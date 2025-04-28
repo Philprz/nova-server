@@ -1,5 +1,5 @@
 import asyncio
-import websockets
+from websockets import connect
 import json
 
 # Configuration
@@ -8,12 +8,12 @@ API_KEY = "ITS2025"
 
 async def test_mcp():
     # Connexion avec header x-api-key
-    async with websockets.connect(
-        WS_URL,
-        extra_headers={"x-api-key": API_KEY}
-    ) as websocket:
+    async with connect(WS_URL) as websocket:
+        # Envoyer API_KEY comme premier message
+        await websocket.send(json.dumps({"type": "auth", "api_key": API_KEY}))
 
-        print("✅ Connecté au serveur MCP.")
+        print("✅ Connecté au serveur MCP (auth envoyé).")
+
 
         # Réception du handshake capabilities
         capabilities = await websocket.recv()

@@ -107,13 +107,15 @@ async def salesforce_query(request: Request):
 async def mcp_endpoint(websocket: WebSocket):
     await websocket.accept()
 
-    # Lecture de l'header x-api-key
-    token = websocket.headers.get('x-api-key')
+    # 🔥 Lire le premier message = authentification
+    auth_message = await websocket.receive_text()
+    auth_data = json.loads(auth_message)
 
-    if token != API_KEY:
-        await websocket.close(code=1008)  # Policy Violation
+    if auth_data.get("type") != "auth" or auth_data.get("api_key") != API_KEY:
+        await websocket.close(code=1008)
         return
 
+    # Si l'authentification réussit, continuer comme avant
     capabilities = {
         "server_info": {"name": "Custom MCP Server", "version": "1.0"},
         "tools": {
@@ -131,6 +133,7 @@ async def mcp_endpoint(websocket: WebSocket):
             await websocket.send_json({"type": "response", "data": response})
     except Exception:
         await websocket.close()
+
 
 
 async def handle_mcp_request(data):
