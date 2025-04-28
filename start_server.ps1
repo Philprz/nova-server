@@ -1,10 +1,10 @@
-Start-Transcript -Path "C:\Users\PPZ\NOVA\nova\server_start.log" -Append
+Start-Transcript -Path "C:\Users\PPZ\NOVA\server_start.log" -Append
 
 try {
     Write-Output "[$(Get-Date)] Lancement du serveur NOVA..."
     
     # Aller dans le dossier du projet
-    Set-Location "C:\Users\PPZ\NOVA\nova"
+    Set-Location "C:\Users\PPZ\NOVA"
 
     # Activer l'environnement virtuel si besoin
     if (Test-Path ".\venv\Scripts\Activate.ps1") {
