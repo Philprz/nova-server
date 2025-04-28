@@ -1,0 +1,7 @@
+### Appel Claude
+POST http://localhost:8000/claude
+Content-Type: application/json
+
+{
+  "prompt": "Explique-moi ce qu’est un middleware dans une API."
+}

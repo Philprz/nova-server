@@ -1,0 +1,76 @@
+# Fichiers temporaires et cachés
+*~
+*.swp
+*.swo
+
+# Dossiers de build
+/build/
+/dist/
+
+# Fichiers de configuration spécifiques à l'utilisateur
+.env
+.vscode/
+.idea/
+
+# Fichiers de log
+*.log
+
+# Dépendances
+/node_modules/
+/vendor/
+
+# Fichiers compilés
+*.class
+*.o
+*.pyc
+__pycache__/
+
+# Fichiers de documentation générés
+/docs/build/
+
+# Fichiers spécifiques à macOS
+.DS_Store
+
+# Fichiers spécifiques à Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Fichiers spécifiques à JetBrains (PyCharm, IntelliJ, etc.)
+.idea/
+*.iml
+
+# Fichiers spécifiques à Visual Studio Code
+.vscode/
+
+# Fichiers spécifiques à Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Fichiers spécifiques à NetBeans
+/nbproject/
+
+# Fichiers spécifiques à Eclipse
+.project
+.classpath
+.settings/
+
+# Fichiers spécifiques à Xcode
+*.xcworkspace
+!default.xcworkspace
+
+# Fichiers spécifiques à Android Studio
+.gradle/
+.idea/
+build/
+*.iml
+local.properties
+
+# Fichiers spécifiques à Docker
+.dockerignore
+Dockerfile
+docker-compose.yml
+
+# Fichiers spécifiques à Heroku
+.slugignore
+.qodo
