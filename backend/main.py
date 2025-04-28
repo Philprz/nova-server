@@ -215,3 +215,37 @@ async def sap_query(request: Request):
         return result
     except Exception as e:
         return {"error": str(e)}
+@app.get("/sap_login_test", dependencies=[Depends(verify_api_key)])
+async def sap_login_test():
+    """
+    Endpoint simple pour tester la connexion SAP.
+    """
+    try:
+        url = os.getenv("SAP_REST_BASE_URL") + "/Login"
+        auth_payload = {
+            "UserName": os.getenv("SAP_USER"),
+            "Password": os.getenv("SAP_PASSWORD"),
+            "CompanyDB": os.getenv("SAP_CLIENT")
+        }
+
+        async with httpx.AsyncClient(verify=False) as client:
+            response = await client.post(url, json=auth_payload)
+
+            if response.status_code == 200:
+                return {
+                    "status": "success",
+                    "message": "Connexion SAP OK ✅",
+                    "sap_response": await response.json()
+                }
+            else:
+                return {
+                    "status": "error",
+                    "message": f"Connexion SAP échouée ❌ (code {response.status_code})",
+                    "details": response.text
+                }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": "Erreur lors de la tentative de connexion SAP",
+            "details": str(e)
+        }

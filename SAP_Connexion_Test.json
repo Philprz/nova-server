@@ -1,0 +1,41 @@
+{
+    "info": {
+        "_postman_id": "1a2b3c4d-5e6f-7890-1234-abcdefabcdef",
+        "name": "NOVA - SAP Login Test",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "item": [
+        {
+            "name": "Test - SAP Login",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n    \"UserName\": \"manager\",\n    \"Password\": \"Tirips44!\",\n    \"CompanyDB\": \"SBODemoFR\"\n}"
+                },
+                "url": {
+                    "raw": "https://51.91.130.136:50000/b1s/v1/Login",
+                    "protocol": "https",
+                    "host": [
+                        "51",
+                        "91",
+                        "130",
+                        "136"
+                    ],
+                    "port": "50000",
+                    "path": [
+                        "b1s",
+                        "v1",
+                        "Login"
+                    ]
+                }
+            }
+        }
+    ]
+}
