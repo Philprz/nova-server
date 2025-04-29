@@ -1,0 +1,124 @@
+{
+    "info": {
+      "name": "NOVA Middleware Tests",
+      "description": "Collection pour tester Claude, Salesforce, SAP via NOVA Middleware",
+      "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "item": [
+      {
+        "name": "01 - Vérifier disponibilité serveur",
+        "request": {
+          "method": "GET",
+          "header": [],
+          "url": {
+            "raw": "http://178.33.233.120:8000/",
+            "protocol": "http",
+            "host": ["178.33.233.120"],
+            "port": "8000",
+            "path": [""]
+          }
+        }
+      },
+      {
+        "name": "02 - Requête Claude LLM",
+        "request": {
+          "method": "POST",
+          "header": [
+            {
+              "key": "x-api-key",
+              "value": "ITS2025"
+            },
+            {
+              "key": "Content-Type",
+              "value": "application/json"
+            }
+          ],
+          "body": {
+            "mode": "raw",
+            "raw": "{\n  \"prompt\": \"Quelle est la capitale du Japon ?\"\n}"
+          },
+          "url": {
+            "raw": "http://178.33.233.120:8000/claude",
+            "protocol": "http",
+            "host": ["178.33.233.120"],
+            "port": "8000",
+            "path": ["claude"]
+          }
+        }
+      },
+      {
+        "name": "03 - Requête Salesforce",
+        "request": {
+          "method": "POST",
+          "header": [
+            {
+              "key": "x-api-key",
+              "value": "ITS2025"
+            },
+            {
+              "key": "Content-Type",
+              "value": "application/json"
+            }
+          ],
+          "body": {
+            "mode": "raw",
+            "raw": "{\n  \"query\": \"SELECT Id, Name FROM Account LIMIT 1\"\n}"
+          },
+          "url": {
+            "raw": "http://178.33.233.120:8000/salesforce_query",
+            "protocol": "http",
+            "host": ["178.33.233.120"],
+            "port": "8000",
+            "path": ["salesforce_query"]
+          }
+        }
+      },
+      {
+        "name": "04 - Test Connexion SAP",
+        "request": {
+          "method": "GET",
+          "header": [
+            {
+              "key": "x-api-key",
+              "value": "ITS2025"
+            }
+          ],
+          "url": {
+            "raw": "http://178.33.233.120:8000/sap_login_test",
+            "protocol": "http",
+            "host": ["178.33.233.120"],
+            "port": "8000",
+            "path": ["sap_login_test"]
+          }
+        }
+      },
+      {
+        "name": "05 - Lecture SAP (produits)",
+        "request": {
+          "method": "POST",
+          "header": [
+            {
+              "key": "x-api-key",
+              "value": "ITS2025"
+            },
+            {
+              "key": "Content-Type",
+              "value": "application/json"
+            }
+          ],
+          "body": {
+            "mode": "raw",
+            "raw": "{\n  \"endpoint\": \"/Items\",\n  \"method\": \"GET\"\n}"
+          },
+          "url": {
+            "raw": "http://178.33.233.120:8000/sap_query",
+            "protocol": "http",
+            "host": ["178.33.233.120"],
+            "port": "8000",
+            "path": ["sap_query"]
+          }
+        }
+      }
+    ]
+  }
+  

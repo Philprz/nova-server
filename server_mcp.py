@@ -1,20 +1,18 @@
-import asyncio
 from mcp.server.fastmcp import FastMCP
-from simple_salesforce import Salesforce
 import os
-import httpx
 from dotenv import load_dotenv
-from typing import Optional
+from simple_salesforce import Salesforce
+import httpx
 from datetime import datetime
-import sys
+from typing import Optional
 
 # Charger .env
 load_dotenv()
 
-# Configurations
+# Connexions externes
 API_KEY = os.getenv("API_KEY")
+SAP_BASE_URL = os.getenv("SAP_REST_BASE_URL")
 
-# Connexion Salesforce
 sf = Salesforce(
     username=os.getenv("SALESFORCE_USERNAME"),
     password=os.getenv("SALESFORCE_PASSWORD"),
@@ -22,7 +20,6 @@ sf = Salesforce(
     domain=os.getenv("SALESFORCE_DOMAIN", "login")
 )
 
-# Gestion session SAP
 sap_session = {
     "cookies": None,
     "expires": None
@@ -30,14 +27,6 @@ sap_session = {
 
 # MCP Server
 mcp = FastMCP("nova_middleware")
-
-# Vérification rapide de la structure capabilities
-if not hasattr(mcp, "tool_registry") or not mcp.tool_registry:
-    print("⚠️  Aucun outil MCP n'est enregistré. Vérifiez vos @mcp.tool() !", file=sys.stderr)
-else:
-    print(f"🔎 {len(mcp.tool_registry)} outils MCP enregistrés :", file=sys.stderr)
-    for tool_name in mcp.tool_registry.keys():
-        print(f"   ➔ {tool_name}", file=sys.stderr)
 
 # Définir les outils
 @mcp.tool()
@@ -57,9 +46,8 @@ async def sap_read(endpoint: str, method: str = "GET", payload: Optional[dict] =
     except Exception as e:
         return {"error": str(e)}
 
-# Fonctions SAP
 async def login_sap():
-    url = os.getenv("SAP_REST_BASE_URL") + "/Login"
+    url = SAP_BASE_URL + "/Login"
     auth_payload = {
         "UserName": os.getenv("SAP_USER"),
         "Password": os.getenv("SAP_PASSWORD"),
@@ -72,12 +60,11 @@ async def login_sap():
         sap_session["expires"] = datetime.utcnow().timestamp() + 60 * 20
 
 async def call_sap(endpoint: str, method="GET", payload: Optional[dict] = None):
-    base_url = os.getenv("SAP_REST_BASE_URL")
     if not sap_session["cookies"] or datetime.utcnow().timestamp() > sap_session["expires"]:
         await login_sap()
 
     async with httpx.AsyncClient(cookies=sap_session["cookies"], verify=False) as client:
-        url = base_url + endpoint
+        url = SAP_BASE_URL + endpoint
         try:
             if method == "GET":
                 response = await client.get(url)
@@ -91,17 +78,6 @@ async def call_sap(endpoint: str, method="GET", payload: Optional[dict] = None):
                 return await call_sap(endpoint, method, payload)
             raise
 
-async def heartbeat():
-    while True:
-        print("💓 MCP Heartbeat: Server still alive.", file=sys.stderr)
-        await asyncio.sleep(30)
-
-# Démarrage serveur MCP
-async def main():
-    await mcp.start(transport="stdio")
-    print("✅ MCP server ready.", file=sys.stderr)
-    asyncio.create_task(heartbeat())
-    await asyncio.Event().wait()
-
+# 🚀 Démarrer directement
 if __name__ == "__main__":
-    asyncio.run(main())
+    mcp.run(transport="stdio")

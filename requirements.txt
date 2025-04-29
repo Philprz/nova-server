@@ -7,4 +7,3 @@ simple-salesforce
 websockets
 httpx
 mcp[cli]>=0.4.0
-
