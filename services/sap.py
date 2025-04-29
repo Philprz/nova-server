@@ -18,7 +18,7 @@ async def login_sap():
     url = SAP_BASE_URL + "/Login"
     auth_payload = {
         "UserName": os.getenv("SAP_USER"),
-        "Password": os.getenv("SAP_PASSWORD"),
+        "Password": os.getenv("SAP_CLIENT_PASSWORD"),
         "CompanyDB": os.getenv("SAP_CLIENT")
     }
     async with httpx.AsyncClient(verify=False) as client:
