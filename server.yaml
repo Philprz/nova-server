@@ -1,0 +1,17 @@
+# -------------------------------
+# server.yaml
+# -------------------------------
+
+name: nova_middleware
+version: "1.0.0"
+
+# Outils exposes au client MCP
+capabilities:
+  tools:
+    - path: ./tools.py
+
+# Transport utilise (Claude Desktop = stdio)
+transports:
+  - type: stdio
+
+heartbeat_interval: 30  # (optionnel, ping serveur toutes les 30 sec)
