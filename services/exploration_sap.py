@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Optional
 import httpx
 from dotenv import load_dotenv
-from mcp import tool
+from mcp_app import mcp
 
 load_dotenv()
 
@@ -70,11 +70,11 @@ async def fetch_sap_metadata():
         save_cache(schema)
         return schema
 
-@tool(name="sap.inspect", description="Liste les endpoints SAP depuis le cache.")
+@mcp.tool(name="sap.inspect", description="Liste les endpoints SAP depuis le cache.")
 def inspect_sap() -> dict:
     return load_cache()
 
-@tool(name="sap.refresh_metadata", description="Force la mise à jour des endpoints SAP.")
+@mcp.tool(name="sap.refresh_metadata", description="Force la mise à jour des endpoints SAP.")
 async def refresh_sap_metadata() -> dict:
     try:
         schema = await fetch_sap_metadata()

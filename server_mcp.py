@@ -1,11 +1,10 @@
-from mcp.server.fastmcp import FastMCP
 import os
 from dotenv import load_dotenv
 from simple_salesforce import Salesforce
 import httpx
 from datetime import datetime
 from typing import Optional
-
+from mcp_app import mcp
 # Charger .env
 load_dotenv()
 
@@ -24,9 +23,6 @@ sap_session = {
     "cookies": None,
     "expires": None
 }
-
-# MCP Server
-mcp = FastMCP("nova_middleware")
 
 # Import des outils personnalisés (après initialisation MCP)
 from services.exploration_salesforce import inspect_salesforce, refresh_salesforce_metadata

@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 from simple_salesforce import Salesforce
 from dotenv import load_dotenv
-from mcp import tool
+from mcp_app import mcp
 
 load_dotenv()
 
@@ -44,14 +44,14 @@ def fetch_metadata():
     save_cache(metadata)
     return metadata
 
-@tool(name="salesforce.inspect", description="Liste les objets et champs Salesforce depuis le cache.")
+@mcp.tool(name="salesforce.inspect", description="Liste les objets et champs Salesforce depuis le cache.")
 def inspect_salesforce(object_name: str = None) -> dict:
     cache = load_cache()
     if object_name:
         return cache.get(object_name, {"error": "Objet non trouvé"})
     return {"objects": list(cache.keys())}
 
-@tool(name="salesforce.refresh_metadata", description="Force la mise à jour des métadonnées Salesforce.")
+@mcp.tool(name="salesforce.refresh_metadata", description="Force la mise à jour des métadonnées Salesforce.")
 def refresh_salesforce_metadata() -> dict:
     try:
         updated = fetch_metadata()

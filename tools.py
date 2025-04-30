@@ -2,7 +2,7 @@
 # tools.py
 # -------------------------------
 
-from mcp import tool
+from server_mcp import mcp
 from simple_salesforce import Salesforce
 import os
 import httpx
@@ -65,7 +65,7 @@ async def call_sap(endpoint: str, method="GET", payload: Optional[dict] = None):
 # OUTILS MCP : Salesforce + SAP
 # -------------------------------
 
-@tool(name="salesforce.query", description="Exécute une requête SOQL sur Salesforce.")
+@mcp.tool(name="salesforce.query", description="Exécute une requête SOQL sur Salesforce.")
 async def salesforce_query(query: str) -> dict:
     """Exécute une requête Salesforce SOQL."""
     try:
@@ -74,7 +74,7 @@ async def salesforce_query(query: str) -> dict:
     except Exception as e:
         return {"error": str(e)}
 
-@tool(name="sap.read", description="Lit des données SAP B1 via API REST.")
+@mcp.tool(name="sap.read", description="Lit des données SAP B1 via API REST.")
 async def sap_read(endpoint: str, method: str = "GET", payload: Optional[dict] = None) -> dict:
     """Lecture de données SAP REST (produits, stock, etc.)."""
     try:
