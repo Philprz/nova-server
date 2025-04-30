@@ -4,6 +4,8 @@ import httpx
 from dotenv import load_dotenv
 import datetime
 from typing import Optional
+import json
+import logging
 
 load_dotenv()
 
@@ -13,6 +15,10 @@ sap_session = {
     "cookies": None,
     "expires": None
 }
+# Activer le mode debug complet de httpx
+httpx_log = logging.getLogger("httpx")
+httpx_log.setLevel(logging.DEBUG)
+httpx_log.addHandler(logging.StreamHandler())
 
 async def login_sap():
     url = SAP_BASE_URL + "/Login"
@@ -21,8 +27,16 @@ async def login_sap():
         "Password": os.getenv("SAP_CLIENT_PASSWORD"),
         "CompanyDB": os.getenv("SAP_CLIENT")
     }
-    async with httpx.AsyncClient(verify=False) as client:
-        response = await client.post(url, json=auth_payload)
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": "curl/8.5.0"  # On imite le comportement de curl (très important)
+    }
+    data = json.dumps(auth_payload)
+
+    async with httpx.AsyncClient(verify=False, http2=False, headers=headers) as client:
+        print("----> LOGIN SAP - Envoi du payload:")
+        print(data)
+        response = await client.post(url, content=data)
         response.raise_for_status()
         sap_session["cookies"] = response.cookies
         sap_session["expires"] = datetime.datetime.utcnow().timestamp() + 60 * 20

@@ -1,0 +1,85 @@
+{
+    "info": {
+      "name": "Exploration MCP",
+      "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+      "_postman_id": "36c2ff80-0c15-4c00-bcfa-claudeexploration"
+    },
+    "item": [
+      {
+        "name": "Salesforce - Inspect all",
+        "request": {
+          "method": "POST",
+          "header": [
+            { "key": "x-api-key", "value": "ITS2025" },
+            { "key": "Content-Type", "value": "application/json" }
+          ],
+          "url": { "raw": "http://127.0.0.1:8000/claude", "protocol": "http", "host": ["127.0.0.1"], "port": "8000", "path": ["claude"] },
+          "body": {
+            "mode": "raw",
+            "raw": "{\n  \"prompt\": \"salesforce.inspect()\"\n}"
+          }
+        }
+      },
+      {
+        "name": "Salesforce - Inspect Account",
+        "request": {
+          "method": "POST",
+          "header": [
+            { "key": "x-api-key", "value": "ITS2025" },
+            { "key": "Content-Type", "value": "application/json" }
+          ],
+          "url": { "raw": "http://127.0.0.1:8000/claude", "protocol": "http", "host": ["127.0.0.1"], "port": "8000", "path": ["claude"] },
+          "body": {
+            "mode": "raw",
+            "raw": "{\n  \"prompt\": \"salesforce.inspect(\\\"Account\\\")\"\n}"
+          }
+        }
+      },
+      {
+        "name": "Salesforce - Refresh metadata",
+        "request": {
+          "method": "POST",
+          "header": [
+            { "key": "x-api-key", "value": "ITS2025" },
+            { "key": "Content-Type", "value": "application/json" }
+          ],
+          "url": { "raw": "http://127.0.0.1:8000/claude", "protocol": "http", "host": ["127.0.0.1"], "port": "8000", "path": ["claude"] },
+          "body": {
+            "mode": "raw",
+            "raw": "{\n  \"prompt\": \"salesforce.refresh_metadata()\"\n}"
+          }
+        }
+      },
+      {
+        "name": "SAP - Inspect endpoints",
+        "request": {
+          "method": "POST",
+          "header": [
+            { "key": "x-api-key", "value": "ITS2025" },
+            { "key": "Content-Type", "value": "application/json" }
+          ],
+          "url": { "raw": "http://127.0.0.1:8000/claude", "protocol": "http", "host": ["127.0.0.1"], "port": "8000", "path": ["claude"] },
+          "body": {
+            "mode": "raw",
+            "raw": "{\n  \"prompt\": \"sap.inspect()\"\n}"
+          }
+        }
+      },
+      {
+        "name": "SAP - Refresh endpoints",
+        "request": {
+          "method": "POST",
+          "header": [
+            { "key": "x-api-key", "value": "ITS2025" },
+            { "key": "Content-Type", "value": "application/json" }
+          ],
+          "url": { "raw": "http://127.0.0.1:8000/claude", "protocol": "http", "host": ["127.0.0.1"], "port": "8000", "path": ["claude"] },
+          "body": {
+            "mode": "raw",
+            "raw": "{\n  \"prompt\": \"sap.refresh_metadata()\"\n}"
+          }
+        }
+      }
+    ]
+  }
+  

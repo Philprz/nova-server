@@ -28,7 +28,11 @@ sap_session = {
 # MCP Server
 mcp = FastMCP("nova_middleware")
 
-# Définir les outils
+# Import des outils personnalisés (après initialisation MCP)
+from services.exploration_salesforce import inspect_salesforce, refresh_salesforce_metadata
+from services.exploration_sap import inspect_sap, refresh_sap_metadata
+
+# Définir les outils métier
 @mcp.tool()
 async def salesforce_query(query: str) -> dict:
     """Exécute une requête SOQL sur Salesforce."""

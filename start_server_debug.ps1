@@ -31,6 +31,9 @@ Start-Process powershell -ArgumentList @(
     "-Command",
     "cd 'C:\Users\PPZ\NOVA'; ./venv/Scripts/Activate.ps1; python main.py"
 )
+# Réenregistrement MCP avec le bon interpréteur Python virtuel
+Write-Host "Réenregistrement du serveur MCP avec le bon environnement..."
+mcp install server_mcp.py --name "nova_middleware" --python "C:/Users/PPZ/NOVA/venv/Scripts/python.exe"
 
 # Lancer MCP Inspector (mcp dev server_mcp.py)
 Write-Host "🟢 Lancement MCP Inspector..."
@@ -45,5 +48,6 @@ Start-Process powershell -ArgumentList @(
 # Lancer serveur Claude Desktop en STDIO (serveur MCP officiel)
 Write-Host "Serveur Claude (server_mcp.py)..."
 python server_mcp.py
+MCP Server nova_middleware started (transport: stdio)
 
 Pause
