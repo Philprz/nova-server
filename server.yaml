@@ -15,3 +15,4 @@ transports:
   - type: stdio
 
 heartbeat_interval: 30  # (optionnel, ping serveur toutes les 30 sec)
+DATABASE_URL=postgresql://user:pass@localhost:5432/nova_mcp
