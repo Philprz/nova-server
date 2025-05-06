@@ -1,0 +1,258 @@
+{
+  "info": {
+    "name": "NOVA Middleware CRUD",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Cr\u00e9er client",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:8000/clients",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8000",
+          "path": [
+            "clients"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"ACME Corp\",\n  \"email\": \"contact@acme.com\",\n  \"erp_type\": \"SAP\"\n}"
+        }
+      }
+    },
+    {
+      "name": "Lister clients",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:8000/clients",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8000",
+          "path": [
+            "clients"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Cr\u00e9er utilisateur",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:8000/utilisateurs",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8000",
+          "path": [
+            "utilisateurs"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"nom\": \"Philippe Perez\",\n  \"role\": \"admin\",\n  \"actif\": true\n}"
+        }
+      }
+    },
+    {
+      "name": "Lister utilisateurs",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:8000/utilisateurs",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8000",
+          "path": [
+            "utilisateurs"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Cr\u00e9er ticket",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:8000/tickets",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8000",
+          "path": [
+            "tickets"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"titre\": \"Bug SAP B1\",\n  \"description\": \"Erreur sur la cr\\u00e9ation de commande client\",\n  \"statut\": \"nouveau\",\n  \"client_id\": 1\n}"
+        }
+      }
+    },
+    {
+      "name": "Lister tickets",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:8000/tickets",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8000",
+          "path": [
+            "tickets"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Cr\u00e9er facture",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:8000/factures",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8000",
+          "path": [
+            "factures"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"numero\": \"FAC-2025-001\",\n  \"client_id\": 1,\n  \"montant\": 1500,\n  \"statut\": \"en attente\"\n}"
+        }
+      }
+    },
+    {
+      "name": "Lister factures",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:8000/factures",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8000",
+          "path": [
+            "factures"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Log interaction LLM",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:8000/interactions_llm",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8000",
+          "path": [
+            "interactions_llm"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"prompt\": \"Que contient la facture FAC-2025-001 ?\",\n  \"reponse\": \"La facture contient 2 articles pour un total de 1500\\u20ac.\",\n  \"modele\": \"Claude\"\n}"
+        }
+      }
+    },
+    {
+      "name": "Lister interactions LLM",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:8000/interactions_llm",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8000",
+          "path": [
+            "interactions_llm"
+          ]
+        }
+      }
+    }
+  ]
+}

@@ -5,6 +5,7 @@ import httpx
 from datetime import datetime
 from typing import Optional
 from mcp_app import mcp
+from tools import salesforce_query, sap_read
 # Charger .env
 load_dotenv()
 
@@ -77,7 +78,9 @@ async def call_sap(endpoint: str, method="GET", payload: Optional[dict] = None):
                 await login_sap()
                 return await call_sap(endpoint, method, payload)
             raise
-
+@mcp.tool()
+async def test_ping() -> str:
+    return "pong"
 # 🚀 Démarrer directement
 if __name__ == "__main__":
     mcp.run(transport="stdio")
