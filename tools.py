@@ -2,7 +2,7 @@
 # tools.py
 # -------------------------------
 
-from server_mcp import mcp
+from mcp_app import mcp
 from simple_salesforce import Salesforce
 import os
 import httpx

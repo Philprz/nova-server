@@ -5,7 +5,7 @@ import httpx
 from datetime import datetime
 from typing import Optional
 from mcp_app import mcp
-from tools import salesforce_query, sap_read
+
 # Charger .env
 load_dotenv()
 
