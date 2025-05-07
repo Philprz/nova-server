@@ -1,0 +1,6 @@
+{
+    "name": "nova_middleware",
+    "entry": "server_mcp.py",
+    "env_file": ".env",
+    "editable": true
+  } 
