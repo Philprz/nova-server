@@ -1,20 +1,24 @@
 # simple_server.py
 from mcp.server.fastmcp import FastMCP
 
-# Créer l'instance MCP
+# Instance MCP simplifiée
 mcp = FastMCP("nova_middleware")
 
 @mcp.tool()
 async def ping() -> str:
-    """Simple test de connectivité"""
+    """Test de connectivité du serveur MCP"""
     return "pong! Le serveur NOVA est connecté."
 
 @mcp.tool()
-async def hello(name: str) -> str:
-    """Salue l'utilisateur par son nom"""
-    return f"Bonjour {name} ! Le serveur NOVA est prêt à vous aider."
+async def salesforce_query(query: str) -> str:
+    """Exécute une requête SOQL (simulation)"""
+    return f"Simulation de requête Salesforce: {query}"
 
-# Point d'entrée principal
+@mcp.tool()
+async def sap_query(endpoint: str) -> str:
+    """Exécute une requête SAP (simulation)"""
+    return f"Simulation de requête SAP: {endpoint}"
+
 if __name__ == "__main__":
-    print("Démarrage du serveur NOVA (MCP)...")
+    print("Démarrage du serveur NOVA MCP...")
     mcp.run(transport="stdio")
