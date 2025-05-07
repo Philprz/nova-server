@@ -1,16 +1,18 @@
-# tools.py corrigé
-from mcp_app import mcp
-from simple_salesforce import Salesforce
 import os
-import httpx
 from dotenv import load_dotenv
-from typing import Optional
+from simple_salesforce import Salesforce
+import httpx
 from datetime import datetime
+from typing import Optional
+from mcp_app import mcp
 
-# Charger les variables d'environnement
+# Charger .env
 load_dotenv()
 
-# Connexion Salesforce
+# Connexions externes
+API_KEY = os.getenv("API_KEY")
+SAP_BASE_URL = os.getenv("SAP_REST_BASE_URL")
+
 sf = Salesforce(
     username=os.getenv("SALESFORCE_USERNAME"),
     password=os.getenv("SALESFORCE_PASSWORD"),
@@ -18,13 +20,32 @@ sf = Salesforce(
     domain=os.getenv("SALESFORCE_DOMAIN", "login")
 )
 
-# Gestion session SAP
 sap_session = {
     "cookies": None,
     "expires": None
 }
 
-SAP_BASE_URL = os.getenv("SAP_REST_BASE_URL")
+# Import des outils personnalisés (après initialisation MCP)
+from services.exploration_salesforce import inspect_salesforce, refresh_salesforce_metadata
+from services.exploration_sap import inspect_sap, refresh_sap_metadata
+
+# Définir les outils métier
+@mcp.tool()
+async def salesforce_query(query: str) -> dict:
+    """Exécute une requête SOQL sur Salesforce."""
+    try:
+        result = sf.query(query)
+        return result
+    except Exception as e:
+        return {"error": str(e)}
+
+@mcp.tool()
+async def sap_read(endpoint: str, method: str = "GET", payload: Optional[dict] = None) -> dict:
+    """Lit des données SAP B1 en REST."""
+    try:
+        return await call_sap(endpoint, method, payload)
+    except Exception as e:
+        return {"error": str(e)}
 
 async def login_sap():
     url = SAP_BASE_URL + "/Login"
@@ -57,22 +78,9 @@ async def call_sap(endpoint: str, method="GET", payload: Optional[dict] = None):
                 await login_sap()
                 return await call_sap(endpoint, method, payload)
             raise
-
-# Outils MCP pour Salesforce
-@mcp.tool(name="salesforce.query", description="Exécute une requête SOQL sur Salesforce.")
-async def salesforce_query(query: str) -> dict:
-    """Exécute une requête Salesforce SOQL."""
-    try:
-        result = sf.query(query)
-        return result
-    except Exception as e:
-        return {"error": str(e)}
-
-# Outils MCP pour SAP
-@mcp.tool(name="sap.read", description="Lit des données SAP B1 via API REST.")
-async def sap_read(endpoint: str, method: str = "GET", payload: Optional[dict] = None) -> dict:
-    """Lecture de données SAP REST (produits, stock, etc.)."""
-    try:
-        return await call_sap(endpoint, method, payload)
-    except Exception as e:
-        return {"error": str(e)}
+@mcp.tool()
+async def test_ping() -> str:
+    return "pong"
+# 🚀 Démarrer directement
+if __name__ == "__main__":
+    mcp.run(transport="stdio")
