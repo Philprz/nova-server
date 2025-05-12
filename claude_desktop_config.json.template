@@ -1,0 +1,13 @@
+{
+  "servers": [
+    {
+      "name": "nova_middleware",
+      "command": "python",
+      "args": ["server_mcp.py"],
+      "cwd": "C:\\Users\\PPZ\\NOVA",
+      "envFile": ".env",
+      "stdio": true,
+      "enabled": true
+    }
+  ]
+}

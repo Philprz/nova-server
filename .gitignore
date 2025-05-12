@@ -74,3 +74,6 @@ docker-compose.yml
 # Fichiers spécifiques à Heroku
 .slugignore
 .qodo
+
+# config Claude Desktop, ne pas versionner
+claude_desktop_config.json

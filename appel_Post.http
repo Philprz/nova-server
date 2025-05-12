@@ -1,6 +1,0 @@
-POST http://localhost:8000/salesforce_query
-Headers: x-api-key: ITS2025
-Body:
-{
-  "query": "SELECT Name FROM Account LIMIT 1"
-}

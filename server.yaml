@@ -15,5 +15,10 @@ capabilities:
 # Transport utilisÃ© (Claude Desktop = stdio)
 transports:
   - type: stdio
-
+# ----------- NOUVEAU -----------
+entrypoint:
+  command: "C:\\Users\\PPZ\\NOVA\\venv\\Scripts\\python.exe"
+  args:
+    - "server_mcp.py"
+# -------------------------------
 heartbeat_interval: 30  # (optionnel, ping serveur toutes les 30 sec)
