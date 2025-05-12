@@ -15,8 +15,8 @@ powershell -Command "& {Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypa
 ECHO Lancement de FastAPI...
 START powershell -NoExit -Command "& {Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force; . .\venv\Scripts\Activate.ps1; uvicorn main:app --reload}"
 
-ECHO Lancement du serveur MCP...
-START powershell -NoExit -Command "& {Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force; . .\venv\Scripts\Activate.ps1; python server_mcp.py}"
+ECHO Lancement du serveur MCP Salesforce...
+START powershell -NoExit -Command "& {Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force; . .\venv\Scripts\Activate.ps1; python salesforce_mcp.py}"
 
 ECHO.
 ECHO NOVA Middleware demarre avec succes!
