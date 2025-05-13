@@ -5,7 +5,6 @@ import json
 from datetime import datetime
 from dotenv import load_dotenv
 import logging
-import sys
 
 # Configuration du logging
 logging.basicConfig(
@@ -13,9 +12,6 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
-
-# Afficher un message de démarrage
-print("🚀 Initialisation du serveur MCP Salesforce...")
 
 # Charger les variables d'environnement
 load_dotenv()
