@@ -25,7 +25,7 @@ def ping() -> str:
     log("Ping reçu!")
     return "pong! Serveur MCP minimal fonctionnel"
 # Commencez par ajouter une fonctionnalité réelle de Salesforce
-@mcp.tool(name="salesforce.query")
+@mcp.tool(name="salesforce_query")
 def salesforce_query(query: str) -> dict:
     """
     Exécute une requête SOQL sur Salesforce.
@@ -36,6 +36,19 @@ def salesforce_query(query: str) -> dict:
     Returns:
         Un dictionnaire contenant les résultats ou une erreur
     """
+    # Tenter d'importer simple-salesforce
+    try:
+        from simple_salesforce import Salesforce
+    except ImportError:
+        import subprocess
+        import sys
+        log("Module simple-salesforce non trouvé. Tentative d'installation...")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "simple-salesforce"])
+        log("Installation terminée, nouvelle tentative d'import...")
+        from simple_salesforce import Salesforce
+    except Exception as e:
+        log(f"Erreur inattendue lors de l'import ou de l'installation : {str(e)}")
+        raise
     try:
         # Journaliser la requête
         log(f"Requête SOQL: {query}")
