@@ -1,9 +1,45 @@
 {
   "mcpServers": {
     "nova_middleware": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--with",
+        "mcp[cli]",
+        "mcp",
+        "run",
+        "C:\\Users\\PPZ\\NOVA\\server_mcp.py"
+      ],
+      "env": {
+        "ANTHROPIC_API_KEY": "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",
+        "OTHER_SECRET": "demo",
+        "SALESFORCE_USERNAME": "p.perez-gt8k@force.com",
+        "SALESFORCE_PASSWORD": "Ae@s5GfCic?3EtNq",
+        "SALESFORCE_SECURITY_TOKEN": "0RLKx2DTvjrMj2eulLgG5ge1i",
+        "SALESFORCE_DOMAIN": "login",
+        "SAP_ASHOST": "https://51.91.130.136:50000",
+        "SAP_LANG": "FR",
+        "SAP_REST_BASE_URL": "https://51.91.130.136:50000/b1s/v1",
+        "SAP_USER": "manager",
+        "SAP_CLIENT": "SBODemoFR",
+        "SAP_CLIENT_PASSWORD": "spirit",
+        "API_KEY": "ITS2025",
+        "DATABASE_URL": "postgresql://nova_user:spirit@localhost:5432/nova_mcp"
+      }
+    },
+    "salesforce_mcp": {
       "command": "python",
       "args": [
-        "test_server.py"
+        "salesforce_mcp_simple.py"
+      ],
+      "cwd": "C:\\Users\\PPZ\\NOVA",
+      "envFile": ".env",
+      "stdio": true
+    },
+    "sap_mcp": {
+      "command": "python",
+      "args": [
+        "sap_mcp.py"
       ],
       "cwd": "C:\\Users\\PPZ\\NOVA",
       "envFile": ".env",
