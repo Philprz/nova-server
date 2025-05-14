@@ -3,11 +3,35 @@ from mcp.server.fastmcp import FastMCP
 import os
 import json
 import httpx
+import asyncio
 from datetime import datetime
 import sys
 import io
 from typing import Optional, Dict, Any, List
 import traceback
+import argparse
+
+# Gestion des arguments pour appel direct
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--input-file", help="Fichier d'entrée JSON")
+    parser.add_argument("--output-file", help="Fichier de sortie JSON")
+    args, unknown = parser.parse_known_args()
+    
+    if args.input_file and args.output_file:
+        with open(args.input_file, 'r') as f:
+            input_data = json.load(f)
+        
+        action = input_data.get("action")
+        params = input_data.get("params", {})
+        
+        # Exécuter l'action
+        result = asyncio.run(globals()[action](**params))
+        
+        # Écrire résultat
+        with open(args.output_file, 'w') as f:
+            json.dump(result, f)
+        sys.exit(0)
 
 # Configuration de l'encodage pour Windows
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')

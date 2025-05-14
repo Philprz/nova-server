@@ -41,7 +41,7 @@ class MCPConnector:
     @staticmethod
     async def _call_mcp(server_name: str, action: str, params: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Méthode générique pour appeler un outil MCP
+        Méthode générique pour appeler un outil MCP via subprocess (compatible stdio)
         
         Args:
             server_name: Nom du serveur MCP (ex: "salesforce_mcp", "sap_mcp")
@@ -54,21 +54,23 @@ class MCPConnector:
         logger.info(f"Appel MCP: {server_name}.{action}")
         
         try:
-            # En production, on utiliserait WebSockets ou autre protocole pour 
-            # communiquer avec le serveur MCP. Pour le POC, on va simuler un appel.
+            # Créer fichier temporaire pour les paramètres d'entrée
+            with tempfile.NamedTemporaryFile(mode='w+', suffix='.json', delete=False) as temp_in:
+                temp_in_path = temp_in.name
+                json.dump({"action": action, "params": params}, temp_in)
             
-            # Option 1: Utiliser un processus Python dédié
-            # Créer un fichier temporaire pour les paramètres
-            with tempfile.NamedTemporaryFile(mode='w+', suffix='.json', delete=False) as temp:
-                temp_path = temp.name
-                json.dump({"action": action, "params": params}, temp)
+            # Créer fichier temporaire pour la sortie
+            with tempfile.NamedTemporaryFile(mode='w+', suffix='.json', delete=False) as temp_out:
+                temp_out_path = temp_out.name
             
             try:
-                # Appeler un script Python dédié qui communique avec le serveur MCP
+                # Exécuter le script avec les arguments appropriés
+                script_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), f"{server_name}.py")
+                
                 process = await asyncio.create_subprocess_exec(
-                    "python", "tools/mcp_client.py", 
-                    "--server", server_name,
-                    "--input", temp_path,
+                    sys.executable, script_path, 
+                    "--input-file", temp_in_path,
+                    "--output-file", temp_out_path,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE
                 )
@@ -76,24 +78,26 @@ class MCPConnector:
                 stdout, stderr = await process.communicate()
                 
                 if process.returncode != 0:
-                    logger.error(f"Erreur lors de l'appel MCP: {stderr.decode()}")
-                    return {"error": f"Échec de l'appel MCP: {stderr.decode()}"}
+                    logger.error(f"Erreur exécution MCP: {stderr.decode()}")
+                    return {"error": f"Échec appel MCP: code {process.returncode}"}
                 
-                # Analyser la sortie JSON
-                result = json.loads(stdout.decode())
+                # Lire le résultat depuis le fichier de sortie
+                with open(temp_out_path, 'r') as f:
+                    result = json.load(f)
+                
+                logger.info(f"Appel MCP réussi: {action}")
                 return result
+                
+            except Exception as e:
+                logger.error(f"Exception lors de l'appel MCP: {str(e)}")
+                return {"error": str(e)}
             finally:
-                # Nettoyer le fichier temporaire
-                os.unlink(temp_path)
-            
-            # Option 2: Pour le POC, simuler les résultats
-            # if server_name == "salesforce_mcp" and action == "salesforce_query":
-            #     if "Account" in params.get("query", ""):
-            #         return {"records": [{"Id": "001X", "Name": "ACME Corp"}]}
-            # elif server_name == "sap_mcp" and action == "sap_get_product_details":
-            #     return {"ItemCode": params.get("item_code"), "Price": 100.0}
-            
-            # return {"error": "Non implémenté dans le POC"}
+                # Nettoyer les fichiers temporaires
+                if os.path.exists(temp_in_path):
+                    os.unlink(temp_in_path)
+                if os.path.exists(temp_out_path):
+                    os.unlink(temp_out_path)
+        
         except Exception as e:
-            logger.error(f"Erreur lors de l'appel MCP: {str(e)}")
+            logger.error(f"Erreur critique: {str(e)}")
             return {"error": str(e)}
