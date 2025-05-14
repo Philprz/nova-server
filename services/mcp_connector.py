@@ -1,6 +1,7 @@
 # services/mcp_connector.py
 
 import os
+import sys
 import json
 import asyncio
 import subprocess

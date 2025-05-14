@@ -5,7 +5,20 @@ import json
 from datetime import datetime
 import sys
 import io
-import asyncio
+import asyncio# Dictionnaire des fonctions MCP disponibles
+mcp_funcs = {
+    "salesforce_query": salesforce_query,
+    "salesforce_inspect": inspect_salesforce,
+    "salesforce_refresh_metadata": refresh_salesforce_metadata,
+    "ping": ping
+}
+
+if action not in mcp_funcs:
+    print(f"Erreur : action '{action}' non trouvée.", file=sys.stderr)
+    sys.exit(1)
+    
+# Exécuter l'action
+result = asyncio.run(mcp_funcs[action](**params))
 from typing import Optional, List
 import traceback
 import argparse
