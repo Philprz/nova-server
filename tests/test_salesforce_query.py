@@ -1,4 +1,6 @@
 import asyncio
+import sys, os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from services.mcp_connector import MCPConnector
 
 async def test_salesforce_query():

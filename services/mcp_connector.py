@@ -28,18 +28,15 @@ class MCPConnector:
         return await MCPConnector._call_mcp("salesforce_mcp", action, params)
     
     @staticmethod
-    async def call_sap_mcp(action: str, params: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Appelle un outil MCP SAP
-        
-        Args:
-            action: Nom de l'action MCP (ex: "sap_get_product_details")
-            params: Paramètres de l'action
-            
-        Returns:
-            Résultat de l'appel MCP
-        """
-        return await MCPConnector._call_mcp("sap_mcp", action, params)
+    async def call_mcp_server(server_name, action, params):
+        # Mode direct sans WebSocket - temporaire
+        if server_name == "salesforce_mcp" and action == "salesforce_query":
+            from services.salesforce import sf
+            result = sf.query(params["query"])
+            return result
+        elif server_name == "sap_mcp":
+            # Simulation SAP - à remplacer
+            return {"success": True}
     
     @staticmethod
     async def _call_mcp(server_name: str, action: str, params: Dict[str, Any]) -> Dict[str, Any]:

@@ -18,8 +18,9 @@ async def generate_quote(request: DevisPromptRequest):
     """
     try:
         # Vérifier si le mode démonstration est activé
-        demo_mode = "demo" in request.prompt.lower() or "edge" in request.prompt.lower() or "a00001" in request.prompt.lower()
-        
+
+        #demo_mode = "demo" in request.prompt.lower() or "edge" in request.prompt.lower() or "a00001" in request.prompt.lower()
+        demo_mode = False  # Forcer mode production
         if demo_mode:
             # Retourner des données simulées
             return {
