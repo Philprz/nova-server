@@ -66,19 +66,57 @@ class DevisWorkflow:
         logger.info(f"Workflow terminé avec succès: {response.get('status')}")
         return response
     
-    async def _extract_info_from_prompt(self, prompt: str) -> Dict[str, Any]:
-        """Extrait les informations clés de la demande (client, produits, quantités)"""
-        logger.info("Extraction des informations du prompt via LLM")
+    async def _extract_info_basic(self, prompt: str) -> Dict[str, Any]:
+        """Méthode d'extraction basique en cas d'échec du LLM"""
+        logger.info("Extraction basique des informations du prompt")
         
-        # Utiliser le LLM pour extraire les informations
-        extracted = await LLMExtractor.extract_quote_info(prompt)
+        # Logique améliorée d'extraction
+        extracted = {
+            "client": None,
+            "products": []
+        }
         
-        if "error" in extracted:
-            logger.error(f"Erreur lors de l'extraction: {extracted['error']}")
-            # Fallback à l'approche basique en cas d'erreur
-            return await self._extract_info_basic(prompt)
+        # Recherche du client
+        prompt_lower = prompt.lower()
+        if "client" in prompt_lower:
+            client_index = prompt_lower.find("client")
+            if client_index != -1:
+                # Extraire tout après "client " jusqu'à la fin ou un séparateur
+                client_start = client_index + 7  # "client " = 7 caractères
+                client_text = prompt[client_start:].strip()
+                
+                # Si le client est à la fin de la phrase, prendre tout
+                if client_text and not any(sep in client_text for sep in ['.', ',', ';']):
+                    extracted["client"] = client_text
+                else:
+                    # Sinon prendre jusqu'au premier séparateur
+                    for sep in ['.', ',', ';']:
+                        if sep in client_text:
+                            extracted["client"] = client_text.split(sep)[0].strip()
+                            break
         
-        logger.info(f"Informations extraites par LLM: {extracted}")
+        # Recherche des produits et quantités améliorée
+        words = prompt.split()
+        for i, word in enumerate(words):
+            if word.isdigit() and i + 1 < len(words):
+                quantity = int(word)
+                
+                # Chercher une référence après le nombre
+                if i + 2 < len(words) and (words[i+1].lower() in ["ref", "référence", "reference"]):
+                    product_code = words[i+2].strip()
+                    extracted["products"].append({"code": product_code, "quantity": quantity})
+                # Ou directement après un nombre si les mots "produit", "article" sont proches
+                elif i > 0 and any(kw in prompt_lower for kw in ["produit", "article", "fourniture"]):
+                    # Chercher la référence dans les 3 prochains mots
+                    for j in range(1, 4):
+                        if i + j < len(words):
+                            product_code = words[i+j].strip()
+                            # Filtrer les mots courants qui ne sont pas des codes produits
+                            if not product_code.lower() in ["de", "pour", "du", "le", "la", "les", "client"]:
+                                extracted["products"].append({"code": product_code, "quantity": quantity})
+                                break
+        
+        logger.info(f"Informations extraites en mode basique: {extracted}")
         return extracted
 
     async def _extract_info_basic(self, prompt: str) -> Dict[str, Any]:
@@ -118,8 +156,18 @@ class DevisWorkflow:
         
         # Intégration avec Salesforce MCP via le connecteur
         try:
-            query = f"SELECT Id, Name, AccountNumber FROM Account WHERE Name LIKE '%{client_name}%' LIMIT 1"
+            # Étape 1: Essai avec correspondance exacte
+            query = f"SELECT Id, Name, AccountNumber FROM Account WHERE Name = '{client_name}' LIMIT 1"
             result = await MCPConnector.call_salesforce_mcp("salesforce_query", {"query": query})
+            
+            # Si pas de résultat, essayer avec LIKE
+            if "error" not in result and result.get("totalSize", 0) == 0:
+                logger.info(f"Client non trouvé avec correspondance exacte, essai avec LIKE")
+                query = f"SELECT Id, Name, AccountNumber FROM Account WHERE Name LIKE '%{client_name}%' LIMIT 1"
+                result = await MCPConnector.call_salesforce_mcp("salesforce_query", {"query": query})
+            
+            # Vérification et journalisation du résultat brut
+            logger.info(f"Résultat brut de la requête Salesforce: {result}")
             
             if "error" in result:
                 logger.error(f"Erreur lors de la requête Salesforce: {result['error']}")
@@ -327,6 +375,26 @@ class DevisWorkflow:
                 "success": False,
                 "error": str(e)
             }
+    async def debug_test(self, prompt: str) -> Dict[str, Any]:
+        """Méthode de débogage pour tester le workflow étape par étape"""
+        logger.info(f"Débogage du workflow avec prompt: {prompt}")
+        
+        # Étape 1: Extraction
+        extracted_info = await self._extract_info_from_prompt(prompt)
+        logger.info(f"Information extraite: {extracted_info}")
+        
+        # Étape 2: Validation du client
+        if extracted_info.get("client"):
+            client_info = await self._validate_client(extracted_info.get("client"))
+            logger.info(f"Validation du client: {client_info}")
+        else:
+            logger.warning("Aucun client trouvé dans l'extraction")
+        
+        # Retourner les résultats de débogage
+        return {
+            "extraction": extracted_info,
+            "client_validation": client_info if 'client_info' in locals() else None
+        }
     
     def _build_response(self) -> Dict[str, Any]:
         """Construit la réponse pour le commercial"""
