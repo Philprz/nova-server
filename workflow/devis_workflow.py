@@ -146,6 +146,18 @@ class DevisWorkflow:
         
         logger.info(f"Informations extraites en mode basique: {extracted}")
         return extracted
+    async def _extract_info_from_prompt(self, prompt: str) -> Dict[str, Any]:
+        """Extrait les informations clés du prompt via LLM"""
+        try:
+            # Tenter extraction via LLM
+            extracted_info = await LLMExtractor.extract_quote_info(prompt)
+            if "error" in extracted_info:
+                # Fallback vers méthode basique
+                return await self._extract_info_basic(prompt)
+            return extracted_info
+        except Exception as e:
+            logger.error(f"Erreur extraction LLM: {str(e)}")
+            return await self._extract_info_basic(prompt)
     
     async def _validate_client(self, client_name: Optional[str]) -> Dict[str, Any]:
         """Valide l'existence du client dans Salesforce"""
