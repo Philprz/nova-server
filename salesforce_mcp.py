@@ -5,45 +5,10 @@ import json
 from datetime import datetime
 import sys
 import io
-import asyncio# Dictionnaire des fonctions MCP disponibles
-mcp_funcs = {
-    "salesforce_query": salesforce_query,
-    "salesforce_inspect": inspect_salesforce,
-    "salesforce_refresh_metadata": refresh_salesforce_metadata,
-    "ping": ping
-}
-
-if action not in mcp_funcs:
-    print(f"Erreur : action '{action}' non trouvée.", file=sys.stderr)
-    sys.exit(1)
-    
-# Exécuter l'action
-result = asyncio.run(mcp_funcs[action](**params))
+import asyncio
 from typing import Optional, List
 import traceback
 import argparse
-
-# Gestion des arguments pour appel direct
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--input-file", help="Fichier d'entrée JSON")
-    parser.add_argument("--output-file", help="Fichier de sortie JSON")
-    args, unknown = parser.parse_known_args()
-    
-    if args.input_file and args.output_file:
-        with open(args.input_file, 'r') as f:
-            input_data = json.load(f)
-        
-        action = input_data.get("action")
-        params = input_data.get("params", {})
-        
-        # Exécuter l'action
-        result = asyncio.run(globals()[action](**params))
-        
-        # Écrire résultat
-        with open(args.output_file, 'w') as f:
-            json.dump(result, f)
-        sys.exit(0)
 
 # Configuration de l'encodage pour Windows
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
@@ -377,7 +342,40 @@ async def refresh_salesforce_metadata(objects_to_refresh: Optional[List[str]] = 
 # Tentative d'initialisation au démarrage
 init_salesforce()
 
+# Gestion des arguments pour appel direct
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--input-file", help="Fichier d'entrée JSON")
+    parser.add_argument("--output-file", help="Fichier de sortie JSON")
+    args, unknown = parser.parse_known_args()
+    
+    if args.input_file and args.output_file:
+        with open(args.input_file, 'r') as f:
+            input_data = json.load(f)
+        
+        action = input_data.get("action")
+        params = input_data.get("params", {})
+        
+        # Dictionnaire des fonctions MCP disponibles - maintenant après les définitions
+        mcp_funcs = {
+            "salesforce_query": salesforce_query,
+            "salesforce_inspect": inspect_salesforce,
+            "salesforce_refresh_metadata": refresh_salesforce_metadata,
+            "ping": ping
+        }
+        
+        if action not in mcp_funcs:
+            print(f"Erreur : action '{action}' non trouvée.", file=sys.stderr)
+            sys.exit(1)
+            
+        # Exécuter l'action
+        result = asyncio.run(mcp_funcs[action](**params))
+        
+        # Écrire résultat
+        with open(args.output_file, 'w') as f:
+            json.dump(result, f)
+        sys.exit(0)
+    
     try:
         log("Lancement du serveur MCP Salesforce...")
         mcp.run(transport="stdio")
