@@ -1,6 +1,9 @@
 # salesforce_mcp_minimal.py
 from mcp.server.fastmcp import FastMCP
 import os
+# Créer le dossier logs s'il n'existe pas
+os.makedirs("logs", exist_ok=True)
+log_file = open("logs/salesforce_debug.log", "w", encoding="utf-8")
 import sys
 import io
 
@@ -9,7 +12,6 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 # Journalisation dans un fichier
-log_file = open("salesforce_debug.log", "w", encoding="utf-8")
 def log(message):
     log_file.write(f"{message}\n")
     log_file.flush()
@@ -39,13 +41,20 @@ def salesforce_query(query: str) -> dict:
     # Tenter d'importer simple-salesforce
     try:
         from simple_salesforce import Salesforce
+        log("simple_salesforce importé avec succès")
     except ImportError:
-        import subprocess
-        import sys
         log("Module simple-salesforce non trouvé. Tentative d'installation...")
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "simple-salesforce"])
-        log("Installation terminée, nouvelle tentative d'import...")
-        from simple_salesforce import Salesforce
+        try:
+            import subprocess
+            import sys
+            log("Module simple-salesforce non trouvé. Tentative d'installation...")
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "simple-salesforce"])
+            log("Installation terminée, nouvelle tentative d'import...")
+            from simple_salesforce import Salesforce
+            log("Module simple-salesforce installé et importé avec succès")
+        except Exception as e:
+            log(f"Erreur lors de l'installation de simple-salesforce : {str(e)}")
+            return {"error": f"Impossible d'installer simple-salesforce: {str(e)}"}
     except Exception as e:
         log(f"Erreur inattendue lors de l'import ou de l'installation : {str(e)}")
         raise
