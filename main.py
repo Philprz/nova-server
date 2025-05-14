@@ -1,5 +1,6 @@
 # main.py (mise à jour)
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from routes.routes_claude import router as claude_router
 from routes.routes_salesforce import router as salesforce_router
 from routes.routes_sap import router as sap_router
@@ -11,6 +12,8 @@ from routes.routes_factures import router as factures_router
 from routes.routes_devis import router as devis_router  # Nouvelle route
 
 app = FastAPI()
+# Monter le dossier static pour servir les fichiers statiques
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # Inclusion des routers
 app.include_router(claude_router)
