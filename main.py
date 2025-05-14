@@ -1,4 +1,4 @@
-# main.py
+# main.py (mise à jour)
 from fastapi import FastAPI
 from routes.routes_claude import router as claude_router
 from routes.routes_salesforce import router as salesforce_router
@@ -8,6 +8,7 @@ from routes.routes_utilisateurs import router as utilisateurs_router
 from routes.routes_tickets import router as tickets_router
 from routes.routes_llm import router as llm_router
 from routes.routes_factures import router as factures_router
+from routes.routes_devis import router as devis_router  # Nouvelle route
 
 app = FastAPI()
 
@@ -20,6 +21,7 @@ app.include_router(utilisateurs_router)
 app.include_router(tickets_router)
 app.include_router(llm_router)
 app.include_router(factures_router)
+app.include_router(devis_router)  # Nouvelle route
 
 @app.get("/")
 def root():
