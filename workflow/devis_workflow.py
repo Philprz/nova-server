@@ -5,6 +5,7 @@ import json
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 from services.llm_extractor import LLMExtractor
+from services.mcp_connector import MCPConnector
 
 # Configuration des logs
 import logging
@@ -115,22 +116,16 @@ class DevisWorkflow:
         
         logger.info(f"Validation du client: {client_name}")
         
-        # Intégration avec Salesforce MCP
-        # Exemple d'appel à la fonction salesforce_query
+        # Intégration avec Salesforce MCP via le connecteur
         try:
-            # À remplacer par un vrai appel MCP
             query = f"SELECT Id, Name, AccountNumber FROM Account WHERE Name LIKE '%{client_name}%' LIMIT 1"
             result = await MCPConnector.call_salesforce_mcp("salesforce_query", {"query": query})
             
-            # Simuler un résultat pour le POC
-            result = {
-                "totalSize": 1,
-                "records": [
-                    {"Id": "001XXXXXXXXXXXX", "Name": client_name, "AccountNumber": "ACC-12345"}
-                ]
-            }
+            if "error" in result:
+                logger.error(f"Erreur lors de la requête Salesforce: {result['error']}")
+                return {"found": False, "error": result["error"]}
             
-            if result["totalSize"] > 0:
+            if result.get("totalSize", 0) > 0:
                 client_data = result["records"][0]
                 logger.info(f"Client trouvé: {client_data['Name']}")
                 return {"found": True, "data": client_data}
@@ -153,22 +148,21 @@ class DevisWorkflow:
         enriched_products = []
         
         for product in products:
-            # Intégration avec SAP MCP
-            # Exemple d'appel à la fonction sap_get_product_details
+            # Intégration avec SAP MCP via le connecteur
             try:
-                # À remplacer par un vrai appel MCP
-                # product_details = await sap_get_product_details(product["code"])
+                # Appel MCP pour récupérer les détails du produit
+                product_details = await MCPConnector.call_sap_mcp("sap_get_product_details", {
+                    "item_code": product["code"]
+                })
                 
-                # Simuler un résultat pour le POC
-                product_details = {
-                    "ItemCode": product["code"],
-                    "ItemName": f"Produit {product['code']}",
-                    "Price": 100.0,
-                    "stock": {
-                        "total": 1000,
-                        "warehouses": [{"WarehouseCode": "WH01", "QuantityOnStock": 1000}]
-                    }
-                }
+                if "error" in product_details:
+                    logger.error(f"Erreur lors de la récupération des détails du produit {product['code']}: {product_details['error']}")
+                    enriched_products.append({
+                        "code": product["code"],
+                        "quantity": product["quantity"],
+                        "error": product_details["error"]
+                    })
+                    continue
                 
                 # Enrichir le produit
                 enriched_product = {
@@ -226,21 +220,15 @@ class DevisWorkflow:
                 }
                 availability_status["unavailable_products"].append(unavailable_item)
                 
-                # Rechercher des alternatives
-                # Intégration avec SAP MCP
+                # Rechercher des alternatives via SAP MCP
                 try:
-                    # À remplacer par un vrai appel MCP
-                    # alternatives_result = await sap_find_alternatives(product["code"])
+                    alternatives_result = await MCPConnector.call_sap_mcp("sap_find_alternatives", {
+                        "item_code": product["code"]
+                    })
                     
-                    # Simuler un résultat pour le POC
-                    alternatives_result = {
-                        "alternatives": [
-                            {"ItemCode": f"{product['code']}-ALT1", "ItemName": f"Alternative 1 pour {product['code']}", "Price": 110.0, "Stock": 2000},
-                            {"ItemCode": f"{product['code']}-ALT2", "ItemName": f"Alternative 2 pour {product['code']}", "Price": 95.0, "Stock": 1500}
-                        ]
-                    }
-                    
-                    if alternatives_result.get("alternatives"):
+                    if "error" in alternatives_result:
+                        logger.error(f"Erreur lors de la recherche d'alternatives pour {product['code']}: {alternatives_result['error']}")
+                    elif alternatives_result.get("alternatives"):
                         availability_status["alternatives"][product["code"]] = alternatives_result["alternatives"]
                         logger.info(f"Alternatives trouvées pour {product['code']}: {len(alternatives_result['alternatives'])}")
                 except Exception as e:
@@ -303,7 +291,25 @@ class DevisWorkflow:
         
         try:
             # Intégration avec Salesforce MCP
-            # Dans un système réel, appel à l'API Salesforce pour créer l'opportunité et le devis
+            # Préparer les données au format attendu par Salesforce
+            quote_sf_data = {
+                "AccountId": quote_data.get("client", {}).get("id", ""),
+                "Status": "Draft" if is_draft else "In Review",
+                "ExpirationDate": (datetime.now() + datetime.timedelta(days=30)).strftime("%Y-%m-%d"),
+                "Description": f"Devis généré automatiquement via NOVA Middleware",
+                "LineItems": [
+                    {
+                        "ProductCode": line.get("product_code", ""),
+                        "ProductName": line.get("product_name", ""),
+                        "Quantity": line.get("quantity", 0),
+                        "UnitPrice": line.get("unit_price", 0)
+                    }
+                    for line in quote_data.get("quote_lines", [])
+                ]
+            }
+            
+            # Dans un environnement réel, appel à Salesforce pour créer le devis
+            # result = await MCPConnector.call_salesforce_mcp("salesforce_create_quote", quote_sf_data)
             
             # Simuler un résultat pour le POC
             result = {
