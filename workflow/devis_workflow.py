@@ -2,7 +2,8 @@
 
 import os
 import json
-from datetime import datetime
+import datetime
+from datetime import timedelta
 from typing import Dict, List, Any, Optional
 from services.llm_extractor import LLMExtractor
 from services.mcp_connector import MCPConnector
@@ -343,7 +344,7 @@ class DevisWorkflow:
             quote_sf_data = {
                 "AccountId": quote_data.get("client", {}).get("id", ""),
                 "Status": "Draft" if is_draft else "In Review",
-                "ExpirationDate": (datetime.now() + datetime.timedelta(days=30)).strftime("%Y-%m-%d"),
+                "ExpirationDate": (datetime.datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d"),
                 "Description": f"Devis généré automatiquement via NOVA Middleware",
                 "LineItems": [
                     {
@@ -380,7 +381,7 @@ class DevisWorkflow:
         logger.info(f"Débogage du workflow avec prompt: {prompt}")
         
         # Étape 1: Extraction
-        extracted_info = await self._extract_info_from_prompt(prompt)
+        extracted_info = await self._extract_info_basic(prompt)
         logger.info(f"Information extraite: {extracted_info}")
         
         # Étape 2: Validation du client

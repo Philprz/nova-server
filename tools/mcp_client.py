@@ -7,6 +7,8 @@ import argparse
 import asyncio
 import websockets
 from dotenv import load_dotenv
+# Ajouter le répertoire parent au chemin de recherche
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Importer le connecteur MCP
 from services.mcp_connector import MCPConnector
 # Charger les variables d'environnement
