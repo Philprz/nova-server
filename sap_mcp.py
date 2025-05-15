@@ -555,7 +555,7 @@ async def sap_find_alternatives(item_code: str) -> dict:
         log(f"Recherche d'alternatives pour le produit {item_code}")
         
         # Récupérer les informations du produit
-        product = await get_product_details(item_code)
+        product = await sap_get_product_details(item_code)
         
         if "error" in product:
             return product
@@ -651,7 +651,7 @@ async def sap_create_draft_order(customer_code: str, items: List[Dict[str, Any]]
         # Vérifier la disponibilité des articles
         unavailable_items = []
         for item in items:
-            availability = await check_product_availability(item["ItemCode"], item.get("Quantity", 1))
+            availability = await sap_check_product_availability(item["ItemCode"], item.get("Quantity", 1))
             if "error" in availability or not availability.get("is_available", False):
                 unavailable_items.append({
                     "ItemCode": item["ItemCode"],

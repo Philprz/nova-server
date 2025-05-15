@@ -185,6 +185,19 @@ class DevisWorkflow:
     
     async def _get_products_info(self, products: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Récupère les informations produits depuis SAP"""
+        # Si les détails du produit contiennent une propriété error, mais aussi des propriétés valides
+        if "error" in product_details and product_details.get("ItemName") is not None:
+            # Utiliser les données disponibles malgré l'erreur
+            enriched_product = {
+                "code": product["code"],
+                "quantity": product["quantity"],
+                "name": product_details.get("ItemName", "Unknown"),
+                "unit_price": product_details.get("Price", 0.0),
+                "stock": product_details.get("stock", {}).get("total", 0),
+                "details": product_details
+            }
+            enriched_products.append(enriched_product)
+            logger.info(f"Produit partiellement enrichi: {product['code']}")
         if not products:
             logger.warning("Aucun produit spécifié")
             return []

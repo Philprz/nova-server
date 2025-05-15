@@ -51,7 +51,7 @@ Vous devriez voir des messages confirmant les connexions.
 ### Option 2: Via navigateur web
 
 1. Ouvrez http://localhost:8000/static/demo_devis.html
-2. Saisissez la demande: "gi"
+2. Saisissez la demande: "faire un devis pour 500 ref A00001 pour le client Edge Communications"
 3. Cliquez sur "Générer le devis"
 
 ### Option 3: Via ligne de commande
