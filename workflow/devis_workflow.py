@@ -120,32 +120,7 @@ class DevisWorkflow:
         logger.info(f"Informations extraites en mode basique: {extracted}")
         return extracted
 
-    async def _extract_info_basic(self, prompt: str) -> Dict[str, Any]:
-        """Méthode d'extraction basique en cas d'échec du LLM"""
-        logger.info("Extraction basique des informations du prompt")
-        
-        # Logique simplifiée d'extraction (celle que nous avions avant)
-        extracted = {
-            "client": None,
-            "products": []
-        }
-        
-        # Recherche du client
-        words = prompt.lower().split()
-        if "client" in words:
-            client_index = words.index("client")
-            if client_index + 1 < len(words):
-                extracted["client"] = words[client_index + 1].strip().upper()
-        
-        # Recherche des produits et quantités
-        for i, word in enumerate(words):
-            if word.isdigit() and i + 2 < len(words) and (words[i+1] == "ref" or words[i+1] == "référence"):
-                quantity = int(word)
-                product_code = words[i+2].strip()
-                extracted["products"].append({"code": product_code, "quantity": quantity})
-        
-        logger.info(f"Informations extraites en mode basique: {extracted}")
-        return extracted
+
     async def _extract_info_from_prompt(self, prompt: str) -> Dict[str, Any]:
         """Extrait les informations clés du prompt via LLM"""
         try:
@@ -167,20 +142,30 @@ class DevisWorkflow:
         
         logger.info(f"Validation du client: {client_name}")
         
-        # Intégration avec Salesforce MCP via le connecteur
+        # AMÉLIORATION: Extraire le nom complet du client de manière plus intelligente
+        client_name_original = client_name
+        client_name_upper = client_name.upper()
+        
         try:
-            # Étape 1: Essai avec correspondance exacte
-            query = f"SELECT Id, Name, AccountNumber FROM Account WHERE Name = '{client_name}' LIMIT 1"
+            # Stratégie 1: Tenter avec LIKE d'abord (plus flexible)
+            query = f"SELECT Id, Name, AccountNumber FROM Account WHERE Name LIKE '%{client_name}%' LIMIT 1"
+            logger.info(f"Requête SOQL (1/3): {query}")
             result = await MCPConnector.call_salesforce_mcp("salesforce_query", {"query": query})
             
-            # Si pas de résultat, essayer avec LIKE
+            # Stratégie 2: Si échec, essayer avec LIKE sur le nom en majuscules
             if "error" not in result and result.get("totalSize", 0) == 0:
-                logger.info(f"Client non trouvé avec correspondance exacte, essai avec LIKE")
-                query = f"SELECT Id, Name, AccountNumber FROM Account WHERE Name LIKE '%{client_name}%' LIMIT 1"
+                query = f"SELECT Id, Name, AccountNumber FROM Account WHERE UPPER(Name) LIKE '%{client_name_upper}%' LIMIT 1"
+                logger.info(f"Requête SOQL (2/3): {query}")
                 result = await MCPConnector.call_salesforce_mcp("salesforce_query", {"query": query})
             
-            # Vérification et journalisation du résultat brut
-            logger.info(f"Résultat brut de la requête Salesforce: {result}")
+            # Stratégie 3: Si toujours rien, essayer une correspondance exacte
+            if "error" not in result and result.get("totalSize", 0) == 0:
+                query = f"SELECT Id, Name, AccountNumber FROM Account WHERE Name = '{client_name_original}' LIMIT 1"
+                logger.info(f"Requête SOQL (3/3): {query}")
+                result = await MCPConnector.call_salesforce_mcp("salesforce_query", {"query": query})
+            
+            # Vérification et journalisation du résultat
+            logger.info(f"Résultat brut de la requête Salesforce: {json.dumps(result) if isinstance(result, dict) else result}")
             
             if "error" in result:
                 logger.error(f"Erreur lors de la requête Salesforce: {result['error']}")
@@ -188,13 +173,14 @@ class DevisWorkflow:
             
             if result.get("totalSize", 0) > 0:
                 client_data = result["records"][0]
-                logger.info(f"Client trouvé: {client_data['Name']}")
+                logger.info(f"Client trouvé: {client_data['Name']} (ID: {client_data['Id']})")
                 return {"found": True, "data": client_data}
             else:
                 logger.warning(f"Client non trouvé: {client_name}")
                 return {"found": False, "error": f"Client {client_name} non trouvé dans Salesforce"}
         except Exception as e:
-            logger.error(f"Erreur lors de la validation du client: {str(e)}")
+            import traceback
+            logger.error(f"Erreur lors de la validation du client: {str(e)}\n{traceback.format_exc()}")
             return {"found": False, "error": str(e)}
     
     async def _get_products_info(self, products: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

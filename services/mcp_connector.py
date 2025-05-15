@@ -32,7 +32,7 @@ class MCPConnector:
     async def call_sap_mcp(action: str, params: Dict[str, Any]) -> Dict[str, Any]:
         """Appelle un outil MCP SAP"""
         return await MCPConnector._call_mcp("sap_mcp", action, params)
-                        
+
     @staticmethod
     async def call_mcp_server(server_name, action, params):
         # Mode direct sans WebSocket - temporaire
@@ -46,17 +46,7 @@ class MCPConnector:
     
     @staticmethod
     async def _call_mcp(server_name: str, action: str, params: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Méthode générique pour appeler un outil MCP via subprocess (compatible stdio)
-        
-        Args:
-            server_name: Nom du serveur MCP (ex: "salesforce_mcp", "sap_mcp")
-            action: Nom de l'action MCP
-            params: Paramètres de l'action
-            
-        Returns:
-            Résultat de l'appel MCP
-        """
+        """Méthode générique pour appeler un outil MCP via subprocess"""
         logger.info(f"Appel MCP: {server_name}.{action}")
         
         try:
@@ -64,6 +54,7 @@ class MCPConnector:
             with tempfile.NamedTemporaryFile(mode='w+', suffix='.json', delete=False) as temp_in:
                 temp_in_path = temp_in.name
                 json.dump({"action": action, "params": params}, temp_in)
+                temp_in.flush()
             
             # Créer fichier temporaire pour la sortie
             with tempfile.NamedTemporaryFile(mode='w+', suffix='.json', delete=False) as temp_out:
@@ -72,38 +63,74 @@ class MCPConnector:
             try:
                 # Exécuter le script avec les arguments appropriés
                 script_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), f"{server_name}.py")
+                logger.info(f"Chemin du script MCP: {script_path}")
                 
-                process = await asyncio.create_subprocess_exec(
-                    sys.executable, script_path, 
-                    "--input-file", temp_in_path,
-                    "--output-file", temp_out_path,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
+                if not os.path.exists(script_path):
+                    logger.error(f"Script MCP introuvable: {script_path}")
+                    return {"error": f"Script MCP introuvable: {script_path}"}
+                
+                # SOLUTION: Utiliser subprocess.run() dans un thread séparé plutôt que create_subprocess_exec
+                import subprocess
+                import concurrent.futures
+                
+                # Définir la fonction qui exécute subprocess.run
+                def run_subprocess():
+                    try:
+                        result = subprocess.run(
+                            [sys.executable, script_path, "--input-file", temp_in_path, "--output-file", temp_out_path],
+                            capture_output=True,
+                            text=True,
+                            check=False
+                        )
+                        return result.returncode, result.stdout, result.stderr
+                    except Exception as e:
+                        logger.error(f"Erreur lors de l'exécution du subprocess: {e}")
+                        return -1, "", str(e)
+                
+                # Exécuter dans un ThreadPoolExecutor pour éviter de bloquer la boucle asyncio
+                loop = asyncio.get_event_loop()
+                returncode, stdout, stderr = await loop.run_in_executor(
+                    None, run_subprocess
                 )
                 
-                stdout, stderr = await process.communicate()
+                logger.info(f"Sortie stdout: {stdout}")
                 
-                if process.returncode != 0:
-                    logger.error(f"Erreur exécution MCP: {stderr.decode()}")
-                    return {"error": f"Échec appel MCP: code {process.returncode}"}
+                if returncode != 0:
+                    logger.error(f"Erreur exécution MCP: {stderr}")
+                    return {"error": f"Échec appel MCP: code {returncode}. Erreur: {stderr}"}
                 
                 # Lire le résultat depuis le fichier de sortie
-                with open(temp_out_path, 'r') as f:
-                    result = json.load(f)
-                
-                logger.info(f"Appel MCP réussi: {action}")
-                return result
-                
+                if os.path.exists(temp_out_path):
+                    try:
+                        with open(temp_out_path, 'r') as f:
+                            result = json.load(f)
+                        
+                        logger.info(f"Appel MCP réussi: {action}")
+                        return result
+                    except json.JSONDecodeError as je:
+                        logger.error(f"Erreur JSON dans le fichier de sortie: {je}")
+                        with open(temp_out_path, 'r') as f:
+                            content = f.read()
+                        logger.error(f"Contenu brut: {content}")
+                        return {"error": f"Format JSON invalide dans la réponse MCP: {je}"}
+                else:
+                    logger.error(f"Fichier de sortie inexistant: {temp_out_path}")
+                    return {"error": "Fichier de sortie MCP non créé"}
             except Exception as e:
-                logger.error(f"Exception lors de l'appel MCP: {str(e)}")
+                import traceback
+                tb = traceback.format_exc()
+                logger.error(f"Exception lors de l'appel MCP: {str(e)}\n{tb}")
                 return {"error": str(e)}
             finally:
                 # Nettoyer les fichiers temporaires
-                if os.path.exists(temp_in_path):
-                    os.unlink(temp_in_path)
-                if os.path.exists(temp_out_path):
-                    os.unlink(temp_out_path)
-        
+                for path in [temp_in_path, temp_out_path]:
+                    if os.path.exists(path):
+                        try:
+                            os.unlink(path)
+                        except:
+                            pass
         except Exception as e:
-            logger.error(f"Erreur critique: {str(e)}")
+            import traceback
+            tb = traceback.format_exc()
+            logger.error(f"Erreur critique: {str(e)}\n{tb}")
             return {"error": str(e)}
