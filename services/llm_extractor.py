@@ -58,15 +58,17 @@ class LLMExtractor:
             }
             
             payload = {
-                "model": "claude-3-opus-20240229",
-                "max_tokens": 1000,
+                "model": "claude-3-7-sonnet-20250219",
+                "max_tokens": 1024,
                 "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_message}
                 ],
                 "temperature": 0.0  # Réponse déterministe pour extraction précise
             }
-            
+            if response.status_code != 200:
+                error_detail = response.json()
+                logger.error(f"Détail erreur API: {error_detail}")
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.post(
                     "https://api.anthropic.com/v1/messages",
