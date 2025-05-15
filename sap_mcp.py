@@ -11,52 +11,6 @@ from typing import Optional, Dict, Any, List
 import traceback
 import argparse
 
-# Table de mappage des noms d'outils MCP vers les fonctions correspondantes
-mcp_functions = {
-    "ping": ping,
-    "sap_read": sap_read,
-    "sap_inspect": sap_inspect,
-    "sap_refresh_metadata": sap_refresh_metadata,
-    "sap_search": sap_search,
-    "sap_get_product_details": sap_get_product_details,
-    "sap_check_product_availability": sap_check_product_availability,
-    "sap_find_alternatives": sap_find_alternatives,
-    "sap_create_draft_order": sap_create_draft_order
-}
-
-# Puis remplacez cette partie au début:
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--input-file", help="Fichier d'entrée JSON")
-    parser.add_argument("--output-file", help="Fichier de sortie JSON")
-    args, unknown = parser.parse_known_args()
-    
-    if args.input_file and args.output_file:
-        with open(args.input_file, 'r') as f:
-            input_data = json.load(f)
-        
-        action = input_data.get("action")
-        params = input_data.get("params", {})
-        
-        # Utiliser la table de mappage
-        if action in mcp_functions:
-            try:
-                result = asyncio.run(mcp_functions[action](**params))
-                # Écrire résultat
-                with open(args.output_file, 'w') as f:
-                    json.dump(result, f)
-                sys.exit(0)
-            except Exception as e:
-                log(f"Erreur lors de l'exécution de {action}: {str(e)}")
-                with open(args.output_file, 'w') as f:
-                    json.dump({"error": str(e)}, f)
-                sys.exit(1)
-        else:
-            log(f"Action inconnue: {action}. Actions disponibles: {list(mcp_functions.keys())}")
-            with open(args.output_file, 'w') as f:
-                json.dump({"error": f"Action inconnue: {action}"}, f)
-            sys.exit(1)
-
 # Configuration de l'encodage pour Windows
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
@@ -758,9 +712,53 @@ async def sap_create_draft_order(customer_code: str, items: List[Dict[str, Any]]
 async def init_sap():
     """Initialisation de la connexion SAP"""
     await login_sap()
+# Table de mappage des noms d'outils MCP vers les fonctions correspondantes
+mcp_functions = {
+    "ping": ping,
+    "sap_read": sap_read,
+    "sap_inspect": sap_inspect,
+    "sap_refresh_metadata": sap_refresh_metadata,
+    "sap_search": sap_search,
+    "sap_get_product_details": sap_get_product_details,
+    "sap_check_product_availability": sap_check_product_availability,
+    "sap_find_alternatives": sap_find_alternatives,
+    "sap_create_draft_order": sap_create_draft_order
+}
 
-# Démarrage du serveur MCP
+# Traitement des arguments en ligne de commande
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--input-file", help="Fichier d'entrée JSON")
+    parser.add_argument("--output-file", help="Fichier de sortie JSON")
+    args, unknown = parser.parse_known_args()
+    
+    if args.input_file and args.output_file:
+        with open(args.input_file, 'r') as f:
+            input_data = json.load(f)
+        
+        action = input_data.get("action")
+        params = input_data.get("params", {})
+        
+        # Utiliser la table de mappage
+        if action in mcp_functions:
+            try:
+                result = asyncio.run(mcp_functions[action](**params))
+                # Écrire résultat
+                with open(args.output_file, 'w') as f:
+                    json.dump(result, f)
+                sys.exit(0)
+            except Exception as e:
+                log(f"Erreur lors de l'exécution de {action}: {str(e)}")
+                with open(args.output_file, 'w') as f:
+                    json.dump({"error": str(e)}, f)
+                sys.exit(1)
+        else:
+            log(f"Action inconnue: {action}. Actions disponibles: {list(mcp_functions.keys())}")
+            with open(args.output_file, 'w') as f:
+                json.dump({"error": f"Action inconnue: {action}"}, f)
+            sys.exit(1)
+
+    # Cette partie reste inchangée
     try:
         log("Lancement du serveur MCP SAP...")
         mcp.run(transport="stdio")
