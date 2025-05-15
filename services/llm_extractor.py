@@ -48,11 +48,13 @@ class LLMExtractor:
                 "content-type": "application/json"
             }
 
+            # CORRECTION ICI: system est maintenant un paramètre de premier niveau
+            # et non plus un message avec le rôle "system"
             payload = {
                 "model": "claude-3-7-sonnet-20250219",
                 "max_tokens": 1024,
+                "system": system_prompt,  # Paramètre system de premier niveau
                 "messages": [
-                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_message}
                 ],
                 "temperature": 0.0  # Réponse déterministe pour extraction précise
@@ -100,14 +102,3 @@ class LLMExtractor:
         except Exception as e:
             logger.error(f"Erreur lors de l'extraction des informations de devis: {e}")
             return {"error": f"Erreur lors de l'extraction des informations de devis: {e}"}
-
-    # Exemple d'utilisation
-    if __name__ == "__main__":
-        import asyncio
-
-        async def main():
-            prompt = "Faire un devis pour 10 ordinateurs portables A23567 pour le client ACME"
-            result = await extract_quote_info(prompt)
-            print(result)
-
-        asyncio.run(main())

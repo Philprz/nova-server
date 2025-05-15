@@ -183,21 +183,10 @@ class DevisWorkflow:
             logger.error(f"Erreur lors de la validation du client: {str(e)}\n{traceback.format_exc()}")
             return {"found": False, "error": str(e)}
     
+
+
     async def _get_products_info(self, products: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Récupère les informations produits depuis SAP"""
-        # Si les détails du produit contiennent une propriété error, mais aussi des propriétés valides
-        if "error" in product_details and product_details.get("ItemName") is not None:
-            # Utiliser les données disponibles malgré l'erreur
-            enriched_product = {
-                "code": product["code"],
-                "quantity": product["quantity"],
-                "name": product_details.get("ItemName", "Unknown"),
-                "unit_price": product_details.get("Price", 0.0),
-                "stock": product_details.get("stock", {}).get("total", 0),
-                "details": product_details
-            }
-            enriched_products.append(enriched_product)
-            logger.info(f"Produit partiellement enrichi: {product['code']}")
         if not products:
             logger.warning("Aucun produit spécifié")
             return []
@@ -217,11 +206,26 @@ class DevisWorkflow:
                 
                 if "error" in product_details:
                     logger.error(f"Erreur lors de la récupération des détails du produit {product['code']}: {product_details['error']}")
-                    enriched_products.append({
-                        "code": product["code"],
-                        "quantity": product["quantity"],
-                        "error": product_details["error"]
-                    })
+                    # Vérifier si malgré l'erreur, nous avons des informations utiles
+                    if product_details.get("ItemName") is not None:
+                        # Utiliser les données disponibles malgré l'erreur
+                        enriched_product = {
+                            "code": product["code"],
+                            "quantity": product["quantity"],
+                            "name": product_details.get("ItemName", "Unknown"),
+                            "unit_price": product_details.get("Price", 0.0),
+                            "stock": product_details.get("stock", {}).get("total", 0),
+                            "details": product_details
+                        }
+                        enriched_products.append(enriched_product)
+                        logger.info(f"Produit partiellement enrichi: {product['code']}")
+                    else:
+                        # Si vraiment aucune donnée utile, ajouter le produit avec l'erreur
+                        enriched_products.append({
+                            "code": product["code"],
+                            "quantity": product["quantity"],
+                            "error": product_details["error"]
+                        })
                     continue
                 
                 # Enrichir le produit
