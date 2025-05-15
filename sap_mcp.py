@@ -341,7 +341,7 @@ async def sap_read(endpoint: str, method: str = "GET", payload: Optional[Dict[st
         return {"error": str(e)}
 
 @mcp.tool(name="sap_inspect")
-async def inspect_sap() -> dict:
+async def sap_inspect() -> dict:
     """
     Liste les endpoints SAP depuis le cache.
     
@@ -373,7 +373,7 @@ async def inspect_sap() -> dict:
         return {"error": str(e)}
 
 @mcp.tool(name="sap_refresh_metadata")
-async def refresh_sap_metadata() -> dict:
+async def sap_refresh_metadata() -> dict:
     """
     Force la mise à jour des endpoints SAP.
     
@@ -452,7 +452,7 @@ async def sap_search(query: str, entity_type: str = "Items", limit: int = 5) -> 
         return {"error": str(e)}
 
 @mcp.tool(name="sap_get_product_details")
-async def get_product_details(item_code: str) -> dict:
+async def sap_get_product_details(item_code: str) -> dict:
     """
     Récupère les détails d'un produit.
     
@@ -510,7 +510,7 @@ async def get_product_details(item_code: str) -> dict:
         return {"error": str(e)}
 
 @mcp.tool(name="sap_check_product_availability")
-async def check_product_availability(item_code: str, quantity: int = 1) -> dict:
+async def sap_check_product_availability(item_code: str, quantity: int = 1) -> dict:
     """
     Vérifie la disponibilité d'un produit.
     
@@ -563,7 +563,7 @@ async def check_product_availability(item_code: str, quantity: int = 1) -> dict:
         return {"error": str(e)}
 
 @mcp.tool(name="sap_find_alternatives")
-async def find_alternatives(item_code: str) -> dict:
+async def sap_find_alternatives(item_code: str) -> dict:
     """
     Trouve des produits alternatifs pour un produit donné.
     
@@ -649,7 +649,7 @@ async def find_alternatives(item_code: str) -> dict:
         return {"error": str(e)}
 
 @mcp.tool(name="sap_create_draft_order")
-async def create_draft_order(customer_code: str, items: List[Dict[str, Any]]) -> dict:
+async def sap_create_draft_order(customer_code: str, items: List[Dict[str, Any]]) -> dict:
     """
     Crée un brouillon de commande dans SAP.
     
