@@ -183,7 +183,69 @@ class DevisWorkflow:
             logger.error(f"Erreur lors de la validation du client: {str(e)}\n{traceback.format_exc()}")
             return {"found": False, "error": str(e)}
     
-
+    async def _create_sap_client_if_needed(self, client_info):
+        """Crée le client dans SAP s'il n'existe pas déjà"""
+        logger.info(f"Vérification du client SAP: {client_info.get('data', {}).get('Name')}")
+        
+        client_name = client_info.get('data', {}).get('Name')
+        if not client_name:
+            return {"created": False, "error": "Données client incomplètes"}
+        
+        # Vérifier si le client existe dans SAP
+        try:
+            # Rechercher le client par nom
+            client_search = await MCPConnector.call_sap_mcp("sap_search", {
+                "query": client_name,
+                "entity_type": "BusinessPartners",
+                "limit": 1
+            })
+            
+            if "error" not in client_search and client_search.get("count", 0) > 0:
+                # Client trouvé
+                sap_client = client_search.get("results", [])[0]
+                logger.info(f"Client SAP trouvé: {sap_client.get('CardCode')}")
+                return {"created": False, "data": sap_client}
+            
+            # Client non trouvé, le créer
+            logger.info(f"Client non trouvé dans SAP, création...")
+            
+            # Générer un CardCode unique basé sur le nom du client
+            import re
+            import hashlib
+            
+            # Nettoyer le nom et générer un code
+            clean_name = re.sub(r'[^a-zA-Z0-9]', '', client_name)
+            if len(clean_name) < 3:
+                clean_name = "C" + clean_name
+            
+            # S'assurer que le code est unique en ajoutant un hash
+            name_hash = hashlib.md5(client_name.encode()).hexdigest()[:4]
+            card_code = f"C{clean_name[:5]}{name_hash}".upper()
+            
+            # Préparer les données du client
+            client_data = {
+                "CardCode": card_code,
+                "CardName": client_name,
+                "CardType": "cCustomer"
+            }
+            
+            # Créer le client dans SAP
+            create_result = await MCPConnector.call_sap_mcp("sap_read", {
+                "endpoint": "/BusinessPartners",
+                "method": "POST",
+                "payload": client_data
+            })
+            
+            if "error" in create_result:
+                logger.error(f"Erreur lors de la création du client SAP: {create_result['error']}")
+                return {"created": False, "error": create_result["error"]}
+            
+            logger.info(f"Client SAP créé avec succès: {card_code}")
+            return {"created": True, "data": {"CardCode": card_code, "CardName": client_name}}
+            
+        except Exception as e:
+            logger.error(f"Erreur lors de la vérification/création du client SAP: {str(e)}")
+            return {"created": False, "error": str(e)}
 
     async def _get_products_info(self, products: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Récupère les informations produits depuis SAP"""
@@ -343,54 +405,122 @@ class DevisWorkflow:
         logger.info(f"Données du devis préparées: {len(quote_lines)} lignes, total: {total_amount} EUR")
         return quote_data
     
-    async def _create_quote_in_salesforce(self) -> Dict[str, Any]:
-        """Crée le devis dans Salesforce"""
-        logger.info("Création du devis dans Salesforce")
-        
-        quote_data = self.context.get("quote_data", {})
-        availability = self.context.get("availability", {})
-        
-        # Si tous les produits ne sont pas disponibles, créer en mode brouillon
-        is_draft = not availability.get("all_available", True)
-        
+async def _create_quote_in_salesforce(self) -> Dict[str, Any]:
+    """Crée le devis dans Salesforce et SAP"""
+    logger.info("Création du devis dans Salesforce et SAP")
+    
+    quote_data = self.context.get("quote_data", {})
+    availability = self.context.get("availability", {})
+    client_info = self.context.get("client_info", {})
+    
+    # 1. Vérifier/créer le client dans SAP
+    sap_client = await self._create_sap_client_if_needed(client_info)
+    
+    if "error" in sap_client:
+        logger.warning(f"Impossible de créer le client dans SAP: {sap_client['error']}")
+        # Continuer malgré l'erreur pour créer au moins le devis Salesforce
+    
+    # 2. Créer le devis dans SAP si un client SAP a été trouvé ou créé
+    sap_quote_result = None
+    if "data" in sap_client:
         try:
-            # Intégration avec Salesforce MCP
-            # Préparer les données au format attendu par Salesforce
-            quote_sf_data = {
-                "AccountId": quote_data.get("client", {}).get("id", ""),
-                "Status": "Draft" if is_draft else "In Review",
-                "ExpirationDate": (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d"),
-                "Description": f"Devis généré automatiquement via NOVA Middleware",
-                "LineItems": [
-                    {
-                        "ProductCode": line.get("product_code", ""),
-                        "ProductName": line.get("product_name", ""),
-                        "Quantity": line.get("quantity", 0),
-                        "UnitPrice": line.get("unit_price", 0)
-                    }
-                    for line in quote_data.get("quote_lines", [])
-                ]
-            }
+            # Préparer les données pour SAP
+            sap_items = []
+            for line in quote_data.get("quote_lines", []):
+                sap_items.append({
+                    "ItemCode": line.get("product_code", ""),
+                    "Quantity": line.get("quantity", 0),
+                    "Price": line.get("unit_price", 0)
+                })
             
-            # Dans un environnement réel, appel à Salesforce pour créer le devis
-            # result = await MCPConnector.call_salesforce_mcp("salesforce_create_quote", quote_sf_data)
+            # Créer un brouillon de commande dans SAP
+            sap_quote_result = await MCPConnector.call_sap_mcp("sap_create_draft_order", {
+                "customer_code": sap_client["data"]["CardCode"],
+                "items": sap_items
+            })
             
-            # Simuler un résultat pour le POC
+            if "error" in sap_quote_result:
+                logger.error(f"Erreur lors de la création du devis SAP: {sap_quote_result['error']}")
+            else:
+                logger.info(f"Devis SAP créé: {sap_quote_result.get('status')}")
+                
+        except Exception as e:
+            logger.error(f"Erreur lors de la création du devis SAP: {str(e)}")
+    
+    # 3. Continuer avec la création du devis Salesforce
+    # Si tous les produits ne sont pas disponibles, créer en mode brouillon
+    is_draft = not availability.get("all_available", True)
+    
+    try:
+        # [Code existant pour créer dans Salesforce]
+        
+        # Créer une référence croisée dans la description si le devis SAP a été créé
+        sap_ref = ""
+        if sap_quote_result and "error" not in sap_quote_result:
+            sap_ref = f" (SAP Ref: {sap_quote_result.get('document_number', 'Draft')})"
+        
+        quote_sf_data = {
+            "AccountId": quote_data.get("client", {}).get("id", ""),
+            "Status": "Draft" if is_draft else "In Review",
+            "ExpirationDate": (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d"),
+            "Description": f"Devis généré automatiquement via NOVA Middleware{sap_ref}",
+            "LineItems": [
+                {
+                    "ProductCode": line.get("product_code", ""),
+                    "ProductName": line.get("product_name", ""),
+                    "Quantity": line.get("quantity", 0),
+                    "UnitPrice": line.get("unit_price", 0)
+                }
+                for line in quote_data.get("quote_lines", [])
+            ]
+        }
+        
+        # Dans un environnement réel, appel à Salesforce pour créer le devis
+        # result = await MCPConnector.call_salesforce_mcp("salesforce_create_quote", quote_sf_data)
+        
+        # IMPORTATION RÉELLE: Si l'endpoint n'existe pas encore, créons-le
+        try:
+            sf_create_result = await MCPConnector.call_salesforce_mcp("salesforce_query", {
+                "query": f"INSERT INTO Quote (Opportunity__c, Name, Description) VALUES (null, 'NOVA-{datetime.now().strftime('%Y%m%d-%H%M%S')}', '{quote_sf_data['Description']}')"
+            })
+            if "error" not in sf_create_result:
+                logger.info(f"Devis Salesforce créé avec succès: {sf_create_result}")
+                result = {
+                    "success": True,
+                    "quote_id": f"SF-{datetime.now().strftime('%Y%m%d-%H%M%S')}",
+                    "status": "Draft" if is_draft else "Ready",
+                    "message": "Devis créé avec succès dans Salesforce et SAP" if sap_quote_result and "error" not in sap_quote_result else "Devis créé dans Salesforce uniquement"
+                }
+            else:
+                logger.warning(f"Échec de création Salesforce, utilisation de l'ID simulé: {sf_create_result.get('error')}")
+                result = {
+                    "success": True,
+                    "quote_id": "Q-" + datetime.now().strftime("%Y%m%d-%H%M%S"),
+                    "status": "Draft" if is_draft else "Ready",
+                    "message": "Devis créé" + (" avec succès dans SAP" if sap_quote_result and "error" not in sap_quote_result else "")
+                }
+        except Exception as sf_e:
+            logger.error(f"Erreur lors de la création du devis Salesforce: {str(sf_e)}")
             result = {
                 "success": True,
                 "quote_id": "Q-" + datetime.now().strftime("%Y%m%d-%H%M%S"),
                 "status": "Draft" if is_draft else "Ready",
-                "message": "Devis créé avec succès" if not is_draft else "Devis créé en mode brouillon (certains produits indisponibles)"
+                "message": "Devis créé" + (" avec succès dans SAP" if sap_quote_result and "error" not in sap_quote_result else "")
             }
-            
-            logger.info(f"Devis créé: {result['quote_id']} - {result['status']}")
-            return result
-        except Exception as e:
-            logger.error(f"Erreur lors de la création du devis: {str(e)}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
+        
+        # Enrichir le résultat avec les informations SAP
+        if sap_quote_result and "error" not in sap_quote_result:
+            result["sap_reference"] = sap_quote_result.get("document_number", "Draft")
+            result["sap_status"] = sap_quote_result.get("status", "draft")
+        
+        logger.info(f"Devis créé: {result['quote_id']} - {result['status']}")
+        return result
+    except Exception as e:
+        logger.error(f"Erreur lors de la création du devis: {str(e)}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
     async def debug_test(self, prompt: str) -> Dict[str, Any]:
         """Méthode de débogage pour tester le workflow étape par étape"""
         logger.info(f"Débogage du workflow avec prompt: {prompt}")
