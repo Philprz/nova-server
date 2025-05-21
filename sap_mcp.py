@@ -1136,12 +1136,35 @@ async def sap_create_draft_order(customer_code: str, items: List[Dict[str, Any]]
                 {
                     "ItemCode": item["ItemCode"],
                     "Quantity": item.get("Quantity", 1),
-                    "Price": item.get("Price")
+                    "Price": item.get("Price"),
+                    "TaxCode": "S1",  # Code taxe par défaut
+                    "DiscountPercent": 0.0
                 }
                 for item in items
-            ]
+            ],
+            "DocObjectCode": "oOrders"  # Spécifier explicitement le type de document
         }
-        
+        # Créer réellement la commande (pas en mode simulation)
+        async with httpx.AsyncClient(cookies=sap_session["cookies"], verify=False) as client:
+            url = SAP_BASE_URL + "/Orders"
+            response = await client.post(url, json=order_data)
+            response.raise_for_status()
+            actual_result = response.json()
+            
+            # Enrichir le résultat
+            result = {
+                "status": "created",
+                "document_number": actual_result.get("DocNum"),
+                "document_entry": actual_result.get("DocEntry"),
+                "customer": {
+                    "CardCode": customer_code,
+                    "CardName": customer.get("CardName", "")
+                },
+                "items": items,
+                "unavailable_items": unavailable_items,
+                "creation_time": datetime.now().isoformat(),
+                "document_total": actual_result.get("DocTotal", sum(item.get("Quantity", 1) * (item.get("Price") or 0) for item in items))
+            }        
         # Si mode brouillon, ne pas envoyer à SAP mais simuler
         result = {
             "status": "draft",

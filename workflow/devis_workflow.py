@@ -248,6 +248,39 @@ class DevisWorkflow:
             return {"created": False, "error": str(e)}
 
     async def _get_products_info(self, products: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        from services.product_sync import sync_product_from_sap_to_salesforce
+
+        # Enrichir chaque produit avec les données SAP ET Salesforce
+        enriched_products = []
+
+        for product in products:
+            # [Code existant]
+            
+            # Synchroniser le produit et récupérer son ID Salesforce
+            salesforce_product_id = await sync_product_from_sap_to_salesforce(product["code"])
+            
+            # Enrichir le produit
+            enriched_product = {
+                "code": product["code"],
+                "quantity": product["quantity"],
+                "name": product_details.get("ItemName", "Unknown"),
+                "unit_price": product_details.get("Price", 0.0),
+                "stock": product_details.get("stock", {}).get("total", 0),
+                "details": product_details,
+                "salesforce_id": salesforce_product_id  # Ajouter l'ID Salesforce
+            }
+
+        # Récupérer l'ID du produit dans Salesforce pour chaque code produit SAP
+        async def _find_product_in_salesforce(self, product_code):
+            """Trouve l'ID Salesforce correspondant au code produit SAP"""
+            query = f"SELECT Id, Name, ProductCode FROM Product2 WHERE ProductCode = '{product_code}' LIMIT 1"
+            result = await MCPConnector.call_salesforce_mcp("salesforce_query", {"query": query})
+            
+            if "error" not in result and result.get("totalSize", 0) > 0:
+                return result["records"][0]["Id"]
+            
+            # Si le produit n'existe pas, on peut le créer (optionnel)
+            return None
         """Récupère les informations produits depuis SAP"""
         if not products:
             logger.warning("Aucun produit spécifié")
@@ -480,9 +513,41 @@ class DevisWorkflow:
             
             # IMPORTATION RÉELLE: Si l'endpoint n'existe pas encore, créons-le
             try:
-                sf_create_result = await MCPConnector.call_salesforce_mcp("salesforce_query", {
-                    "query": f"INSERT INTO Quote (Opportunity__c, Name, Description) VALUES (null, 'NOVA-{datetime.now().strftime('%Y%m%d-%H%M%S')}', '{quote_sf_data['Description']}')"
-                })
+                from simple_salesforce import Salesforce
+                from services.salesforce import sf  # Import de l'instance Salesforce configurée
+
+                # Créer le devis proprement en utilisant l'API Salesforce
+                quote_data = {
+                    'Name': f'NOVA-{datetime.now().strftime("%Y%m%d-%H%M%S")}',
+                    'Description': quote_sf_data['Description'],
+                    'AccountId': quote_data.get("client", {}).get("id", ""),
+                    'ExpirationDate': (datetime.now() + timedelta(days=30)).isoformat(),
+                    'Status': 'Draft' if is_draft else 'In Review'
+                }
+
+                try:
+                    # Création réelle du devis dans Salesforce
+                    quote_result = sf.Quote.create(quote_data)
+                    quote_id = quote_result.get('id')
+                    
+                    # Création des lignes de devis
+                    for line in quote_data.get("quote_lines", []):
+                        line_item_data = {
+                            'QuoteId': quote_id,
+                            'Product2Id': line.get("product_id"),  # Besoin de récupérer l'ID réel du produit
+                            'Quantity': line.get("quantity", 0),
+                            'UnitPrice': line.get("unit_price", 0)
+                        }
+                        sf.QuoteLineItem.create(line_item_data)
+                    
+                    logger.info(f"Devis Salesforce créé avec succès, ID: {quote_id}")
+                    sf_create_result = {
+                        "success": True,
+                        "id": quote_id
+                    }
+                except Exception as sf_e:
+                    logger.error(f"Erreur lors de la création du devis Salesforce: {str(sf_e)}")
+                    sf_create_result = {"error": str(sf_e)}
                 if "error" not in sf_create_result:
                     logger.info(f"Devis Salesforce créé avec succès: {sf_create_result}")
                     result = {
