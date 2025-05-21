@@ -373,7 +373,342 @@ async def sap_refresh_metadata() -> dict:
     except Exception as e:
         log(f"Erreur lors du rafraîchissement des métadonnées SAP: {str(e)}")
         return {"error": str(e)}
+@mcp.tool(name="sap_create_customer")
+async def sap_create_customer(
+    card_name: str,
+    card_type: str = "cCustomer",
+    group_code: int = 100,
+    street: str = None,
+    city: str = None,
+    state: str = None,
+    zip_code: str = None,
+    country: str = None,
+    phone: str = None,
+    email: str = None,
+    website: str = None,
+    notes: str = None,
+    contact_person: str = None,
+    reference_id: str = None
+) -> dict:
+    """
+    Crée un nouveau client dans SAP Business One.
     
+    Args:
+        card_name: Nom du client (obligatoire)
+        card_type: Type de partenaire commercial (cCustomer par défaut pour client)
+        group_code: Code groupe client (100 par défaut)
+        street: Rue de l'adresse
+        city: Ville
+        state: État/Province
+        zip_code: Code postal
+        country: Pays
+        phone: Téléphone
+        email: Email
+        website: Site web
+        notes: Notes
+        contact_person: Nom du contact principal
+        reference_id: ID externe de référence (ex: ID Salesforce)
+        
+    Returns:
+        Un dictionnaire contenant le résultat de l'opération
+    """
+    try:
+        log(f"Création d'un nouveau client dans SAP: {card_name}")
+        
+        # Vérifier si le client existe déjà par nom
+        check_result = await sap_search(card_name, "BusinessPartners", 1)
+        
+        if "error" not in check_result and check_result.get("count", 0) > 0:
+            existing_client = check_result.get("results", [])[0]
+            log(f"Client existant trouvé: {existing_client.get('CardCode')} - {existing_client.get('CardName')}")
+            return {
+                "success": True,
+                "message": "Client existant trouvé",
+                "exists": True,
+                "client": existing_client
+            }
+        
+        # Générer un CardCode unique basé sur le nom
+        import re
+        import time
+        
+        # Nettoyer le nom (garder seulement alphanumériques)
+        clean_name = re.sub(r'[^a-zA-Z0-9]', '', card_name)
+        
+        # Préfixe C pour Customer
+        prefix = 'C'
+        if card_type == 'cSupplier':
+            prefix = 'S'
+        elif card_type == 'cLead':
+            prefix = 'L'
+        
+        # Prendre maximum 7 caractères du nom nettoyé
+        name_part = clean_name[:7] if len(clean_name) > 0 else "NEW"
+        
+        # Ajouter un timestamp pour unicité
+        timestamp = str(int(time.time()))[-5:]
+        
+        # Construire le code client (max 15 caractères)
+        card_code = f"{prefix}{name_part}{timestamp}"
+        card_code = card_code[:15].upper()
+        
+        # Préparer les données du client
+        client_data = {
+            "CardCode": card_code,
+            "CardName": card_name,
+            "CardType": card_type,
+            "GroupCode": group_code,
+        }
+        
+        # Ajouter les champs optionnels si fournis
+        if street:
+            client_data["BillToStreet"] = street
+            client_data["ShipToStreet"] = street
+        
+        if city:
+            client_data["BillToCity"] = city
+            client_data["ShipToCity"] = city
+        
+        if state:
+            client_data["BillToState"] = state
+            client_data["ShipToState"] = state
+        
+        if zip_code:
+            client_data["BillToZipCode"] = zip_code
+            client_data["ShipToZipCode"] = zip_code
+        
+        if country:
+            client_data["BillToCountry"] = country
+            client_data["ShipToCountry"] = country
+        
+        if phone:
+            client_data["Phone1"] = phone
+        
+        if email:
+            client_data["EmailAddress"] = email
+        
+        if website:
+            client_data["Website"] = website
+        
+        if notes:
+            client_data["Notes"] = notes
+        
+        if reference_id:
+            client_data["U_SalesforceID"] = reference_id  # Champ personnalisé pour l'ID Salesforce
+        
+        # Créer le contact si fourni
+        if contact_person:
+            client_data["ContactPerson"] = contact_person
+        
+        # Appel à l'API SAP pour créer le client
+        log(f"Envoi des données pour création du client: {card_code}")
+        create_result = await call_sap("/BusinessPartners", "POST", client_data)
+        
+        if "error" in create_result:
+            log(f"Erreur lors de la création du client: {create_result.get('error')}")
+            return {
+                "success": False,
+                "error": create_result.get("error", "Erreur inconnue"),
+                "data": client_data
+            }
+        
+        log(f"Client créé avec succès: {card_code}")
+        
+        # Récupérer les détails complets du client créé
+        get_result = await call_sap(f"/BusinessPartners('{card_code}')")
+        
+        if "error" in get_result:
+            log(f"Client créé mais impossible de récupérer les détails: {get_result.get('error')}")
+            return {
+                "success": True,
+                "message": "Client créé avec succès mais impossible de récupérer les détails complets",
+                "client": {
+                    "CardCode": card_code,
+                    "CardName": card_name
+                }
+            }
+        
+        return {
+            "success": True,
+            "message": "Client créé avec succès",
+            "exists": False,
+            "client": get_result
+        }
+    except Exception as e:
+        log(f"Erreur lors de la création du client: {str(e)}")
+        return {
+            "success": False,
+            "error": str(e)
+        }    
+@mcp.tool(name="sap_create_customer")
+async def sap_create_customer(
+    card_name: str,
+    card_type: str = "cCustomer",
+    group_code: int = 100,
+    street: str = None,
+    city: str = None,
+    state: str = None,
+    zip_code: str = None,
+    country: str = None,
+    phone: str = None,
+    email: str = None,
+    website: str = None,
+    notes: str = None,
+    contact_person: str = None,
+    reference_id: str = None
+) -> dict:
+    """
+    Crée un nouveau client dans SAP Business One.
+    
+    Args:
+        card_name: Nom du client (obligatoire)
+        card_type: Type de partenaire commercial (cCustomer par défaut pour client)
+        group_code: Code groupe client (100 par défaut)
+        street: Rue de l'adresse
+        city: Ville
+        state: État/Province
+        zip_code: Code postal
+        country: Pays
+        phone: Téléphone
+        email: Email
+        website: Site web
+        notes: Notes
+        contact_person: Nom du contact principal
+        reference_id: ID externe de référence (ex: ID Salesforce)
+        
+    Returns:
+        Un dictionnaire contenant le résultat de l'opération
+    """
+    try:
+        log(f"Création d'un nouveau client dans SAP: {card_name}")
+        
+        # Vérifier si le client existe déjà par nom
+        check_result = await sap_search(card_name, "BusinessPartners", 1)
+        
+        if "error" not in check_result and check_result.get("count", 0) > 0:
+            existing_client = check_result.get("results", [])[0]
+            log(f"Client existant trouvé: {existing_client.get('CardCode')} - {existing_client.get('CardName')}")
+            return {
+                "success": True,
+                "message": "Client existant trouvé",
+                "exists": True,
+                "client": existing_client
+            }
+        
+        # Générer un CardCode unique basé sur le nom
+        import re
+        import time
+        
+        # Nettoyer le nom (garder seulement alphanumériques)
+        clean_name = re.sub(r'[^a-zA-Z0-9]', '', card_name)
+        
+        # Préfixe C pour Customer
+        prefix = 'C'
+        if card_type == 'cSupplier':
+            prefix = 'S'
+        elif card_type == 'cLead':
+            prefix = 'L'
+        
+        # Prendre maximum 7 caractères du nom nettoyé
+        name_part = clean_name[:7] if len(clean_name) > 0 else "NEW"
+        
+        # Ajouter un timestamp pour unicité
+        timestamp = str(int(time.time()))[-5:]
+        
+        # Construire le code client (max 15 caractères)
+        card_code = f"{prefix}{name_part}{timestamp}"
+        card_code = card_code[:15].upper()
+        
+        # Préparer les données du client
+        client_data = {
+            "CardCode": card_code,
+            "CardName": card_name,
+            "CardType": card_type,
+            "GroupCode": group_code,
+        }
+        
+        # Ajouter les champs optionnels si fournis
+        if street:
+            client_data["BillToStreet"] = street
+            client_data["ShipToStreet"] = street
+        
+        if city:
+            client_data["BillToCity"] = city
+            client_data["ShipToCity"] = city
+        
+        if state:
+            client_data["BillToState"] = state
+            client_data["ShipToState"] = state
+        
+        if zip_code:
+            client_data["BillToZipCode"] = zip_code
+            client_data["ShipToZipCode"] = zip_code
+        
+        if country:
+            client_data["BillToCountry"] = country
+            client_data["ShipToCountry"] = country
+        
+        if phone:
+            client_data["Phone1"] = phone
+        
+        if email:
+            client_data["EmailAddress"] = email
+        
+        if website:
+            client_data["Website"] = website
+        
+        if notes:
+            client_data["Notes"] = notes
+        
+        if reference_id:
+            client_data["U_SalesforceID"] = reference_id  # Champ personnalisé pour l'ID Salesforce
+        
+        # Créer le contact si fourni
+        if contact_person:
+            client_data["ContactPerson"] = contact_person
+        
+        # Appel à l'API SAP pour créer le client
+        log(f"Envoi des données pour création du client: {card_code}")
+        create_result = await call_sap("/BusinessPartners", "POST", client_data)
+        
+        if "error" in create_result:
+            log(f"Erreur lors de la création du client: {create_result.get('error')}")
+            return {
+                "success": False,
+                "error": create_result.get("error", "Erreur inconnue"),
+                "data": client_data
+            }
+        
+        log(f"Client créé avec succès: {card_code}")
+        
+        # Récupérer les détails complets du client créé
+        get_result = await call_sap(f"/BusinessPartners('{card_code}')")
+        
+        if "error" in get_result:
+            log(f"Client créé mais impossible de récupérer les détails: {get_result.get('error')}")
+            return {
+                "success": True,
+                "message": "Client créé avec succès mais impossible de récupérer les détails complets",
+                "client": {
+                    "CardCode": card_code,
+                    "CardName": card_name
+                }
+            }
+        
+        return {
+            "success": True,
+            "message": "Client créé avec succès",
+            "exists": False,
+            "client": get_result
+        }
+    except Exception as e:
+        log(f"Erreur lors de la création du client: {str(e)}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+@mcp.tool(name="_create_sap_client_if_needed")      
 async def _create_sap_client_if_needed(self, client_info):
     """Crée le client dans SAP en utilisant toutes les données disponibles dans Salesforce"""
     logger.info(f"Vérification du client SAP: {client_info.get('data', {}).get('Name')}")
