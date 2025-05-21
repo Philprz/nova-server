@@ -49,12 +49,12 @@ Clear-Host
 Write-Host @"
 ╔═══════════════════════════════════════════════════╗
 ║                                                   ║
-║   ███╗   ██╗ ██████╗ ██╗   ██╗ █████╗            ║
-║   ████╗  ██║██╔═══██╗██║   ██║██╔══██╗           ║
-║   ██╔██╗ ██║██║   ██║██║   ██║███████║           ║
-║   ██║╚██╗██║██║   ██║╚██╗ ██╔╝██╔══██║           ║
-║   ██║ ╚████║╚██████╔╝ ╚████╔╝ ██║  ██║           ║
-║   ╚═╝  ╚═══╝ ╚═════╝   ╚═══╝  ╚═╝  ╚═╝           ║
+║   ███╗   ██╗ ██████╗ ██╗   ██╗ █████╗             ║
+║   ████╗  ██║██╔═══██╗██║   ██║██╔══██╗            ║
+║   ██╔██╗ ██║██║   ██║██║   ██║███████║            ║
+║   ██║╚██╗██║██║   ██║╚██╗ ██╔╝██╔══██║            ║
+║   ██║ ╚████║╚██████╔╝ ╚████╔╝ ██║  ██║            ║
+║   ╚═╝  ╚═══╝ ╚═════╝   ╚═══╝  ╚═╝  ╚═╝            ║
 ║                                                   ║
 ║   Middleware d'intégration LLM - SAP - Salesforce ║
 ║   v1.0.0 - IT Spirit - 2025                       ║
@@ -195,7 +195,7 @@ if (-not $NoClaudeDesktop) {
 if (-not $SkipTests) {
     Write-Header "TEST RAPIDE"
     try {
-        $testResult = python -c "import sys; sys.path.append('$projectPath'); from services.mcp_connector import MCPConnector; print('Connexion MCP OK')"
+        $testResult = python -c "import sys; sys.path.append(r'$projectPath'); from services.mcp_connector import MCPConnector; print('Connexion MCP OK')"
         if ($testResult -match "Connexion MCP OK") {
             Write-Host "✅ Test MCP réussi" -ForegroundColor "Green"
         } else {

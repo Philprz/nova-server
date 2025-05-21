@@ -13,11 +13,16 @@ Ce script teste le workflow complet à travers les étapes suivantes :
 
 import os
 import sys
+import sys
+# Ajouter le répertoire parent (racine du projet) au chemin d'importation
+sys.path.insert(0, os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
+# Maintenant l'import de workflow devrait fonctionner
+from workflow.devis_workflow import DevisWorkflow
+
 import json
 import logging
 import asyncio
 from datetime import datetime
-from workflow.devis_workflow import DevisWorkflow
 
 # Configuration du logging
 logging.basicConfig(
