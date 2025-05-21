@@ -1,3 +1,20 @@
+# Configuration de l'encodage
+import sys
+import io
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
+# Configuration des logs
+import logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    filename='logs/workflow_devis.log',
+    encoding='utf-8',  # Spécifier l'encodage UTF-8
+    force=True
+)
+logger = logging.getLogger('workflow_devis')
+
 # workflow/devis_workflow.py
 
 import os
