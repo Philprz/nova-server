@@ -145,24 +145,27 @@ class DocumentVerifier:
             return {"found": False, "error": str(e)}
     
     async def _get_sap_quotation_lines(self, doc_entry: int) -> list:
-        """Récupère les lignes du devis SAP"""
+        """Récupère les lignes du devis SAP - VERSION CORRIGÉE"""
         if not doc_entry:
             return []
         
         try:
             logger.info(f"Récupération des lignes du devis SAP {doc_entry}")
             
-            lines_result = await MCPConnector.call_sap_mcp("sap_read", {
-                "endpoint": f"/Quotations({doc_entry})/DocumentLines",
+            # CORRECTION: Les lignes sont déjà dans le devis principal !
+            # Récupérer le devis complet d'abord
+            quotation_result = await MCPConnector.call_sap_mcp("sap_read", {
+                "endpoint": f"/Quotations({doc_entry})",
                 "method": "GET"
             })
             
-            if "error" in lines_result:
-                logger.warning(f"Impossible de récupérer les lignes SAP: {lines_result['error']}")
+            if "error" in quotation_result:
+                logger.warning(f"Impossible de récupérer le devis SAP: {quotation_result['error']}")
                 return []
             
-            if "value" in lines_result:
-                lines = lines_result["value"]
+            # CORRECTION: Extraire les lignes depuis DocumentLines
+            if "DocumentLines" in quotation_result:
+                lines = quotation_result["DocumentLines"]
                 logger.info(f"✅ {len(lines)} ligne(s) de devis SAP récupérée(s)")
                 
                 for i, line in enumerate(lines, 1):
@@ -171,10 +174,12 @@ class DocumentVerifier:
                     logger.info(f"     - Quantité: {line.get('Quantity')}")
                     logger.info(f"     - Prix unitaire: {line.get('Price')}")
                     logger.info(f"     - Total ligne: {line.get('LineTotal')}")
+                    logger.info(f"     - TVA: {line.get('VatGroup')} ({line.get('TaxPercentagePerRow')}%)")
                 
                 return lines
-            
-            return []
+            else:
+                logger.warning("⚠️ Aucune ligne DocumentLines trouvée dans le devis")
+                return []
             
         except Exception as e:
             logger.warning(f"Erreur récupération lignes SAP: {str(e)}")
@@ -283,7 +288,7 @@ class DocumentVerifier:
             return []
     
     async def _verify_data_consistency(self) -> Dict[str, Any]:
-        """Vérifie la cohérence des données entre SAP et Salesforce"""
+        """Vérifie la cohérence des données entre SAP et Salesforce - VERSION CORRIGÉE"""
         logger.info("--- Vérification de la cohérence des données ---")
         
         try:
@@ -296,21 +301,26 @@ class DocumentVerifier:
             if not sf_data or not sf_data.get("found"):
                 return {"consistent": False, "error": "Données Salesforce manquantes"}
             
-            # Comparer les montants
-            sap_total = float(sap_data["summary"]["total_amount"] or 0)
-            sf_total = float(sf_data["summary"]["amount"] or 0)
+            # CORRECTION: Comparer les montants HT (sans TVA)
+            sap_total_ttc = float(sap_data["summary"]["total_amount"] or 0)
+            sap_vat = float(sap_data["data"].get("VatSum", 0))
+            sap_total_ht = sap_total_ttc - sap_vat  # Montant HT SAP
             
-            # Comparer le nombre de lignes
-            sap_lines_count = sap_data["summary"]["lines_count"]
+            sf_total = float(sf_data["summary"]["amount"] or 0)  # Salesforce stocke en HT
+            
+            # Comparer le nombre de lignes (corrigé)
+            sap_lines_count = len(sap_data.get("lines", []))  # Utiliser les lignes réelles
             sf_lines_count = sf_data["summary"]["lines_count"]
             
             # Tolérance pour les arrondis
-            amount_consistent = abs(sap_total - sf_total) < 0.01
+            amount_consistent = abs(sap_total_ht - sf_total) < 0.01
             lines_consistent = sap_lines_count == sf_lines_count
             
-            logger.info(f"Comparaison des données:")
-            logger.info(f"  - Montant SAP: {sap_total} EUR")
-            logger.info(f"  - Montant Salesforce: {sf_total}")
+            logger.info(f"Comparaison des données (CORRIGÉE):")
+            logger.info(f"  - Montant SAP TTC: {sap_total_ttc} EUR")
+            logger.info(f"  - TVA SAP: {sap_vat} EUR")
+            logger.info(f"  - Montant SAP HT: {sap_total_ht} EUR")
+            logger.info(f"  - Montant Salesforce HT: {sf_total}")
             logger.info(f"  - Cohérence montant: {'✅' if amount_consistent else '❌'}")
             logger.info(f"  - Lignes SAP: {sap_lines_count}")
             logger.info(f"  - Lignes Salesforce: {sf_lines_count}")
@@ -323,16 +333,18 @@ class DocumentVerifier:
                 "amount_consistent": amount_consistent,
                 "lines_consistent": lines_consistent,
                 "comparison": {
-                    "sap_amount": sap_total,
+                    "sap_amount_ttc": sap_total_ttc,
+                    "sap_amount_ht": sap_total_ht,
+                    "sap_vat": sap_vat,
                     "sf_amount": sf_total,
-                    "amount_difference": abs(sap_total - sf_total),
+                    "amount_difference_ht": abs(sap_total_ht - sf_total),
                     "sap_lines": sap_lines_count,
                     "sf_lines": sf_lines_count
                 }
             }
             
             if overall_consistent:
-                logger.info("✅ Les données sont cohérentes entre SAP et Salesforce")
+                logger.info("✅ Les données sont parfaitement cohérentes entre SAP et Salesforce")
             else:
                 logger.warning("⚠️ Incohérences détectées entre SAP et Salesforce")
             
