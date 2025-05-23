@@ -1,9 +1,9 @@
 {
   "status": "success",
-  "quote_id": "SAP-363",
-  "sap_doc_entry": 363,
-  "sap_doc_num": 363,
-  "salesforce_quote_id": "006gL000006zu1qQAA",
+  "quote_id": "SAP-366",
+  "sap_doc_entry": 366,
+  "sap_doc_num": 366,
+  "salesforce_quote_id": "006gL0000070DE9QAM",
   "quote_status": "Created",
   "client": {
     "name": "Edge Communications",
@@ -24,7 +24,7 @@
   "total_amount": 0.0,
   "currency": "EUR",
   "date": "2025-05-23",
-  "message": "Devis créé avec succès dans SAP (DocNum: 363)",
+  "message": "Devis créé avec succès dans SAP (DocNum: 366)",
   "all_products_available": false,
   "unavailable_products": [
     {
@@ -40,6 +40,6 @@
   "system_references": {
     "sap_client_created": false,
     "sap_client_card_code": "CEDGEC1058",
-    "quote_creation_timestamp": "2025-05-23T15:53:08.781333"
+    "quote_creation_timestamp": "2025-05-23T16:07:14.659032"
   }
 }

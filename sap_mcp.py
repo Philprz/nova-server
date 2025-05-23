@@ -465,7 +465,7 @@ async def sap_search(query: str, entity_type: str = "Items", limit: int = 5) -> 
 
 @mcp.tool(name="sap_get_product_details")
 async def sap_get_product_details(item_code: str) -> dict:
-    """Récupère les détails complets d'un produit."""
+    """Récupère les détails complets d'un produit avec le VRAI stock SAP."""
     try:
         log(f"Récupération des détails du produit: {item_code}")
         
@@ -476,47 +476,118 @@ async def sap_get_product_details(item_code: str) -> dict:
             log(f"❌ Produit {item_code} non trouvé: {product['error']}", "ERROR")
             return product
         
-        # Enrichir avec le stock si disponible
-        try:
-            # Récupérer les informations de stock par entrepôt
-            warehouse_info = await call_sap(f"/Items('{item_code}')/ItemWarehouseInfoCollection")
-            
-            total_stock = 0
-            warehouses = []
-            
-            if "error" not in warehouse_info and "value" in warehouse_info:
-                for wh in warehouse_info["value"]:
-                    stock_qty = wh.get("InStock", 0)
-                    total_stock += stock_qty
-                    warehouses.append({
-                        "WarehouseCode": wh.get("WarehouseCode", ""),
-                        "InStock": stock_qty,
-                        "Committed": wh.get("Committed", 0),
-                        "Ordered": wh.get("Ordered", 0)
-                    })
-            else:
-                # Fallback sur le stock total du produit
-                total_stock = product.get("OnHand", 0)
-            
-            product["stock"] = {
-                "total": total_stock,
-                "warehouses": warehouses
-            }
-            
-        except Exception as stock_error:
-            log(f"⚠️ Impossible de récupérer le stock pour {item_code}: {str(stock_error)}", "WARNING")
-            product["stock"] = {
-                "total": product.get("OnHand", 0),
-                "warehouses": []
-            }
+        # Extraire le stock total depuis QuantityOnStock (c'est le vrai stock total !)
+        total_stock = float(product.get("QuantityOnStock", 0))
         
-        log(f"✅ Détails du produit {item_code} récupérés avec succès")
-        return product
+        # Extraire le prix depuis ItemPrices
+        price = 0.0
+        if product.get("ItemPrices") and len(product["ItemPrices"]) > 0:
+            price = float(product["ItemPrices"][0].get("Price", 0))
+        
+        # Récupérer les détails par entrepôt depuis ItemWarehouseInfoCollection
+        warehouses = []
+        total_calculated = 0.0
+        
+        if product.get("ItemWarehouseInfoCollection"):
+            for wh in product["ItemWarehouseInfoCollection"]:
+                in_stock = float(wh.get("InStock", 0))
+                committed = float(wh.get("Committed", 0))
+                ordered = float(wh.get("Ordered", 0))
+                available = in_stock - committed
+                total_calculated += in_stock
+                
+                warehouses.append({
+                    "WarehouseCode": wh.get("WarehouseCode", ""),
+                    "InStock": in_stock,
+                    "Committed": committed,
+                    "Ordered": ordered,
+                    "Available": available
+                })
+        
+        # Construire la réponse avec le VRAI stock
+        enriched_product = {
+            **product,
+            "stock": {
+                "total": total_stock,  # Utiliser QuantityOnStock (le vrai stock total)
+                "warehouses": warehouses,
+                "method_used": "QuantityOnStock_real",
+                "details": {
+                    "quantity_on_stock": total_stock,
+                    "calculated_from_warehouses": total_calculated,
+                    "warehouses_count": len(warehouses)
+                }
+            },
+            "Price": price,
+            "price_details": {
+                "price": price,
+                "method_used": "ItemPrices",
+                "details": {"price_list": product.get("ItemPrices", [{}])[0].get("PriceList", "Standard") if product.get("ItemPrices") else "N/A"}
+            }
+        }
+        
+        log(f"✅ Détails du produit {item_code} récupérés - Stock RÉEL: {total_stock}, Prix: {price}", "SUCCESS")
+        return enriched_product
         
     except Exception as e:
         log(f"❌ Erreur lors de la récupération des détails du produit {item_code}: {str(e)}", "ERROR")
         return {"error": str(e)}
-
+        
+@mcp.tool(name="sap_find_alternatives")
+async def sap_find_alternatives(item_code: str, limit: int = 5) -> dict:
+    """
+    Trouve des alternatives pour un produit donné
+    
+    Args:
+        item_code: Code du produit à remplacer
+        limit: Nombre d'alternatives à retourner
+        
+    Returns:
+        Liste des alternatives trouvées
+    """
+    try:
+        log(f"Recherche d'alternatives pour le produit: {item_code}")
+        
+        # Récupérer les informations du produit original
+        original_product = await call_sap(f"/Items('{item_code}')")
+        if "error" in original_product:
+            return {"error": f"Produit original {item_code} non trouvé"}
+        
+        # Rechercher des produits similaires par nom ou catégorie
+        product_name = original_product.get("ItemName", "")
+        
+        # Stratégie 1: Recherche par nom similaire
+        alternatives = []
+        if product_name:
+            # Extraire les mots clés du nom du produit
+            keywords = product_name.split()[:2]  # Prendre les 2 premiers mots
+            
+            for keyword in keywords:
+                if len(keyword) > 3:  # Ignorer les mots trop courts
+                    search_result = await call_sap(
+                        f"/Items?$filter=contains(ItemName,'{keyword}') and ItemCode ne '{item_code}' and OnHand gt 0&$top={limit}"
+                    )
+                    
+                    if "error" not in search_result and "value" in search_result:
+                        for item in search_result["value"]:
+                            if len(alternatives) < limit:
+                                alternatives.append({
+                                    "ItemCode": item.get("ItemCode"),
+                                    "ItemName": item.get("ItemName"),
+                                    "Price": item.get("Price", 0),
+                                    "Stock": item.get("OnHand", 0),
+                                    "Unit": item.get("SalesUnit", "")
+                                })
+        
+        log(f"✅ {len(alternatives)} alternative(s) trouvée(s) pour {item_code}")
+        return {
+            "original_item": item_code,
+            "alternatives": alternatives,
+            "count": len(alternatives)
+        }
+        
+    except Exception as e:
+        log(f"❌ Erreur recherche alternatives {item_code}: {str(e)}", "ERROR")
+        return {"error": str(e)}
 # Table de mappage des fonctions MCP
 mcp_functions = {
     "ping": ping,

@@ -186,7 +186,7 @@ class DevisWorkflow:
             return {"found": False, "error": str(e)}
     
     async def _get_products_info(self, products: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Récupère les informations produits depuis SAP - AMÉLIORÉE"""
+        """Récupère les informations produits depuis SAP - VERSION CORRIGÉE POUR LES PRIX"""
         if not products:
             logger.warning("Aucun produit spécifié")
             return []
@@ -224,22 +224,65 @@ class DevisWorkflow:
                         })
                     continue
                 
+                # CORRECTION PRINCIPALE: Récupérer le prix depuis la structure retournée par sap_mcp.py
+                unit_price = 0.0
+                
+                # 1. Le prix est maintenant dans la clé "Price" directement (enrichi par sap_mcp.py)
+                if "Price" in product_details:
+                    unit_price = float(product_details.get("Price", 0.0))
+                    logger.info(f"Prix trouvé via 'Price': {unit_price}")
+                
+                # 2. Si pas de prix direct, essayer dans price_details (nouveau format)
+                elif "price_details" in product_details and product_details["price_details"].get("price"):
+                    unit_price = float(product_details["price_details"]["price"])
+                    logger.info(f"Prix trouvé via 'price_details': {unit_price}")
+                
+                # 3. Fallback sur ItemPrices[0].Price (format SAP natif)
+                elif "ItemPrices" in product_details and len(product_details["ItemPrices"]) > 0:
+                    unit_price = float(product_details["ItemPrices"][0].get("Price", 0.0))
+                    logger.info(f"Prix trouvé via 'ItemPrices[0]': {unit_price}")
+                
+                # 4. Autres fallbacks
+                elif "LastPurchasePrice" in product_details:
+                    unit_price = float(product_details.get("LastPurchasePrice", 0.0))
+                    logger.info(f"Prix trouvé via 'LastPurchasePrice': {unit_price}")
+                
+                # Si toujours aucun prix trouvé, utiliser une valeur par défaut
+                if unit_price == 0.0:
+                    logger.warning(f"⚠️ Aucun prix trouvé pour {product['code']}, utilisation d'un prix par défaut")
+                    unit_price = 100.0  # Prix par défaut de 100€
+                    
                 # Enrichir le produit avec ID Salesforce
                 salesforce_id = await self._find_product_in_salesforce(product["code"])
+                
+                # Calculer le stock total depuis la nouvelle structure sap_mcp.py
+                total_stock = 0
+                if "stock" in product_details and isinstance(product_details["stock"], dict):
+                    # Nouvelle structure avec stock.total
+                    total_stock = float(product_details["stock"].get("total", 0))
+                    logger.info(f"Stock trouvé via 'stock.total': {total_stock}")
+                elif "QuantityOnStock" in product_details:
+                    # Structure SAP native
+                    total_stock = float(product_details.get("QuantityOnStock", 0))
+                    logger.info(f"Stock trouvé via 'QuantityOnStock': {total_stock}")
+                elif "OnHand" in product_details:
+                    # Fallback sur OnHand
+                    total_stock = float(product_details.get("OnHand", 0))
+                    logger.info(f"Stock trouvé via 'OnHand': {total_stock}")
                 
                 enriched_product = {
                     "code": product["code"],
                     "quantity": product["quantity"],
                     "name": product_details.get("ItemName", "Unknown"),
-                    "unit_price": float(product_details.get("Price", 0.0)),
-                    "stock": product_details.get("stock", {}).get("total", 0),
-                    "line_total": product["quantity"] * float(product_details.get("Price", 0.0)),
+                    "unit_price": unit_price,
+                    "stock": total_stock,
+                    "line_total": product["quantity"] * unit_price,  # CORRECTION: Calculer le total de ligne
                     "details": product_details,
                     "salesforce_id": salesforce_id
                 }
                 
                 enriched_products.append(enriched_product)
-                logger.info(f"Produit enrichi: {product['code']}")
+                logger.info(f"Produit enrichi: {product['code']} - Prix: {unit_price}€ - Stock: {total_stock}")
                 
             except Exception as e:
                 logger.error(f"Erreur récupération produit {product['code']}: {str(e)}")
