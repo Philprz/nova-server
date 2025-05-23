@@ -1,4 +1,5 @@
-# sap_mcp.py
+# sap_mcp.py - VERSION CORRIGÉE POUR CRÉATION RÉELLE CLIENT ET DEVIS
+
 from mcp.server.fastmcp import FastMCP
 import os
 import json
@@ -20,15 +21,15 @@ os.makedirs("logs", exist_ok=True)
 os.makedirs("cache", exist_ok=True)
 log_file = open("logs/sap_mcp.log", "w", encoding="utf-8")
 
-# Journalisation
-def log(message):
+# Journalisation améliorée
+def log(message, level="INFO"):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    formatted_message = f"[{timestamp}] {message}"
+    formatted_message = f"[{timestamp}] [{level}] {message}"
     log_file.write(f"{formatted_message}\n")
     log_file.flush()
     print(formatted_message)
 
-log("Démarrage du serveur MCP SAP...")
+log("Démarrage du serveur MCP SAP - VERSION PRODUCTION", "STARTUP")
 
 # Création du serveur MCP
 mcp = FastMCP("sap_mcp")
@@ -43,32 +44,19 @@ SAP_USER = os.getenv("SAP_USER")
 SAP_CLIENT_PASSWORD = os.getenv("SAP_CLIENT_PASSWORD")
 SAP_CLIENT = os.getenv("SAP_CLIENT")
 
-# Cache pour les métadonnées SAP
-CACHE_FILE = "cache/metadata_sap.json"
+# Validation de la configuration
+if not all([SAP_BASE_URL, SAP_USER, SAP_CLIENT_PASSWORD, SAP_CLIENT]):
+    log("ERREUR: Configuration SAP incomplète dans .env", "ERROR")
+    log(f"SAP_BASE_URL: {'✓' if SAP_BASE_URL else '✗'}", "ERROR")
+    log(f"SAP_USER: {'✓' if SAP_USER else '✗'}", "ERROR")
+    log(f"SAP_CLIENT_PASSWORD: {'✓' if SAP_CLIENT_PASSWORD else '✗'}", "ERROR")
+    log(f"SAP_CLIENT: {'✓' if SAP_CLIENT else '✗'}", "ERROR")
 
 # Session SAP partagée
 sap_session = {"cookies": None, "expires": None}
 
-def load_cache():
-    """Charge le cache des métadonnées SAP"""
-    if os.path.exists(CACHE_FILE):
-        try:
-            with open(CACHE_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception as e:
-            log(f"Erreur lors du chargement du cache: {str(e)}")
-    return {}
-
-def save_cache(data):
-    """Enregistre le cache des métadonnées SAP"""
-    try:
-        with open(CACHE_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-    except Exception as e:
-        log(f"Erreur lors de l'enregistrement du cache: {str(e)}")
-
 async def login_sap():
-    """Authentification à SAP B1"""
+    """Authentification à SAP B1 avec gestion d'erreurs renforcée"""
     url = SAP_BASE_URL + "/Login"
     auth_payload = {
         "UserName": SAP_USER,
@@ -76,210 +64,292 @@ async def login_sap():
         "CompanyDB": SAP_CLIENT
     }
     headers = {
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "Accept": "application/json"
     }
     
     try:
-        log(f"Connexion à SAP {SAP_BASE_URL}...")
+        log(f"Tentative de connexion à SAP: {SAP_BASE_URL}")
+        log(f"Utilisateur: {SAP_USER}, Base: {SAP_CLIENT}")
         
         async with httpx.AsyncClient(verify=False, timeout=30.0) as client:
             response = await client.post(url, json=auth_payload, headers=headers)
-            response.raise_for_status()
             
-            sap_session["cookies"] = response.cookies
-            sap_session["expires"] = datetime.utcnow().timestamp() + 60 * 20  # 20 minutes
+            # Log des détails de la réponse
+            log(f"Statut de connexion SAP: {response.status_code}")
+            log(f"Headers de réponse: {dict(response.headers)}")
             
-            log("✅ Connexion SAP établie avec succès")
-            return True
+            if response.status_code == 200:
+                sap_session["cookies"] = response.cookies
+                sap_session["expires"] = datetime.utcnow().timestamp() + 60 * 20  # 20 minutes
+                
+                # Vérifier que nous avons bien reçu les cookies de session
+                session_id = None
+                for cookie in response.cookies:
+                    if 'B1SESSION' in cookie.name:
+                        session_id = cookie.value
+                        break
+                
+                if session_id:
+                    log(f"✅ Connexion SAP réussie - Session ID: {session_id[:10]}...", "SUCCESS")
+                    return True
+                else:
+                    log("⚠️ Connexion SAP sans session ID valide", "WARNING")
+                    return False
+            else:
+                error_text = response.text
+                log(f"❌ Échec connexion SAP - Code: {response.status_code}", "ERROR")
+                log(f"Réponse: {error_text}", "ERROR")
+                return False
+                
+    except httpx.TimeoutException:
+        log("❌ Timeout lors de la connexion SAP", "ERROR")
+        return False
     except Exception as e:
-        log(f"❌ Erreur de connexion SAP: {str(e)}")
+        log(f"❌ Erreur connexion SAP: {str(e)}", "ERROR")
+        log(f"Traceback: {traceback.format_exc()}", "DEBUG")
         return False
 
 async def call_sap(endpoint: str, method="GET", payload: Optional[Dict[str, Any]] = None):
-    """Appel à l'API REST SAP B1"""
+    """Appel à l'API REST SAP B1 avec gestion d'erreurs renforcée"""
     # Vérifier et rafraîchir la session si nécessaire
     if not sap_session["cookies"] or datetime.utcnow().timestamp() > sap_session["expires"]:
+        log("Session SAP expirée ou inexistante, reconnexion...")
         if not await login_sap():
             return {"error": "Impossible de se connecter à SAP"}
     
     try:
         url = SAP_BASE_URL + endpoint
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+        }
         
-        async with httpx.AsyncClient(cookies=sap_session["cookies"], verify=False, timeout=30.0) as client:
-            if method == "GET":
-                response = await client.get(url)
+        log(f"Appel SAP: {method} {endpoint}")
+        if payload:
+            log(f"Payload: {json.dumps(payload, indent=2)}", "DEBUG")
+        
+        async with httpx.AsyncClient(cookies=sap_session["cookies"], verify=False, timeout=60.0) as client:
+            if method.upper() == "GET":
+                response = await client.get(url, headers=headers)
+            elif method.upper() == "POST":
+                response = await client.post(url, json=payload, headers=headers)
+            elif method.upper() == "PUT":
+                response = await client.put(url, json=payload, headers=headers)
+            elif method.upper() == "DELETE":
+                response = await client.delete(url, headers=headers)
             else:
-                response = await client.post(url, json=payload or {})
+                return {"error": f"Méthode HTTP non supportée: {method}"}
             
-            response.raise_for_status()
+            log(f"Réponse SAP: {response.status_code}")
             
-            if response.status_code == 204:  # No Content
+            if response.status_code == 401:
+                # Session expirée, tenter de se reconnecter
+                log("Session SAP expirée (401), reconnexion...")
+                if await login_sap():
+                    return await call_sap(endpoint, method, payload)
+                else:
+                    return {"error": "Impossible de renouveler la session SAP"}
+            
+            if response.status_code in [200, 201]:
+                if response.status_code == 201:
+                    log("✅ Ressource créée avec succès dans SAP", "SUCCESS")
+                
+                # Vérifier si la réponse contient du JSON
+                content_type = response.headers.get("content-type", "")
+                if "application/json" in content_type:
+                    result = response.json()
+                    log(f"Réponse JSON reçue: {len(str(result))} caractères")
+                    return result
+                else:
+                    log("Réponse non-JSON reçue")
+                    return {"status": "success", "message": "Opération réussie"}
+            
+            elif response.status_code == 204:
+                log("✅ Opération réussie (204 No Content)", "SUCCESS")
                 return {"status": "success", "message": "Opération réussie"}
             
-            return response.json()
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 401:
-            # Session expirée, tenter de se reconnecter
-            log("Session SAP expirée, reconnexion...")
-            
-            if await login_sap():
-                return await call_sap(endpoint, method, payload)
-            
-        log(f"Erreur HTTP lors de l'appel à {endpoint}: {str(e)}")
-        
-        try:
-            # Tenter de récupérer le message d'erreur SAP
-            error_msg = e.response.json()
-            return {"error": error_msg}
-        except:
-            return {"error": f"Erreur HTTP {e.response.status_code}: {str(e)}"}
+            else:
+                # Gérer les erreurs
+                error_text = response.text
+                log(f"❌ Erreur SAP {response.status_code}: {error_text}", "ERROR")
+                
+                try:
+                    error_json = response.json()
+                    return {"error": error_json}
+                except:
+                    return {"error": f"Erreur HTTP {response.status_code}: {error_text}"}
+                    
+    except httpx.TimeoutException:
+        log(f"❌ Timeout lors de l'appel à {endpoint}", "ERROR")
+        return {"error": f"Timeout lors de l'appel à {endpoint}"}
     except Exception as e:
-        log(f"Erreur lors de l'appel à {endpoint}: {str(e)}")
+        log(f"❌ Erreur lors de l'appel à {endpoint}: {str(e)}", "ERROR")
+        log(f"Traceback: {traceback.format_exc()}", "DEBUG")
         return {"error": str(e)}
 
-async def fetch_sap_metadata():
-    """Récupère les métadonnées SAP"""
-    try:
-        # Tenter d'utiliser l'endpoint standard OData
-        try:
-            metadata = await call_sap("/$metadata")
-            log("Métadonnées récupérées via /$metadata")
-        except:
-            # Si ça échoue, essayer une approche alternative
-            log("Impossible d'utiliser /$metadata, utilisation d'une stratégie alternative")
-            
-            # Récupérer un échantillon de données pour quelques endpoints clés
-            endpoints_to_test = ["/Items", "/BusinessPartners", "/Orders", "/Invoices"]
-            metadata = {"value": []}
-            
-            for endpoint in endpoints_to_test:
-                try:
-                    result = await call_sap(endpoint + "?$top=1")
-                    if "value" in result and result["value"]:
-                        # Récupérer les champs du premier élément
-                        fields = list(result["value"][0].keys())
-                        metadata["value"].append({
-                            "name": endpoint.strip("/"),
-                            "fields": fields
-                        })
-                except Exception as inner_e:
-                    log(f"Impossible de récupérer des métadonnées pour {endpoint}: {str(inner_e)}")
-        
-        # Formatter les métadonnées
-        schema = {
-            "endpoints": [
-                {
-                    "name": "Items",
-                    "path": "/Items",
-                    "description": "Produits/articles",
-                    "fields": []
-                },
-                {
-                    "name": "BusinessPartners",
-                    "path": "/BusinessPartners",
-                    "description": "Partenaires commerciaux (clients, fournisseurs)",
-                    "fields": []
-                },
-                {
-                    "name": "Orders",
-                    "path": "/Orders",
-                    "description": "Commandes clients",
-                    "fields": []
-                },
-                {
-                    "name": "Invoices",
-                    "path": "/Invoices",
-                    "description": "Factures",
-                    "fields": []
-                },
-                {
-                    "name": "StockTransfers",
-                    "path": "/StockTransfers",
-                    "description": "Transferts de stock",
-                    "fields": []
-                },
-                {
-                    "name": "InventoryGenEntries",
-                    "path": "/InventoryGenEntries",
-                    "description": "Entrées de stock",
-                    "fields": []
-                },
-                {
-                    "name": "InventoryGenExits",
-                    "path": "/InventoryGenExits",
-                    "description": "Sorties de stock",
-                    "fields": []
-                }
-            ],
-            "update_time": datetime.utcnow().isoformat()
-        }
-        
-        # Enrichir avec les champs découverts
-        if "value" in metadata:
-            for endpoint_data in metadata["value"]:
-                for endpoint in schema["endpoints"]:
-                    if endpoint["name"] == endpoint_data["name"]:
-                        endpoint["fields"] = endpoint_data.get("fields", [])
-        
-        # Sauvegarder dans le cache
-        save_cache(schema)
-        return schema
-    except Exception as e:
-        log(f"Erreur lors de la récupération des métadonnées SAP: {str(e)}")
-        
-        # Fallback: liste manuelle d'endpoints courants
-        schema = {
-            "endpoints": [
-                {
-                    "name": "Items",
-                    "path": "/Items",
-                    "description": "Produits/articles"
-                },
-                {
-                    "name": "BusinessPartners",
-                    "path": "/BusinessPartners",
-                    "description": "Partenaires commerciaux (clients, fournisseurs)"
-                },
-                {
-                    "name": "Orders",
-                    "path": "/Orders",
-                    "description": "Commandes clients"
-                },
-                {
-                    "name": "Invoices",
-                    "path": "/Invoices",
-                    "description": "Factures"
-                },
-                {
-                    "name": "StockTransfers",
-                    "path": "/StockTransfers",
-                    "description": "Transferts de stock"
-                },
-                {
-                    "name": "InventoryGenEntries",
-                    "path": "/InventoryGenEntries",
-                    "description": "Entrées de stock"
-                },
-                {
-                    "name": "InventoryGenExits",
-                    "path": "/InventoryGenExits",
-                    "description": "Sorties de stock"
-                }
-            ],
-            "update_time": datetime.utcnow().isoformat(),
-            "note": "Liste manuelle des endpoints (échec de la récupération automatique)"
-        }
-        
-        # Sauvegarder dans le cache
-        save_cache(schema)
-        return schema
+# Outils MCP corrigés
 
-# Outils MCP
 @mcp.tool(name="ping")
 def ping() -> str:
     """Test simple de disponibilité du serveur MCP SAP"""
     log("Ping reçu!")
-    return "pong! Serveur MCP SAP opérationnel"
+    return "pong! Serveur MCP SAP opérationnel - VERSION PRODUCTION"
+
+@mcp.tool(name="sap_create_customer_complete")
+async def sap_create_customer_complete(customer_data: Dict[str, Any]) -> dict:
+    """
+    Crée un client dans SAP avec toutes les données fournies.
+    
+    Args:
+        customer_data: Dictionnaire contenant toutes les données du client
+        
+    Returns:
+        Résultat de la création
+    """
+    try:
+        log(f"Création client SAP avec données complètes: {customer_data.get('CardName', 'Nom manquant')}")
+        
+        # Validation des données minimales requises
+        if not customer_data.get("CardCode"):
+            return {"success": False, "error": "CardCode manquant"}
+        if not customer_data.get("CardName"):
+            return {"success": False, "error": "CardName manquant"}
+        
+        # Vérifier si le client existe déjà
+        existing_check = await call_sap(f"/BusinessPartners('{customer_data['CardCode']}')")
+        if "error" not in existing_check:
+            log(f"Client {customer_data['CardCode']} existe déjà")
+            return {"success": True, "data": existing_check, "created": False}
+        
+        # Nettoyer et valider les données
+        clean_data = {}
+        for key, value in customer_data.items():
+            if value is not None and value != "":
+                if isinstance(value, str):
+                    clean_data[key] = value.strip()
+                else:
+                    clean_data[key] = value
+        
+        log(f"Données nettoyées: {json.dumps(clean_data, indent=2)}", "DEBUG")
+        
+        # Créer le client
+        result = await call_sap("/BusinessPartners", "POST", clean_data)
+        
+        if "error" in result:
+            log(f"❌ Erreur création client: {result['error']}", "ERROR")
+            return {"success": False, "error": result["error"]}
+        
+        log(f"✅ Client créé avec succès: {customer_data['CardCode']}", "SUCCESS")
+        
+        # Vérifier la création
+        verify_result = await call_sap(f"/BusinessPartners('{customer_data['CardCode']}')")
+        if "error" not in verify_result:
+            return {"success": True, "data": verify_result, "created": True}
+        else:
+            return {"success": True, "data": result, "created": True}
+            
+    except Exception as e:
+        log(f"❌ Exception lors de la création du client: {str(e)}", "ERROR")
+        return {"success": False, "error": str(e)}
+
+@mcp.tool(name="sap_create_quotation_complete")
+async def sap_create_quotation_complete(quotation_data: Dict[str, Any]) -> dict:
+    """
+    Crée un devis complet dans SAP.
+    
+    Args:
+        quotation_data: Données complètes du devis
+        
+    Returns:
+        Résultat de la création
+    """
+    try:
+        log(f"Création devis SAP pour client: {quotation_data.get('CardCode', 'Code manquant')}")
+        
+        # Validation des données minimales
+        required_fields = ["CardCode", "DocumentLines"]
+        for field in required_fields:
+            if not quotation_data.get(field):
+                return {"success": False, "error": f"Champ requis manquant: {field}"}
+        
+        if not quotation_data["DocumentLines"]:
+            return {"success": False, "error": "Aucune ligne de document fournie"}
+        
+        # Vérifier que le client existe
+        client_check = await call_sap(f"/BusinessPartners('{quotation_data['CardCode']}')")
+        if "error" in client_check:
+            return {"success": False, "error": f"Client {quotation_data['CardCode']} non trouvé"}
+        
+        # Valider les lignes de document
+        valid_lines = []
+        for i, line in enumerate(quotation_data["DocumentLines"]):
+            if not line.get("ItemCode"):
+                log(f"⚠️ Ligne {i}: ItemCode manquant, ignorée", "WARNING")
+                continue
+            
+            # Vérifier que le produit existe
+            item_check = await call_sap(f"/Items('{line['ItemCode']}')")
+            if "error" in item_check:
+                log(f"⚠️ Ligne {i}: Produit {line['ItemCode']} non trouvé", "WARNING")
+                continue
+            
+            valid_line = {
+                "ItemCode": line["ItemCode"],
+                "Quantity": float(line.get("Quantity", 1)),
+                "Price": float(line.get("Price", 0)),
+                "DiscountPercent": float(line.get("DiscountPercent", 0)),
+                "TaxCode": line.get("TaxCode", "S1"),
+                "WarehouseCode": line.get("WarehouseCode", "")
+            }
+            valid_lines.append(valid_line)
+        
+        if not valid_lines:
+            return {"success": False, "error": "Aucune ligne de document valide"}
+        
+        # Préparer les données finales du devis
+        final_quotation_data = {
+            "CardCode": quotation_data["CardCode"],
+            "DocDate": quotation_data.get("DocDate", datetime.now().strftime("%Y-%m-%d")),
+            "DocDueDate": quotation_data.get("DocDueDate", (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")),
+            "DocCurrency": quotation_data.get("DocCurrency", "EUR"),
+            "Comments": quotation_data.get("Comments", "Devis créé via NOVA Middleware"),
+            "SalesPersonCode": quotation_data.get("SalesPersonCode", -1),
+            "DocumentLines": valid_lines
+        }
+        
+        log(f"Données finales du devis: {json.dumps(final_quotation_data, indent=2)}", "DEBUG")
+        
+        # Créer le devis dans SAP
+        result = await call_sap("/Quotations", "POST", final_quotation_data)
+        
+        if "error" in result:
+            log(f"❌ Erreur création devis: {result['error']}", "ERROR")
+            return {"success": False, "error": result["error"]}
+        
+        doc_num = result.get("DocNum")
+        doc_entry = result.get("DocEntry")
+        
+        log(f"✅ DEVIS SAP CRÉÉ AVEC SUCCÈS - DocNum: {doc_num}, DocEntry: {doc_entry}", "SUCCESS")
+        
+        return {
+            "success": True,
+            "doc_num": doc_num,
+            "doc_entry": doc_entry,
+            "card_code": quotation_data["CardCode"],
+            "total_amount": result.get("DocTotal", 0),
+            "creation_date": result.get("DocDate"),
+            "due_date": result.get("DocDueDate"),
+            "currency": result.get("DocCurrency", "EUR"),
+            "status": result.get("DocumentStatus", "Open"),
+            "lines_count": len(valid_lines),
+            "raw_result": result
+        }
+        
+    except Exception as e:
+        log(f"❌ Exception lors de la création du devis: {str(e)}", "ERROR")
+        log(f"Traceback: {traceback.format_exc()}", "DEBUG")
+        return {"success": False, "error": str(e)}
 
 @mcp.tool(name="sap_read")
 async def sap_read(endpoint: str, method: str = "GET", payload: Optional[Dict[str, Any]] = None) -> dict:
@@ -305,509 +375,20 @@ async def sap_read(endpoint: str, method: str = "GET", payload: Optional[Dict[st
             result["_metadata"] = {
                 "query_time_ms": (end_time - start_time).total_seconds() * 1000,
                 "endpoint": endpoint,
-                "method": method
+                "method": method,
+                "timestamp": datetime.now().isoformat()
             }
         
         if "value" in result:
             log(f"Lecture réussie - {len(result['value'])} résultats")
         else:
-            log(f"Lecture réussie - réponse sans liste 'value'")
+            log(f"Lecture réussie - réponse directe")
         
         return result
     except Exception as e:
-        log(f"Erreur lors de l'appel à l'API SAP: {str(e)}")
+        log(f"❌ Erreur lors de l'appel à l'API SAP: {str(e)}", "ERROR")
         return {"error": str(e)}
 
-@mcp.tool(name="sap_inspect")
-async def sap_inspect() -> dict:
-    """
-    Liste les endpoints SAP depuis le cache.
-    
-    Returns:
-        Un dictionnaire contenant les endpoints disponibles ou une erreur
-    """
-    try:
-        log("Inspection des endpoints SAP")
-        cache = load_cache()
-        
-        if not cache or "endpoints" not in cache:
-            # Cache vide ou invalide, utiliser les données par défaut
-            log("Cache SAP vide ou invalide, utilisation de valeurs par défaut")
-            return {
-                "endpoints": [
-                    {"name": "Items", "path": "/Items"},
-                    {"name": "BusinessPartners", "path": "/BusinessPartners"},
-                    {"name": "Orders", "path": "/Orders"},
-                    {"name": "Invoices", "path": "/Invoices"}
-                ],
-                "note": "Données par défaut (cache non disponible)",
-                "update_time": datetime.utcnow().isoformat()
-            }
-        
-        log(f"Inspection réussie - {len(cache.get('endpoints', []))} endpoints disponibles")
-        return cache
-    except Exception as e:
-        log(f"Erreur lors de l'inspection SAP: {str(e)}")
-        return {"error": str(e)}
-
-@mcp.tool(name="sap_refresh_metadata")
-async def sap_refresh_metadata() -> dict:
-    """
-    Force la mise à jour des endpoints SAP.
-    
-    Returns:
-        Un dictionnaire contenant le résultat de l'opération
-    """
-    try:
-        log("Rafraîchissement des métadonnées SAP")
-        start_time = datetime.now()
-        schema = await fetch_sap_metadata()
-        end_time = datetime.now()
-        
-        return {
-            "status": "ok",
-            "endpoints_count": len(schema.get("endpoints", [])),
-            "refresh_time_ms": (end_time - start_time).total_seconds() * 1000,
-            "update_time": schema.get("update_time")
-        }
-    except Exception as e:
-        log(f"Erreur lors du rafraîchissement des métadonnées SAP: {str(e)}")
-        return {"error": str(e)}
-@mcp.tool(name="sap_create_customer")
-async def sap_create_customer(
-    card_name: str,
-    card_type: str = "cCustomer",
-    group_code: int = 100,
-    street: str = None,
-    city: str = None,
-    state: str = None,
-    zip_code: str = None,
-    country: str = None,
-    phone: str = None,
-    email: str = None,
-    website: str = None,
-    notes: str = None,
-    contact_person: str = None,
-    reference_id: str = None
-) -> dict:
-    """
-    Crée un nouveau client dans SAP Business One.
-    
-    Args:
-        card_name: Nom du client (obligatoire)
-        card_type: Type de partenaire commercial (cCustomer par défaut pour client)
-        group_code: Code groupe client (100 par défaut)
-        street: Rue de l'adresse
-        city: Ville
-        state: État/Province
-        zip_code: Code postal
-        country: Pays
-        phone: Téléphone
-        email: Email
-        website: Site web
-        notes: Notes
-        contact_person: Nom du contact principal
-        reference_id: ID externe de référence (ex: ID Salesforce)
-        
-    Returns:
-        Un dictionnaire contenant le résultat de l'opération
-    """
-    try:
-        log(f"Création d'un nouveau client dans SAP: {card_name}")
-        
-        # Vérifier si le client existe déjà par nom
-        check_result = await sap_search(card_name, "BusinessPartners", 1)
-        
-        if "error" not in check_result and check_result.get("count", 0) > 0:
-            existing_client = check_result.get("results", [])[0]
-            log(f"Client existant trouvé: {existing_client.get('CardCode')} - {existing_client.get('CardName')}")
-            return {
-                "success": True,
-                "message": "Client existant trouvé",
-                "exists": True,
-                "client": existing_client
-            }
-        
-        # Générer un CardCode unique basé sur le nom
-        import re
-        import time
-        
-        # Nettoyer le nom (garder seulement alphanumériques)
-        clean_name = re.sub(r'[^a-zA-Z0-9]', '', card_name)
-        
-        # Préfixe C pour Customer
-        prefix = 'C'
-        if card_type == 'cSupplier':
-            prefix = 'S'
-        elif card_type == 'cLead':
-            prefix = 'L'
-        
-        # Prendre maximum 7 caractères du nom nettoyé
-        name_part = clean_name[:7] if len(clean_name) > 0 else "NEW"
-        
-        # Ajouter un timestamp pour unicité
-        timestamp = str(int(time.time()))[-5:]
-        
-        # Construire le code client (max 15 caractères)
-        card_code = f"{prefix}{name_part}{timestamp}"
-        card_code = card_code[:15].upper()
-        
-        # Préparer les données du client
-        client_data = {
-            "CardCode": card_code,
-            "CardName": card_name,
-            "CardType": card_type,
-            "GroupCode": group_code,
-        }
-        
-        # Ajouter les champs optionnels si fournis
-        if street:
-            client_data["BillToStreet"] = street
-            client_data["ShipToStreet"] = street
-        
-        if city:
-            client_data["BillToCity"] = city
-            client_data["ShipToCity"] = city
-        
-        if state:
-            client_data["BillToState"] = state
-            client_data["ShipToState"] = state
-        
-        if zip_code:
-            client_data["BillToZipCode"] = zip_code
-            client_data["ShipToZipCode"] = zip_code
-        
-        if country:
-            client_data["BillToCountry"] = country
-            client_data["ShipToCountry"] = country
-        
-        if phone:
-            client_data["Phone1"] = phone
-        
-        if email:
-            client_data["EmailAddress"] = email
-        
-        if website:
-            client_data["Website"] = website
-        
-        if notes:
-            client_data["Notes"] = notes
-        
-        if reference_id:
-            client_data["U_SalesforceID"] = reference_id  # Champ personnalisé pour l'ID Salesforce
-        
-        # Créer le contact si fourni
-        if contact_person:
-            client_data["ContactPerson"] = contact_person
-        
-        # Appel à l'API SAP pour créer le client
-        log(f"Envoi des données pour création du client: {card_code}")
-        create_result = await call_sap("/BusinessPartners", "POST", client_data)
-        
-        if "error" in create_result:
-            log(f"Erreur lors de la création du client: {create_result.get('error')}")
-            return {
-                "success": False,
-                "error": create_result.get("error", "Erreur inconnue"),
-                "data": client_data
-            }
-        
-        log(f"Client créé avec succès: {card_code}")
-        
-        # Récupérer les détails complets du client créé
-        get_result = await call_sap(f"/BusinessPartners('{card_code}')")
-        
-        if "error" in get_result:
-            log(f"Client créé mais impossible de récupérer les détails: {get_result.get('error')}")
-            return {
-                "success": True,
-                "message": "Client créé avec succès mais impossible de récupérer les détails complets",
-                "client": {
-                    "CardCode": card_code,
-                    "CardName": card_name
-                }
-            }
-        
-        return {
-            "success": True,
-            "message": "Client créé avec succès",
-            "exists": False,
-            "client": get_result
-        }
-    except Exception as e:
-        log(f"Erreur lors de la création du client: {str(e)}")
-        return {
-            "success": False,
-            "error": str(e)
-        }    
-@mcp.tool(name="sap_create_customer")
-async def sap_create_customer(
-    card_name: str,
-    card_type: str = "cCustomer",
-    group_code: int = 100,
-    street: str = None,
-    city: str = None,
-    state: str = None,
-    zip_code: str = None,
-    country: str = None,
-    phone: str = None,
-    email: str = None,
-    website: str = None,
-    notes: str = None,
-    contact_person: str = None,
-    reference_id: str = None
-) -> dict:
-    """
-    Crée un nouveau client dans SAP Business One.
-    
-    Args:
-        card_name: Nom du client (obligatoire)
-        card_type: Type de partenaire commercial (cCustomer par défaut pour client)
-        group_code: Code groupe client (100 par défaut)
-        street: Rue de l'adresse
-        city: Ville
-        state: État/Province
-        zip_code: Code postal
-        country: Pays
-        phone: Téléphone
-        email: Email
-        website: Site web
-        notes: Notes
-        contact_person: Nom du contact principal
-        reference_id: ID externe de référence (ex: ID Salesforce)
-        
-    Returns:
-        Un dictionnaire contenant le résultat de l'opération
-    """
-    try:
-        log(f"Création d'un nouveau client dans SAP: {card_name}")
-        
-        # Vérifier si le client existe déjà par nom
-        check_result = await sap_search(card_name, "BusinessPartners", 1)
-        
-        if "error" not in check_result and check_result.get("count", 0) > 0:
-            existing_client = check_result.get("results", [])[0]
-            log(f"Client existant trouvé: {existing_client.get('CardCode')} - {existing_client.get('CardName')}")
-            return {
-                "success": True,
-                "message": "Client existant trouvé",
-                "exists": True,
-                "client": existing_client
-            }
-        
-        # Générer un CardCode unique basé sur le nom
-        import re
-        import time
-        
-        # Nettoyer le nom (garder seulement alphanumériques)
-        clean_name = re.sub(r'[^a-zA-Z0-9]', '', card_name)
-        
-        # Préfixe C pour Customer
-        prefix = 'C'
-        if card_type == 'cSupplier':
-            prefix = 'S'
-        elif card_type == 'cLead':
-            prefix = 'L'
-        
-        # Prendre maximum 7 caractères du nom nettoyé
-        name_part = clean_name[:7] if len(clean_name) > 0 else "NEW"
-        
-        # Ajouter un timestamp pour unicité
-        timestamp = str(int(time.time()))[-5:]
-        
-        # Construire le code client (max 15 caractères)
-        card_code = f"{prefix}{name_part}{timestamp}"
-        card_code = card_code[:15].upper()
-        
-        # Préparer les données du client
-        client_data = {
-            "CardCode": card_code,
-            "CardName": card_name,
-            "CardType": card_type,
-            "GroupCode": group_code,
-        }
-        
-        # Ajouter les champs optionnels si fournis
-        if street:
-            client_data["BillToStreet"] = street
-            client_data["ShipToStreet"] = street
-        
-        if city:
-            client_data["BillToCity"] = city
-            client_data["ShipToCity"] = city
-        
-        if state:
-            client_data["BillToState"] = state
-            client_data["ShipToState"] = state
-        
-        if zip_code:
-            client_data["BillToZipCode"] = zip_code
-            client_data["ShipToZipCode"] = zip_code
-        
-        if country:
-            client_data["BillToCountry"] = country
-            client_data["ShipToCountry"] = country
-        
-        if phone:
-            client_data["Phone1"] = phone
-        
-        if email:
-            client_data["EmailAddress"] = email
-        
-        if website:
-            client_data["Website"] = website
-        
-        if notes:
-            client_data["Notes"] = notes
-        
-        if reference_id:
-            client_data["U_SalesforceID"] = reference_id  # Champ personnalisé pour l'ID Salesforce
-        
-        # Créer le contact si fourni
-        if contact_person:
-            client_data["ContactPerson"] = contact_person
-        
-        # Appel à l'API SAP pour créer le client
-        log(f"Envoi des données pour création du client: {card_code}")
-        create_result = await call_sap("/BusinessPartners", "POST", client_data)
-        
-        if "error" in create_result:
-            log(f"Erreur lors de la création du client: {create_result.get('error')}")
-            return {
-                "success": False,
-                "error": create_result.get("error", "Erreur inconnue"),
-                "data": client_data
-            }
-        
-        log(f"Client créé avec succès: {card_code}")
-        
-        # Récupérer les détails complets du client créé
-        get_result = await call_sap(f"/BusinessPartners('{card_code}')")
-        
-        if "error" in get_result:
-            log(f"Client créé mais impossible de récupérer les détails: {get_result.get('error')}")
-            return {
-                "success": True,
-                "message": "Client créé avec succès mais impossible de récupérer les détails complets",
-                "client": {
-                    "CardCode": card_code,
-                    "CardName": card_name
-                }
-            }
-        
-        return {
-            "success": True,
-            "message": "Client créé avec succès",
-            "exists": False,
-            "client": get_result
-        }
-    except Exception as e:
-        log(f"Erreur lors de la création du client: {str(e)}")
-        return {
-            "success": False,
-            "error": str(e)
-        }
-
-@mcp.tool(name="_create_sap_client_if_needed")      
-async def _create_sap_client_if_needed(self, client_info):
-    """Crée le client dans SAP en utilisant toutes les données disponibles dans Salesforce"""
-    logger.info(f"Vérification du client SAP: {client_info.get('data', {}).get('Name')}")
-    
-    if not client_info.get('found', False) or not client_info.get('data'):
-        return {"created": False, "error": "Données client incomplètes"}
-    
-    sf_client = client_info.get('data', {})
-    client_name = sf_client.get('Name')
-    client_id = sf_client.get('Id')
-    
-    # Vérifier si le client existe dans SAP par nom
-    try:
-        # Rechercher le client par nom
-        client_search = await MCPConnector.call_sap_mcp("sap_read", {
-            "endpoint": f"/BusinessPartners?$filter=CardName eq '{client_name}'",
-            "method": "GET"
-        })
-        
-        if "error" not in client_search and client_search.get("value") and len(client_search.get("value", [])) > 0:
-            # Client trouvé
-            sap_client = client_search.get("value", [])[0]
-            logger.info(f"Client SAP existant trouvé: {sap_client.get('CardCode')} - {sap_client.get('CardName')}")
-            return {"created": False, "data": sap_client}
-        
-        # Client non trouvé, récupérer plus de détails depuis Salesforce
-        logger.info(f"Client non trouvé dans SAP, récupération des détails complets depuis Salesforce...")
-        
-        detailed_query = f"SELECT Id, Name, AccountNumber, BillingStreet, BillingCity, BillingState, BillingPostalCode, BillingCountry, Phone, Website, Description FROM Account WHERE Id = '{client_id}'"
-        client_details = await MCPConnector.call_salesforce_mcp("salesforce_query", {"query": detailed_query})
-        
-        if "error" in client_details or client_details.get("totalSize", 0) == 0:
-            logger.error(f"Impossible de récupérer les détails du client: {client_details.get('error', 'Client non trouvé')}")
-            return {"created": False, "error": client_details.get('error', 'Client non trouvé')}
-        
-        detailed_sf_client = client_details["records"][0]
-        
-        # Générer un CardCode unique et valide pour SAP
-        import re
-        card_code = "C"
-        if detailed_sf_client.get("AccountNumber"):
-            # Utiliser le numéro de compte s'il existe
-            clean_number = re.sub(r'[^a-zA-Z0-9]', '', detailed_sf_client.get("AccountNumber"))
-            card_code += clean_number[:9] if len(clean_number) > 0 else (re.sub(r'[^a-zA-Z0-9]', '', client_name)[:9])
-        else:
-            # Sinon, utiliser le nom du client
-            clean_name = re.sub(r'[^a-zA-Z0-9]', '', client_name)
-            card_code += clean_name[:9] if len(clean_name) > 0 else "NEWCLIENT"
-        
-        # S'assurer que le code est unique en ajoutant un timestamp
-        import time
-        card_code = (card_code + str(int(time.time()))[6:])[:15].upper()
-        
-        # Préparer les données client complètes pour SAP
-        client_data = {
-            "CardCode": card_code,
-            "CardName": client_name,
-            "CardType": "cCustomer",
-            "GroupCode": 100,  # Groupe client standard
-            # Adresse facturation
-            "BillToStreet": detailed_sf_client.get("BillingStreet", ""),
-            "BillToCity": detailed_sf_client.get("BillingCity", ""),
-            "BillToState": detailed_sf_client.get("BillingState", ""),
-            "BillToZipCode": detailed_sf_client.get("BillingPostalCode", ""),
-            "BillToCountry": detailed_sf_client.get("BillingCountry", ""),
-            # Dupliquer pour adresse livraison
-            "ShipToStreet": detailed_sf_client.get("BillingStreet", ""),
-            "ShipToCity": detailed_sf_client.get("BillingCity", ""),
-            "ShipToState": detailed_sf_client.get("BillingState", ""),
-            "ShipToZipCode": detailed_sf_client.get("BillingPostalCode", ""),
-            "ShipToCountry": detailed_sf_client.get("BillingCountry", ""),
-            # Autres informations
-            "Phone1": detailed_sf_client.get("Phone", ""),
-            "Website": detailed_sf_client.get("Website", ""),
-            "Notes": detailed_sf_client.get("Description", ""),
-            # Champ personnalisé pour référencer l'ID Salesforce
-            "U_SFAccountID": client_id
-        }
-        
-        logger.info(f"Création du client SAP avec les données: {json.dumps(client_data)}")
-        
-        # Créer le client dans SAP
-        create_result = await MCPConnector.call_sap_mcp("sap_read", {
-            "endpoint": "/BusinessPartners",
-            "method": "POST",
-            "payload": client_data
-        })
-        
-        if "error" in create_result:
-            logger.error(f"Erreur lors de la création du client SAP: {create_result.get('error', 'Erreur inconnue')}")
-            return {"created": False, "error": create_result.get('error', 'Erreur inconnue')}
-        
-        logger.info(f"Client SAP créé avec succès: {card_code}")
-        return {"created": True, "data": {"CardCode": card_code, "CardName": client_name}}
-        
-    except Exception as e:
-        import traceback
-        logger.error(f"Erreur lors de la création du client SAP: {str(e)}\n{traceback.format_exc()}")
-        return {"created": False, "error": str(e)}
 @mcp.tool(name="sap_search")
 async def sap_search(query: str, entity_type: str = "Items", limit: int = 5) -> dict:
     """
@@ -822,25 +403,27 @@ async def sap_search(query: str, entity_type: str = "Items", limit: int = 5) -> 
         Un dictionnaire contenant les résultats de la recherche
     """
     try:
-        log(f"Recherche SAP: {query} dans {entity_type}")
+        log(f"Recherche SAP: '{query}' dans {entity_type}")
         
         # Déterminer le bon champ pour la recherche
-        search_field = ""
-        if entity_type == "Items":
-            search_field = "ItemName"
-        elif entity_type == "BusinessPartners":
-            search_field = "CardName"
-        elif entity_type == "Orders":
-            search_field = "DocNum"
-        elif entity_type == "Invoices":
-            search_field = "DocNum"
-        else:
-            search_field = "Name"
+        search_mappings = {
+            "Items": "ItemName",
+            "BusinessPartners": "CardName",
+            "Orders": "DocNum",
+            "Invoices": "DocNum",
+            "Quotations": "DocNum"
+        }
         
-        # Construire la requête
-        endpoint = f"/{entity_type}?$filter=contains({search_field},'{query}')&$top={limit}"
+        search_field = search_mappings.get(entity_type, "Name")
+        
+        # Construire la requête avec échappement des caractères spéciaux
+        escaped_query = query.replace("'", "''")  # Échapper les apostrophes
+        endpoint = f"/{entity_type}?$filter=contains({search_field},'{escaped_query}')&$top={limit}"
         
         result = await call_sap(endpoint)
+        
+        if "error" in result:
+            return {"error": result["error"]}
         
         if "value" in result:
             log(f"Recherche réussie - {len(result['value'])} résultats")
@@ -851,7 +434,7 @@ async def sap_search(query: str, entity_type: str = "Items", limit: int = 5) -> 
                 "count": len(result["value"])
             }
         else:
-            log("Recherche réussie - aucun résultat ou format inattendu")
+            log("Recherche réussie - format de réponse inattendu")
             return {
                 "query": query,
                 "entity_type": entity_type,
@@ -860,422 +443,81 @@ async def sap_search(query: str, entity_type: str = "Items", limit: int = 5) -> 
                 "raw_response": result
             }
     except Exception as e:
-        log(f"Erreur lors de la recherche SAP: {str(e)}")
+        log(f"❌ Erreur lors de la recherche SAP: {str(e)}", "ERROR")
         return {"error": str(e)}
 
 @mcp.tool(name="sap_get_product_details")
 async def sap_get_product_details(item_code: str) -> dict:
-    """Récupère les détails d'un produit."""
+    """Récupère les détails complets d'un produit."""
     try:
-        log(f"Récupération des détails du produit {item_code}")
+        log(f"Récupération des détails du produit: {item_code}")
         
         # Récupérer les informations de base du produit
         product = await call_sap(f"/Items('{item_code}')")
         
         if "error" in product:
-            log(f"Erreur lors de la récupération du produit {item_code}: {product['error']}")
+            log(f"❌ Produit {item_code} non trouvé: {product['error']}", "ERROR")
             return product
         
-        # Récupérer le stock disponible en utilisant la fonction auxiliaire
-        total_stock = await _get_product_stock(item_code)
-        
-        product["stock"] = {
-            "total": total_stock,
-            "warehouses": []  # Simplification
-        }
-        
-        # Récupérer les prix
+        # Enrichir avec le stock si disponible
         try:
-            # Essayer de récupérer directement depuis le produit
-            if "Price" in product:
-                product["prices"] = [{"Price": product["Price"], "PriceList": 1}]
+            # Récupérer les informations de stock par entrepôt
+            warehouse_info = await call_sap(f"/Items('{item_code}')/ItemWarehouseInfoCollection")
+            
+            total_stock = 0
+            warehouses = []
+            
+            if "error" not in warehouse_info and "value" in warehouse_info:
+                for wh in warehouse_info["value"]:
+                    stock_qty = wh.get("InStock", 0)
+                    total_stock += stock_qty
+                    warehouses.append({
+                        "WarehouseCode": wh.get("WarehouseCode", ""),
+                        "InStock": stock_qty,
+                        "Committed": wh.get("Committed", 0),
+                        "Ordered": wh.get("Ordered", 0)
+                    })
             else:
-                # Tenter de récupérer les prix spécifiques
-                prices = await call_sap(f"/Items('{item_code}')/ItemPrices")
-                
-                if "value" in prices:
-                    product["prices"] = prices["value"]
-                else:
-                    product["prices"] = []
-        except Exception as price_error:
-            log(f"Erreur lors de la récupération des prix pour {item_code}: {str(price_error)}")
-            product["prices"] = []
+                # Fallback sur le stock total du produit
+                total_stock = product.get("OnHand", 0)
+            
+            product["stock"] = {
+                "total": total_stock,
+                "warehouses": warehouses
+            }
+            
+        except Exception as stock_error:
+            log(f"⚠️ Impossible de récupérer le stock pour {item_code}: {str(stock_error)}", "WARNING")
+            product["stock"] = {
+                "total": product.get("OnHand", 0),
+                "warehouses": []
+            }
         
-        log(f"Détails du produit {item_code} récupérés avec succès")
+        log(f"✅ Détails du produit {item_code} récupérés avec succès")
         return product
+        
     except Exception as e:
-        log(f"Erreur lors de la récupération des détails du produit {item_code}: {str(e)}")
-        return {"error": str(e)}
-    
-async def get_product_stock(item_code: str) -> dict:
-    """Récupère le stock d'un produit directement depuis les API SAP B1"""
-    try:
-        log(f"Récupération du stock pour {item_code}")
-        
-        # Utiliser l'endpoint correct pour SAP B1 Service Layer
-        stock_endpoint = f"/Items('{item_code}')"
-        stock_result = await call_sap(stock_endpoint)
-        
-        if "error" in stock_result:
-            log(f"Erreur d'accès à l'API SAP: {stock_result['error']}")
-            return {"error": stock_result["error"]}
-            
-        # Dans SAP B1, le champ standard pour le stock est OnHand
-        total_stock = stock_result.get("OnHand", 0)
-        log(f"Stock pour {item_code}: {total_stock} unités")
-        
-        # Récupérer le détail par entrepôt si nécessaire via l'API correcte
-        warehouses = []
-        try:
-            # Endpoint correct pour les données d'entrepôt dans SAP B1
-            warehouse_endpoint = f"/Items('{item_code}')/ItemWarehouseInfoCollection"
-            warehouse_result = await call_sap(warehouse_endpoint)
-            
-            if "error" not in warehouse_result and "value" in warehouse_result:
-                warehouses = warehouse_result["value"]
-                log(f"Détails d'entrepôt récupérés: {len(warehouses)} entrepôts")
-        except Exception as wh_error:
-            log(f"Impossible de récupérer les détails d'entrepôt: {str(wh_error)}")
-            
-        return {
-            "total": total_stock,
-            "warehouses": warehouses,
-            "is_available": total_stock > 0
-        }
-    except Exception as e:
-        log(f"Erreur lors de la récupération du stock: {str(e)}")
-        return {"error": str(e)}
-    
-@mcp.tool(name="sap_check_product_availability")
-async def sap_check_product_availability(item_code: str, quantity: int = 1) -> dict:
-    """Vérifie la disponibilité d'un produit."""
-    try:
-        log(f"Vérification de la disponibilité du produit {item_code} (quantité: {quantity})")
-        
-        # Récupérer les détails du produit directement, sans passer par get_product_details
-        # qui pourrait avoir des problèmes de caching
-        product_result = await call_sap(f"/Items('{item_code}')")
-        
-        if "error" in product_result:
-            log(f"Erreur lors de la récupération du produit {item_code}: {product_result['error']}")
-            return product_result
-        
-        # Récupérer le stock directement depuis l'API SAP
-        inventory_result = await call_sap(f"/Items('{item_code}')/InventoryGenEntries")
-        
-        # Gérer le cas où l'endpoint /InventoryGenEntries ne fonctionne pas
-        if "error" in inventory_result:
-            log(f"Erreur lors de la récupération du stock via InventoryGenEntries, tentative alternative")
-            # Tenter avec un autre endpoint ou une requête directe
-            inventory_query = await call_sap(f"/InventoryGenEntries?$filter=ItemCode eq '{item_code}'")
-            
-            if "error" not in inventory_query and "value" in inventory_query:
-                total_stock = sum(item.get("Quantity", 0) for item in inventory_query.get("value", []))
-            else:
-                # Dernier recours: utiliser directement le champ QuantityOnStock du produit
-                total_stock = product_result.get("QuantityOnStock", 0)
-                
-                # Si toujours pas de valeur, vérifier OnHand (champ standard pour le stock dans SAP B1)
-                if total_stock == 0:
-                    total_stock = product_result.get("OnHand", 0)
-        else:
-            # Calculer le total à partir de la réponse
-            if "value" in inventory_result:
-                total_stock = sum(item.get("Quantity", 0) for item in inventory_result.get("value", []))
-            else:
-                total_stock = product_result.get("OnHand", 0)
-        
-        # Pour le cas spécifique de A00001, vérifier et corriger si nécessaire
-        if item_code == "A00001" and total_stock != 1130:
-            log(f"⚠️ Correction du stock pour A00001: utilisation de la valeur connue (1130)")
-            total_stock = 1130
-        
-        # Vérifier la disponibilité
-        is_available = total_stock >= quantity
-        
-        result = {
-            "item_code": item_code,
-            "item_name": product_result.get("ItemName", ""),
-            "requested_quantity": quantity,
-            "available_quantity": total_stock,
-            "is_available": is_available,
-            "unit_price": product_result.get("Price", 0.0)
-        }
-        
-        log(f"Vérification de disponibilité terminée pour {item_code}: {total_stock} unités disponibles")
-        return result
-    except Exception as e:
-        log(f"Erreur lors de la vérification de disponibilité pour {item_code}: {str(e)}")
+        log(f"❌ Erreur lors de la récupération des détails du produit {item_code}: {str(e)}", "ERROR")
         return {"error": str(e)}
 
-@mcp.tool(name="sap_find_alternatives")
-async def sap_find_alternatives(item_code: str) -> dict:
-    """
-    Trouve des produits alternatifs pour un produit donné.
-    
-    Args:
-        item_code: Code du produit
-        
-    Returns:
-        Un dictionnaire contenant les produits alternatifs
-    """
-    try:
-        log(f"Recherche d'alternatives pour le produit {item_code}")
-        
-        # Récupérer les informations du produit
-        product = await sap_get_product_details(item_code)
-        
-        if "error" in product:
-            return product
-        
-        item_name = product.get("ItemName", "")
-        item_group = product.get("ItemsGroupCode")
-        
-        # Stratégie 1: Rechercher par groupe d'articles
-        alternatives = []
-        
-        if item_group:
-            group_query = await call_sap(f"/Items?$filter=ItemsGroupCode eq {item_group} and ItemCode ne '{item_code}'&$top=5")
-            
-            if "value" in group_query:
-                alternatives.extend(group_query["value"])
-        
-        # Stratégie 2: Rechercher par nom similaire si pas assez d'alternatives
-        if len(alternatives) < 3 and item_name:
-            # Extraire les mots clés du nom
-            words = item_name.split()
-            if len(words) > 1:
-                # Utiliser le mot le plus long comme terme de recherche
-                search_term = max(words, key=len)
-                
-                name_query = await call_sap(f"/Items?$filter=contains(ItemName,'{search_term}') and ItemCode ne '{item_code}'&$top=5")
-                
-                if "value" in name_query:
-                    # Ajouter uniquement les articles qui ne sont pas déjà dans les alternatives
-                    existing_codes = [alt["ItemCode"] for alt in alternatives]
-                    for item in name_query["value"]:
-                        if item["ItemCode"] not in existing_codes:
-                            alternatives.append(item)
-        
-        # Simplifier la réponse
-        simplified_alternatives = []
-        for alt in alternatives[:5]:  # Limiter à 5 alternatives
-            # Récupérer le stock
-            try:
-                inventory = await call_sap(f"/Items('{alt['ItemCode']}')/InventoryPostingItem")
-                total_stock = 0
-                
-                if "value" in inventory:
-                    total_stock = sum(w.get("QuantityOnStock", 0) for w in inventory["value"])
-            except:
-                total_stock = "N/A"
-            
-            simplified_alternatives.append({
-                "ItemCode": alt.get("ItemCode"),
-                "ItemName": alt.get("ItemName"),
-                "Price": alt.get("Price"),
-                "Stock": total_stock
-            })
-        
-        result = {
-            "original_item": {
-                "ItemCode": item_code,
-                "ItemName": item_name,
-                "Price": product.get("Price"),
-                "Stock": product.get("stock", {}).get("total", 0)
-            },
-            "alternatives": simplified_alternatives,
-            "count": len(simplified_alternatives)
-        }
-        
-        log(f"Alternatives trouvées pour {item_code}: {len(simplified_alternatives)}")
-        return result
-    except Exception as e:
-        log(f"Erreur lors de la recherche d'alternatives pour {item_code}: {str(e)}")
-        return {"error": str(e)}
-
-@mcp.tool(name="sap_create_draft_order")
-async def sap_create_draft_order(customer_code: str, items: List[Dict[str, Any]]) -> dict:
-    """
-    Crée un brouillon de commande dans SAP.
-    
-    Args:
-        customer_code: Code du client
-        items: Liste des articles de la commande (format: [{"ItemCode": "X", "Quantity": Y, "Price": Z}])
-        
-    Returns:
-        Un dictionnaire contenant le résultat de l'opération
-    """
-    try:
-        log(f"Création d'un brouillon de commande pour le client {customer_code}")
-        
-        # Vérifier que le client existe
-        customer = await call_sap(f"/BusinessPartners('{customer_code}')")
-        
-        if "error" in customer:
-            log(f"Client {customer_code} non trouvé: {customer['error']}")
-            return {"error": f"Client non trouvé: {customer_code}"}
-        
-        # Vérifier la disponibilité des articles
-        unavailable_items = []
-        for item in items:
-            availability = await sap_check_product_availability(item["ItemCode"], item.get("Quantity", 1))
-            if "error" in availability or not availability.get("is_available", False):
-                unavailable_items.append({
-                    "ItemCode": item["ItemCode"],
-                    "Quantity": item.get("Quantity", 1),
-                    "Available": availability.get("available_quantity", 0),
-                    "Reason": availability.get("error", "Stock insuffisant")
-                })
-        
-        # Préparer la commande
-        order_data = {
-            "CardCode": customer_code,
-            "DocDueDate": datetime.now().strftime("%Y-%m-%d"),
-            "DocumentLines": [
-                {
-                    "ItemCode": item["ItemCode"],
-                    "Quantity": item.get("Quantity", 1),
-                    "Price": item.get("Price"),
-                    "TaxCode": "S1",  # Code taxe par défaut
-                    "DiscountPercent": 0.0
-                }
-                for item in items
-            ],
-            "DocObjectCode": "oOrders"  # Spécifier explicitement le type de document
-        }
-        # Créer réellement la commande (pas en mode simulation)
-        async with httpx.AsyncClient(cookies=sap_session["cookies"], verify=False) as client:
-            url = SAP_BASE_URL + "/Orders"
-            response = await client.post(url, json=order_data)
-            response.raise_for_status()
-            actual_result = response.json()
-            
-            # Enrichir le résultat
-            result = {
-                "status": "created",
-                "document_number": actual_result.get("DocNum"),
-                "document_entry": actual_result.get("DocEntry"),
-                "customer": {
-                    "CardCode": customer_code,
-                    "CardName": customer.get("CardName", "")
-                },
-                "items": items,
-                "unavailable_items": unavailable_items,
-                "creation_time": datetime.now().isoformat(),
-                "document_total": actual_result.get("DocTotal", sum(item.get("Quantity", 1) * (item.get("Price") or 0) for item in items))
-            }        
-        # Si mode brouillon, ne pas envoyer à SAP mais simuler
-        result = {
-            "status": "draft",
-            "customer": {
-                "CardCode": customer_code,
-                "CardName": customer.get("CardName", "")
-            },
-            "items": [
-                {
-                    "ItemCode": item["ItemCode"],
-                    "Quantity": item.get("Quantity", 1),
-                    "Price": item.get("Price"),
-                    "LineTotal": item.get("Quantity", 1) * (item.get("Price") or 0)
-                }
-                for item in items
-            ],
-            "unavailable_items": unavailable_items,
-            "creation_time": datetime.now().isoformat(),
-            "document_total": sum(item.get("Quantity", 1) * (item.get("Price") or 0) for item in items)
-        }
-        
-        # Dans un environnement réel, vous pourriez appeler:
-        # actual_result = await call_sap("/Orders", "POST", order_data)
-        
-        log(f"Brouillon de commande créé pour {customer_code} avec {len(items)} articles")
-        
-        if unavailable_items:
-            log(f"⚠️ {len(unavailable_items)} articles indisponibles dans la commande")
-            
-        return result
-    except Exception as e:
-        log(f"Erreur lors de la création du brouillon de commande: {str(e)}")
-        return {"error": str(e)}
-async def _create_sap_document(self, sap_client, products_info):
-    """Crée réellement le document dans SAP"""
-    logger.info(f"Création du document dans SAP pour le client {sap_client.get('CardCode')}")
-    
-    if not sap_client or not sap_client.get('CardCode'):
-        return {"error": "Données client SAP incomplètes"}
-    
-    try:
-        # Préparer les lignes du document
-        document_lines = []
-        for product in products_info:
-            if "error" not in product:
-                line = {
-                    "ItemCode": product.get("code"),
-                    "Quantity": product.get("quantity", 1),
-                    "Price": product.get("unit_price", 0)
-                }
-                document_lines.append(line)
-        
-        if not document_lines:
-            return {"error": "Aucune ligne de produit valide pour créer le document"}
-        
-        # Préparer les données du document
-        quotation_data = {
-            "CardCode": sap_client.get('CardCode'),
-            "DocDate": datetime.now().strftime("%Y-%m-%d"),
-            "DocDueDate": (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d"),
-            "Comments": "Créé via NOVA Middleware",
-            "DocObjectCode": "oQuotations",  # Code objet pour les devis dans SAP B1
-            "DocumentLines": document_lines
-        }
-        
-        logger.info(f"Création du devis SAP avec les données: {json.dumps(quotation_data)}")
-        
-        # Appel à l'API SAP pour créer le devis
-        quotation_result = await MCPConnector.call_sap_mcp("sap_read", {
-            "endpoint": "/Quotations",  # Endpoint correct pour les devis
-            "method": "POST",
-            "payload": quotation_data
-        })
-        
-        if "error" in quotation_result:
-            logger.error(f"Erreur lors de la création du devis SAP: {quotation_result.get('error', 'Erreur inconnue')}")
-            return {"error": quotation_result.get('error', 'Erreur inconnue')}
-        
-        # Extraction du numéro de document
-        doc_num = quotation_result.get("DocNum")
-        doc_entry = quotation_result.get("DocEntry")
-        
-        logger.info(f"Devis SAP créé avec succès: DocNum {doc_num}, DocEntry {doc_entry}")
-        
-        return {
-            "success": True,
-            "document_number": doc_num,
-            "document_entry": doc_entry,
-            "document_date": quotation_result.get("DocDate"),
-            "document_total": quotation_result.get("DocTotal")
-        }
-    except Exception as e:
-        import traceback
-        logger.error(f"Erreur lors de la création du devis SAP: {str(e)}\n{traceback.format_exc()}")
-        return {"error": str(e)}
-# Tentative d'initialisation au démarrage
-async def init_sap():
-    """Initialisation de la connexion SAP"""
-    await login_sap()
-# Table de mappage des noms d'outils MCP vers les fonctions correspondantes
+# Table de mappage des fonctions MCP
 mcp_functions = {
     "ping": ping,
     "sap_read": sap_read,
-    "sap_inspect": sap_inspect,
-    "sap_refresh_metadata": sap_refresh_metadata,
     "sap_search": sap_search,
     "sap_get_product_details": sap_get_product_details,
-    "sap_check_product_availability": sap_check_product_availability,
-    "sap_find_alternatives": sap_find_alternatives,
-    "sap_create_draft_order": sap_create_draft_order
+    "sap_create_customer_complete": sap_create_customer_complete,
+    "sap_create_quotation_complete": sap_create_quotation_complete
 }
+
+# Initialisation au démarrage
+async def init_sap():
+    """Initialisation et test de la connexion SAP"""
+    log("Initialisation de la connexion SAP...")
+    success = await login_sap()
+    if not success:
+        log("❌ ÉCHEC de l'initialisation SAP", "ERROR")
+    return success
 
 # Traitement des arguments en ligne de commande
 if __name__ == "__main__":
@@ -1285,37 +527,55 @@ if __name__ == "__main__":
     args, unknown = parser.parse_known_args()
     
     if args.input_file and args.output_file:
-        with open(args.input_file, 'r') as f:
-            input_data = json.load(f)
-        
-        action = input_data.get("action")
-        params = input_data.get("params", {})
-        
-        # Utiliser la table de mappage
-        if action in mcp_functions:
-            try:
-                result = asyncio.run(mcp_functions[action](**params))
-                # Écrire résultat
+        try:
+            with open(args.input_file, 'r') as f:
+                input_data = json.load(f)
+            
+            action = input_data.get("action")
+            params = input_data.get("params", {})
+            
+            log(f"Exécution de l'action: {action} avec paramètres: {params}")
+            
+            if action in mcp_functions:
+                try:
+                    result = asyncio.run(mcp_functions[action](**params))
+                    with open(args.output_file, 'w') as f:
+                        json.dump(result, f, indent=2)
+                    log(f"✅ Action {action} exécutée avec succès", "SUCCESS")
+                    sys.exit(0)
+                except Exception as e:
+                    log(f"❌ Erreur lors de l'exécution de {action}: {str(e)}", "ERROR")
+                    with open(args.output_file, 'w') as f:
+                        json.dump({"error": str(e)}, f)
+                    sys.exit(1)
+            else:
+                error_msg = f"Action inconnue: {action}. Actions disponibles: {list(mcp_functions.keys())}"
+                log(error_msg, "ERROR")
                 with open(args.output_file, 'w') as f:
-                    json.dump(result, f)
-                sys.exit(0)
-            except Exception as e:
-                log(f"Erreur lors de l'exécution de {action}: {str(e)}")
-                with open(args.output_file, 'w') as f:
-                    json.dump({"error": str(e)}, f)
+                    json.dump({"error": error_msg}, f)
                 sys.exit(1)
-        else:
-            log(f"Action inconnue: {action}. Actions disponibles: {list(mcp_functions.keys())}")
-            with open(args.output_file, 'w') as f:
-                json.dump({"error": f"Action inconnue: {action}"}, f)
+                
+        except Exception as e:
+            log(f"❌ Erreur lors du traitement des arguments: {str(e)}", "ERROR")
             sys.exit(1)
-
-    # Cette partie reste inchangée
+    
+    # Mode serveur MCP
     try:
+        log("Initialisation du serveur MCP SAP...")
+        # Tester la connexion au démarrage
+        init_result = asyncio.run(init_sap())
+        if init_result:
+            log("✅ Serveur MCP SAP prêt et connecté", "SUCCESS")
+        else:
+            log("⚠️ Serveur MCP SAP démarré mais connexion SAP échouée", "WARNING")
+        
         log("Lancement du serveur MCP SAP...")
         mcp.run(transport="stdio")
+        
     except KeyboardInterrupt:
-        log("Arrêt du serveur MCP SAP par l'utilisateur")
+        log("Arrêt du serveur MCP SAP par l'utilisateur", "INFO")
     except Exception as e:
-        log(f"Erreur fatale du serveur MCP SAP: {str(e)}")
-        log(traceback.format_exc())
+        log(f"❌ Erreur fatale du serveur MCP SAP: {str(e)}", "ERROR")
+        log(f"Traceback: {traceback.format_exc()}", "DEBUG")
+    finally:
+        log_file.close()
