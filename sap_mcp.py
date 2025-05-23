@@ -317,7 +317,7 @@ async def sap_create_quotation_complete(quotation_data: Dict[str, Any]) -> dict:
                 "Price": float(line.get("Price", 0)),
                 "DiscountPercent": float(line.get("DiscountPercent", 0)),
                 "TaxCode": line.get("TaxCode", "S1"),
-                "WarehouseCode": line.get("WarehouseCode", "")
+                "WarehouseCode": line.get("WarehouseCode", "01")
             }
             valid_lines.append(valid_line)
         

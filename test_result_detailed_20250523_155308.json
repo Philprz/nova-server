@@ -1,0 +1,45 @@
+{
+  "status": "success",
+  "quote_id": "SAP-363",
+  "sap_doc_entry": 363,
+  "sap_doc_num": 363,
+  "salesforce_quote_id": "006gL000006zu1qQAA",
+  "quote_status": "Created",
+  "client": {
+    "name": "Edge Communications",
+    "salesforce_id": "001gL000005OYCDQA4",
+    "sap_card_code": "CEDGEC1058",
+    "account_number": "CD451796"
+  },
+  "products": [
+    {
+      "code": "A00002",
+      "name": "Imprimante IBM type Infoprint 1222",
+      "quantity": 500,
+      "unit_price": 0.0,
+      "line_total": 0.0,
+      "salesforce_id": "01tgL000002HAOPQA4"
+    }
+  ],
+  "total_amount": 0.0,
+  "currency": "EUR",
+  "date": "2025-05-23",
+  "message": "Devis créé avec succès dans SAP (DocNum: 363)",
+  "all_products_available": false,
+  "unavailable_products": [
+    {
+      "code": "A00002",
+      "name": "Imprimante IBM type Infoprint 1222",
+      "quantity_requested": 500,
+      "quantity_available": 0,
+      "reason": "Stock insuffisant"
+    }
+  ],
+  "alternatives": {},
+  "next_steps": "Veuillez vérifier les produits indisponibles et leurs alternatives proposées.",
+  "system_references": {
+    "sap_client_created": false,
+    "sap_client_card_code": "CEDGEC1058",
+    "quote_creation_timestamp": "2025-05-23T15:53:08.781333"
+  }
+}
