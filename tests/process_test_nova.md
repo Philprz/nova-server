@@ -82,6 +82,11 @@ Consultez les logs pour identifier d'éventuelles erreurs:
 Get-Content .\logs\workflow_devis.log -Tail 20
 Get-Content .\logs\salesforce_mcp.log -Tail 20
 Get-Content .\logs\sap_mcp.log -Tail 20
+Get-Content .\logs\test_bidirectionnel.log -Tail 20
+Get-Content .\logs\test_direct_api.log -Tail 20
+Get-Content .\logs\test_salesforce_connection.log -Tail 20
+Get-Content .\logs\test_sap_connection.log -Tail 20      
+Get-Content .\logs\test_salesforce_connection.log -Tail 20
 ```
 
 ## 7. Résolution des problèmes courants

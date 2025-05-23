@@ -5,7 +5,7 @@ import os
 import json
 import httpx
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 import sys
 import io
 from typing import Optional, Dict, Any, List
@@ -55,6 +55,9 @@ if not all([SAP_BASE_URL, SAP_USER, SAP_CLIENT_PASSWORD, SAP_CLIENT]):
 # Session SAP partagée
 sap_session = {"cookies": None, "expires": None}
 
+# Correction à apporter dans sap_mcp.py
+# Remplacer la section de gestion des cookies (lignes 85-95 environ)
+
 async def login_sap():
     """Authentification à SAP B1 avec gestion d'erreurs renforcée"""
     url = SAP_BASE_URL + "/Login"
@@ -83,18 +86,32 @@ async def login_sap():
                 sap_session["cookies"] = response.cookies
                 sap_session["expires"] = datetime.utcnow().timestamp() + 60 * 20  # 20 minutes
                 
-                # Vérifier que nous avons bien reçu les cookies de session
+                # CORRECTION ICI : Vérifier que nous avons bien reçu les cookies de session
                 session_id = None
-                for cookie in response.cookies:
-                    if 'B1SESSION' in cookie.name:
-                        session_id = cookie.value
+                
+                # Méthode corrigée pour itérer sur les cookies
+                for cookie_name, cookie_value in response.cookies.items():
+                    if 'B1SESSION' in cookie_name:
+                        session_id = cookie_value
                         break
+                
+                # Alternative si la méthode ci-dessus ne fonctionne pas
+                if not session_id:
+                    # Chercher dans les headers Set-Cookie
+                    set_cookie_header = response.headers.get('set-cookie', '')
+                    if 'B1SESSION' in set_cookie_header:
+                        # Extraire l'ID de session du header
+                        import re
+                        match = re.search(r'B1SESSION=([^;]+)', set_cookie_header)
+                        if match:
+                            session_id = match.group(1)
                 
                 if session_id:
                     log(f"✅ Connexion SAP réussie - Session ID: {session_id[:10]}...", "SUCCESS")
                     return True
                 else:
                     log("⚠️ Connexion SAP sans session ID valide", "WARNING")
+                    log(f"Cookies reçus: {dict(response.cookies)}", "DEBUG")
                     return False
             else:
                 error_text = response.text
@@ -191,7 +208,7 @@ async def call_sap(endpoint: str, method="GET", payload: Optional[Dict[str, Any]
 # Outils MCP corrigés
 
 @mcp.tool(name="ping")
-def ping() -> str:
+async def ping() -> str:
     """Test simple de disponibilité du serveur MCP SAP"""
     log("Ping reçu!")
     return "pong! Serveur MCP SAP opérationnel - VERSION PRODUCTION"
