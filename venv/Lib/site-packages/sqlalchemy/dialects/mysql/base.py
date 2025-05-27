@@ -1933,7 +1933,7 @@ class MySQLDDLCompiler(compiler.DDLCompiler):
                 if (
                     self.dialect._support_default_function
                     and not re.match(r"^\s*[\'\"\(]", default)
-                    and "ON UPDATE" not in default
+                    and not re.search(r"ON +UPDATE", default, re.I)
                     and re.match(r".*\W.*", default)
                 ):
                     colspec.append(f"DEFAULT ({default})")
@@ -3478,7 +3478,6 @@ class MySQLDialect(default.DefaultDialect):
             full_name = self.identifier_preparer.format_table(table)
         st = "SHOW CREATE TABLE %s" % full_name
 
-        rp = None
         try:
             rp = connection.execution_options(
                 skip_user_error_events=True

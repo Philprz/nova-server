@@ -77,3 +77,4 @@ docker-compose.yml
 
 # config Claude Desktop, ne pas versionner
 claude_desktop_config.json
+venv

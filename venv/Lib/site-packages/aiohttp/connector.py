@@ -32,6 +32,7 @@ from typing import (
 )
 
 import aiohappyeyeballs
+from aiohappyeyeballs import AddrInfoType, SocketFactoryType
 
 from . import hdrs, helpers
 from .abc import AbstractResolver, ResolveResult
@@ -59,6 +60,11 @@ from .helpers import (
     set_result,
 )
 from .resolver import DefaultResolver
+
+if sys.version_info >= (3, 12):
+    from collections.abc import Buffer
+else:
+    Buffer = Union[bytes, bytearray, "memoryview[int]", "memoryview[bytes]"]
 
 if TYPE_CHECKING:
     import ssl
@@ -89,7 +95,14 @@ NEEDS_CLEANUP_CLOSED = (3, 13, 0) <= sys.version_info < (
 # which first appeared in Python 3.12.7 and 3.13.1
 
 
-__all__ = ("BaseConnector", "TCPConnector", "UnixConnector", "NamedPipeConnector")
+__all__ = (
+    "BaseConnector",
+    "TCPConnector",
+    "UnixConnector",
+    "NamedPipeConnector",
+    "AddrInfoType",
+    "SocketFactoryType",
+)
 
 
 if TYPE_CHECKING:
@@ -828,6 +841,9 @@ class TCPConnector(BaseConnector):
                            the happy eyeballs algorithm, set to None.
     interleave - “First Address Family Count” as defined in RFC 8305
     loop - Optional event loop.
+    socket_factory - A SocketFactoryType function that, if supplied,
+                     will be used to create sockets given an
+                     AddrInfoType.
     """
 
     allowed_protocol_schema_set = HIGH_LEVEL_SCHEMA_SET | frozenset({"tcp"})
@@ -853,6 +869,7 @@ class TCPConnector(BaseConnector):
         timeout_ceil_threshold: float = 5,
         happy_eyeballs_delay: Optional[float] = 0.25,
         interleave: Optional[int] = None,
+        socket_factory: Optional[SocketFactoryType] = None,
     ):
         super().__init__(
             keepalive_timeout=keepalive_timeout,
@@ -879,6 +896,7 @@ class TCPConnector(BaseConnector):
         self._happy_eyeballs_delay = happy_eyeballs_delay
         self._interleave = interleave
         self._resolve_host_tasks: Set["asyncio.Task[List[ResolveResult]]"] = set()
+        self._socket_factory = socket_factory
 
     def close(self) -> Awaitable[None]:
         """Close all ongoing DNS calls."""
@@ -1102,7 +1120,7 @@ class TCPConnector(BaseConnector):
     async def _wrap_create_connection(
         self,
         *args: Any,
-        addr_infos: List[aiohappyeyeballs.AddrInfoType],
+        addr_infos: List[AddrInfoType],
         req: ClientRequest,
         timeout: "ClientTimeout",
         client_error: Type[Exception] = ClientConnectorError,
@@ -1118,6 +1136,7 @@ class TCPConnector(BaseConnector):
                     happy_eyeballs_delay=self._happy_eyeballs_delay,
                     interleave=self._interleave,
                     loop=self._loop,
+                    socket_factory=self._socket_factory,
                 )
                 return await self._loop.create_connection(*args, **kwargs, sock=sock)
         except cert_errors as exc:
@@ -1311,13 +1330,13 @@ class TCPConnector(BaseConnector):
 
     def _convert_hosts_to_addr_infos(
         self, hosts: List[ResolveResult]
-    ) -> List[aiohappyeyeballs.AddrInfoType]:
+    ) -> List[AddrInfoType]:
         """Converts the list of hosts to a list of addr_infos.
 
         The list of hosts is the result of a DNS lookup. The list of
         addr_infos is the result of a call to `socket.getaddrinfo()`.
         """
-        addr_infos: List[aiohappyeyeballs.AddrInfoType] = []
+        addr_infos: List[AddrInfoType] = []
         for hinfo in hosts:
             host = hinfo["host"]
             is_ipv6 = ":" in host

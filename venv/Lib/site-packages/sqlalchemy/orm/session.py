@@ -3718,8 +3718,7 @@ class Session(_SessionClassMethods, EventTarget):
         """Return exactly one instance based on the given primary key
         identifier, or raise an exception if not found.
 
-        Raises ``sqlalchemy.orm.exc.NoResultFound`` if the query
-        selects no rows.
+        Raises :class:`_exc.NoResultFound` if the query selects no rows.
 
         For a detailed documentation of the arguments see the
         method :meth:`.Session.get`.
@@ -4015,14 +4014,7 @@ class Session(_SessionClassMethods, EventTarget):
         else:
             key_is_persistent = True
 
-        if key in self.identity_map:
-            try:
-                merged = self.identity_map[key]
-            except KeyError:
-                # object was GC'ed right as we checked for it
-                merged = None
-        else:
-            merged = None
+        merged = self.identity_map.get(key)
 
         if merged is None:
             if key_is_persistent and key in _resolve_conflict_map:

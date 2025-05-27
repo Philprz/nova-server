@@ -442,7 +442,7 @@ def _drop_constraint(
     name = _render_gen_name(autogen_context, op.constraint_name)
     schema = _ident(op.schema) if op.schema else None
     type_ = _ident(op.constraint_type) if op.constraint_type else None
-
+    if_exists = op.if_exists
     params_strs = []
     params_strs.append(repr(name))
     if not autogen_context._has_batch:
@@ -451,32 +451,47 @@ def _drop_constraint(
             params_strs.append(f"schema={schema!r}")
     if type_ is not None:
         params_strs.append(f"type_={type_!r}")
+    if if_exists is not None:
+        params_strs.append(f"if_exists={if_exists}")
 
     return f"{prefix}drop_constraint({', '.join(params_strs)})"
 
 
 @renderers.dispatch_for(ops.AddColumnOp)
 def _add_column(autogen_context: AutogenContext, op: ops.AddColumnOp) -> str:
-    schema, tname, column = op.schema, op.table_name, op.column
+    schema, tname, column, if_not_exists = (
+        op.schema,
+        op.table_name,
+        op.column,
+        op.if_not_exists,
+    )
     if autogen_context._has_batch:
         template = "%(prefix)sadd_column(%(column)s)"
     else:
         template = "%(prefix)sadd_column(%(tname)r, %(column)s"
         if schema:
             template += ", schema=%(schema)r"
+        if if_not_exists is not None:
+            template += ", if_not_exists=%(if_not_exists)r"
         template += ")"
     text = template % {
         "prefix": _alembic_autogenerate_prefix(autogen_context),
         "tname": tname,
         "column": _render_column(column, autogen_context),
         "schema": schema,
+        "if_not_exists": if_not_exists,
     }
     return text
 
 
 @renderers.dispatch_for(ops.DropColumnOp)
 def _drop_column(autogen_context: AutogenContext, op: ops.DropColumnOp) -> str:
-    schema, tname, column_name = op.schema, op.table_name, op.column_name
+    schema, tname, column_name, if_exists = (
+        op.schema,
+        op.table_name,
+        op.column_name,
+        op.if_exists,
+    )
 
     if autogen_context._has_batch:
         template = "%(prefix)sdrop_column(%(cname)r)"
@@ -484,6 +499,8 @@ def _drop_column(autogen_context: AutogenContext, op: ops.DropColumnOp) -> str:
         template = "%(prefix)sdrop_column(%(tname)r, %(cname)r"
         if schema:
             template += ", schema=%(schema)r"
+        if if_exists is not None:
+            template += ", if_exists=%(if_exists)r"
         template += ")"
 
     text = template % {
@@ -491,6 +508,7 @@ def _drop_column(autogen_context: AutogenContext, op: ops.DropColumnOp) -> str:
         "tname": _ident(tname),
         "cname": _ident(column_name),
         "schema": _ident(schema),
+        "if_exists": if_exists,
     }
     return text
 
@@ -1122,7 +1140,10 @@ def _execute_sql(autogen_context: AutogenContext, op: ops.ExecuteSQLOp) -> str:
             "Autogenerate rendering of SQL Expression language constructs "
             "not supported here; please use a plain SQL string"
         )
-    return "op.execute(%r)" % op.sqltext
+    return "{prefix}execute({sqltext!r})".format(
+        prefix=_alembic_autogenerate_prefix(autogen_context),
+        sqltext=op.sqltext,
+    )
 
 
 renderers = default_renderers.branch()
