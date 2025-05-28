@@ -6,7 +6,7 @@ import json
 import asyncio
 import subprocess
 import tempfile
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, List
 import logging
 
 logger = logging.getLogger("mcp_connector")
@@ -37,7 +37,7 @@ class MCPConnector:
     async def call_mcp_server(server_name, action, params):
         """Mode direct sans WebSocket - fallback pour compatibilité"""
         # Cette méthode est conservée pour compatibilité mais délègue à _call_mcp
-        logger.warning(f"Utilisation de call_mcp_server (déprécié) - redirection vers _call_mcp")
+        logger.warning("Utilisation de call_mcp_server (déprécié) - redirection vers _call_mcp")
         return await MCPConnector._call_mcp(server_name, action, params)
     
     @staticmethod
@@ -66,7 +66,6 @@ class MCPConnector:
                     return {"error": f"Script MCP introuvable: {script_path}"}
                 
                 # Utiliser subprocess.run() dans un thread séparé
-                import concurrent.futures
                 
                 def run_subprocess():
                     try:
@@ -115,7 +114,8 @@ class MCPConnector:
                             with open(temp_out_path, 'r', encoding='utf-8') as f:
                                 content = f.read()
                             logger.error(f"Contenu brut du fichier: {content}")
-                        except:
+                        # Catch any exception when reading the file for logging purposes only.
+                        except Exception:
                             pass
                         return {"error": f"Format JSON invalide dans la réponse MCP: {je}"}
                 else:
@@ -133,7 +133,8 @@ class MCPConnector:
                     if os.path.exists(path):
                         try:
                             os.unlink(path)
-                        except:
+                        # Only OSError should be caught here, as os.unlink raises this if deletion fails.
+                        except OSError:
                             pass
                             
         except Exception as e:

@@ -8,10 +8,10 @@ import asyncio
 from datetime import datetime, timedelta
 import sys
 import io
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 import traceback
 import argparse
-
+from dotenv import load_dotenv
 # Configuration de l'encodage pour Windows
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
@@ -35,7 +35,7 @@ log("Démarrage du serveur MCP SAP - VERSION PRODUCTION", "STARTUP")
 mcp = FastMCP("sap_mcp")
 
 # Charger les variables d'environnement
-from dotenv import load_dotenv
+
 load_dotenv()
 
 # Configuration SAP
@@ -194,7 +194,7 @@ async def call_sap(endpoint: str, method="GET", payload: Optional[Dict[str, Any]
                 try:
                     error_json = response.json()
                     return {"error": error_json}
-                except:
+                except Exception:
                     return {"error": f"Erreur HTTP {response.status_code}: {error_text}"}
                     
     except httpx.TimeoutException:
@@ -399,7 +399,7 @@ async def sap_read(endpoint: str, method: str = "GET", payload: Optional[Dict[st
         if "value" in result:
             log(f"Lecture réussie - {len(result['value'])} résultats")
         else:
-            log(f"Lecture réussie - réponse directe")
+            log("Lecture réussie - réponse directe")
         
         return result
     except Exception as e:

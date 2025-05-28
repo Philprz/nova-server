@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "salesforce_mcp": {
+      "command": "python",
+      "args": ["C:\\Users\\PhilippePEREZ\\OneDrive - it-spirit.com\\NOVA-SERVER\\salesforce_mcp.py"],
+      "cwd": "C:\\Users\\PhilippePEREZ\\OneDrive - it-spirit.com\\NOVA-SERVER",
+      "envFile": ".env",
+      "stdio": true
+    },
+    "sap_mcp": {
+      "command": "python",
+      "args": ["C:\\Users\\PhilippePEREZ\\OneDrive - it-spirit.com\\NOVA-SERVER\\sap_mcp.py"],
+      "cwd": "C:\\Users\\PhilippePEREZ\\OneDrive - it-spirit.com\\NOVA-SERVER",
+      "envFile": ".env",
+      "stdio": true
+    }
+  }
+}

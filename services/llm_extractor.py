@@ -3,10 +3,9 @@
 import os
 import json
 import httpx
-from typing import Dict, Any, List
+from typing import Dict, Any
 from dotenv import load_dotenv
 import logging
-
 load_dotenv()
 logger = logging.getLogger("llm_extractor")
 
