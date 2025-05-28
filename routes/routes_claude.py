@@ -1,7 +1,7 @@
 # dans routes/routes_claude.py
 import os
 import requests
-from fastapi import APIRouter, HTTPException, Depends, Header
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from dotenv import load_dotenv
 

@@ -12,3 +12,5 @@ SQLAlchemy>=1.4
 alembic>=1.8
 psycopg2-binary
 aiohttp
+email-validator
+python-multipart
