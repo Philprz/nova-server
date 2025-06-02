@@ -743,12 +743,37 @@ class ClientValidator:
     
     def get_stats(self) -> Dict[str, Any]:
         """Retourne les statistiques de validation"""
+        # Calculer la taille du cache selon le type utilisé
+        cache_size = 0
+        cache_type = "none"
+        
+        if HTTP_CACHE_AVAILABLE and hasattr(self, 'cached_http_client'):
+            try:
+                # Essayer d'obtenir la taille du cache requests_cache
+                cache_size = len(self.cached_http_client.cache.responses)
+                cache_type = "requests_cache"
+            except Exception:
+                cache_size = 0
+                cache_type = "requests_cache_error"
+        elif hasattr(self, 'api_cache'):
+            cache_size = len(self.api_cache)
+            cache_type = "dict"
+        
         return {
             "validation_stats": self.validation_stats,
-            "cache_size": len(self.api_cache),
+            "cache_info": {
+                "size": cache_size,
+                "type": cache_type
+            },
             "dependencies": {
                 "fuzzywuzzy": FUZZYWUZZY_AVAILABLE,
-                "email_validator": EMAIL_VALIDATOR_AVAILABLE
+                "email_validator": EMAIL_VALIDATOR_AVAILABLE,
+                "http_cache": HTTP_CACHE_AVAILABLE
+            },
+            "insee_config": {
+                "consumer_key_set": bool(self.insee_consumer_key),
+                "consumer_secret_set": bool(self.insee_consumer_secret),
+                "token_valid": bool(self.insee_access_token and self.insee_token_expires_at > datetime.now())
             }
         }
 
