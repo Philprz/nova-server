@@ -2,161 +2,154 @@
 # -*- coding: utf-8 -*-
 
 """
-Test de validation SIRET avec des entreprises réelles existantes
+Test direct de l'API INSEE pour diagnostiquer les problèmes de 404
 """
 
-import sys
-import os
 import asyncio
-import logging
-from datetime import datetime
+import httpx
+import os
+from dotenv import load_dotenv
 
-# Ajouter le répertoire racine au path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+load_dotenv()
 
-# Configuration du logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
+# Configuration INSEE
+INSEE_CONSUMER_KEY = os.getenv("INSEE_CONSUMER_KEY")
+INSEE_CONSUMER_SECRET = os.getenv("INSEE_CONSUMER_SECRET")
 
-# SIRET d'entreprises réelles pour les tests
-TEST_SIRET_CASES = [
-    {
-        "siret": "35600000000021",  # BPIFRANCE (connu dans la base INSEE)
-        "description": "BPIFRANCE - Établissement principal"
-    },
-    {
-        "siret": "13002526500013",  # SNCF VOYAGEURS (exemple connu)
-        "description": "SNCF VOYAGEURS"
-    },
-    {
-        "siret": "78925320700014",  # LA POSTE (exemple connu)
-        "description": "LA POSTE"
-    },
-    {
-        "siret": "32012345600000",  # SIRET invalide pour test d'erreur
-        "description": "SIRET invalide (test d'erreur)"
-    }
-]
-
-async def test_real_siret_validation():
-    """Test de validation avec des SIRET réels"""
-    logger.info("🧪 TEST DE VALIDATION SIRET AVEC ENTREPRISES RÉELLES")
-    logger.info(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+async def test_insee_api_direct():
+    """Test direct de l'API INSEE avec différents formats"""
     
-    try:
-        from services.client_validator import ClientValidator
-        logger.info("✅ ClientValidator importé avec succès")
-    except ImportError as e:
-        logger.error(f"❌ Erreur import ClientValidator: {e}")
+    print("🔍 TEST DIRECT DE L'API INSEE")
+    print(f"Consumer Key: {'✅ Présent' if INSEE_CONSUMER_KEY else '❌ Absent'}")
+    print(f"Consumer Secret: {'✅ Présent' if INSEE_CONSUMER_SECRET else '❌ Absent'}")
+    
+    if not INSEE_CONSUMER_KEY or not INSEE_CONSUMER_SECRET:
+        print("❌ Configuration INSEE manquante")
         return
     
-    validator = ClientValidator()
+    # 1. Obtenir le token
+    print("\n1️⃣ Obtention du token...")
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                "https://api.insee.fr/token",
+                auth=(INSEE_CONSUMER_KEY, INSEE_CONSUMER_SECRET),
+                data={"grant_type": "client_credentials"}
+            )
+            response.raise_for_status()
+            token_data = response.json()
+            access_token = token_data["access_token"]
+            print(f"✅ Token obtenu: {access_token[:20]}...")
+    except Exception as e:
+        print(f"❌ Erreur token: {e}")
+        return
+    
+    # SIRET d'entreprises réelles pour les tests - AVEC SIRET VALIDE CONFIRMÉ
+    TEST_SIRET_CASES = [
+        {
+            "siret": "51252037000036",  # IT SPIRIT - CONFIRMÉ VALIDE ✅
+            "description": "IT SPIRIT - Votre entreprise (validé)"
+        },
+        {
+            "siret": "78925320700011",  # La Poste - à tester
+            "description": "La Poste (siège social)"
+        },
+        {
+            "siret": "55204215300056",  # Microsoft - probablement invalide
+            "description": "Microsoft France (test)"
+        },
+        {
+            "siret": "12345678901234",  # SIRET invalide pour test d'erreur
+            "description": "SIRET invalide (test d'erreur)"
+        }
+    ]
+    
+    headers = {"Authorization": f"Bearer {access_token}"}
     
     for i, test_case in enumerate(TEST_SIRET_CASES, 1):
-        logger.info(f"\n{'='*60}")
-        logger.info(f"🧪 TEST {i}/{len(TEST_SIRET_CASES)}: {test_case['description']}")
-        logger.info(f"SIRET: {test_case['siret']}")
-        logger.info(f"{'='*60}")
+        print(f"\n{i}️⃣ Test: {test_case['name']}")
+        print(f"URL: {test_case['url']}")
+        print(f"Description: {test_case['description']}")
         
         try:
-            # Test de validation SIRET
-            result = await validator._validate_siret_insee(test_case['siret'])
-            
-            logger.info("\n📊 RÉSULTAT:")
-            logger.info(f"   Valide: {'✅ OUI' if result['valid'] else '❌ NON'}")
-            
-            if result['valid']:
-                data = result.get('data', {})
-                logger.info("   📋 DONNÉES RÉCUPÉRÉES:")
-                logger.info(f"      Dénomination: {data.get('denomination', 'N/A')}")
-                logger.info(f"      Activité principale: {data.get('activite_principale', 'N/A')}")
-                logger.info(f"      Adresse: {data.get('adresse_complete', 'N/A')}")
-                logger.info(f"      Code postal: {data.get('code_postal', 'N/A')}")
-                logger.info(f"      Commune: {data.get('libelle_commune', 'N/A')}")
-                logger.info(f"      État administratif: {data.get('etat_administratif', 'N/A')}")
+            async with httpx.AsyncClient() as client:
+                response = await client.get(test_case['url'], headers=headers, timeout=10.0)
                 
-                if data.get('date_creation'):
-                    logger.info(f"      Date de création: {data['date_creation']}")
+                print(f"Status: {response.status_code}")
                 
-                logger.info(f"   🔧 Méthode: {result.get('validation_method', 'N/A')}")
-            else:
-                logger.warning(f"   ❌ Erreur: {result.get('error', 'Erreur inconnue')}")
+                if response.status_code == 200:
+                    data = response.json()
+                    print("✅ SUCCÈS!")
+                    
+                    # Analyser la structure de réponse
+                    if "header" in data:
+                        header = data["header"]
+                        print(f"Header statut: {header.get('statut')}")
+                        print(f"Header message: {header.get('message', 'N/A')}")
+                    
+                    if "etablissement" in data:
+                        etab = data["etablissement"]
+                        print(f"SIRET trouvé: {etab.get('siret')}")
+                        unite_legale = etab.get("uniteLegale", {})
+                        print(f"Dénomination: {unite_legale.get('denominationUniteLegale', 'N/A')}")
+                    
+                    if "etablissements" in data:
+                        etabs = data["etablissements"]
+                        print(f"Nombre d'établissements: {len(etabs)}")
+                        if etabs:
+                            print(f"Premier SIRET: {etabs[0].get('siret')}")
+                    
+                    # Afficher la structure pour diagnostic
+                    print(f"Clés principales: {list(data.keys())}")
+                    
+                elif response.status_code == 404:
+                    print("❌ 404 - Ressource non trouvée")
+                    try:
+                        error_data = response.json()
+                        print(f"Détail erreur: {error_data}")
+                    except:
+                        print("Pas de détail d'erreur JSON")
                 
-                # Si c'est une erreur HTTP, afficher plus de détails
-                if 'HTTP' in result.get('error', ''):
-                    logger.warning("   💡 Suggestion: Ce SIRET peut ne pas exister dans la base INSEE")
-            
+                elif response.status_code == 400:
+                    print("❌ 400 - Requête incorrecte")
+                    try:
+                        error_data = response.json()
+                        print(f"Détail erreur: {error_data}")
+                    except:
+                        print("Pas de détail d'erreur JSON")
+                
+                else:
+                    print(f"❌ Erreur {response.status_code}")
+                    print(f"Réponse: {response.text[:200]}...")
+                
         except Exception as e:
-            logger.exception(f"💥 Exception lors du test {i}: {str(e)}")
+            print(f"❌ Exception: {e}")
         
         # Pause entre les tests
-        if i < len(TEST_SIRET_CASES):
-            logger.info("\n⏳ Pause de 2 secondes...")
-            await asyncio.sleep(2)
+        await asyncio.sleep(1)
     
-    # Test avec données client complètes
-    logger.info(f"\n{'='*80}")
-    logger.info("🧪 TEST CLIENT COMPLET AVEC SIRET VALIDE")
-    logger.info(f"{'='*80}")
-    
-    # Utiliser le premier SIRET qui devrait être valide
-    test_client_data = {
-        "company_name": "Test Entreprise SIRET",
-        "siret": TEST_SIRET_CASES[0]["siret"],  # BPIFRANCE
-        "email": "contact@test-entreprise.fr",
-        "phone": "+33 1 23 45 67 89",
-        "billing_street": "123 Rue Test",
-        "billing_city": "Paris",
-        "billing_postal_code": "75001",
-        "billing_country": "France"
-    }
-    
+    # 3. Test de l'endpoint de base
+    print("\n🔍 Test endpoint de base...")
     try:
-        logger.info("Validation client complète avec SIRET réel...")
-        result = await validator.validate_complete(test_client_data, "FR")
-        
-        logger.info("\n📊 RÉSULTAT VALIDATION COMPLÈTE:")
-        logger.info(f"   Client valide: {'✅ OUI' if result['valid'] else '❌ NON'}")
-        logger.info(f"   Erreurs: {len(result['errors'])}")
-        logger.info(f"   Avertissements: {len(result['warnings'])}")
-        logger.info(f"   Suggestions: {len(result['suggestions'])}")
-        
-        if result['errors']:
-            logger.warning("   ❌ ERREURS:")
-            for error in result['errors']:
-                logger.warning(f"      - {error}")
-        
-        if result.get('enriched_data', {}).get('siret_data'):
-            siret_data = result['enriched_data']['siret_data']
-            logger.info("   ✨ DONNÉES SIRET ENRICHIES:")
-            logger.info(f"      Entreprise: {siret_data.get('denomination', 'N/A')}")
-            logger.info(f"      Activité: {siret_data.get('activite_principale', 'N/A')}")
-            logger.info(f"      Adresse: {siret_data.get('adresse_complete', 'N/A')}")
-        
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                "https://api.insee.fr/entreprises/sirene/V3/",
+                headers=headers
+            )
+            print(f"Status endpoint base: {response.status_code}")
+            if response.status_code == 200:
+                print("✅ L'API de base répond")
+            else:
+                print(f"❌ Erreur: {response.text[:200]}")
     except Exception as e:
-        logger.exception(f"💥 Exception lors du test client complet: {str(e)}")
+        print(f"❌ Erreur endpoint base: {e}")
     
-    # Statistiques finales
-    logger.info(f"\n{'='*80}")
-    logger.info("📈 STATISTIQUES FINALES")
-    logger.info(f"{'='*80}")
-    
-    stats = validator.get_stats()
-    logger.info(f"Validations totales: {stats['validation_stats']['total_validations']}")
-    logger.info(f"Validations réussies: {stats['validation_stats']['successful_validations']}")
-    logger.info(f"Validations échouées: {stats['validation_stats']['failed_validations']}")
-    logger.info(f"Taille du cache: {stats['cache_size']}")
-    
-    logger.info("\n🎯 CONCLUSION:")
-    logger.info("Si au moins un SIRET a été validé avec succès, l'intégration API INSEE fonctionne.")
-    logger.info("Les erreurs 404 sont normales pour les SIRET inexistants.")
-    logger.info("L'important est que l'API réponde et traite les requêtes correctement.")
+    print("\n📋 DIAGNOSTIC:")
+    print("Si tous les tests retournent 404, cela peut indiquer:")
+    print("1. Les clés API n'ont pas les permissions Sirene")
+    print("2. L'URL de base est incorrecte")
+    print("3. Le format de requête a changé")
+    print("4. Les SIRET testés sont vraiment inexistants")
 
 if __name__ == "__main__":
-    asyncio.run(test_real_siret_validation())
+    asyncio.run(test_insee_api_direct())
