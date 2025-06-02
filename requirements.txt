@@ -14,3 +14,7 @@ psycopg2-binary
 aiohttp
 email-validator
 python-multipart
+# Nouvelles dépendances pour validation client
+fuzzywuzzy>=0.18.0
+python-Levenshtein>=0.12.0
+requests-cache>=1.0.0

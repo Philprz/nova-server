@@ -1,0 +1,266 @@
+{
+  "test_summary": {
+    "unique_id": "0477cc39",
+    "total_tests": 4,
+    "success_count": 4,
+    "error_count": 0,
+    "exception_count": 0,
+    "average_processing_time": 41.224008500000004,
+    "timestamp": "2025-05-28T17:26:39.318912"
+  },
+  "test_results": [
+    {
+      "scenario": "Client inexistant - Création automatique",
+      "prompt": "faire un devis pour 10 unités de A00001 pour le client NOVA-ENRICHED-0477cc39",
+      "expected": "creation_automatique",
+      "status": "success",
+      "test_status": "✅ RÉUSSI",
+      "processing_time": 43.156273,
+      "result": {
+        "status": "success",
+        "quote_id": "SAP-372",
+        "sap_doc_entry": 372,
+        "sap_doc_num": 372,
+        "salesforce_quote_id": "006gL000007BVyvQAG",
+        "quote_status": "Created",
+        "client": {
+          "name": "Nova-Enriched-0477Cc39",
+          "salesforce_id": "001gL000007hJctQAE",
+          "sap_card_code": "CNOVAENRI5853",
+          "account_number": null
+        },
+        "products": [
+          {
+            "code": "A00001",
+            "name": "Imprimante IBM type Infoprint 1312",
+            "quantity": 10,
+            "unit_price": 400.0,
+            "line_total": 4000.0,
+            "salesforce_id": null
+          }
+        ],
+        "total_amount": 4000.0,
+        "currency": "EUR",
+        "date": "2025-05-28",
+        "message": "Devis créé avec succès dans SAP (DocNum: 372)",
+        "all_products_available": true,
+        "client_validation": {
+          "validation_used": true,
+          "country": "FR",
+          "validation_level": "complete",
+          "warnings": [
+            "Adresse incomplète - ville et pays recommandés",
+            "SIRET non fourni - fortement recommandé pour les entreprises françaises"
+          ],
+          "suggestions": [
+            "Format de téléphone valide",
+            "Ajoutez le numéro SIRET pour validation automatique et enrichissement",
+            "✅ Aucun doublon détecté",
+            "Nom d'entreprise normalisé"
+          ],
+          "enriched_data": {
+            "normalized_company_name": "Nova-Enriched-0477Cc39",
+            "suggested_client_code": "CNOVAENRI5848"
+          },
+          "duplicate_check": {
+            "duplicates_found": false,
+            "count": 0,
+            "similar_clients": [],
+            "action_required": false
+          }
+        },
+        "system_references": {
+          "sap_client_created": false,
+          "sap_client_card_code": "CNOVAENRI5853",
+          "quote_creation_timestamp": "2025-05-28T17:24:28.555423",
+          "validation_enabled": true
+        }
+      },
+      "timestamp": "2025-05-28T17:24:28.555922"
+    },
+    {
+      "scenario": "Client inexistant - Validation France",
+      "prompt": "devis pour NOVA-FRANCE-0477cc39 SARL avec 5 ref A00002",
+      "expected": "validation_france",
+      "status": "success",
+      "test_status": "✅ RÉUSSI",
+      "processing_time": 46.414729,
+      "result": {
+        "status": "success",
+        "quote_id": "SAP-373",
+        "sap_doc_entry": 373,
+        "sap_doc_num": 373,
+        "salesforce_quote_id": "006gL000007BW0XQAW",
+        "quote_status": "Created",
+        "client": {
+          "name": "Nova-France-0477Cc39 Sarl",
+          "salesforce_id": "001gL000007hWTdQAM",
+          "sap_card_code": "CNOVAFRAN5902",
+          "account_number": null
+        },
+        "products": [
+          {
+            "code": "A00002",
+            "name": "Imprimante IBM type Infoprint 1222",
+            "quantity": 5,
+            "unit_price": 200.0,
+            "line_total": 1000.0,
+            "salesforce_id": "01tgL000002HAOPQA4"
+          }
+        ],
+        "total_amount": 1000.0,
+        "currency": "EUR",
+        "date": "2025-05-28",
+        "message": "Devis créé avec succès dans SAP (DocNum: 373)",
+        "all_products_available": true,
+        "client_validation": {
+          "validation_used": true,
+          "country": "FR",
+          "validation_level": "complete",
+          "warnings": [
+            "Adresse incomplète - ville et pays recommandés",
+            "SIRET non fourni - fortement recommandé pour les entreprises françaises"
+          ],
+          "suggestions": [
+            "Format de téléphone valide",
+            "Ajoutez le numéro SIRET pour validation automatique et enrichissement",
+            "✅ Aucun doublon détecté",
+            "Nom d'entreprise normalisé"
+          ],
+          "enriched_data": {
+            "normalized_company_name": "Nova-France-0477Cc39 Sarl",
+            "suggested_client_code": "CNOVAFRAN5897"
+          },
+          "duplicate_check": {
+            "duplicates_found": false,
+            "count": 0,
+            "similar_clients": [],
+            "action_required": false
+          }
+        },
+        "system_references": {
+          "sap_client_created": false,
+          "sap_client_card_code": "CNOVAFRAN5902",
+          "quote_creation_timestamp": "2025-05-28T17:25:17.981818",
+          "validation_enabled": true
+        }
+      },
+      "timestamp": "2025-05-28T17:25:17.982352"
+    },
+    {
+      "scenario": "Client inexistant - Validation USA",
+      "prompt": "quote for NOVA-USA-0477cc39 Inc with 20 items A00001",
+      "expected": "validation_usa",
+      "status": "success",
+      "test_status": "✅ RÉUSSI",
+      "processing_time": 44.826421,
+      "result": {
+        "status": "success",
+        "quote_id": "SAP-374",
+        "sap_doc_entry": 374,
+        "sap_doc_num": 374,
+        "salesforce_quote_id": "006gL000007BW5NQAW",
+        "quote_status": "Created",
+        "client": {
+          "name": "Nova-Usa-0477Cc39 Inc With",
+          "salesforce_id": "001gL000007hWdJQAU",
+          "sap_card_code": "CNOVAUSA05951",
+          "account_number": null
+        },
+        "products": [
+          {
+            "code": "A00001",
+            "name": "Imprimante IBM type Infoprint 1312",
+            "quantity": 20,
+            "unit_price": 400.0,
+            "line_total": 8000.0,
+            "salesforce_id": null
+          }
+        ],
+        "total_amount": 8000.0,
+        "currency": "EUR",
+        "date": "2025-05-28",
+        "message": "Devis créé avec succès dans SAP (DocNum: 374)",
+        "all_products_available": true,
+        "client_validation": {
+          "validation_used": true,
+          "country": "US",
+          "validation_level": "complete",
+          "warnings": [
+            "Adresse incomplète - ville et pays recommandés"
+          ],
+          "suggestions": [
+            "Format de téléphone valide",
+            "✅ Aucun doublon détecté",
+            "Nom d'entreprise normalisé"
+          ],
+          "enriched_data": {
+            "normalized_company_name": "Nova-Usa-0477Cc39 Inc With",
+            "suggested_client_code": "CNOVAUSA05946"
+          },
+          "duplicate_check": {
+            "duplicates_found": false,
+            "count": 0,
+            "similar_clients": [],
+            "action_required": false
+          }
+        },
+        "system_references": {
+          "sap_client_created": false,
+          "sap_client_card_code": "CNOVAUSA05951",
+          "quote_creation_timestamp": "2025-05-28T17:26:05.817731",
+          "validation_enabled": true
+        }
+      },
+      "timestamp": "2025-05-28T17:26:05.818043"
+    },
+    {
+      "scenario": "Client existant",
+      "prompt": "faire un devis pour 15 unités de A00001 pour le client Edge Communications",
+      "expected": "client_existant",
+      "status": "success",
+      "test_status": "✅ RÉUSSI",
+      "processing_time": 30.498611,
+      "result": {
+        "status": "success",
+        "quote_id": "SAP-375",
+        "sap_doc_entry": 375,
+        "sap_doc_num": 375,
+        "salesforce_quote_id": "006gL000007BW6zQAG",
+        "quote_status": "Created",
+        "client": {
+          "name": "Edge Communications",
+          "salesforce_id": "001gL000005OYCDQA4",
+          "sap_card_code": "CEDGEC1058",
+          "account_number": "CD451796"
+        },
+        "products": [
+          {
+            "code": "A00001",
+            "name": "Imprimante IBM type Infoprint 1312",
+            "quantity": 15,
+            "unit_price": 400.0,
+            "line_total": 6000.0,
+            "salesforce_id": null
+          }
+        ],
+        "total_amount": 6000.0,
+        "currency": "EUR",
+        "date": "2025-05-28",
+        "message": "Devis créé avec succès dans SAP (DocNum: 375)",
+        "all_products_available": true,
+        "client_validation": {
+          "validation_used": false,
+          "reason": "Client existant trouvé dans Salesforce"
+        },
+        "system_references": {
+          "sap_client_created": false,
+          "sap_client_card_code": "CEDGEC1058",
+          "quote_creation_timestamp": "2025-05-28T17:26:39.317871",
+          "validation_enabled": true
+        }
+      },
+      "timestamp": "2025-05-28T17:26:39.318570"
+    }
+  ]
+}
