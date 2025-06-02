@@ -7,7 +7,9 @@ Version POC avec validations SIRET, doublons, normalisation
 import re
 import logging
 from typing import Dict, Any, List
-from datetime import datetime
+from datetime import datetime, timedelta # Ajout de timedelta
+import os # Ajout de os
+import httpx # Ajout de httpx
 
 # Importer les dépendances avec gestion des erreurs
 try:
@@ -24,18 +26,100 @@ except ImportError:
     EMAIL_VALIDATOR_AVAILABLE = False
     print("⚠️ email-validator non disponible - validation email basique")
 
-logger = logging.getLogger(__name__)
+# Configuration du cache pour les requêtes HTTP
+try:
+    import requests_cache
+    HTTP_CACHE_AVAILABLE = True
+except ImportError:
+    HTTP_CACHE_AVAILABLE = False
+    print("⚠️ requests-cache non disponible - les appels API ne seront pas mis en cache")
 
+logger = logging.getLogger(__name__)
+# Constantes pour l'API INSEE
+INSEE_TOKEN_URL = "https://api.insee.fr/token"
+INSEE_API_BASE_URL = "https://api.insee.fr/entreprises/sirene/V3"
+# Constante pour l'API Adresse Gouv
+API_ADRESSE_GOUV_URL = "https://api-adresse.data.gouv.fr/search/"
 class ClientValidator:
     """Validateur complet pour les données client"""
     
     def __init__(self):
-        self.api_cache = {}
+        # self.api_cache = {} # Remplacé par requests-cache si disponible
         self.validation_stats = {
             "total_validations": 0,
             "successful_validations": 0,
             "failed_validations": 0
         }
+        
+        self.insee_consumer_key = os.getenv("INSEE_CONSUMER_KEY")
+        self.insee_consumer_secret = os.getenv("INSEE_CONSUMER_SECRET")
+        self.insee_access_token = None
+        self.insee_token_expires_at = datetime.now()
+
+        # Initialisation du client HTTP avec cache si disponible
+        if HTTP_CACHE_AVAILABLE:
+            # Cache les requêtes pour 1 heure, expire les anciennes après 1 jour
+            # Les erreurs 5xx ne sont pas mises en cache par défaut
+            self.http_client = httpx.AsyncClient(
+                event_hooks={'response': [self._raise_on_4xx_5xx]}
+            )
+            self.cached_http_client = requests_cache.CachedSession(
+                cache_name='api_cache',
+                backend='sqlite',
+                expire_after=timedelta(hours=1),
+                allowable_codes=[200], # Cache seulement les succès
+                old_data_on_error=True # Utilise le cache si l'API est down
+            )
+            # Monkey patch pour utiliser requests_cache avec httpx de manière synchrone pour le token
+            # Pour les appels asynchrones, nous gérerons le cache manuellement ou via une lib compatible
+        else:
+            self.http_client = httpx.AsyncClient(
+                 event_hooks={'response': [self._raise_on_4xx_5xx]}
+            )
+        
+        if not self.insee_consumer_key or not self.insee_consumer_secret:
+            logger.warning("INSEE_CONSUMER_KEY ou INSEE_CONSUMER_SECRET non configurés. Validation INSEE désactivée.")
+
+    async def _raise_on_4xx_5xx(self, response):
+        """Hook pour httpx pour lever une exception sur les erreurs HTTP."""
+        # L'objectif principal de ce hook est de s'assurer que les erreurs HTTP
+        # sont levées pour que le code appelant puisse les intercepter.
+        # Les détails de l'erreur (comme le corps de la réponse) seront gérés
+        # par le bloc `except` spécifique dans la méthode appelante.
+        response.raise_for_status()
+
+    async def _get_insee_token(self) -> str | None:
+        """Récupère ou renouvelle le token d'accès INSEE."""
+        if not self.insee_consumer_key or not self.insee_consumer_secret:
+            return None
+
+        if self.insee_access_token and datetime.now() < self.insee_token_expires_at:
+            return self.insee_access_token
+
+        logger.info("Demande d'un nouveau token d'accès INSEE...")
+        auth = (self.insee_consumer_key, self.insee_consumer_secret)
+        data = {"grant_type": "client_credentials"}
+        
+        try:
+            # Utilisation d'un client httpx synchrone pour cette partie critique ou gestion manuelle du cache
+            # Pour simplifier, appel direct sans cache spécifique pour le token ici, car géré par l'expiration.
+            async with httpx.AsyncClient() as client: # Client temporaire pour le token
+                response = await client.post(INSEE_TOKEN_URL, auth=auth, data=data)
+            response.raise_for_status()
+            
+            token_data = response.json()
+            self.insee_access_token = token_data["access_token"]
+            # Mettre une marge de 60 secondes avant l'expiration réelle
+            self.insee_token_expires_at = datetime.now() + timedelta(seconds=token_data["expires_in"] - 60)
+            logger.info("✅ Token INSEE obtenu avec succès.")
+            return self.insee_access_token
+        except httpx.HTTPStatusError as e:
+            logger.error(f"❌ Échec d'obtention du token INSEE: {e.response.status_code} - {e.response.text}")
+            self.insee_access_token = None # S'assurer que le token est invalidé
+        except Exception as e:
+            logger.error(f"❌ Erreur inattendue lors de l'obtention du token INSEE: {str(e)}")
+            self.insee_access_token = None
+        return None
     
     async def validate_complete(self, client_data: Dict[str, Any], country: str = "FR") -> Dict[str, Any]:
         """
@@ -96,7 +180,7 @@ class ClientValidator:
             await self._validate_consistency(client_data, validation_result)
             
             # Déterminer le statut final
-            validation_result["valid"] = len(validation_result["errors"]) == 0
+            validation_result["valid"] = not validation_result["errors"]
             
             if validation_result["valid"]:
                 self.validation_stats["successful_validations"] += 1
@@ -426,81 +510,211 @@ class ClientValidator:
     # Méthodes utilitaires
     
     async def _validate_siret_insee(self, siret: str) -> Dict[str, Any]:
-        """Validation SIRET via API INSEE (simulé pour le POC)"""
+        """Validation SIRET via API INSEE."""
+        
+        # Utilisation du cache intégré de requests_cache si disponible et configuré pour httpx
+        # Sinon, gestion manuelle simple ou pas de cache pour cet exemple.
+        # Pour une vraie app, il faudrait une solution de cache asynchrone compatible httpx.
+        # Ici, on va simuler un cache en mémoire simple pour l'exemple si requests_cache n'est pas là.
+
+        # Cache simple en mémoire (si requests_cache n'est pas utilisé pour les appels async)
+        # Remplacé par la logique de cache de requests_cache si le client est sessionné
+        # cache_key = f"siret_{siret}"
+        # if hasattr(self, 'api_cache') and cache_key in self.api_cache:
+        #    return self.api_cache[cache_key]
+
+        if not self.insee_consumer_key or not self.insee_consumer_secret:
+            logger.warning("Validation INSEE désactivée (clés manquantes).")
+            return {"valid": False, "error": "Configuration API INSEE manquante", "validation_method": "skipped"}
+
+        access_token = await self._get_insee_token()
+        if not access_token:
+            return {"valid": False, "error": "Impossible d'obtenir le token INSEE", "validation_method": "token_error"}
+
+        headers = {"Authorization": f"Bearer {access_token}"}
+        url = f"{INSEE_API_BASE_URL}/siret/{siret}"
+        
+        logger.info(f"Validation SIRET {siret} via API INSEE...")
+
         try:
-            # Cache pour éviter les appels répétés
-            cache_key = f"siret_{siret}"
-            if cache_key in self.api_cache:
-                return self.api_cache[cache_key]
+            # Utilisation du client http_client qui peut être configuré avec requests_cache
+            # Note: requests_cache ne fonctionne pas nativement avec httpx.AsyncClient de manière transparente.
+            # Pour une solution robuste, on utiliserait `Hishel` ou on ferait des appels synchrones
+            # via la session `self.cached_http_client` dans un thread séparé si on veut absolument ce cache.
+            # Pour cet exemple, on fait l'appel direct avec httpx.AsyncClient.
             
-            logger.info(f"Validation SIRET {siret} via API INSEE (simulé)")
+            # Si vous avez configuré requests_cache pour fonctionner avec httpx (ex: via un transport personnalisé non montré ici)
+            # l'appel suivant serait mis en cache. Sinon, il ne le sera pas par requests-cache.
+            response = await self.http_client.get(url, headers=headers, timeout=10.0)
+            # response.raise_for_status() # Géré par le hook _raise_on_4xx_5xx
+
+            data = response.json()
             
-            # TODO: Implémenter l'appel réel à l'API INSEE
-            # Nécessite un token d'accès INSEE
-            # url = f"https://api.insee.fr/entreprises/sirene/V3/siret/{siret}"
-            
-            # Simulation de validation basique
-            # Vérification de la clé de contrôle du SIRET
-            if len(siret) == 14 and siret.isdigit():
-                # Algorithme de validation SIRET simplifié
-                siren = siret[:9]
-                nic = siret[9:14]
+            if response.status_code == 200 and data.get("header", {}).get("statut") == 200:
+                etablissement = data.get("etablissement", {})
+                unite_legale = etablissement.get("uniteLegale", {})
+                adresse = etablissement.get("adresseEtablissement", {})
                 
-                # Simulation de réponse positive
+                # Construction d'une adresse lisible
+                full_address_parts = [
+                    adresse.get("numeroVoieEtablissement"),
+                    adresse.get("typeVoieEtablissement"),
+                    adresse.get("libelleVoieEtablissement"),
+                    adresse.get("codePostalEtablissement"),
+                    adresse.get("libelleCommuneEtablissement")
+                ]
+                full_address = " ".join(filter(None, full_address_parts)).strip()
+
                 result = {
                     "valid": True,
                     "data": {
-                        "siret": siret,
-                        "siren": siren,
-                        "nic": nic,
-                        "company_name": "Entreprise validée (simulé)",
-                        "activity_code": "6201Z",
-                        "activity_label": "Programmation informatique",
-                        "address": "Adresse simulée",
-                        "status": "Active",
-                        "validation_method": "simulated"
+                        "siret": etablissement.get("siret"),
+                        "siren": etablissement.get("siren"),
+                        "nic": etablissement.get("nic"),
+                        "company_name": unite_legale.get("denominationUniteLegale") or \
+                                        f"{unite_legale.get('nomUniteLegale', '')} {unite_legale.get('prenom1UniteLegale', '')}".strip(),
+                        "creation_date": unite_legale.get("dateCreationUniteLegale"),
+                        "activity_code": etablissement.get("activitePrincipaleEtablissement"),
+                        "activity_label": "N/A", # L'API Siret ne fournit pas le libellé direct, nécessite une table NAF
+                        "address": full_address,
+                        "postal_code": adresse.get("codePostalEtablissement"),
+                        "city": adresse.get("libelleCommuneEtablissement"),
+                        "status": "Actif" if unite_legale.get("etatAdministratifUniteLegale") == "A" else "Inactif",
+                        "is_siege": etablissement.get("etablissementSiege"),
+                        "validation_method": "api_insee"
                     }
                 }
+                # if hasattr(self, 'api_cache'): self.api_cache[cache_key] = result
+                return result
+            elif data.get("header", {}).get("statut") == 404:
+                 logger.warning(f"SIRET {siret} non trouvé via API INSEE.")
+                 return {"valid": False, "error": "SIRET non trouvé", "validation_method": "api_insee"}    
             else:
-                result = {"valid": False, "error": "Format SIRET invalide"}
+                error_message = data.get("header", {}).get("message", "Erreur inconnue de l'API INSEE")
+                logger.error(f"Erreur API INSEE pour SIRET {siret}: {response.status_code} - {error_message}")
+                return {"valid": False, "error": f"API INSEE: {error_message}", "validation_method": "api_insee"}
+
+        except httpx.HTTPStatusError as e:
+            status_code_str = str(e.response.status_code) if hasattr(e.response, 'status_code') else "N/A"
+            request_url_str = str(e.request.url) if e.request else "URL inconnue"
+            error_detail_str = f"Erreur API {status_code_str}." # Default message
+
+            try:
+                # Ensure the response body is read. raise_for_status() in the hook should have done this,
+                # but ResponseNotRead indicates it might not be complete or accessible yet.
+                # Calling aread() here ensures content is loaded. If already read, it's a no-op.
+                await e.response.aread()
+
+                if e.response.content: # Now this access should be safe
+                    try:
+                        decoded_content = e.response.content.decode('utf-8', errors='replace')
+                        if decoded_content.strip():
+                            error_detail_str = decoded_content
+                        else:
+                            error_detail_str = f"Erreur API {status_code_str}, réponse avec corps vide."
+                    except UnicodeDecodeError:
+                        logger.warning(f"Impossible de décoder (UTF-8) le corps de la réponse d'erreur pour SIRET {siret} (status: {status_code_str}). Contenu binaire présent.")
+                        error_detail_str = f"Contenu de l'erreur API (status: {status_code_str}) non décodable en UTF-8."
+                elif e.response.is_closed:
+                    warning_message = f"Flux de réponse fermé pour SIRET {siret} (status: {status_code_str}), impossible de lire le corps de l'erreur. Le serveur a peut-être fermé la connexion prématurément ou envoyé une réponse vide."
+                    logger.warning(warning_message)
+                    error_detail_str = f"Erreur API {status_code_str}, aucun détail de réponse (flux fermé)."
+                else: # Stream not closed, but content is empty after aread()
+                    error_detail_str = f"Erreur API {status_code_str}, réponse vide (après lecture explicite)."
             
-            self.api_cache[cache_key] = result
-            return result
-            
+            except httpx.ResponseNotRead:
+                logger.warning(f"httpx.ResponseNotRead rencontrée pour SIRET {siret} (status: {status_code_str}) malgré la tentative de lecture explicite.")
+                error_detail_str = f"Erreur API {status_code_str}, contenu de la réponse non lu (ResponseNotRead)."
+            except Exception as read_exc: # Catch any other errors during read/decode
+                logger.warning(f"Erreur lors de la lecture/décodage du corps de la réponse d'erreur pour SIRET {siret} (status: {status_code_str}): {str(read_exc)}")
+                error_detail_str = f"Erreur API {status_code_str}, impossible de traiter le corps de la réponse: {str(read_exc)}"
+
+            logger.error(f"Erreur HTTP API INSEE pour SIRET {siret}: {status_code_str} pour {request_url_str}. Détail: {error_detail_str}")
+            return {"valid": False, "error": f"Erreur HTTP API INSEE: {status_code_str}", "validation_method": "api_insee"}
+        except httpx.TimeoutException:
+            logger.error(f"Timeout lors de la validation SIRET {siret} via API INSEE.")
+            return {"valid": False, "error": "Timeout API INSEE", "validation_method": "api_insee"}
         except Exception as e:
-            logger.error(f"Erreur validation SIRET: {str(e)}")
-            return {"valid": False, "error": str(e)}
+            logger.exception(f"Erreur inattendue validation SIRET {siret}: {str(e)}")
+            return {"valid": False, "error": f"Erreur interne: {str(e)}", "validation_method": "api_insee"}
     
     async def _validate_address_france(self, client_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Validation adresse via API Adresse gouv.fr (simulé pour le POC)"""
-        try:
-            street = client_data.get("billing_street", "")
-            city = client_data.get("billing_city", "")
-            
-            if not street or not city:
-                return {"found": False, "error": "Adresse incomplète"}
-            
-            # TODO: Implémenter l'appel réel à l'API Adresse gouv.fr
-            # url = "https://api-adresse.data.gouv.fr/search/"
-            # params = {"q": f"{street} {city}", "limit": 1}
-            
-            logger.info(f"Validation adresse via API gouv.fr (simulé): {street}, {city}")
-            
-            # Simulation de validation d'adresse
-            return {
-                "found": True,
-                "address": {
-                    "street": street,
-                    "city": city,
-                    "postal_code": client_data.get("billing_postal_code", "75001"),
-                    "coordinates": {"lat": 48.8566, "lon": 2.3522},
-                    "validation_method": "simulated"
-                }
-            }
+        """Validation adresse via API Adresse gouv.fr."""
+        street = client_data.get("billing_street", "")
+        city = client_data.get("billing_city", "")
+        postal_code = client_data.get("billing_postal_code", "")
+
+        if not street or not (city or postal_code): # Au moins rue + (ville ou CP)
+            logger.warning("Adresse incomplète pour validation via API Adresse Gouv.")
+            return {"found": False, "error": "Adresse incomplète pour validation", "validation_method": "skipped"}
+
+        # Construire la requête, donner la priorité au code postal s'il est présent
+        query_parts = [street, postal_code if postal_code else city]
+        query = " ".join(filter(None, query_parts))
         
+        params = {"q": query, "limit": 1} # On prend le premier meilleur résultat
+        
+        logger.info(f"Validation adresse via API gouv.fr: {query}")
+
+        try:
+            response = await self.http_client.get(API_ADRESSE_GOUV_URL, params=params, timeout=10.0)
+            # La levée d'exception pour 4xx/5xx est gérée par le hook _raise_on_4xx_5xx
+
+            data = response.json()
+            
+            if response.status_code == 200 and data.get("features"):
+                best_match = data["features"][0] # On prend le premier résultat
+                properties = best_match.get("properties", {})
+                geometry = best_match.get("geometry", {})
+                
+                # Vérifier la pertinence du résultat (score élevé)
+                # L'API retourne un score, un score > 0.7 est généralement bon.
+                # Pour simplifier, on prend le premier, mais en production on vérifierait le score.
+                # score = properties.get("score", 0.0)
+                # if score < 0.7: # Seuil de pertinence
+                #     logger.warning(f"Adresse trouvée mais score faible ({score:.2f}): {properties.get('label')}")
+                #     return {"found": False, "error": "Adresse non trouvée avec certitude", "validation_method": "api_ban", "low_score": True}
+
+
+                normalized_address = {
+                    "label": properties.get("label"), # Adresse complète formatée
+                    "street_number": properties.get("housenumber"),
+                    "street_name": properties.get("street") or properties.get("name"), # "name" pour les lieux-dits/routes
+                    "postal_code": properties.get("postcode"),
+                    "city": properties.get("city"),
+                    "context": properties.get("context"), # Ex: "75, Paris, Île-de-France"
+                    "type": properties.get("type"), # Ex: "housenumber", "street"
+                    "coordinates": {
+                        "latitude": geometry.get("coordinates", [None, None])[1], # Ordre: lon, lat
+                        "longitude": geometry.get("coordinates", [None, None])[0]
+                    },
+                    "validation_method": "api_ban" # BAN = Base Adresse Nationale
+                }
+                
+                # Comparer si l'adresse trouvée est significativement différente
+                # (logique de suggestion ou d'alerte à affiner)
+                # Par exemple, si le code postal ou la ville diffèrent de l'entrée.
+                
+                return {"found": True, "address": normalized_address}
+            
+            elif not data.get("features"):
+                logger.warning(f"Aucune adresse trouvée pour: {query}")
+                return {"found": False, "error": "Adresse non trouvée", "validation_method": "api_ban"}
+            else:
+                # Cas d'erreur non standard de l'API si la structure est inattendue
+                logger.error(f"Réponse inattendue de l'API Adresse pour {query}: {data}")
+                return {"found": False, "error": "Réponse API Adresse inattendue", "validation_method": "api_ban"}
+
+        except httpx.HTTPStatusError as e:
+            error_detail = e.response.text[:200] if e.response else str(e)
+            logger.error(f"Erreur HTTP lors de la validation d'adresse {query}: {str(e)} - {error_detail}")
+            return {"found": False, "error": f"Erreur HTTP API Adresse: {e.response.status_code}", "validation_method": "api_ban"}
+        except httpx.TimeoutException:
+            logger.error(f"Timeout lors de la validation d'adresse {query} via API Adresse.")
+            return {"found": False, "error": "Timeout API Adresse", "validation_method": "api_ban"}
         except Exception as e:
-            logger.error(f"Erreur validation adresse: {str(e)}")
-            return {"found": False, "error": str(e)}
+            logger.exception(f"Erreur inattendue validation adresse {query}: {str(e)}")
+            return {"found": False, "error": f"Erreur interne: {str(e)}", "validation_method": "api_ban"}
     
     def _validate_phone_format(self, phone: str) -> bool:
         """Validation format téléphone international"""
