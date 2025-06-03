@@ -1,20 +1,35 @@
+# Requirements NOVA POC - VERSION NETTOYÉE
+# Suppression d'aio-pika suite à l'évaluation d'architecture
+
+# Core FastAPI et serveur
 fastapi
 uvicorn[standard]
 python-dotenv
 requests
 pydantic
+python-multipart
+
+# Intégrations systèmes
 simple-salesforce
-websockets
 httpx
+
+# LLM et MCP
 mcp[cli]>=0.4.0
-aio-pika
+
+# Base de données
 SQLAlchemy>=1.4
 alembic>=1.8
 psycopg2-binary
+
+# Utilitaires
 aiohttp
 email-validator
-python-multipart
-# Nouvelles dépendances pour validation client
+
+# Validation client enrichie
 fuzzywuzzy>=0.18.0
 python-Levenshtein>=0.12.0
 requests-cache>=1.0.0
+
+# SUPPRIMÉ : aio-pika (RabbitMQ non requis pour le POC)
+# Décision documentée le 2025-06-03 suite à évaluation d'architecture
+# RabbitMQ pourra être ajouté en version production si scaling requis
