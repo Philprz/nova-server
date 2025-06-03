@@ -7,20 +7,25 @@ Suivez ces étapes pour vérifier le bon fonctionnement du système:
 Ouvrez PowerShell et exécutez:
 
 ```powershell
-cd C:\Users\PPZ\NOVA
+cd CHEMIN_VERS_VOTRE_PROJET\NOVA-SERVER
 .\venv\Scripts\Activate.ps1
 python -c "import sys; print(f'Python {sys.version}')"
 ```
 
-Vérifiez que Python 3.10+ est bien installé et l'environnement virtuel activé.
+Vérifiez que Python 3.9+ est bien installé et l'environnement virtuel activé.
 
 ## 2. Démarrage des services
 
-Lancez le script de démarrage optimisé:
+Lancez le script de démarrage global:
 
 ```powershell
-.\start_nova_devis.ps1 -Verbose
+.\start_nova.ps1
 ```
+
+Ce script devrait (vérifiez son contenu si besoin) :
+- Activer l'environnement virtuel
+- Démarrer les serveurs MCP pour Salesforce et SAP
+- Lancer l'API FastAPI sur le port 8000 (par défaut)
 
 Ce script va:
 - Activer l'environnement virtuel
@@ -28,71 +33,51 @@ Ce script va:
 - Démarrer les serveurs MCP pour Salesforce et SAP
 - Lancer l'API FastAPI sur le port 8000
 
-## 3. Test des connexions
+Alternativement, vous pouvez démarrer les services manuellement (voir `README.md` pour les commandes détaillées).
 
-Vérifiez les connexions aux systèmes externes:
+## 3. Vérification des Composants
 
+### Diagnostic de la Base de Données
+Assurez-vous que la base de données est correctement configurée et que les migrations Alembic sont à jour :
 ```powershell
-python tests\test_salesforce_connection.py
-python tests\test_sap_connection.py
+python tests\diagnostic_db.py
 ```
 
-Vous devriez voir des messages confirmant les connexions.
+### Health Check de l'API
+Ouvrez votre navigateur ou utilisez un client API (comme Postman ou curl) pour vérifier que l'API FastAPI est accessible :
+`http://localhost:8000/`
 
-## 4. Test du workflow de devis
+Vous devriez également pouvoir accéder à la documentation Swagger/OpenAPI :
+`http://localhost:8000/docs`
 
-### Option 1: Via Postman
+## 4. Tests Fonctionnels
 
-1. Ouvrez Postman et importez la collection:
-   `postman\NOVA_WORKFLOW_Test.json`
-
-2. Exécutez la requête "Générer un devis"
-
-### Option 2: Via navigateur web
-
-1. Ouvrez http://localhost:8000/static/demo_devis.html
-2. Saisissez la demande: "faire un devis pour 500 ref A00001 pour le client Edge Communications"
-3. Cliquez sur "Générer le devis"
-
-### Option 3: Via ligne de commande
-
+### Test de Génération de Devis Simple
+Exécutez le script de test pour un workflow de devis basique :
 ```powershell
-cd C:\Users\PPZ\NOVA
-python tests\test_direct_api.py
+python tests\test_devis_generique.py "faire un devis pour 500 ref A00002 pour le client Edge Communications"
 ```
+Adaptez la requête en langage naturel selon vos besoins de test.
 
-## 5. Test de Claude avec MCP
-
-1. Ouvrez Claude Desktop
-2. Vérifiez que les outils MCP sont disponibles (icône "+")
-3. Testez la commande simple:
-   ```
-   ping
-   ```
-4. Testez une requête Salesforce:
-   ```
-   salesforce_query("SELECT Id, Name FROM Account LIMIT 5")
-   ```
-
-## 6. Vérification des logs
-
-Consultez les logs pour identifier d'éventuelles erreurs:
-
+### Test du Workflow Enrichi (avec création/validation client)
+Pour tester le processus complet incluant la création de client et les validations :
 ```powershell
-Get-Content .\logs\workflow_devis.log -Tail 20
-Get-Content .\logs\salesforce_mcp.log -Tail 20
-Get-Content .\logs\sap_mcp.log -Tail 20
-Get-Content .\logs\test_bidirectionnel.log -Tail 20
-Get-Content .\logs\test_direct_api.log -Tail 20
-Get-Content .\logs\test_salesforce_connection.log -Tail 20
-Get-Content .\logs\test_sap_connection.log -Tail 20      
-Get-Content .\logs\test_salesforce_connection.log -Tail 20
+python workflow\test_enriched_workflow.py
 ```
+Ce script peut nécessiter une configuration ou des prompts spécifiques, référez-vous à son contenu pour les détails.
 
-## 7. Résolution des problèmes courants
+## 5. Tests via API (Exemples)
 
-- **Erreur de connexion Salesforce**: Vérifiez les credentials dans .env
-- **Erreur de connexion SAP**: Vérifiez l'URL et les identifiants
-- **Serveur MCP non trouvé**: Vérifiez le fichier claude_desktop_config.json
+Utilisez un client API pour interagir directement avec les endpoints :
 
-Besoin d'aide supplémentaire?
+- **POST** `/generate_quote`
+  - Body (JSON) : `{"query": "votre requête en langage naturel"}`
+- **POST** `/create_client`
+  - Body (JSON) : (Référez-vous à la structure attendue, ex: `{"natural_language_query": "Créer client Dupont SAS..."}` ou une structure de données client plus détaillée)
+- **GET** `/search_clients?query=...`
+
+Consultez la documentation Swagger (`/docs`) pour les détails exacts des requêtes et réponses.
+
+## 6. Vérification des Logs
+
+Consultez les fichiers dans le répertoire `logs/` (si des logs y sont configurés) et la sortie console des serveurs MCP et FastAPI pour identifier d'éventuelles erreurs ou avertissements.

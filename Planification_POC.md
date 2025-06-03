@@ -136,3 +136,56 @@ requirements.txt:
 ---
 
 **🎯 OBJECTIF FINAL** : Lors de la génération d'un devis, si le client n'existe pas, le système guide l'utilisateur pour créer proprement le client (France avec SIRET, USA avec validation renforcée) tout en évitant les doublons grâce au contrôle à 80% de similarité.
+
+---
+
+## Actions Complémentaires pour la Finalisation et l'Amélioration du POC
+
+En complément du développement de la fonctionnalité de création de clients, voici d'autres actions identifiées pour stabiliser, améliorer et documenter le POC NOVA. Ces points sont principalement issus du document `Maj_PlanDetaillePoc.md`.
+
+### 1. Stabilisation des Fondations
+*   **Gestion de la Base de Données avec Alembic (MID-2)**:
+    *   Objectif : S'assurer qu'Alembic est correctement synchronisé avec la base de données `nova_mcp_local` et gère le schéma.
+    *   Actions :
+        *   Vérifier l'état actuel des migrations et du schéma (par exemple, via `python tests/diagnostic_db.py`).
+        *   Si nécessaire, générer une nouvelle migration (`python -m alembic revision --autogenerate -m "nom_migration"`) et l'appliquer (`python -m alembic upgrade head`), ou utiliser `python -m alembic stamp head` si la base est déjà à jour manuellement.
+    *   *Note : Le README indique qu'Alembic est "stabilisé". Cette action vise à confirmer et formaliser cet état.*
+
+### 2. Amélioration de la Robustesse et de la Maintenabilité
+*   **Mise à Jour du README.md**:
+    *   Objectif : Maintenir une documentation d'accueil précise et à jour.
+    *   Actions :
+        *   Confirmer que le README reflète bien votre rôle unique sur le projet (Philippe PEREZ, seul responsable).
+        *   Vérifier l'exactitude des instructions d'installation et de démarrage, notamment concernant la base de données et Alembic.
+        *   Ajuster la section "Statut global" et "Roadmap" du projet si besoin.
+    *   *Note : Des modifications récentes ont été apportées au README.*
+
+*   **Renforcement des Tests Unitaires (MID-8)**:
+    *   Objectif : Augmenter la couverture de test pour fiabiliser les composants clés.
+    *   Actions :
+        *   Identifier les modules critiques nécessitant une meilleure couverture (ex: `services/llm_extractor.py`, `services/client_validator.py`, fonctions spécifiques dans `sap_mcp.py` et `salesforce_mcp.py`).
+        *   Rédiger des tests unitaires pour ces composants, couvrant les cas d'usage principaux et les cas limites.
+        *   Envisager l'utilisation de `pytest` pour une gestion optimisée des tests.
+
+*   **Complétion de la Documentation Technique (CONNECT-8, LLM-5)**:
+    *   Objectif : Fournir une documentation suffisante pour la compréhension et la maintenance des intégrations.
+    *   Actions :
+        *   **CONNECT-8 (Schémas SAP/Salesforce)**: Finaliser la documentation listant les principaux champs/objets SAP et Salesforce utilisés, leur mapping et leur rôle (état actuel: "En cours / À compléter").
+        *   **LLM-5 (Prompts Claude)**: Documenter les prompts clés utilisés avec Claude, ainsi que la structure des données attendues et reçues.
+
+*   **Homogénéisation de la Gestion des Erreurs (MID-7)**:
+    *   Objectif : Simplifier le débogage et améliorer la prévisibilité des erreurs.
+    *   Actions :
+        *   Analyser la gestion actuelle des erreurs à travers le middleware.
+        *   Standardiser les formats des réponses d'erreur des API.
+        *   Uniformiser la manière dont les exceptions sont capturées et loguées.
+
+### 3. Perspectives et Évolutions
+*   **Planification des Aspects Infrastructure (INFRA-3, INFRA-5, INFRA-6)**:
+    *   Objectif : Préparer le terrain pour un déploiement ou une évolution plus opérationnelle du POC.
+    *   Actions (à planifier/exécuter) :
+        *   **INFRA-3 (Déploiement MCP)**: Documenter précisément les étapes de déploiement de l'application sur le serveur OVH (état actuel: "À faire").
+        *   **INFRA-5 (Monitoring)**: Définir et mettre en place des stratégies de monitoring de base pour l'application (état actuel: "À faire").
+        *   **INFRA-6 (Sécurité Réseau)**: Réfléchir et implémenter des mesures de sécurité réseau de base pour l'environnement de déploiement (état actuel: "À faire").
+
+---
