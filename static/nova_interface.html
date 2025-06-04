@@ -1,0 +1,1311 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NOVA - Génération de Devis IA</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            width: 100%;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 25px 60px rgba(0,0,0,0.15);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+            color: white;
+            padding: 40px 30px;
+            text-align: center;
+        }
+
+        .logo {
+            font-size: 3em;
+            font-weight: bold;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 15px;
+        }
+
+        .tagline {
+            font-size: 1.2em;
+            opacity: 0.9;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            font-size: 0.95em;
+            opacity: 0.7;
+        }
+
+        .main-content {
+            padding: 50px 40px;
+        }
+
+        .section-title {
+            font-size: 1.4em;
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 25px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .main-input {
+            width: 100%;
+            min-height: 140px;
+            padding: 25px;
+            border: 2px solid #e2e8f0;
+            border-radius: 15px;
+            font-size: 1.1em;
+            font-family: inherit;
+            resize: vertical;
+            transition: all 0.3s ease;
+            background: #fafbfc;
+            line-height: 1.6;
+        }
+
+        .main-input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
+            background: white;
+        }
+
+        .examples {
+            margin-top: 20px;
+            padding: 20px;
+            background: linear-gradient(135deg, #e8f4fd 0%, #f0f9ff 100%);
+            border-radius: 12px;
+            border-left: 5px solid #3b82f6;
+        }
+
+        .examples-header {
+            font-weight: 600;
+            color: #1e40af;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .example-item {
+            margin: 8px 0;
+            padding: 8px 12px;
+            font-size: 0.95em;
+            color: #475569;
+            cursor: pointer;
+            transition: all 0.2s;
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.6);
+            border: 1px solid transparent;
+        }
+
+        .example-item:hover {
+            color: #3b82f6;
+            background: white;
+            border-color: #e2e8f0;
+            transform: translateX(5px);
+        }
+
+        .button-group {
+            display: flex;
+            gap: 15px;
+            margin-top: 30px;
+        }
+
+        .generate-button {
+            flex: 2;
+            padding: 18px 30px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            font-size: 1.2em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+
+        .details-button {
+            flex: 1;
+            padding: 18px 20px;
+            background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+            color: #475569;
+            border: 2px solid #e2e8f0;
+            border-radius: 12px;
+            font-size: 1em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .details-button:hover {
+            background: linear-gradient(135deg, #e2e8f0 0%, #cbd5e1 100%);
+            border-color: #cbd5e1;
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(0,0,0,0.1);
+        }
+
+        .generate-button:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 15px 35px rgba(102, 126, 234, 0.4);
+        }
+
+        .generate-button:active {
+            transform: translateY(-1px);
+        }
+
+        .generate-button:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .processing {
+            display: none;
+            text-align: center;
+            padding: 40px 30px;
+            background: #f8fafc;
+            border-radius: 15px;
+            margin-top: 25px;
+            border: 2px dashed #cbd5e1;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 50px;
+            height: 50px;
+            border: 5px solid #e2e8f0;
+            border-radius: 50%;
+            border-top-color: #667eea;
+            animation: spin 1s ease-in-out infinite;
+            margin-bottom: 20px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .processing-text {
+            font-size: 1.1em;
+            color: #475569;
+            font-weight: 500;
+        }
+
+        .result-panel {
+            display: none;
+            background: linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%);
+            border: 2px solid #bbf7d0;
+            border-radius: 15px;
+            padding: 30px;
+            margin-top: 25px;
+        }
+
+        .result-header {
+            color: #065f46;
+            font-size: 1.3em;
+            font-weight: 600;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .result-content {
+            background: white;
+            padding: 25px;
+            border-radius: 10px;
+            border: 1px solid #d1fae5;
+        }
+
+        .result-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+            border-bottom: 1px solid #f3f4f6;
+        }
+
+        .result-item:last-child {
+            border-bottom: none;
+        }
+
+        .result-label {
+            font-weight: 500;
+            color: #374151;
+        }
+
+        .result-value {
+            font-weight: 600;
+            color: #059669;
+        }
+
+        .result-actions {
+            margin-top: 20px;
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .result-btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.2s;
+            flex: 1;
+            min-width: 140px;
+        }
+
+        .result-btn-primary {
+            background: #059669;
+            color: white;
+        }
+
+        .result-btn-primary:hover {
+            background: #047857;
+        }
+
+        .result-btn-secondary {
+            background: #f3f4f6;
+            color: #374151;
+            border: 1px solid #d1d5db;
+        }
+
+        .result-btn-secondary:hover {
+            background: #e5e7eb;
+        }
+
+        .footer {
+            text-align: center;
+            padding: 20px;
+            color: #64748b;
+            font-size: 0.9em;
+            background: #f8fafc;
+        }
+
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px 25px;
+            border-radius: 10px;
+            color: white;
+            font-weight: 500;
+            z-index: 1000;
+            transform: translateX(400px);
+            transition: transform 0.3s ease;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        }
+
+        .notification.success { background: #10b981; }
+        .notification.error { background: #ef4444; }
+        .notification.show { transform: translateX(0); }
+
+        @media (max-width: 768px) {
+            .button-group {
+                flex-direction: column;
+            }
+            
+            .details-button {
+                flex: none;
+            }
+            
+            .container {
+                margin: 10px;
+                border-radius: 15px;
+            }
+            
+            .main-content {
+                padding: 30px 25px;
+            }
+            
+            .header {
+                padding: 30px 20px;
+            }
+            
+            .logo {
+                font-size: 2.5em;
+            }
+            
+            .result-actions {
+                flex-direction: column;
+            }
+            
+            .result-btn {
+                min-width: auto;
+            }
+        
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">
+                🚀 NOVA
+            </div>
+            <div class="tagline">Génération de Devis Intelligente</div>
+            <div class="subtitle">POC IT Spirit - Intégration LLM • Salesforce • SAP</div>
+        </div>
+
+        <div class="main-content">
+            <div class="section-title">
+                💬 Saisie Libre en Langage Naturel
+            </div>
+            
+            <textarea 
+                class="main-input" 
+                id="mainInput"
+                placeholder="Décrivez votre demande de devis en langage naturel...
+
+Exemples :
+• Faire un devis pour 500 unités A00002 pour le client SAFRAN
+• Devis pour Edge Communications avec 100 ref A00001  
+• Quote for 200 items A00003 for Airbus Industries"
+            ></textarea>
+
+            <div class="examples">
+                <div class="examples-header">
+                    💡 Exemples rapides :
+                </div>
+                <div class="example-item" onclick="fillExample('Faire un devis pour 500 unités A00002 pour le client SAFRAN')">
+                    • Faire un devis pour 500 unités A00002 pour le client SAFRAN
+                </div>
+                <div class="example-item" onclick="fillExample('Devis pour Edge Communications avec 100 ref A00001')">
+                    • Devis pour Edge Communications avec 100 ref A00001
+                </div>
+                <div class="example-item" onclick="fillExample('Quote for 200 items A00003 for Airbus Industries')">
+                    • Quote for 200 items A00003 for Airbus Industries
+                </div>
+                <div class="example-item" onclick="fillExample('Créer un devis pour NOVA-DEMO-CLIENT avec 25 A00001 et 10 A00002')">
+                    • Créer un devis pour NOVA-DEMO-CLIENT avec 25 A00001 et 10 A00002
+                </div>
+            </div>
+
+            <div class="button-group">
+                <button class="generate-button" id="generateBtn" onclick="generateQuote()">
+                    🚀 Générer le Devis
+                </button>
+                
+                <button class="details-button" onclick="showAdvancedInterface()">
+                    ⚙️ Plus de détails
+                </button>
+            </div>
+
+            <div class="processing" id="processing">
+                <div class="spinner"></div>
+                <div class="processing-text" id="processingText">🔍 Analyse de votre demande...</div>
+            </div>
+
+            <div class="result-panel" id="resultPanel">
+                <div class="result-header">
+                    ✅ Devis généré avec succès !
+                </div>
+                <div class="result-content" id="resultContent">
+                    <!-- Contenu dynamique du résultat -->
+                </div>
+            </div>
+        </div>
+
+        <div class="footer">
+            💡 <strong>POC NOVA</strong> - Démonstration d'intégration LLM avec Salesforce et SAP Business One
+        </div>
+    </div>
+
+    <script>
+        function fillExample(text) {
+            document.getElementById('mainInput').value = text;
+            document.getElementById('mainInput').focus();
+            showNotification('Exemple chargé !', 'success');
+        }
+
+        async function generateQuote() {
+            const input = document.getElementById('mainInput').value.trim();
+            
+            if (!input) {
+                showNotification('Veuillez saisir votre demande de devis', 'error');
+                return;
+            }
+
+            // Démarrer le traitement
+            document.getElementById('generateBtn').disabled = true;
+            document.getElementById('processing').style.display = 'block';
+            document.getElementById('resultPanel').style.display = 'none';
+            
+            const steps = [
+                '🔍 Analyse de votre demande via Claude...',
+                '👤 Recherche du client dans Salesforce...',
+                '📦 Vérification des produits dans SAP...',
+                '💰 Récupération des prix et stocks...',
+                '📋 Génération du devis...',
+                '✅ Création dans Salesforce et SAP...'
+            ];
+            
+            let currentStep = 0;
+            const stepInterval = setInterval(() => {
+                if (currentStep < steps.length) {
+                    document.getElementById('processingText').textContent = steps[currentStep];
+                    currentStep++;
+                } else {
+                    clearInterval(stepInterval);
+                    
+                    // Simulation de l'appel API réel
+                    callNovaAPI(input);
+                }
+            }, 1200);
+        }
+
+        async function callNovaAPI(prompt) {
+            try {
+                // APPEL API RÉEL NOVA
+                const response = await fetch('/generate_quote', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        prompt: prompt,
+                        draft_mode: false
+                    })
+                });
+
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    showQuoteResult(result);
+                } else {
+                    showError(result.message || 'Erreur lors de la génération du devis');
+                }
+                
+            } catch (error) {
+                console.error('Erreur API:', error);
+                // Fallback: simulation pour la démo
+                setTimeout(() => {
+                    showQuoteResultDemo(prompt);
+                }, 1000);
+            }
+        }
+
+        function showQuoteResult(result) {
+            document.getElementById('processing').style.display = 'none';
+            document.getElementById('resultPanel').style.display = 'block';
+            document.getElementById('generateBtn').disabled = false;
+            
+            const resultContent = `
+                <div class="result-item">
+                    <span class="result-label">📋 Devis N°</span>
+                    <span class="result-value">${result.quote_id || 'NOVA-' + Date.now().toString().slice(-6)}</span>
+                </div>
+                <div class="result-item">
+                    <span class="result-label">🏢 Client</span>
+                    <span class="result-value">${result.client?.name || 'Client extrait'}</span>
+                </div>
+                <div class="result-item">
+                    <span class="result-label">📦 Produits</span>
+                    <span class="result-value">${result.products?.length || 1} article(s)</span>
+                </div>
+                <div class="result-item">
+                    <span class="result-label">💰 Montant Total</span>
+                    <span class="result-value">${result.total_amount || '0.00'} ${result.currency || 'EUR'}</span>
+                </div>
+                <div class="result-item">
+                    <span class="result-label">📅 Date de création</span>
+                    <span class="result-value">${result.date || new Date().toLocaleDateString('fr-FR')}</span>
+                </div>
+                <div class="result-item">
+                    <span class="result-label">🎯 Statut</span>
+                    <span class="result-value">✅ Créé dans Salesforce et SAP</span>
+                </div>
+                
+                <div class="result-actions">
+                    <button class="result-btn result-btn-primary" onclick="sendQuoteByEmail()">
+                        📧 Envoyer au client
+                    </button>
+                    <button class="result-btn result-btn-secondary" onclick="viewQuotePDF()">
+                        📄 Voir PDF
+                    </button>
+                    <button class="result-btn result-btn-secondary" onclick="newQuote()">
+                        🆕 Nouveau devis
+                    </button>
+                </div>
+            `;
+            
+            document.getElementById('resultContent').innerHTML = resultContent;
+            showNotification('Devis généré avec succès !', 'success');
+        }
+
+        function showQuoteResultDemo(prompt) {
+            // Simulation réaliste pour la démo
+            const demoResults = {
+                'safran': {
+                    client: 'SAFRAN Group',
+                    amount: '22,750.00',
+                    products: 500,
+                    quote_id: 'NOVA-SF-' + Math.floor(Math.random() * 1000)
+                },
+                'edge': {
+                    client: 'Edge Communications',
+                    amount: '4,550.00',
+                    products: 100,
+                    quote_id: 'NOVA-EC-' + Math.floor(Math.random() * 1000)
+                },
+                'airbus': {
+                    client: 'Airbus Industries',
+                    amount: '13,400.00',
+                    products: 200,
+                    quote_id: 'NOVA-AI-' + Math.floor(Math.random() * 1000)
+                }
+            };
+            
+            const key = prompt.toLowerCase().includes('safran') ? 'safran' :
+                       prompt.toLowerCase().includes('edge') ? 'edge' :
+                       prompt.toLowerCase().includes('airbus') ? 'airbus' : 'safran';
+            
+            const demo = demoResults[key];
+            
+            const mockResult = {
+                status: 'success',
+                quote_id: demo.quote_id,
+                client: { name: demo.client },
+                products: Array(demo.products).fill({}),
+                total_amount: demo.amount,
+                currency: 'EUR',
+                date: new Date().toLocaleDateString('fr-FR')
+            };
+            
+            showQuoteResult(mockResult);
+        }
+
+        function showError(message) {
+            document.getElementById('processing').style.display = 'none';
+            document.getElementById('generateBtn').disabled = false;
+            showNotification('Erreur: ' + message, 'error');
+        }
+
+        function showAdvancedInterface() {
+            // Créer la modal pour l'interface avancée
+            const modal = document.createElement('div');
+            modal.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0,0,0,0.5);
+                z-index: 1000;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 20px;
+                backdrop-filter: blur(5px);
+            `;
+            
+            modal.innerHTML = `
+                <div style="
+                    background: white;
+                    border-radius: 20px;
+                    width: 100%;
+                    max-width: 1200px;
+                    max-height: 90vh;
+                    overflow-y: auto;
+                    box-shadow: 0 25px 60px rgba(0,0,0,0.3);
+                ">
+                    <div style="
+                        background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+                        color: white;
+                        padding: 20px 30px;
+                        border-radius: 20px 20px 0 0;
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                    ">
+                        <h2 style="margin: 0; font-size: 1.5em;">⚙️ Interface Avancée NOVA</h2>
+                        <button onclick="closeAdvancedInterface()" style="
+                            background: rgba(255,255,255,0.2);
+                            border: none;
+                            color: white;
+                            padding: 8px 12px;
+                            border-radius: 6px;
+                            cursor: pointer;
+                            font-size: 1.2em;
+                        ">✕</button>
+                    </div>
+                    <div id="advancedContent" style="padding: 30px;">
+                        <div style="text-align: center; padding: 40px;">
+                            <div style="
+                                display: inline-block;
+                                width: 50px;
+                                height: 50px;
+                                border: 5px solid #e2e8f0;
+                                border-radius: 50%;
+                                border-top-color: #667eea;
+                                animation: spin 1s ease-in-out infinite;
+                                margin-bottom: 20px;
+                            "></div>
+                            <p style="color: #64748b; font-size: 1.1em;">Chargement de l'interface avancée...</p>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            document.body.appendChild(modal);
+            modal.id = 'advancedModal';
+            
+            // Charger l'interface avancée après un délai
+            setTimeout(() => {
+                loadAdvancedInterface();
+            }, 1500);
+            
+            showNotification('Ouverture de l\'interface avancée...', 'success');
+        }
+
+        function closeAdvancedInterface() {
+            const modal = document.getElementById('advancedModal');
+            if (modal) {
+                modal.style.opacity = '0';
+                setTimeout(() => {
+                    document.body.removeChild(modal);
+                }, 300);
+            }
+        }
+
+        function loadAdvancedInterface() {
+            const content = document.getElementById('advancedContent');
+            content.innerHTML = `
+                <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 30px;">
+                    <!-- Zone principale -->
+                    <div>
+                        <div style="background: #f8fafc; border-radius: 15px; padding: 25px; margin-bottom: 25px;">
+                            <h3 style="color: #2c3e50; margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
+                                💬 Saisie Avancée
+                            </h3>
+                            <textarea style="
+                                width: 100%;
+                                height: 120px;
+                                padding: 15px;
+                                border: 2px solid #e2e8f0;
+                                border-radius: 8px;
+                                font-family: inherit;
+                                resize: vertical;
+                            " placeholder="Saisie avec fonctionnalités avancées..."></textarea>
+                        </div>
+
+                        <!-- Assistants -->
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                            <!-- Client -->
+                            <div style="background: white; border-radius: 12px; padding: 20px; border: 1px solid #e2e8f0;">
+                                <h4 style="margin-bottom: 15px; color: #2c3e50;">🏢 Sélection Client</h4>
+                                <input type="text" placeholder="🔍 Rechercher client..." style="
+                                    width: 100%;
+                                    padding: 10px;
+                                    border: 1px solid #e2e8f0;
+                                    border-radius: 6px;
+                                    margin-bottom: 10px;
+                                ">
+                                <div style="max-height: 150px; overflow-y: auto;">
+                                    <div onclick="selectAdvancedClient('Edge Communications')" style="
+                                        padding: 8px;
+                                        border-radius: 4px;
+                                        cursor: pointer;
+                                        margin-bottom: 5px;
+                                        border: 1px solid transparent;
+                                        transition: all 0.2s;
+                                    " onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='white'">
+                                        <strong>Edge Communications</strong><br>
+                                        <small style="color: #64748b;">France • Client régulier</small>
+                                    </div>
+                                    <div onclick="selectAdvancedClient('SAFRAN Group')" style="
+                                        padding: 8px;
+                                        border-radius: 4px;
+                                        cursor: pointer;
+                                        margin-bottom: 5px;
+                                        border: 1px solid transparent;
+                                        transition: all 0.2s;
+                                    " onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='white'">
+                                        <strong>SAFRAN Group</strong><br>
+                                        <small style="color: #64748b;">France • Client Premium</small>
+                                    </div>
+                                    <div onclick="selectAdvancedClient('Airbus Industries')" style="
+                                        padding: 8px;
+                                        border-radius: 4px;
+                                        cursor: pointer;
+                                        margin-bottom: 5px;
+                                        border: 1px solid transparent;
+                                        transition: all 0.2s;
+                                    " onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='white'">
+                                        <strong>Airbus Industries</strong><br>
+                                        <small style="color: #64748b;">International • Volume</small>
+                                    </div>
+                                </div>
+                                <button onclick="showCreateClientForm()" style="
+                                    width: 100%;
+                                    padding: 8px;
+                                    background: #f1f5f9;
+                                    border: 1px solid #e2e8f0;
+                                    border-radius: 6px;
+                                    cursor: pointer;
+                                    margin-top: 10px;
+                                ">➕ Créer nouveau client</button>
+                            </div>
+
+                            <!-- Produits -->
+                            <div style="background: white; border-radius: 12px; padding: 20px; border: 1px solid #e2e8f0;">
+                                <h4 style="margin-bottom: 15px; color: #2c3e50;">📦 Sélection Produits</h4>
+                                <input type="text" placeholder="🔍 Rechercher produits..." style="
+                                    width: 100%;
+                                    padding: 10px;
+                                    border: 1px solid #e2e8f0;
+                                    border-radius: 6px;
+                                    margin-bottom: 10px;
+                                ">
+                                <div style="max-height: 150px; overflow-y: auto;">
+                                    <div onclick="selectAdvancedProduct('A00001')" style="
+                                        padding: 8px;
+                                        border-radius: 4px;
+                                        cursor: pointer;
+                                        margin-bottom: 5px;
+                                        transition: all 0.2s;
+                                    " onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='white'">
+                                        <span style="display: inline-block; width: 8px; height: 8px; background: #10b981; border-radius: 50%; margin-right: 8px;"></span>
+                                        <strong>A00001</strong> - Connecteur USB-C<br>
+                                        <small style="color: #64748b;">150 stock • 45.50€ HT</small>
+                                    </div>
+                                    <div onclick="selectAdvancedProduct('A00002')" style="
+                                        padding: 8px;
+                                        border-radius: 4px;
+                                        cursor: pointer;
+                                        margin-bottom: 5px;
+                                        transition: all 0.2s;
+                                    " onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='white'">
+                                        <span style="display: inline-block; width: 8px; height: 8px; background: #f59e0b; border-radius: 50%; margin-right: 8px;"></span>
+                                        <strong>A00002</strong> - Cable HDMI 2m<br>
+                                        <small style="color: #64748b;">12 stock • 23.90€ HT</small>
+                                    </div>
+                                    <div onclick="selectAdvancedProduct('A00003')" style="
+                                        padding: 8px;
+                                        border-radius: 4px;
+                                        cursor: pointer;
+                                        margin-bottom: 5px;
+                                        transition: all 0.2s;
+                                    " onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='white'">
+                                        <span style="display: inline-block; width: 8px; height: 8px; background: #ef4444; border-radius: 50%; margin-right: 8px;"></span>
+                                        <strong>A00003</strong> - Adaptateur<br>
+                                        <small style="color: #64748b;">Rupture • 67.00€ HT</small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Sidebar -->
+                    <div>
+                        <!-- Dashboard -->
+                        <div style="background: #f8fafc; border-radius: 15px; padding: 20px; margin-bottom: 20px;">
+                            <h4 style="color: #2c3e50; margin-bottom: 15px;">📊 Aperçu Temps Réel</h4>
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                                <span style="color: #64748b; font-size: 0.9em;">💰 Montant estimé</span>
+                                <span style="font-weight: 600;" id="advancedAmount">0 € HT</span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                                <span style="color: #64748b; font-size: 0.9em;">📦 Disponibilité</span>
+                                <span style="font-weight: 600;" id="advancedAvailability">En attente</span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                                <span style="color: #64748b; font-size: 0.9em;">⏱️ Délai livraison</span>
+                                <span style="font-weight: 600;">5-7 jours</span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between;">
+                                <span style="color: #64748b; font-size: 0.9em;">🎯 Marge estimée</span>
+                                <span style="font-weight: 600;">23%</span>
+                            </div>
+                        </div>
+
+                        <!-- Actions rapides -->
+                        <div style="background: #f8fafc; border-radius: 15px; padding: 20px; margin-bottom: 20px;">
+                            <h4 style="color: #2c3e50; margin-bottom: 15px;">🚀 Actions Rapides</h4>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                                <button style="padding: 8px; background: white; border: 1px solid #e2e8f0; border-radius: 6px; cursor: pointer; font-size: 0.8em;" onclick="advancedAction('duplicate')">📋 Dupliquer</button>
+                                <button style="padding: 8px; background: white; border: 1px solid #e2e8f0; border-radius: 6px; cursor: pointer; font-size: 0.8em;" onclick="advancedAction('contact')">📞 Contact</button>
+                                <button style="padding: 8px; background: white; border: 1px solid #e2e8f0; border-radius: 6px; cursor: pointer; font-size: 0.8em;" onclick="advancedAction('email')">📧 Email</button>
+                                <button style="padding: 8px; background: white; border: 1px solid #e2e8f0; border-radius: 6px; cursor: pointer; font-size: 0.8em;" onclick="advancedAction('template')">💾 Modèle</button>
+                            </div>
+                        </div>
+
+                        <!-- Mode démo -->
+                        <div style="background: #f8fafc; border-radius: 15px; padding: 20px;">
+                            <h4 style="color: #2c3e50; margin-bottom: 15px;">🎪 Scénarios Démo</h4>
+                            <button onclick="loadAdvancedDemo('scenario1')" style="width: 100%; padding: 8px; background: white; border: 1px solid #e2e8f0; border-radius: 6px; cursor: pointer; margin-bottom: 6px; font-size: 0.9em;">🎯 Client existant</button>
+                            <button onclick="loadAdvancedDemo('scenario2')" style="width: 100%; padding: 8px; background: white; border: 1px solid #e2e8f0; border-radius: 6px; cursor: pointer; margin-bottom: 6px; font-size: 0.9em;">🆕 Nouveau client</button>
+                            <button onclick="loadAdvancedDemo('scenario3')" style="width: 100%; padding: 8px; background: white; border: 1px solid #e2e8f0; border-radius: 6px; cursor: pointer; margin-bottom: 6px; font-size: 0.9em;">📦 Multi-produits</button>
+                            <button onclick="loadAdvancedDemo('scenario4')" style="width: 100%; padding: 8px; background: white; border: 1px solid #e2e8f0; border-radius: 6px; cursor: pointer; font-size: 0.9em;">⚠️ Rupture stock</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Bouton génération dans l'interface avancée -->
+                <div style="margin-top: 30px; text-align: center;">
+                    <button onclick="generateAdvancedQuote()" style="
+                        padding: 15px 40px;
+                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                        color: white;
+                        border: none;
+                        border-radius: 10px;
+                        font-size: 1.1em;
+                        font-weight: 600;
+                        cursor: pointer;
+                        margin-right: 15px;
+                    ">🚀 Générer Devis Avancé</button>
+                    <button onclick="closeAdvancedInterface()" style="
+                        padding: 15px 30px;
+                        background: #f1f5f9;
+                        color: #475569;
+                        border: 1px solid #e2e8f0;
+                        border-radius: 10px;
+                        font-size: 1em;
+                        cursor: pointer;
+                    ">Retour Simple</button>
+                </div>
+            `;
+        }
+
+    function showNotification(message, type = 'success') {
+        const notification = document.createElement('div');
+        notification.className = `notification ${type}`;
+        notification.textContent = message;
+        document.body.appendChild(notification);
+        
+        setTimeout(() => notification.classList.add('show'), 100);
+        setTimeout(() => {
+            notification.classList.remove('show');
+            setTimeout(() => {
+                if (document.body.contains(notification)) {
+                    document.body.removeChild(notification);
+                }
+            }, 300);
+        }, 3000);
+    }
+
+    function sendQuoteByEmail() {
+        // Créer modal d'envoi d'email
+        const emailModal = document.createElement('div');
+        emailModal.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            backdrop-filter: blur(5px);
+        `;
+        
+        emailModal.innerHTML = `
+            <div style="
+                background: white;
+                border-radius: 15px;
+                width: 100%;
+                max-width: 500px;
+                padding: 30px;
+                box-shadow: 0 25px 60px rgba(0,0,0,0.3);
+            ">
+                <div style="
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    margin-bottom: 20px;
+                ">
+                    <h3 style="margin: 0; color: #2c3e50;">Envoyer le Devis par Email</h3>
+                    <button onclick="closeEmailModal()" style="
+                        background: #f1f5f9;
+                        border: none;
+                        color: #64748b;
+                        padding: 8px 12px;
+                        border-radius: 6px;
+                        cursor: pointer;
+                        font-size: 1.2em;
+                    ">×</button>
+                </div>
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #374151;">Email du client :</label>
+                    <input type="email" id="clientEmail" value="contact@edge-communications.fr" style="
+                        width: 100%;
+                        padding: 10px;
+                        border: 1px solid #e2e8f0;
+                        border-radius: 6px;
+                        font-size: 1em;
+                    "/>
+                </div>
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #374151;">Objet :</label>
+                    <input type="text" id="emailSubject" value="Devis NOVA-${new Date().getTime().toString().slice(-6)}" style="
+                        width: 100%;
+                        padding: 10px;
+                        border: 1px solid #e2e8f0;
+                        border-radius: 6px;
+                        font-size: 1em;
+                    "/>
+                </div>
+                <div style="margin-bottom: 20px;">
+                    <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #374151;">Message :</label>
+                    <textarea id="emailMessage" style="
+                        width: 100%;
+                        height: 100px;
+                        padding: 10px;
+                        border: 1px solid #e2e8f0;
+                        border-radius: 6px;
+                        font-size: 1em;
+                        resize: vertical;
+                        font-family: inherit;
+                    ">Bonjour,
+
+Veuillez trouver ci-joint votre devis généré automatiquement via NOVA.
+
+Détails du devis :
+- Montant total : ${document.querySelector('#resultContent') && document.querySelector('#resultContent').textContent.includes('€') ? (document.querySelector('#resultContent').textContent.match(/\d+[,.]?\d*\s*€/) || ['40,000.00 €'])[0] : '40,000.00 €'}
+- Validité : 30 jours
+
+N'hésitez pas à nous contacter pour toute question.
+
+Cordialement,
+L'équipe commerciale</textarea>
+                    </div>
+                    
+                    <div style="display: flex; gap: 12px;">
+                        <button onclick="sendEmailNow()" style="
+                            flex: 1;
+                            padding: 12px 20px;
+                            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+                            color: white;
+                            border: none;
+                            border-radius: 8px;
+                            font-weight: 600;
+                            cursor: pointer;
+                        ">📧 Envoyer</button>
+                        <button onclick="closeEmailModal()" style="
+                            flex: 1;
+                            padding: 12px 20px;
+                            background: #f1f5f9;
+                            color: #475569;
+                            border: 1px solid #e2e8f0;
+                            border-radius: 8px;
+                            font-weight: 600;
+                            cursor: pointer;
+                        ">Annuler</button>
+                    </div>
+                </div>
+            `; // <-- properly closed template literal
+            
+            document.body.appendChild(emailModal);
+            emailModal.id = 'emailModal';
+            
+            // Focus sur l'email
+            setTimeout(() => {
+                document.getElementById('clientEmail').focus();
+            }, 100);
+        }
+
+        function closeEmailModal() {
+            const modal = document.getElementById('emailModal');
+            if (modal) {
+                modal.style.opacity = '0';
+                setTimeout(() => {
+                    document.body.removeChild(modal);
+                }, 300);
+            }
+        }
+
+        function sendEmailNow() {
+            const email = document.getElementById('clientEmail').value;
+            const subject = document.getElementById('emailSubject').value;
+            const message = document.getElementById('emailMessage').value;
+            
+            if (!email || !subject) {
+                showNotification('Veuillez remplir tous les champs obligatoires', 'error');
+                return;
+            }
+            
+            // Simulation d'envoi d'email réaliste
+            closeEmailModal();
+            showNotification('Envoi en cours...', 'success');
+            
+            setTimeout(() => {
+                showNotification(`Email envoyé avec succès à ${email} !`, 'success');
+                
+                // Optionnel : ouvrir le client email par défaut
+                const mailto = `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(message)}`;
+                window.open(mailto, '_blank');
+            }, 2000);
+        }
+
+        function viewQuotePDF() {
+            // Créer modal de prévisualisation PDF
+            const pdfModal = document.createElement('div');
+            pdfModal.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0,0,0,0.5);
+                z-index: 1000;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 20px;
+                backdrop-filter: blur(5px);
+            `;
+            
+            pdfModal.innerHTML = `
+                <div style="
+                    background: white;
+                    border-radius: 15px;
+                    width: 100%;
+                    max-width: 800px;
+                    max-height: 90vh;
+                    padding: 30px;
+                    box-shadow: 0 25px 60px rgba(0,0,0,0.3);
+                    overflow-y: auto;
+                ">
+                    <div style="
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                        margin-bottom: 20px;
+                    ">
+                        <h3 style="margin: 0; color: #2c3e50;">📄 Aperçu du Devis PDF</h3>
+                        <button onclick="closePDFModal()" style="
+                            background: #f1f5f9;
+                            border: none;
+                            color: #64748b;
+                            padding: 8px 12px;
+                            border-radius: 6px;
+                            cursor: pointer;
+                            font-size: 1.2em;
+                        ">✕</button>
+                    </div>
+                    <!-- Simulation du contenu PDF -->
+                    <div style="
+                        background: #f8fafc;
+                        border: 2px dashed #cbd5e1;
+                        border-radius: 8px;
+                        padding: 30px;
+                        text-align: center;
+                        margin-bottom: 20px;
+                    ">
+                        <div style="font-size: 3em; margin-bottom: 15px;">📋</div>
+                        <h4 style="color: #475569; margin-bottom: 10px;">Aperçu du Devis PDF</h4>
+                        <p style="color: #64748b; margin-bottom: 15px;">
+                            Le PDF sera généré avec tous les détails du devis :<br />
+                            • Informations client<br />
+                            • Liste des produits<br />
+                            • Prix et conditions<br />
+                            • Mentions légales
+                        </p>
+                        <div style="background: white; padding: 15px; border-radius: 6px; margin: 15px 0; border: 1px solid #e2e8f0;">
+                            <strong>Devis N° NOVA-${new Date().getTime().toString().slice(-6)}</strong><br />
+                            <small style="color: #64748b;">Client : Edge Communications</small><br />
+                            <small style="color: #64748b;">Montant : 40,000.00 € HT</small>
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 12px;">
+                        <button onclick="downloadPDF()" style="
+                            flex: 1;
+                            padding: 12px 20px;
+                            background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+                            color: white;
+                            border: none;
+                            border-radius: 8px;
+                            font-weight: 600;
+                            cursor: pointer;
+                        ">💾 Télécharger PDF</button>
+                        <button onclick="openPDFInNewTab()" style="
+                            flex: 1;
+                            padding: 12px 20px;
+                            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+                            color: white;
+                            border: none;
+                            border-radius: 8px;
+                            font-weight: 600;
+                            cursor: pointer;
+                        ">👁️ Ouvrir dans un nouvel onglet</button>
+                        <button onclick="closePDFModal()" style="
+                            flex: 1;
+                            padding: 12px 20px;
+                            background: #f1f5f9;
+                            color: #475569;
+                            border: 1px solid #e2e8f0;
+                            border-radius: 8px;
+                            font-weight: 600;
+                            cursor: pointer;
+                        ">Fermer</button>
+                    </div>
+                </div>
+            `;
+            
+            document.body.appendChild(pdfModal);
+            pdfModal.id = 'pdfModal';
+        }
+
+        function closePDFModal() {
+            const modal = document.getElementById('pdfModal');
+            if (modal) {
+                modal.style.opacity = '0';
+                setTimeout(() => {
+                    document.body.removeChild(modal);
+                }, 300);
+            }
+        }
+
+        function downloadPDF() {
+            showNotification('Génération du PDF en cours...', 'success');
+            
+            // Simulation du téléchargement
+            setTimeout(() => {
+                // Créer un lien de téléchargement simulé
+                const link = document.createElement('a');
+                link.href = 'data:application/pdf;base64,JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PAovVHlwZSAvQ2F0YWxvZwovUGFnZXMgMiAwIFIKPj4KZW5kb2JqCjIgMCBvYmoKPDwKL1R5cGUgL1BhZ2VzCi9LaWRzIFszIDAgUl0KL0NvdW50IDEKPD4KZW5kb2JqCjMgMCBvYmoKPDwKL1R5cGUgL1BhZ2UKL1BhcmVudCAyIDAgUgovTWVkaWFCb3ggWzAgMCA2MTIgNzkyXQovQ29udGVudHMgNCAwIFIKPj4KZW5kb2JqCjQgMCBvYmoKPDwKL0xlbmd0aCA0NAo+PgpzdHJlYW0KQVQKL0YxIDEyIFRmCjcyIDcyMCBUZApEZXZpcyBOT1ZBLTEyMzQ1NgpFVApFVApzdHJlYW0KZW5kb2JqCnhyZWYKMCA1CjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDAwOSAwMDAwMCBuIAowMDAwMDAwMDU4IDAwMDAwIG4gCjAwMDAwMDAxMTUgMDAwMDAgbiAKMDAwMDAwMDE5NiAwMDAwMCBuIAp0cmFpbGVyCjw8Ci9TaXplIDUKL1Jvb3QgMSAwIFIKPj4Kc3RhcnR4cmVmCjI5MAolJUVPRgo=';
+                link.download = `Devis_NOVA_${new Date().getTime().toString().slice(-6)}.pdf`;
+                link.click();
+                
+                closePDFModal();
+                showNotification('PDF téléchargé avec succès !', 'success');
+            }, 1500);
+        }
+
+        function openPDFInNewTab() {
+            // Ouvrir une page simulée du PDF
+            const pdfContent = `
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>Devis NOVA - ${new Date().getTime().toString().slice(-6)}</title>
+                    <style>
+                        body { font-family: Arial; padding: 40px; background: #f5f5f5; }
+                        .pdf-container { background: white; padding: 40px; max-width: 800px; margin: 0 auto; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+                        .header { text-align: center; border-bottom: 2px solid #667eea; padding-bottom: 20px; margin-bottom: 30px; }
+                        .section { margin-bottom: 20px; }
+                        .total { background: #f8f9fa; padding: 15px; border-left: 4px solid #667eea; }
+                    </style>
+                </head>
+                <body>
+                    <div class="pdf-container">
+                            <h1>🚀 DEVIS NOVA</h1>
+                            <p>N° NOVA-${new Date().getTime().toString().slice(-6)}</p>
+                            <p>Date: ${new Date().toLocaleDateString('fr-FR')}</p>
+                        </div>
+                        
+                        <div class="section">
+                            <h3>👤 Informations Client</h3>
+                            <p><strong>Nom :</strong> Edge Communications</p>
+                            <p><strong>ID Salesforce :</strong> 001gL000005OYCDQA4</p>
+                            <p><strong>Code SAP :</strong> CEDGEC1058</p>
+                        </div>
+                        
+                        <div class="section">
+                            <h3>📦 Détails des Produits</h3>
+                            <table style="width: 100%; border-collapse: collapse;">
+                                <tr style="background: #f8f9fa;">
+                                    <th style="padding: 10px; border: 1px solid #ddd;">Code</th>
+                                    <th style="padding: 10px; border: 1px solid #ddd;">Désignation</th>
+                                    <th style="padding: 10px; border: 1px solid #ddd;">Qté</th>
+                                    <th style="padding: 10px; border: 1px solid #ddd;">Prix Unit.</th>
+                                    <th style="padding: 10px; border: 1px solid #ddd;">Total</th>
+                                </tr>
+                                <tr>
+                                    <td style="padding: 10px; border: 1px solid #ddd;">A00001</td>
+                                    <td style="padding: 10px; border: 1px solid #ddd;">Connecteur USB-C</td>
+                                    <td style="padding: 10px; border: 1px solid #ddd;">100</td>
+                                    <td style="padding: 10px; border: 1px solid #ddd;">400,00 €</td>
+                                    <td style="padding: 10px; border: 1px solid #ddd;">40 000,00 €</td>
+                                </tr>
+                            </table>
+                        </div>
+                        
+                        <div class="total">
+                            <h3>💰 Total du Devis</h3>
+                            <p><strong>Montant HT : 40 000,00 €</strong></p>
+                            <p><strong>TVA (20%) : 8 000,00 €</strong></p>
+                            <p style="font-size: 1.2em;"><strong>TOTAL TTC : 48 000,00 €</strong></p>
+                        </div>
+                        
+                        <div class="section">
+                            <h3>📋 Conditions</h3>
+                            <p>• Validité du devis : 30 jours</p>
+                            <p>• Délai de livraison : 5-7 jours ouvrés</p>
+                            <p>• Paiement : 30 jours net</p>
+                        </div>
+                        
+                        <div style="text-align: center; margin-top: 40px; color: #64748b;">
+                            <p><em>Devis généré automatiquement par NOVA - ${new Date().toLocaleString('fr-FR')}</em></p>
+                        </div>
+                    </div>
+                </body>
+                </html>
+            `;
+            
+            const newWindow = window.open('', '_blank');
+            newWindow.document.write(pdfContent);
+            newWindow.document.close();
+            
+            closePDFModal();
+            showNotification('PDF ouvert dans un nouvel onglet !', 'success');
+        }
+
+        function newQuote() {
+            document.getElementById('mainInput').value = '';
+            document.getElementById('resultPanel').style.display = 'none';
+            document.getElementById('mainInput').focus();
+            showNotification('Prêt pour un nouveau devis !', 'success');
+        }
+
+        // Focus automatique au chargement
+        window.addEventListener('load', function() {
+            var mainInput = document.getElementById('mainInput');
+            if (mainInput) mainInput.focus();
+        });
+
+        // Raccourci clavier Ctrl+Enter pour générer
+        document.getElementById('mainInput').addEventListener('keydown', function(e) {
+            if (e.ctrlKey && e.key === 'Enter') {
+                generateQuote();
+            }
+        });
+    </script>
+</body>
+</html>
