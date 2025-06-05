@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>NOVA - Génération de Devis IA</title>
@@ -370,6 +371,7 @@
         }
     </style>
 </head>
+
 <body>
     <div class="container">
         <div class="header">
@@ -510,11 +512,7 @@ Exemples :
                 }
                 
             } catch (error) {
-                console.error('Erreur API:', error);
-                // Fallback: simulation pour la démo
-                setTimeout(() => {
-                    showQuoteResultDemo(prompt);
-                }, 1000);
+                showError(error.message || 'Erreur lors de la génération du devis');
             }
         }
 
@@ -550,10 +548,10 @@ Exemples :
                 </div>
                 
                 <div class="result-actions">
-                    <button class="result-btn result-btn-primary" onclick="sendQuoteByEmail()">
+                    <button id="dynamicSendEmailButton" class="result-btn result-btn-primary">
                         📧 Envoyer au client
                     </button>
-                    <button class="result-btn result-btn-secondary" onclick="viewQuotePDF()">
+                    <button id="dynamicShowPdfButton" class="result-btn result-btn-secondary">
                         📄 Voir PDF
                     </button>
                     <button class="result-btn result-btn-secondary" onclick="newQuote()">
@@ -563,51 +561,71 @@ Exemples :
             `;
             
             document.getElementById('resultContent').innerHTML = resultContent;
+
+            const btnPDF = document.getElementById('dynamicShowPdfButton');
+            if (btnPDF) {
+                btnPDF.addEventListener('click', () => showQuotePreview(result));
+            }
+            const btnEmail = document.getElementById('dynamicSendEmailButton');
+            if (btnEmail) {
+                btnEmail.addEventListener('click', sendQuoteByEmail);
+            }
+
             showNotification('Devis généré avec succès !', 'success');
         }
+        function showQuotePreview(result) {
+            const previewContainer = document.createElement('div');
+            previewContainer.id = 'quote-preview';
+            previewContainer.contentEditable = true;
+            previewContainer.style = 'background: white; padding: 30px; width: 800px; margin: 40px auto; border: 1px solid #ccc; border-radius: 8px; font-family: sans-serif; box-shadow: 0 5px 15px rgba(0,0,0,0.1);';
 
-        function showQuoteResultDemo(prompt) {
-            // Simulation réaliste pour la démo
-            const demoResults = {
-                'safran': {
-                    client: 'SAFRAN Group',
-                    amount: '22,750.00',
-                    products: 500,
-                    quote_id: 'NOVA-SF-' + Math.floor(Math.random() * 1000)
-                },
-                'edge': {
-                    client: 'Edge Communications',
-                    amount: '4,550.00',
-                    products: 100,
-                    quote_id: 'NOVA-EC-' + Math.floor(Math.random() * 1000)
-                },
-                'airbus': {
-                    client: 'Airbus Industries',
-                    amount: '13,400.00',
-                    products: 200,
-                    quote_id: 'NOVA-AI-' + Math.floor(Math.random() * 1000)
-                }
-            };
-            
-            const key = prompt.toLowerCase().includes('safran') ? 'safran' :
-                       prompt.toLowerCase().includes('edge') ? 'edge' :
-                       prompt.toLowerCase().includes('airbus') ? 'airbus' : 'safran';
-            
-            const demo = demoResults[key];
-            
-            const mockResult = {
-                status: 'success',
-                quote_id: demo.quote_id,
-                client: { name: demo.client },
-                products: Array(demo.products).fill({}),
-                total_amount: demo.amount,
-                currency: 'EUR',
-                date: new Date().toLocaleDateString('fr-FR')
-            };
-            
-            showQuoteResult(mockResult);
-        }
+            let productsList = '<li>Non défini</li>';
+            if (Array.isArray(result.products)) {
+                productsList = result.products.map(p => {
+                const quantity = p.quantity ?? '-';
+                const label = p.label ?? p.code ?? 'Produit';
+                return `<li>${quantity} × ${label}</li>`;
+                }).join('');
+            }
 
+            previewContainer.innerHTML = `
+                <h2 style="text-align:center;">🧾 DEVIS #<span id="preview-id">${result.quote_id || '---'}</span></h2>
+                <p><strong>Client :</strong> <span id="preview-client">${result.client?.name || '---'}</span></p>
+                <p><strong>Date :</strong> <span id="preview-date">${result.date || new Date().toLocaleDateString()}</span></p>
+                <p><strong>Montant total :</strong> <span id="preview-amount">${result.total_amount || '---'} ${result.currency || 'EUR'}</span></p>
+                <h3>📦 Produits :</h3>
+                <ul id="preview-products">${productsList}</ul>
+            `;
+
+            const old = document.getElementById('quote-preview');
+            if (old) old.remove();
+            document.body.appendChild(previewContainer);
+
+            // Ajouter bouton export PDF
+            const oldBtn = document.getElementById('pdf-export-btn');
+            if (oldBtn) oldBtn.remove();
+
+            const exportBtn = document.createElement('button');
+            exportBtn.id = 'pdf-export-btn';
+            exportBtn.innerText = '📄 Exporter en PDF';
+            exportBtn.onclick = generatePDF;
+            exportBtn.style = 'display:block;margin:20px auto;padding:12px 25px;background:#1d4ed8;color:white;border:none;border-radius:6px;font-size:1em;cursor:pointer;';
+            document.body.appendChild(exportBtn);
+            }
+
+
+
+            function generatePDF() {
+            const element = document.getElementById('quote-preview');
+            const opt = {
+                margin:       0.5,
+                filename:     'devis_nova.pdf',
+                image:        { type: 'jpeg', quality: 0.98 },
+                html2canvas:  { scale: 2 },
+                jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' }
+            };
+            html2pdf().set(opt).from(element).save();
+            }
         function showError(message) {
             document.getElementById('processing').style.display = 'none';
             document.getElementById('generateBtn').disabled = false;
@@ -1028,114 +1046,6 @@ L'équipe commerciale</textarea>
             }, 2000);
         }
 
-        function viewQuotePDF() {
-            // Créer modal de prévisualisation PDF
-            const pdfModal = document.createElement('div');
-            pdfModal.style.cssText = `
-                position: fixed;
-                top: 0;
-                left: 0;
-                width: 100%;
-                height: 100%;
-                background: rgba(0,0,0,0.5);
-                z-index: 1000;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                padding: 20px;
-                backdrop-filter: blur(5px);
-            `;
-            
-            pdfModal.innerHTML = `
-                <div style="
-                    background: white;
-                    border-radius: 15px;
-                    width: 100%;
-                    max-width: 800px;
-                    max-height: 90vh;
-                    padding: 30px;
-                    box-shadow: 0 25px 60px rgba(0,0,0,0.3);
-                    overflow-y: auto;
-                ">
-                    <div style="
-                        display: flex;
-                        justify-content: space-between;
-                        align-items: center;
-                        margin-bottom: 20px;
-                    ">
-                        <h3 style="margin: 0; color: #2c3e50;">📄 Aperçu du Devis PDF</h3>
-                        <button onclick="closePDFModal()" style="
-                            background: #f1f5f9;
-                            border: none;
-                            color: #64748b;
-                            padding: 8px 12px;
-                            border-radius: 6px;
-                            cursor: pointer;
-                            font-size: 1.2em;
-                        ">✕</button>
-                    </div>
-                    <!-- Simulation du contenu PDF -->
-                    <div style="
-                        background: #f8fafc;
-                        border: 2px dashed #cbd5e1;
-                        border-radius: 8px;
-                        padding: 30px;
-                        text-align: center;
-                        margin-bottom: 20px;
-                    ">
-                        <div style="font-size: 3em; margin-bottom: 15px;">📋</div>
-                        <h4 style="color: #475569; margin-bottom: 10px;">Aperçu du Devis PDF</h4>
-                        <p style="color: #64748b; margin-bottom: 15px;">
-                            Le PDF sera généré avec tous les détails du devis :<br />
-                            • Informations client<br />
-                            • Liste des produits<br />
-                            • Prix et conditions<br />
-                            • Mentions légales
-                        </p>
-                        <div style="background: white; padding: 15px; border-radius: 6px; margin: 15px 0; border: 1px solid #e2e8f0;">
-                            <strong>Devis N° NOVA-${new Date().getTime().toString().slice(-6)}</strong><br />
-                            <small style="color: #64748b;">Client : Edge Communications</small><br />
-                            <small style="color: #64748b;">Montant : 40,000.00 € HT</small>
-                        </div>
-                    </div>
-                    <div style="display: flex; gap: 12px;">
-                        <button onclick="downloadPDF()" style="
-                            flex: 1;
-                            padding: 12px 20px;
-                            background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
-                            color: white;
-                            border: none;
-                            border-radius: 8px;
-                            font-weight: 600;
-                            cursor: pointer;
-                        ">💾 Télécharger PDF</button>
-                        <button onclick="openPDFInNewTab()" style="
-                            flex: 1;
-                            padding: 12px 20px;
-                            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-                            color: white;
-                            border: none;
-                            border-radius: 8px;
-                            font-weight: 600;
-                            cursor: pointer;
-                        ">👁️ Ouvrir dans un nouvel onglet</button>
-                        <button onclick="closePDFModal()" style="
-                            flex: 1;
-                            padding: 12px 20px;
-                            background: #f1f5f9;
-                            color: #475569;
-                            border: 1px solid #e2e8f0;
-                            border-radius: 8px;
-                            font-weight: 600;
-                            cursor: pointer;
-                        ">Fermer</button>
-                    </div>
-                </div>
-            `;
-            
-            document.body.appendChild(pdfModal);
-            pdfModal.id = 'pdfModal';
-        }
 
         function closePDFModal() {
             const modal = document.getElementById('pdfModal');
@@ -1392,5 +1302,6 @@ L'équipe commerciale</textarea>
         }
 
     </script>
+
 </body>
 </html>
