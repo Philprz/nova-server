@@ -407,7 +407,7 @@ async def get_client_requirements():
         raise HTTPException(status_code=500, detail=f"Erreur lors de la récupération des exigences: {str(e)}")
 
 @router.get("/search_clients_advanced")
-async def search_clients_advanced(q: str = "", limit: int = 10):
+async def search_clients_advanced(q: str = "", limit: int =50):
     """
     Recherche de clients Salesforce pour l'interface avancée - VERSION CORRIGÉE
     """

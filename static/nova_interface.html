@@ -868,6 +868,11 @@ Exemples :
                     ">Retour Simple</button>
                 </div>
             `;
+            
+            // Charger les clients au démarrage de l'interface avancée
+            setTimeout(() => {
+                loadRealClients();
+            }, 100);    
         }
 
     function showNotification(message, type = 'success') {
@@ -1353,11 +1358,6 @@ L'équipe commerciale</textarea>
             updateAdvancedPreview();
         }
 
-        // Charger les clients au démarrage de l'interface avancée
-        // Modifier la fonction loadAdvancedInterface() pour ajouter à la fin :
-        setTimeout(() => {
-            loadRealClients();
-        }, 500);
     </script>
 </body>
 </html>
