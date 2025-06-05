@@ -5,6 +5,21 @@ from fastapi.staticfiles import StaticFiles
 
 # Import seulement des routes qui existent réellement
 try:
+    from routes.routes_sync import router as sync_router
+    sync_available = True
+    print("✅ routes_sync chargées avec succès")
+except ImportError as e:
+    sync_available = False
+    print(f"⚠️ routes_sync non disponible: {e}")
+
+try:
+    from routes.routes_products import router as products_router
+    products_available = True
+    print("✅ routes_products chargées avec succès")
+except ImportError as e:
+    products_available = False
+    print(f"⚠️ routes_products non disponible: {e}")
+try:
     from routes.routes_claude import router as claude_router
     claude_available = True
 except ImportError:
@@ -85,6 +100,10 @@ if sync_available:
     app.include_router(sync_router, prefix="/sync", tags=["Synchronisation"])
     print("✅ Routes Synchronisation chargées")
 
+if products_available:
+    app.include_router(products_router, prefix="/products", tags=["Produits"])
+    print("✅ Routes Produits chargées")
+    
 @app.get("/", tags=["Health"])
 def root():
     """Point d'entrée principal - Vérification de santé"""

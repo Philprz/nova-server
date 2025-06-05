@@ -750,51 +750,30 @@ Exemples :
                                 ">➕ Créer nouveau client</button>
                             </div>
 
-                            <!-- Produits -->
+                        <!-- Produits -->
                             <div style="background: white; border-radius: 12px; padding: 20px; border: 1px solid #e2e8f0;">
                                 <h4 style="margin-bottom: 15px; color: #2c3e50;">📦 Sélection Produits</h4>
-                                <input type="text" placeholder="🔍 Rechercher produits..." style="
+                                <input type="text" placeholder="🔍 Rechercher produits..." onkeyup="searchProducts(this.value)" style="
                                     width: 100%;
                                     padding: 10px;
                                     border: 1px solid #e2e8f0;
                                     border-radius: 6px;
                                     margin-bottom: 10px;
                                 ">
-                                <div style="max-height: 150px; overflow-y: auto;">
-                                    <div onclick="selectAdvancedProduct('A00001')" style="
-                                        padding: 8px;
-                                        border-radius: 4px;
-                                        cursor: pointer;
-                                        margin-bottom: 5px;
-                                        transition: all 0.2s;
-                                    " onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='white'">
-                                        <span style="display: inline-block; width: 8px; height: 8px; background: #10b981; border-radius: 50%; margin-right: 8px;"></span>
-                                        <strong>A00001</strong> - Connecteur USB-C<br>
-                                        <small style="color: #64748b;">150 stock • 45.50€ HT</small>
-                                    </div>
-                                    <div onclick="selectAdvancedProduct('A00002')" style="
-                                        padding: 8px;
-                                        border-radius: 4px;
-                                        cursor: pointer;
-                                        margin-bottom: 5px;
-                                        transition: all 0.2s;
-                                    " onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='white'">
-                                        <span style="display: inline-block; width: 8px; height: 8px; background: #f59e0b; border-radius: 50%; margin-right: 8px;"></span>
-                                        <strong>A00002</strong> - Cable HDMI 2m<br>
-                                        <small style="color: #64748b;">12 stock • 23.90€ HT</small>
-                                    </div>
-                                    <div onclick="selectAdvancedProduct('A00003')" style="
-                                        padding: 8px;
-                                        border-radius: 4px;
-                                        cursor: pointer;
-                                        margin-bottom: 5px;
-                                        transition: all 0.2s;
-                                    " onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='white'">
-                                        <span style="display: inline-block; width: 8px; height: 8px; background: #ef4444; border-radius: 50%; margin-right: 8px;"></span>
-                                        <strong>A00003</strong> - Adaptateur<br>
-                                        <small style="color: #64748b;">Rupture • 67.00€ HT</small>
+                                <div style="max-height: 150px; overflow-y: auto;" id="productsContainer">
+                                    <div style="padding: 20px; text-align: center; color: #64748b;">
+                                        Chargement des produits...
                                     </div>
                                 </div>
+                                <button onclick="showCreateProductForm()" style="
+                                    width: 100%;
+                                    padding: 8px;
+                                    background: #f1f5f9;
+                                    border: 1px solid #e2e8f0;
+                                    border-radius: 6px;
+                                    cursor: pointer;
+                                    margin-top: 10px;
+                                ">➕ Ajouter produit personnalisé</button>
                             </div>
                         </div>
                     </div>
@@ -872,6 +851,7 @@ Exemples :
             // Charger les clients au démarrage de l'interface avancée
             setTimeout(() => {
                 loadRealClients();
+                loadRealProducts();
             }, 100);    
         }
 
@@ -1338,6 +1318,59 @@ L'équipe commerciale</textarea>
                 `;
             }
         }
+        async function loadRealProducts(searchTerm = '') {
+            try {
+                const response = await fetch(`/products/search_products_advanced?q=${encodeURIComponent(searchTerm)}&limit=10`);
+                const data = await response.json();
+
+                const productsContainer = document.getElementById('productsContainer');
+
+                if (data.success && data.products.length > 0) {
+                    productsContainer.innerHTML = data.products.map(product => `
+                        <div onclick="selectAdvancedProduct('${product.item_code}', '${product.item_name}', ${product.price})" style="
+                            padding: 12px;
+                            border-radius: 6px;
+                            cursor: pointer;
+                            margin-bottom: 8px;
+                            border: 1px solid #e2e8f0;
+                            transition: all 0.2s;
+                            background: white;
+                        " onmouseover="this.style.background='#f8fafc'; this.style.borderColor='#3b82f6'" 
+                        onmouseout="this.style.background='white'; this.style.borderColor='#e2e8f0'">
+                            <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 4px;">
+                                <strong style="color: #1f2937; font-size: 0.95em;">${product.display_text}</strong>
+                                ${product.price > 0 ? `<span style='font-size: 0.9em; color: #059669;'>${product.price_display}</span>` : ''}
+                            </div>
+                            <div style="font-size: 0.85em; color: ${product.availability_color};">
+                                ${product.availability_text}
+                            </div>
+                        </div>
+                    `).join('');
+                } else {
+                    productsContainer.innerHTML = `
+                        <div style="padding: 20px; text-align: center; color: #64748b;">
+                            <div style="font-size: 2em; margin-bottom: 10px;">🔍</div>
+                            ${searchTerm ? `Aucun produit trouvé pour "${searchTerm}"` : 'Aucun produit disponible'}
+                        </div>
+                    `;
+                }
+
+                console.log(`Produits chargés: ${data.products?.length || 0}`);
+
+            } catch (error) {
+                console.error('Erreur chargement produits:', error);
+                document.getElementById('productsContainer').innerHTML = `
+                    <div style="padding: 20px; text-align: center; color: #ef4444;">
+                        <div style="font-size: 2em; margin-bottom: 10px;">⚠️</div>
+                        Erreur de chargement des produits
+                        <div style="font-size: 0.8em; margin-top: 5px; color: #6b7280;">
+                            Vérifiez la connexion SAP
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
         // Recherche en temps réel
         function searchClients(searchTerm) {
             clearTimeout(window.clientSearchTimeout);
