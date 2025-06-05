@@ -5,12 +5,12 @@ import os
 import json
 import httpx
 import asyncio
-from datetime import datetime, timedelta
-import sys
-import io
-from typing import Optional, Dict, Any
-import traceback
 import argparse
+import traceback
+from datetime import datetime, timedelta, UTC
+from typing import Dict, Optional, Any
+import io
+import sys
 from dotenv import load_dotenv
 # Configuration de l'encodage pour Windows
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
@@ -84,7 +84,7 @@ async def login_sap():
             
             if response.status_code == 200:
                 sap_session["cookies"] = response.cookies
-                sap_session["expires"] = datetime.utcnow().timestamp() + 60 * 20  # 20 minutes
+                sap_session["expires"] = datetime.now(UTC).timestamp() + 60 * 20  # 20 minutes
                 
                 # CORRECTION ICI : Vérifier que nous avons bien reçu les cookies de session
                 session_id = None
@@ -130,7 +130,7 @@ async def login_sap():
 async def call_sap(endpoint: str, method="GET", payload: Optional[Dict[str, Any]] = None):
     """Appel à l'API REST SAP B1 avec gestion d'erreurs renforcée"""
     # Vérifier et rafraîchir la session si nécessaire
-    if not sap_session["cookies"] or datetime.utcnow().timestamp() > sap_session["expires"]:
+    if not sap_session["cookies"] or datetime.now(UTC).timestamp() > sap_session["expires"]:
         log("Session SAP expirée ou inexistante, reconnexion...")
         if not await login_sap():
             return {"error": "Impossible de se connecter à SAP"}
@@ -146,7 +146,9 @@ async def call_sap(endpoint: str, method="GET", payload: Optional[Dict[str, Any]
         if payload:
             log(f"Payload: {json.dumps(payload, indent=2)}", "DEBUG")
         
-        async with httpx.AsyncClient(cookies=sap_session["cookies"], verify=False, timeout=60.0) as client:
+        async with httpx.AsyncClient(cookies=sap_session["cookies"], verify=False, timeout=60.0, follow_redirects=True) as client:
+            # Force UTF-8 encoding for responses
+            client.headers.update({"Accept-Charset": "utf-8"})
             if method.upper() == "GET":
                 response = await client.get(url, headers=headers)
             elif method.upper() == "POST":
@@ -188,7 +190,11 @@ async def call_sap(endpoint: str, method="GET", payload: Optional[Dict[str, Any]
             
             else:
                 # Gérer les erreurs
-                error_text = response.text
+                try:
+                    # Force UTF-8 encoding for error response
+                    error_text = response.content.decode('utf-8', errors='replace')
+                except Exception as decode_err:
+                    error_text = f"[Erreur de décodage: {str(decode_err)}]"
                 log(f"❌ Erreur SAP {response.status_code}: {error_text}", "ERROR")
                 
                 try:

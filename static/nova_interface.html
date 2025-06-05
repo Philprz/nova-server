@@ -727,46 +727,16 @@ Exemples :
                             <!-- Client -->
                             <div style="background: white; border-radius: 12px; padding: 20px; border: 1px solid #e2e8f0;">
                                 <h4 style="margin-bottom: 15px; color: #2c3e50;">🏢 Sélection Client</h4>
-                                <input type="text" placeholder="🔍 Rechercher client..." style="
+                                <input type="text" placeholder="🔍 Rechercher client..." onkeyup="searchClients(this.value)" style="
                                     width: 100%;
                                     padding: 10px;
                                     border: 1px solid #e2e8f0;
                                     border-radius: 6px;
                                     margin-bottom: 10px;
                                 ">
-                                <div style="max-height: 150px; overflow-y: auto;">
-                                    <div onclick="selectAdvancedClient('Edge Communications')" style="
-                                        padding: 8px;
-                                        border-radius: 4px;
-                                        cursor: pointer;
-                                        margin-bottom: 5px;
-                                        border: 1px solid transparent;
-                                        transition: all 0.2s;
-                                    " onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='white'">
-                                        <strong>Edge Communications</strong><br>
-                                        <small style="color: #64748b;">France • Client régulier</small>
-                                    </div>
-                                    <div onclick="selectAdvancedClient('SAFRAN Group')" style="
-                                        padding: 8px;
-                                        border-radius: 4px;
-                                        cursor: pointer;
-                                        margin-bottom: 5px;
-                                        border: 1px solid transparent;
-                                        transition: all 0.2s;
-                                    " onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='white'">
-                                        <strong>SAFRAN Group</strong><br>
-                                        <small style="color: #64748b;">France • Client Premium</small>
-                                    </div>
-                                    <div onclick="selectAdvancedClient('Airbus Industries')" style="
-                                        padding: 8px;
-                                        border-radius: 4px;
-                                        cursor: pointer;
-                                        margin-bottom: 5px;
-                                        border: 1px solid transparent;
-                                        transition: all 0.2s;
-                                    " onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='white'">
-                                        <strong>Airbus Industries</strong><br>
-                                        <small style="color: #64748b;">International • Volume</small>
+                                <div style="max-height: 150px; overflow-y: auto;" id="clientsContainer">
+                                    <div style="padding: 20px; text-align: center; color: #64748b;">
+                                        Chargement des clients...
                                     </div>
                                 </div>
                                 <button onclick="showCreateClientForm()" style="
@@ -1306,6 +1276,88 @@ L'équipe commerciale</textarea>
                 generateQuote();
             }
         });
+        async function loadRealClients(searchTerm = '') {
+            try {
+                const response = await fetch(`/clients/search_clients_advanced?q=${encodeURIComponent(searchTerm)}&limit=10`);
+                const data = await response.json();
+                
+                const clientsContainer = document.getElementById('clientsContainer');
+                
+                if (data.success && data.clients.length > 0) {
+                    clientsContainer.innerHTML = data.clients.map(client => `
+                        <div onclick="selectAdvancedClient('${client.name}', '${client.id}')" style="
+                            padding: 12px;
+                            border-radius: 6px;
+                            cursor: pointer;
+                            margin-bottom: 8px;
+                            border: 1px solid #e2e8f0;
+                            transition: all 0.2s;
+                            background: white;
+                        " onmouseover="this.style.background='#f8fafc'; this.style.borderColor='#3b82f6'" 
+                        onmouseout="this.style.background='white'; this.style.borderColor='#e2e8f0'">
+                            <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 4px;">
+                                <strong style="color: #1f2937; font-size: 0.95em;">${client.name}</strong>
+                                ${client.account_number ? `<span style="font-size: 0.8em; color: #6b7280; background: #f3f4f6; padding: 2px 6px; border-radius: 3px;">${client.account_number}</span>` : ''}
+                            </div>
+                            <div style="font-size: 0.85em; color: #6b7280; margin-bottom: 2px;">
+                                📍 ${client.location_display}
+                            </div>
+                            <div style="font-size: 0.85em; color: #6b7280;">
+                                🏢 ${client.type_display}
+                            </div>
+                            ${client.phone ? `<div style="font-size: 0.8em; color: #9ca3af; margin-top: 4px;">📞 ${client.phone}</div>` : ''}
+                        </div>
+                    `).join('');
+                } else {
+                    clientsContainer.innerHTML = `
+                        <div style="padding: 20px; text-align: center; color: #64748b;">
+                            <div style="font-size: 2em; margin-bottom: 10px;">🔍</div>
+                            ${searchTerm ? `Aucun client trouvé pour "${searchTerm}"` : 'Aucun client disponible'}
+                        </div>
+                    `;
+                }
+                
+                // Debug : afficher le nombre de clients chargés
+                console.log(`Clients chargés: ${data.clients?.length || 0}`);
+                
+            } catch (error) {
+                console.error('Erreur chargement clients:', error);
+                document.getElementById('clientsContainer').innerHTML = `
+                    <div style="padding: 20px; text-align: center; color: #ef4444;">
+                        <div style="font-size: 2em; margin-bottom: 10px;">⚠️</div>
+                        Erreur de chargement des clients
+                        <div style="font-size: 0.8em; margin-top: 5px; color: #6b7280;">
+                            Vérifiez la connexion Salesforce
+                        </div>
+                    </div>
+                `;
+            }
+        }
+        // Recherche en temps réel
+        function searchClients(searchTerm) {
+            clearTimeout(window.clientSearchTimeout);
+            window.clientSearchTimeout = setTimeout(() => {
+                loadRealClients(searchTerm);
+            }, 300); // Délai de 300ms pour éviter trop d'appels
+        }
+
+        // Sélection d'un client
+        function selectAdvancedClient(clientName, clientId) {
+            // Mettre à jour l'affichage de sélection
+            showNotification(`Client sélectionné: ${clientName}`, 'success');
+            
+            // Stocker la sélection
+            window.selectedClient = { name: clientName, id: clientId };
+            
+            // Optionnel : mettre à jour l'aperçu
+            updateAdvancedPreview();
+        }
+
+        // Charger les clients au démarrage de l'interface avancée
+        // Modifier la fonction loadAdvancedInterface() pour ajouter à la fin :
+        setTimeout(() => {
+            loadRealClients();
+        }, 500);
     </script>
 </body>
 </html>

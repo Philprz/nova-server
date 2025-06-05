@@ -74,7 +74,9 @@ class MCPConnector:
                             capture_output=True,
                             text=True,
                             check=False,
-                            timeout=120  # Timeout de 2 minutes pour éviter les blocages
+                            timeout=120,
+                            encoding='utf-8',  # AJOUT : Forcer l'encodage UTF-8
+                            errors='replace'   # AJOUT : Remplacer les caractères problématiques
                         )
                         return result.returncode, result.stdout, result.stderr
                     except subprocess.TimeoutExpired:

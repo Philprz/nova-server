@@ -405,3 +405,123 @@ async def get_client_requirements():
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erreur lors de la récupération des exigences: {str(e)}")
+
+@router.get("/search_clients_advanced")
+async def search_clients_advanced(q: str = "", limit: int = 10):
+    """
+    Recherche de clients Salesforce pour l'interface avancée - VERSION CORRIGÉE
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"Recherche clients avancée: q='{q}', limit={limit}")
+    
+    try:
+        # Requête enrichie avec plus de champs et correction du tri
+        if not q.strip():
+            query = f"""
+            SELECT Id, Name, BillingCity, BillingCountry, BillingState, Phone, Type, Industry,
+                   ShippingCity, ShippingCountry, AccountNumber, CreatedDate
+            FROM Account 
+            WHERE Name != null 
+            ORDER BY Name ASC
+            LIMIT {limit}
+            """
+        else:
+            # Échapper correctement la recherche pour éviter les injections SOQL
+            escaped_query = q.replace("'", "\\'").replace("\\", "\\\\")
+            query = f"""
+            SELECT Id, Name, BillingCity, BillingCountry, BillingState, Phone, Type, Industry,
+                   ShippingCity, ShippingCountry, AccountNumber, CreatedDate
+            FROM Account 
+            WHERE Name LIKE '%{escaped_query}%' OR AccountNumber LIKE '%{escaped_query}%'
+            ORDER BY Name ASC
+            LIMIT {limit}
+            """
+        
+        # Log de debugging pour la requête Salesforce
+        logger.info(f"Requête SOQL: {query}")
+        
+        # Appel au connecteur MCP avec délai augmenté
+        result = await MCPConnector.call_salesforce_mcp("salesforce_query", {
+            "query": query
+        })
+        
+        # Vérification d'erreur explicite
+        if "error" in result:
+            logger.error(f"Erreur Salesforce MCP: {result['error']}")
+            return {"success": False, "error": result["error"], "clients": []}
+        
+        # Vérification des données reçues
+        if "records" not in result:
+            logger.error(f"Réponse Salesforce invalide: 'records' manquant. Réponse: {result}")
+            return {"success": False, "error": "Format de réponse Salesforce invalide", "clients": []}
+        
+        # Log du nombre de résultats
+        logger.info(f"Nombre de clients trouvés: {len(result.get('records', []))}")
+        
+        # Formatage amélioré avec gestion des valeurs nulles
+        formatted_clients = []
+        for record in result.get("records", []):
+            # Extraction sécurisée des données avec valeurs par défaut
+            client = {
+                "id": record.get("Id", ""),
+                "name": record.get("Name", "Client sans nom")
+            }
+            
+            # Ne pas inclure un client sans ID ou sans nom
+            if not client["id"] or not client["name"]:
+                continue
+                
+            # Gestion intelligente de la localisation
+            city = record.get("BillingCity") or record.get("ShippingCity") or ""
+            country = record.get("BillingCountry") or record.get("ShippingCountry") or ""
+            state = record.get("BillingState") or ""
+            
+            # Construction de l'affichage de localisation
+            location_parts = []
+            if city:
+                location_parts.append(city)
+            if state and country == "United States":
+                location_parts.append(state)
+            elif country:
+                location_parts.append(country)
+            
+            # Type de client enrichi
+            client_type = record.get("Type") or "Client standard"
+            industry = record.get("Industry")
+            
+            # Compléter l'objet client
+            client.update({
+                "city": city,
+                "country": country,
+                "state": state,
+                "phone": record.get("Phone", ""),
+                "type": client_type,
+                "industry": industry or "",
+                "account_number": record.get("AccountNumber") or "",
+                "location_display": " • ".join(location_parts) if location_parts else "Localisation non spécifiée",
+                "type_display": f"{client_type} • {industry}" if industry else client_type,
+                "created_date": record.get("CreatedDate", "")
+            })
+            
+            formatted_clients.append(client)
+        
+        # Tri par ordre alphabétique si nécessaire
+        formatted_clients.sort(key=lambda x: x["name"])
+        
+        return {
+            "success": True,
+            "clients": formatted_clients,
+            "count": len(formatted_clients),
+            "query": q,
+            "debug_info": {
+                "query_used": query,
+                "salesforce_records": len(result.get("records", []))
+            }
+        }
+        
+    except Exception as e:
+        import traceback
+        tb = traceback.format_exc()
+        logger.error(f"Exception dans search_clients_advanced: {str(e)}\n{tb}")
+        return {"success": False, "error": str(e), "clients": []}
