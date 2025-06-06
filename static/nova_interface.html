@@ -334,6 +334,26 @@
         .notification.error { background: #ef4444; }
         .notification.show { transform: translateX(0); }
 
+        @media (max-width: 1366px) {
+    /* Optimisation pour écrans 15" (1366x768) */
+    .container {
+        max-width: 95vw;
+        margin: 10px auto;
+    }
+    
+    .main-content {
+        padding: 30px 25px;
+    }
+    
+    .header {
+        padding: 25px 20px;
+    }
+    
+    .logo {
+        font-size: 2.5em;
+    }
+}
+
         @media (max-width: 768px) {
             .button-group {
                 flex-direction: column;
@@ -344,20 +364,20 @@
             }
             
             .container {
-                margin: 10px;
+                margin: 5px;
                 border-radius: 15px;
             }
             
             .main-content {
-                padding: 30px 25px;
+                padding: 20px 15px;
             }
             
             .header {
-                padding: 30px 20px;
+                padding: 20px 15px;
             }
             
             .logo {
-                font-size: 2.5em;
+                font-size: 2em;
             }
             
             .result-actions {
@@ -367,7 +387,6 @@
             .result-btn {
                 min-width: auto;
             }
-        
         }
     </style>
 </head>
@@ -516,7 +535,19 @@ Exemples :
             }
         }
 
+
+        // Remplacer la fonction showQuoteResult par celle-ci (pour debug)
         function showQuoteResult(result) {
+            // DEBUG: Afficher la structure des données dans la console
+            console.log("=== STRUCTURE COMPLETE DES DONNEES ===");
+            console.log(JSON.stringify(result, null, 2));
+            console.log("=== CLIENT DATA ===");
+            console.log("result.client:", result.client);
+            console.log("=== PRODUCTS DATA ===");
+            console.log("result.products:", result.products);
+            console.log("=== TOTAL AMOUNT ===");
+            console.log("result.total_amount:", result.total_amount);
+            
             document.getElementById('processing').style.display = 'none';
             document.getElementById('resultPanel').style.display = 'block';
             document.getElementById('generateBtn').disabled = false;
@@ -553,6 +584,8 @@ Exemples :
                     </button>
                     <button id="dynamicShowPdfButton" class="result-btn result-btn-secondary">
                         📄 Voir PDF
+
+
                     </button>
                     <button class="result-btn result-btn-secondary" onclick="newQuote()">
                         🆕 Nouveau devis
@@ -573,63 +606,470 @@ Exemples :
 
             showNotification('Devis généré avec succès !', 'success');
         }
+        // 1. Remplacer showQuotePreview par cette version avec VRAIES DONNÉES
         function showQuotePreview(result) {
-            const previewContainer = document.createElement('div');
-            previewContainer.id = 'quote-preview';
-            previewContainer.contentEditable = true;
-            previewContainer.style = 'background: white; padding: 30px; width: 800px; margin: 40px auto; border: 1px solid #ccc; border-radius: 8px; font-family: sans-serif; box-shadow: 0 5px 15px rgba(0,0,0,0.1);';
-
-            let productsList = '<li>Non défini</li>';
-            if (Array.isArray(result.products)) {
-                productsList = result.products.map(p => {
-                const quantity = p.quantity ?? '-';
-                const label = p.label ?? p.code ?? 'Produit';
-                return `<li>${quantity} × ${label}</li>`;
-                }).join('');
-            }
-
-            previewContainer.innerHTML = `
-                <h2 style="text-align:center;">🧾 DEVIS #<span id="preview-id">${result.quote_id || '---'}</span></h2>
-                <p><strong>Client :</strong> <span id="preview-client">${result.client?.name || '---'}</span></p>
-                <p><strong>Date :</strong> <span id="preview-date">${result.date || new Date().toLocaleDateString()}</span></p>
-                <p><strong>Montant total :</strong> <span id="preview-amount">${result.total_amount || '---'} ${result.currency || 'EUR'}</span></p>
-                <h3>📦 Produits :</h3>
-                <ul id="preview-products">${productsList}</ul>
-            `;
-
-            const old = document.getElementById('quote-preview');
-            if (old) old.remove();
-            document.body.appendChild(previewContainer);
-
-            // Ajouter bouton export PDF
+            console.log("showQuotePreview appelée avec:", result);
+            
+            // Supprimer l'ancien aperçu s'il existe
+            const oldPreview = document.getElementById('quote-preview');
+            if (oldPreview) oldPreview.remove();
+            
             const oldBtn = document.getElementById('pdf-export-btn');
             if (oldBtn) oldBtn.remove();
 
+            // Créer l'overlay de fond
+            const overlay = document.createElement('div');
+            overlay.id = 'pdf-overlay';
+            overlay.style = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0,0,0,0.7);
+                z-index: 1999;
+                backdrop-filter: blur(3px);
+            `;
+            overlay.onclick = closePDFPreview;
+            document.body.appendChild(overlay);
+
+            const previewContainer = document.createElement('div');
+            previewContainer.id = 'quote-preview';
+            previewContainer.style = `
+                position: fixed;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                background: white;
+                padding: 40px;
+                width: 1000px;
+                max-width: 95vw;
+                max-height: 95vh;
+                overflow-y: auto;
+                border-radius: 12px;
+                font-family: 'Segoe UI', Arial, sans-serif;
+                box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+                z-index: 2000;
+                font-size: 14px;
+                line-height: 1.5;
+            `;
+
+            // VRAIES DONNÉES extraites de votre structure JSON
+            const clientName = result.client?.name || 'Client non défini';
+            const clientCode = result.client?.sap_card_code || result.client?.salesforce_id || 'N/A';
+            const quoteNumber = result.quote_id || 'NOVA-' + Date.now().toString().slice(-6);
+            const totalAmount = parseFloat(result.total_amount) || 0;
+            const currency = result.currency || 'EUR';
+            const quoteDate = result.date || new Date().toLocaleDateString('fr-FR');
+
+            // Tableau des produits avec VRAIES DONNÉES
+            let productsList = '';
+            let stockWarning = '';
+            
+            if (Array.isArray(result.products) && result.products.length > 0) {
+                let hasOutOfStock = false;
+                
+                productsList = result.products.map((p, index) => {
+                    const quantity = p.quantity || 1;
+                    const productName = p.name || p.code || 'Produit sans nom';
+                    const unitPrice = parseFloat(p.unit_price) || 0;
+                    const lineTotal = parseFloat(p.line_total) || (quantity * unitPrice);
+                    
+                    // Simulation vérification stock (vous pouvez ajouter un champ stock dans votre API)
+                    const inStock = quantity <= 1000; // Exemple : considérer en stock si qty <= 1000
+                    if (!inStock) hasOutOfStock = true;
+                    
+                    return `
+                        <tr style="border-bottom: 1px solid #e5e7eb; ${index % 2 === 0 ? 'background: #f9fafb;' : ''}">
+                            <td style="padding: 12px 8px; font-weight: 600; color: #374151;">${p.code || 'N/A'}</td>
+                            <td style="padding: 12px 8px; color: #374151;">${productName}</td>
+                            <td style="padding: 12px 8px; text-align: center; font-weight: 600;">${quantity}</td>
+                            <td style="padding: 12px 8px; text-align: right; font-family: monospace;">${unitPrice.toFixed(2)} €</td>
+                            <td style="padding: 12px 8px; text-align: right; font-weight: 700; color: #059669; font-family: monospace;">${lineTotal.toFixed(2)} €</td>
+                        </tr>
+                    `;
+                }).join('');
+                
+                // Message stock selon disponibilité
+                if (result.all_products_available === true) {
+                    stockWarning = `
+                        <div style="background: #f0fdf4; padding: 15px; border-radius: 8px; border-left: 4px solid #22c55e; margin-bottom: 20px;">
+                            <p style="margin: 0; color: #15803d; font-weight: 600;">
+                                ✅ <strong>Produits en stock</strong> - Délai de livraison : 5-7 jours ouvrés
+                            </p>
+                        </div>
+                    `;
+                } else {
+                    stockWarning = `
+                        <div style="background: #fef3c7; padding: 15px; border-radius: 8px; border-left: 4px solid #f59e0b; margin-bottom: 20px;">
+                            <p style="margin: 0; color: #92400e; font-weight: 600;">
+                                ⚠️ <strong>Produits en rupture</strong> - Délai de livraison : 3 semaines sous réserve de disponibilités fabricant
+                            </p>
+                        </div>
+                    `;
+                }
+            } else {
+                productsList = '<tr><td colspan="5" style="padding: 30px; text-align: center; color: #9ca3af; font-style: italic;">Aucun produit défini</td></tr>';
+            }
+
+            // Calculer les totaux
+            const totalHT = totalAmount;
+            const totalTVA = totalHT * 0.2;
+            const totalTTC = totalHT + totalTVA;
+
+            previewContainer.innerHTML = `
+                <!-- En-tête du devis -->
+                <div style="text-align: center; margin-bottom: 40px; padding-bottom: 20px; border-bottom: 3px solid #667eea;">
+                    <h1 style="margin: 0; color: #1f2937; font-size: 2.2em; font-weight: 700;">
+                        🧾 DEVIS COMMERCIAL
+                    </h1>
+                    <p style="margin: 8px 0 0 0; color: #6b7280; font-size: 1.1em; font-weight: 500;">
+                        Document contractuel - Validité 30 jours
+                    </p>
+                </div>
+                
+                <!-- Informations principales en 2 colonnes -->
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin-bottom: 40px;">
+                    <div style="background: #f8fafc; padding: 25px; border-radius: 10px; border-left: 5px solid #3b82f6;">
+                        <h3 style="color: #1f2937; margin: 0 0 20px 0; font-size: 1.3em; display: flex; align-items: center; gap: 10px;">
+                            📋 Informations Devis
+                        </h3>
+                        <div style="space-y: 10px;">
+                            <p style="margin: 8px 0; display: flex; justify-content: space-between;">
+                                <span style="color: #6b7280; font-weight: 500;">N° Devis :</span>
+                                <span style="font-weight: 700; color: #1f2937;">${quoteNumber}</span>
+                            </p>
+                            <p style="margin: 8px 0; display: flex; justify-content: space-between;">
+                                <span style="color: #6b7280; font-weight: 500;">Date d'émission :</span>
+                                <span style="font-weight: 600; color: #1f2937;">${quoteDate}</span>
+                            </p>
+                            <p style="margin: 8px 0; display: flex; justify-content: space-between;">
+                                <span style="color: #6b7280; font-weight: 500;">Validité :</span>
+                                <span style="font-weight: 600; color: #dc2626;">30 jours</span>
+                            </p>
+                            <p style="margin: 8px 0; display: flex; justify-content: space-between;">
+                                <span style="color: #6b7280; font-weight: 500;">Statut :</span>
+                                <span style="font-weight: 600; color: #059669;">✅ ${result.quote_status || 'Créé'}</span>
+                            </p>
+                        </div>
+                    </div>
+                    
+                    <div style="background: #f0fdf4; padding: 25px; border-radius: 10px; border-left: 5px solid #22c55e;">
+                        <h3 style="color: #1f2937; margin: 0 0 20px 0; font-size: 1.3em; display: flex; align-items: center; gap: 10px;">
+                            🏢 Informations Client
+                        </h3>
+                        <div style="space-y: 10px;">
+                            <p style="margin: 8px 0; display: flex; justify-content: space-between;">
+                                <span style="color: #6b7280; font-weight: 500;">Nom :</span>
+                                <span style="font-weight: 700; color: #1f2937;">${clientName}</span>
+                            </p>
+                            <p style="margin: 8px 0; display: flex; justify-content: space-between;">
+                                <span style="color: #6b7280; font-weight: 500;">Code client :</span>
+                                <span style="font-weight: 600; color: #1f2937;">${clientCode}</span>
+                            </p>
+                            <p style="margin: 8px 0; display: flex; justify-content: space-between;">
+                                <span style="color: #6b7280; font-weight: 500;">ID Salesforce :</span>
+                                <span style="font-weight: 500; color: #1f2937;">${result.client?.salesforce_id || 'N/A'}</span>
+                            </p>
+                            <p style="margin: 8px 0; display: flex; justify-content: space-between;">
+                                <span style="color: #6b7280; font-weight: 500;">SAP DocNum :</span>
+                                <span style="font-weight: 500; color: #1f2937;">${result.sap_doc_num || 'N/A'}</span>
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Message stock -->
+                ${stockWarning}
+
+                <!-- Tableau des produits -->
+                <div style="margin-bottom: 40px;">
+                    <h3 style="color: #1f2937; margin-bottom: 20px; font-size: 1.4em; display: flex; align-items: center; gap: 10px;">
+                        📦 Détail des Produits
+                    </h3>
+                    <div style="overflow-x: auto; border-radius: 10px; border: 1px solid #e5e7eb;">
+                        <table style="width: 100%; border-collapse: collapse; background: white;">
+                            <thead>
+                                <tr style="background: #667eea; color: white;">
+                                    <th style="padding: 15px 12px; text-align: left; font-weight: 700; font-size: 1em;">Code Produit</th>
+                                    <th style="padding: 15px 12px; text-align: left; font-weight: 700; font-size: 1em;">Désignation</th>
+                                    <th style="padding: 15px 12px; text-align: center; font-weight: 700; font-size: 1em;">Quantité</th>
+                                    <th style="padding: 15px 12px; text-align: right; font-weight: 700; font-size: 1em;">Prix Unit. HT</th>
+                                    <th style="padding: 15px 12px; text-align: right; font-weight: 700; font-size: 1em;">Total HT</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${productsList}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Récapitulatif financier -->
+                <div style="margin-bottom: 40px;">
+                    <div style="float: right; background: #f8fafc; padding: 25px; border-radius: 12px; min-width: 350px; border: 2px solid #cbd5e1;">
+                        <h4 style="color: #1f2937; margin: 0 0 20px 0; font-size: 1.2em; text-align: center; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px;">
+                            💰 Récapitulatif Financier
+                        </h4>
+                        <div style="space-y: 8px;">
+                            <p style="margin: 10px 0; display: flex; justify-content: space-between; padding: 8px 0;">
+                                <span style="color: #374151; font-weight: 600;">Total HT :</span>
+                                <span style="font-weight: 700; color: #1f2937; font-family: monospace; font-size: 1.1em;">${totalHT.toFixed(2)} ${currency}</span>
+                            </p>
+                            <p style="margin: 10px 0; display: flex; justify-content: space-between; padding: 8px 0; border-top: 1px solid #e5e7eb;">
+                                <span style="color: #374151; font-weight: 600;">TVA (20%) :</span>
+                                <span style="font-weight: 600; color: #6b7280; font-family: monospace;">${totalTVA.toFixed(2)} EUR</span>
+                            </p>
+                            <p style="margin: 15px 0 0 0; display: flex; justify-content: space-between; padding: 12px; border-top: 3px solid #059669; background: #f0fdf4; border-radius: 6px;">
+                                <span style="color: #059669; font-weight: 700; font-size: 1.1em;">TOTAL TTC :</span>
+                                <span style="font-weight: 900; color: #059669; font-family: monospace; font-size: 1.3em;">${totalTTC.toFixed(2)} EUR</span>
+                            </p>
+                        </div>
+                    </div>
+                    <div style="clear: both;"></div>
+                </div>
+
+                <!-- Conditions commerciales -->
+                <div style="background: #fffbeb; padding: 25px; border-radius: 10px; border-left: 5px solid #f59e0b; margin-top: 30px;">
+                    <h4 style="color: #92400e; margin: 0 0 15px 0; font-size: 1.2em; display: flex; align-items: center; gap: 8px;">
+                        📋 Conditions Commerciales
+                    </h4>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; color: #78350f; font-size: 0.95em; line-height: 1.6;">
+                        <ul style="margin: 0; padding-left: 20px;">
+                            <li style="margin: 6px 0;"><strong>Validité :</strong> 30 jours à compter de la date d'émission</li>
+                            <li style="margin: 6px 0;"><strong>Délai de livraison :</strong> ${result.all_products_available ? '5-7 jours ouvrés après confirmation' : '3 semaines sous réserve de disponibilités fabricant'}</li>
+                        </ul>
+                        <ul style="margin: 0; padding-left: 20px;">
+                            <li style="margin: 6px 0;"><strong>Conditions de paiement :</strong> 30 jours net</li>
+                            <li style="margin: 6px 0;"><strong>Prix :</strong> Exprimés en euros hors taxes</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Pied de page -->
+                <div style="text-align: center; margin-top: 40px; padding-top: 20px; border-top: 2px solid #e5e7eb; color: #6b7280; font-size: 0.9em;">
+                    <p style="margin: 0; font-style: italic;">
+                        <em>Devis généré automatiquement par NOVA Middleware - ${new Date().toLocaleString('fr-FR')}</em>
+                    </p>
+                </div>
+
+                <!-- Boutons d'action -->
+                <div style="position: absolute; top: 15px; right: 15px; display: flex; gap: 10px;">
+                    <button onclick="closePDFPreview()" style="
+                        background: #f1f5f9;
+                        border: 1px solid #e2e8f0;
+                        color: #64748b;
+                        padding: 8px 12px;
+                        border-radius: 6px;
+                        cursor: pointer;
+                        font-size: 1.2em;
+                        width: 35px;
+                        height: 35px;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                    ">✕</button>
+                </div>
+            `;
+
+            document.body.appendChild(previewContainer);
+
+            // Bouton export PDF
             const exportBtn = document.createElement('button');
             exportBtn.id = 'pdf-export-btn';
-            exportBtn.innerText = '📄 Exporter en PDF';
-            exportBtn.onclick = generatePDF;
-            exportBtn.style = 'display:block;margin:20px auto;padding:12px 25px;background:#1d4ed8;color:white;border:none;border-radius:6px;font-size:1em;cursor:pointer;';
+            exportBtn.innerHTML = '📄 Télécharger PDF';
+            exportBtn.style = `
+                position: fixed;
+                bottom: 40px;
+                right: 40px;
+                padding: 15px 30px;
+                background: #1d4ed8;
+                color: white;
+                border: none;
+                border-radius: 10px;
+                font-size: 1.1em;
+                font-weight: 600;
+                cursor: pointer;
+                box-shadow: 0 10px 25px rgba(29, 78, 216, 0.3);
+                z-index: 2001;
+                transition: all 0.3s ease;
+            `;
+            
+            exportBtn.addEventListener('click', function() {
+                console.log("Bouton PDF cliqué !");
+                setTimeout(() => {
+                    generatePDFWorking(result);
+                }, 100);
+            });
+            
             document.body.appendChild(exportBtn);
+            
+            console.log("Aperçu PDF créé avec vraies données");
+        }
+
+        // Fonction pour fermer l'aperçu (mise à jour)
+        function closePDFPreview() {
+            const overlay = document.getElementById('pdf-overlay');
+            const preview = document.getElementById('quote-preview');
+            const btn = document.getElementById('pdf-export-btn');
+            
+            if (overlay) overlay.remove();
+            if (preview) preview.remove();
+            if (btn) btn.remove();
+        }
+
+        // 2. Nouvelle fonction PDF qui FONCTIONNE vraiment
+        function generatePDFWorking(result) {
+            console.log("Génération PDF avec méthode qui fonctionne...");
+            
+            // Vérifier html2pdf
+            if (typeof html2pdf === 'undefined') {
+                alert("html2pdf non disponible");
+                return;
             }
-
-
-
-            function generatePDF() {
-            const element = document.getElementById('quote-preview');
-            const opt = {
-                margin:       0.5,
-                filename:     'devis_nova.pdf',
-                image:        { type: 'jpeg', quality: 0.98 },
-                html2canvas:  { scale: 2 },
-                jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' }
+            
+            // Extraire les vraies données
+            const clientName = result.client?.name || 'Client Demo';
+            const quoteNumber = result.quote_id || 'NOVA-DEMO';
+            const totalAmount = parseFloat(result.total_amount) || 0;
+            const currency = result.currency || 'EUR';
+            const quoteDate = result.date || new Date().toLocaleDateString('fr-FR');
+            
+            // Créer un élément PDF ULTRA-SIMPLE
+            const pdfDiv = document.createElement('div');
+            pdfDiv.style.cssText = `
+                font-family: Arial, sans-serif;
+                font-size: 12px;
+                line-height: 1.4;
+                color: #000;
+                background: #fff;
+                padding: 20px;
+                width: 700px;
+                margin: 0;
+            `;
+            
+            // Construire le tableau des produits
+            let productsHTML = '';
+            if (result.products && result.products.length > 0) {
+                productsHTML = result.products.map(p => `
+                    <tr>
+                        <td style="padding: 8px; border: 1px solid #ccc;">${p.code}</td>
+                        <td style="padding: 8px; border: 1px solid #ccc;">${p.name}</td>
+                        <td style="padding: 8px; border: 1px solid #ccc; text-align: center;">${p.quantity}</td>
+                        <td style="padding: 8px; border: 1px solid #ccc; text-align: right;">${parseFloat(p.unit_price).toFixed(2)} €</td>
+                        <td style="padding: 8px; border: 1px solid #ccc; text-align: right; font-weight: bold;">${parseFloat(p.line_total).toFixed(2)} €</td>
+                    </tr>
+                `).join('');
+            } else {
+                productsHTML = '<tr><td colspan="5" style="padding: 20px; text-align: center;">Aucun produit</td></tr>';
+            }
+            
+            // Stock message
+            const stockMessage = result.all_products_available 
+                ? "✅ Produits en stock - Livraison : 5-7 jours ouvrés"
+                : "⚠️ Produits en rupture - Délai : 3 semaines sous réserve";
+            
+            pdfDiv.innerHTML = `
+                <div style="text-align: center; margin-bottom: 30px; border-bottom: 2px solid #000; padding-bottom: 15px;">
+                    <h1 style="margin: 0; font-size: 24px;">DEVIS COMMERCIAL</h1>
+                    <p style="margin: 5px 0;">Document contractuel - Validité 30 jours</p>
+                </div>
+                
+                <table style="width: 100%; margin-bottom: 20px;">
+                    <tr>
+                        <td style="width: 50%; padding-right: 10px;">
+                            <h3>Informations Devis</h3>
+                            <p><strong>N° :</strong> ${quoteNumber}</p>
+                            <p><strong>Date :</strong> ${quoteDate}</p>
+                            <p><strong>Validité :</strong> 30 jours</p>
+                        </td>
+                        <td style="width: 50%; padding-left: 10px;">
+                            <h3>Client</h3>
+                            <p><strong>Nom :</strong> ${clientName}</p>
+                            <p><strong>Code :</strong> ${result.client?.sap_card_code || 'N/A'}</p>
+                            <p><strong>SAP Doc :</strong> ${result.sap_doc_num || 'N/A'}</p>
+                        </td>
+                    </tr>
+                </table>
+                
+                <div style="background: #f0f0f0; padding: 10px; margin: 15px 0; border-radius: 5px;">
+                    <strong>${stockMessage}</strong>
+                </div>
+                
+                <h3>Détail des Produits</h3>
+                <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+                    <thead>
+                        <tr style="background: #667eea; color: white;">
+                            <th style="padding: 10px; border: 1px solid #000; text-align: left;">Code</th>
+                            <th style="padding: 10px; border: 1px solid #000; text-align: left;">Désignation</th>
+                            <th style="padding: 10px; border: 1px solid #000; text-align: center;">Qté</th>
+                            <th style="padding: 10px; border: 1px solid #000; text-align: right;">Prix Unit.</th>
+                            <th style="padding: 10px; border: 1px solid #000; text-align: right;">Total HT</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${productsHTML}
+                    </tbody>
+                </table>
+                
+                <div style="text-align: right; margin: 20px 0;">
+                    <div style="background: #f5f5f5; padding: 15px; display: inline-block; min-width: 250px;">
+                        <h4 style="margin: 0 0 10px 0;">Récapitulatif</h4>
+                        <p><strong>Total HT : ${totalAmount.toFixed(2)} ${currency}</strong></p>
+                        <p>TVA (20%) : ${(totalAmount * 0.2).toFixed(2)} EUR</p>
+                        <p style="font-size: 14px; border-top: 1px solid #000; padding-top: 5px;"><strong>TOTAL TTC : ${(totalAmount * 1.2).toFixed(2)} EUR</strong></p>
+                    </div>
+                </div>
+                
+                <div style="background: #fff8dc; padding: 15px; border: 1px solid #ddd; margin-top: 20px;">
+                    <h4>Conditions Commerciales</h4>
+                    <p>• Validité : 30 jours • Livraison : ${result.all_products_available ? '5-7 jours' : '3 semaines'}</p>
+                    <p>• Paiement : 30 jours net • Prix exprimés en euros HT</p>
+                </div>
+                
+                <div style="text-align: center; margin-top: 30px; font-size: 10px; color: #666;">
+                    Devis généré par NOVA - ${new Date().toLocaleString('fr-FR')}
+                </div>
+            `;
+            
+            // Ajouter au DOM temporairement
+            pdfDiv.style.position = 'absolute';
+            pdfDiv.style.left = '-9999px';
+            document.body.appendChild(pdfDiv);
+            
+            // Options PDF ultra-simples
+            const options = {
+                margin: 15,
+                filename: `devis_${quoteNumber}.pdf`,
+                image: { type: 'jpeg', quality: 0.98 },
+                html2canvas: { 
+                    scale: 2,
+                    backgroundColor: '#ffffff',
+                    logging: false
+                },
+                jsPDF: { 
+                    unit: 'mm', 
+                    format: 'a4', 
+                    orientation: 'portrait' 
+                }
             };
-            html2pdf().set(opt).from(element).save();
-            }
-        function showError(message) {
-            document.getElementById('processing').style.display = 'none';
-            document.getElementById('generateBtn').disabled = false;
-            showNotification('Erreur: ' + message, 'error');
+            
+            // Génération PDF
+            html2pdf()
+                .set(options)
+                .from(pdfDiv)
+                .save()
+                .then(() => {
+                    console.log("✅ PDF généré avec succès !");
+                    document.body.removeChild(pdfDiv);
+                    closePDFPreview();
+                    showNotification('PDF téléchargé avec succès !', 'success');
+                })
+                .catch((error) => {
+                    console.error("❌ Erreur PDF:", error);
+                    document.body.removeChild(pdfDiv);
+                    alert("Erreur PDF: " + error.message);
+                });
         }
 
         function showAdvancedInterface() {
