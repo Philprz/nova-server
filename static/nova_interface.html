@@ -1030,28 +1030,30 @@ Exemples :
                                         margin: 15mm;
                                     }
                                     
-                                    /* Masquer les éléments de contrôle */
-                                    body * {
-                                        visibility: hidden;
+                                    /* Masquer TOUT ce qui n'est pas le contenu à imprimer */
+                                    body > *:not(#pdf-full-overlay) {
+                                        display: none !important;
+                                    }
+                                    
+                                    /* Masquer les éléments de contrôle dans l'overlay */
+                                    #pdf-full-overlay > *:not(#printable-content) {
+                                        display: none !important;
                                     }
                                     
                                     /* Afficher seulement le contenu à imprimer */
-                                    #printable-content, #printable-content * {
-                                        visibility: visible;
-                                    }
-                                    
-                                    /* Repositionner le contenu pour l'impression */
                                     #printable-content {
-                                        position: absolute;
-                                        left: 0;
-                                        top: 0;
-                                        width: 100%;
-                                        margin: 0;
-                                        padding: 0;
-                                        box-shadow: none;
-                                        page-break-after: avoid;
-                                        min-height: auto;
+                                        position: static !important;
+                                        left: auto !important;
+                                        top: auto !important;
+                                        width: 100% !important;
+                                        margin: 0 !important;
+                                        padding: 0 !important;
+                                        box-shadow: none !important;
+                                        page-break-after: avoid !important;
+                                        min-height: auto !important;
                                         background: white !important;
+                                        display: block !important;
+                                        visibility: visible !important;
                                     }
                                     
                                     /* Ajuster les tailles pour tenir sur une page */
@@ -1109,9 +1111,15 @@ Exemples :
                                     .info-grid, .status-section, table, .financial-section, .conditions-section {
                                         page-break-inside: avoid;
                                     }
+                                    
+                                    /* S'assurer qu'il n'y a qu'une seule page */
+                                    html, body {
+                                        height: auto !important;
+                                        overflow: visible !important;
+                                    }
                                 }
                                 
-                                /* Styles normaux pour l'écran */
+                                /* Styles normaux pour l'écran (inchangés) */
                                 .info-grid {
                                     display: grid;
                                     grid-template-columns: 1fr 1fr;
