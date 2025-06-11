@@ -41,11 +41,17 @@ class DevisWorkflow:
     
     def __init__(self):
         self.context = {}
+        self.draft_mode = False  # ← AJOUT NOUVEAU ATTRIBUT
         self.validation_enabled = VALIDATOR_AVAILABLE
         self.client_validator = ClientValidator() if VALIDATOR_AVAILABLE else None
         logger.info(f"Initialisation du workflow de devis - Validation client: {'✅ Activée' if self.validation_enabled else '❌ Désactivée'}")
     
-    async def process_prompt(self, prompt: str) -> Dict[str, Any]:
+    async def process_prompt(self, prompt: str, draft_mode: bool = False) -> Dict[str, Any]:
+        """
+        ✅ MODIFICATION : Ajouter le paramètre draft_mode
+        """
+        self.draft_mode = draft_mode  # ← STOCKER LE MODE
+        logger.info(f"Traitement prompt en mode: {'DRAFT' if draft_mode else 'NORMAL'}")
         """Traite une demande en langage naturel et orchestre le workflow complet"""
         logger.info("=== DÉBUT DU WORKFLOW ENRICHI AVEC VALIDATION ===")
         logger.info(f"Demande: {prompt}")
@@ -96,7 +102,81 @@ class DevisWorkflow:
             sap_client = await self._create_sap_client_if_needed(client_info)
             self.context["sap_client"] = sap_client
             logger.info(f"Étape 6 - Client SAP: {'Créé/Trouvé' if sap_client.get('created') is not None else 'Erreur'}")
+            # Créer le devis dans SAP si un client SAP est disponible
+            sap_quote = None
+            if sap_client.get("data") and sap_client["data"].get("CardCode"):
+                logger.info(f"Création du devis dans SAP en mode {'DRAFT' if self.draft_mode else 'NORMAL'}...")
+                
+                # Filtrer les produits valides
+                valid_products = [p for p in products_info if "error" not in p]
+                
+                if valid_products:
+                    # Préparer les lignes pour SAP
+                    document_lines = []
+                    for product in valid_products:
+                        line = {
+                            "ItemCode": product["code"],
+                            "Quantity": product["quantity"],
+                            "Price": product["unit_price"],
+                            "DiscountPercent": 0.0,
+                            "TaxCode": "S1"
+                        }
+                        document_lines.append(line)
+                    
+                    # ✅ CORRECTION : Adapter les données selon le mode
+                    quotation_data = {
+                        "CardCode": sap_client["data"]["CardCode"],
+                        "DocDate": datetime.now().strftime("%Y-%m-%d"),
+                        "DocDueDate": (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d"),
+                        "DocCurrency": "EUR",
+                        "Comments": f"Devis {'BROUILLON' if self.draft_mode else 'VALIDÉ'} créé automatiquement via NOVA Middleware le {datetime.now().strftime('%d/%m/%Y %H:%M')}",
+                        "SalesPersonCode": -1,
+                        "DocumentLines": document_lines,
+                        # ✅ NOUVEAU : Ajouter le flag draft mode pour SAP
+                        "U_NOVA_DRAFT": "Y" if self.draft_mode else "N"  # Champ utilisateur personnalisé
+                    }
+                    
+                    # ✅ CORRECTION : Appeler différentes méthodes selon le mode
+                    if self.draft_mode:
+                        # Mode DRAFT - Créer comme brouillon
+                        sap_result = await MCPConnector.call_sap_mcp("sap_create_quotation_draft", {
+                            "quotation_data": quotation_data
+                        })
+                    else:
+                        # Mode NORMAL - Créer comme document validé
+                        sap_result = await MCPConnector.call_sap_mcp("sap_create_quotation_complete", {
+                            "quotation_data": quotation_data
+                        })
+                    
+                    if sap_result.get("success"):
+                        sap_quote = sap_result
+                        mode_text = "BROUILLON" if self.draft_mode else "VALIDÉ"
+                        logger.info(f"✅ Devis SAP {mode_text} créé: DocNum {sap_result.get('doc_num')}")
+                    else:
+                        logger.error(f"❌ Erreur création devis SAP: {sap_result.get('error')}")
             
+            # 2. Créer/Synchroniser avec Salesforce (optionnel mais recommandé)
+            salesforce_quote = await self._create_salesforce_quote(quote_data, sap_quote)
+
+            # Construire la réponse
+            success = sap_quote and sap_quote.get("success", False)
+            
+            result = {
+                "success": success,
+                "quote_id": f"SAP-{sap_quote.get('doc_num', 'DRAFT')}" if sap_quote else f"DRAFT-{datetime.now().strftime('%Y%m%d-%H%M%S')}",
+                "sap_doc_entry": sap_quote.get("doc_entry") if sap_quote else None,
+                "sap_doc_num": sap_quote.get("doc_num") if sap_quote else None,
+                "salesforce_quote_id": salesforce_quote.get("id") if salesforce_quote and salesforce_quote.get("success") else None,
+                "status": "Draft" if self.draft_mode else ("Created" if success else "Failed"),
+                "mode": "DRAFT" if self.draft_mode else "NORMAL",  # ✅ NOUVEAU CHAMP
+                "message": f"Devis créé en mode {'brouillon' if self.draft_mode else 'validé'} dans SAP (DocNum: {sap_quote.get('doc_num')})" if success else f"Devis en {'brouillon' if self.draft_mode else 'échec'}",
+                "sap_result": sap_quote,
+                "salesforce_result": salesforce_quote,
+                "draft_mode": self.draft_mode  # ✅ NOUVEAU CHAMP pour le frontend
+            }
+            
+            logger.info(f"Création devis terminée: {result['status']} en mode {result['mode']}")
+            return result            
             # Étape 7: Création RÉELLE du devis dans Salesforce ET SAP
             quote_result = await self._create_quote_in_salesforce()
             self.context["quote_result"] = quote_result

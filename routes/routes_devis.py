@@ -20,10 +20,13 @@ async def generate_quote(request: DevisPromptRequest):
         # Désactiver le mode démo
         demo_mode = False  # Force le mode production
         
-        # Utiliser le workflow de traitement normal
+        # ✅ CORRECTION : Passer draft_mode au workflow
         from workflow.devis_workflow import DevisWorkflow
         workflow = DevisWorkflow()
-        result = await workflow.process_prompt(request.prompt)
+        result = await workflow.process_prompt(
+            request.prompt, 
+            draft_mode=request.draft_mode  # ← AJOUT DE CE PARAMÈTRE
+        )
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erreur lors de la génération du devis: {str(e)}")
@@ -67,3 +70,7 @@ async def update_quote(request: UpdateQuoteRequest):
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erreur lors de la mise à jour du devis: {str(e)}")
+@router.post("/validate_quote")
+async def validate_quote(quote_id: str):
+    """Valide un devis brouillon pour le rendre définitif"""
+    

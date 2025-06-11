@@ -594,6 +594,85 @@ async def sap_find_alternatives(item_code: str, limit: int = 5) -> dict:
     except Exception as e:
         log(f"❌ Erreur recherche alternatives {item_code}: {str(e)}", "ERROR")
         return {"error": str(e)}
+@mcp.tool(name="sap_create_quotation_draft")
+async def sap_create_quotation_draft(quotation_data: Dict[str, Any]) -> dict:
+    """
+    Crée un devis en mode BROUILLON dans SAP
+    """
+    try:
+        log(f"Création devis SAP en mode BROUILLON pour client: {quotation_data.get('CardCode', 'Code manquant')}")
+        
+        # Validation des données minimales
+        required_fields = ["CardCode", "DocumentLines"]
+        for field in required_fields:
+            if not quotation_data.get(field):
+                return {"success": False, "error": f"Champ requis manquant: {field}"}
+        
+        # Ajouter des métadonnées pour le mode brouillon
+        quotation_data["Comments"] = f"[BROUILLON] {quotation_data.get('Comments', '')}"
+        
+        # Créer le document (même endpoint mais avec commentaire spécial)
+        response = await call_sap("/Quotations", "POST", quotation_data)
+        
+        if "error" in response:
+            return {"success": False, "error": response["error"]}
+        
+        doc_entry = response.get("DocEntry")
+        doc_num = response.get("DocNum")
+        
+        log(f"✅ Devis BROUILLON SAP créé: DocEntry={doc_entry}, DocNum={doc_num}")
+        
+        return {
+            "success": True,
+            "doc_entry": doc_entry,
+            "doc_num": doc_num,
+            "mode": "DRAFT",
+            "message": f"Devis brouillon créé avec succès (DocNum: {doc_num})",
+            "can_be_modified": True
+        }
+        
+    except Exception as e:
+        log(f"❌ Erreur création devis brouillon SAP: {str(e)}", "ERROR")
+        return {"success": False, "error": str(e)}
+
+@mcp.tool(name="sap_validate_draft_quote")
+async def sap_validate_draft_quote(doc_entry: int) -> dict:
+    """
+    Valide un devis brouillon pour le transformer en devis définitif
+    """
+    try:
+        log(f"Validation du devis brouillon SAP: DocEntry={doc_entry}")
+        
+        # Récupérer le devis brouillon
+        draft_quote = await call_sap(f"/Quotations({doc_entry})")
+        
+        if "error" in draft_quote:
+            return {"success": False, "error": f"Devis brouillon non trouvé: {draft_quote['error']}"}
+        
+        # Modifier les données pour validation
+        update_data = {
+            "Comments": draft_quote.get("Comments", "").replace("[BROUILLON]", "[VALIDÉ]")
+        }
+        
+        # Mettre à jour le document
+        response = await call_sap(f"/Quotations({doc_entry})", "PATCH", update_data)
+        
+        if "error" in response:
+            return {"success": False, "error": response["error"]}
+        
+        log(f"✅ Devis brouillon validé: DocEntry={doc_entry}")
+        
+        return {
+            "success": True,
+            "doc_entry": doc_entry,
+            "doc_num": draft_quote.get("DocNum"),
+            "mode": "VALIDATED",
+            "message": f"Devis validé avec succès (DocNum: {draft_quote.get('DocNum')})"
+        }
+        
+    except Exception as e:
+        log(f"❌ Erreur validation devis brouillon: {str(e)}", "ERROR")
+        return {"success": False, "error": str(e)}
 # Table de mappage des fonctions MCP
 mcp_functions = {
     "ping": ping,
@@ -601,7 +680,9 @@ mcp_functions = {
     "sap_search": sap_search,
     "sap_get_product_details": sap_get_product_details,
     "sap_create_customer_complete": sap_create_customer_complete,
-    "sap_create_quotation_complete": sap_create_quotation_complete
+    "sap_create_quotation_complete": sap_create_quotation_complete,
+    "sap_create_quotation_draft": sap_create_quotation_draft,
+    "sap_validate_draft_quote": sap_validate_draft_quote
 }
 
 # Initialisation au démarrage
@@ -673,3 +754,4 @@ if __name__ == "__main__":
         log(f"Traceback: {traceback.format_exc()}", "DEBUG")
     finally:
         log_file.close()
+

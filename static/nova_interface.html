@@ -388,6 +388,62 @@
                 min-width: auto;
             }
         }
+        .mode-selector {
+            margin-bottom: 30px;
+            text-align: center;
+        }
+
+        .mode-selector h3 {
+            color: #2c3e50;
+            margin-bottom: 15px;
+            font-size: 1.3em;
+        }
+
+        .mode-buttons {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            margin-bottom: 10px;
+        }
+
+        .mode-button {
+            padding: 12px 24px;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            background: white;
+            cursor: pointer;
+            font-size: 1em;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-width: 140px;
+            justify-content: center;
+        }
+
+        .mode-button.active {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+        }
+
+        .mode-button:hover:not(.active) {
+            border-color: #667eea;
+            background: #f8fafc;
+        }
+
+        .mode-description {
+            font-size: 0.9em;
+            color: #6b7280;
+            margin-top: 10px;
+            padding: 10px;
+            background: #f8fafc;
+            border-radius: 6px;
+            border-left: 4px solid #667eea;
+        }        
     </style>
 </head>
 
@@ -405,7 +461,20 @@
             <div class="section-title">
                 💬 Saisie Libre en Langage Naturel
             </div>
-            
+            <div class="mode-selector">
+                <h3>📋 Mode de création du devis</h3>
+                <div class="mode-buttons">
+                    <button class="mode-button active" id="draftMode" onclick="selectMode('draft')">
+                        📝 Draft (Brouillon)
+                    </button>
+                    <button class="mode-button" id="normalMode" onclick="selectMode('normal')">
+                        ✅ Normal (Validation)
+                    </button>
+                </div>
+                <div class="mode-description" id="modeDescription">
+                    <strong>Mode Draft :</strong> Création en brouillon dans SAP - Peut être modifié avant validation finale
+                </div>
+            </div>   
             <textarea 
                 class="main-input" 
                 id="mainInput"
@@ -466,6 +535,26 @@ Exemples :
     </div>
 
     <script>
+        let currentMode = 'draft'; // Mode par défaut
+
+        function selectMode(mode) {
+            currentMode = mode;
+            
+            // Mettre à jour l'apparence des boutons
+            document.getElementById('draftMode').classList.remove('active');
+            document.getElementById('normalMode').classList.remove('active');
+            document.getElementById(mode + 'Mode').classList.add('active');
+            
+            // Mettre à jour la description
+            const descriptions = {
+                'draft': '<strong>Mode Draft :</strong> Création en brouillon dans SAP - Peut être modifié avant validation finale',
+                'normal': '<strong>Mode Normal :</strong> Création définitive et validée dans SAP - Document contractuel'
+            };
+            
+            document.getElementById('modeDescription').innerHTML = descriptions[mode];
+            
+            showNotification(`Mode ${mode === 'draft' ? 'Draft' : 'Normal'} sélectionné`, 'success');
+        }
         function fillExample(text) {
             document.getElementById('mainInput').value = text;
             document.getElementById('mainInput').focus();
@@ -518,7 +607,7 @@ Exemples :
                     },
                     body: JSON.stringify({
                         prompt: prompt,
-                        draft_mode: false
+                        draft_mode: currentMode === 'draft'
                     })
                 });
 
