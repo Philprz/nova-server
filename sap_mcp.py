@@ -673,6 +673,116 @@ async def sap_validate_draft_quote(doc_entry: int) -> dict:
     except Exception as e:
         log(f"❌ Erreur validation devis brouillon: {str(e)}", "ERROR")
         return {"success": False, "error": str(e)}
+
+
+@mcp.tool(name="get_quotation_details")
+async def get_quotation_details(doc_entry: int, include_lines: bool = True, include_customer: bool = True) -> dict:
+    """
+    Récupère les détails complets d'un devis SAP pour édition
+    
+    Args:
+        doc_entry: DocEntry du devis SAP
+        include_lines: Inclure les lignes de produits  
+        include_customer: Inclure les détails client
+        
+    Returns:
+        Dict contenant toutes les données du devis
+    """
+    
+    try:
+        log(f"Récupération détails devis SAP DocEntry: {doc_entry}")
+        
+        # URL pour récupérer le devis complet avec ses lignes
+        url_params = ""
+        if include_lines:
+            url_params = "?$expand=DocumentLines"
+        
+        endpoint = f"/Quotations({doc_entry}){url_params}"
+        
+        # Appel API SAP
+        response = await call_sap(endpoint)
+        
+        if "error" in response:
+            log(f"❌ Erreur récupération devis {doc_entry}: {response['error']}", "ERROR")
+            return {"success": False, "error": response["error"]}
+        
+        quote_data = response
+        
+        # Enrichissement avec informations client si demandé
+        if include_customer and "CardCode" in quote_data:
+            customer_info = await _get_customer_details(quote_data["CardCode"])
+            if customer_info.get("success"):
+                quote_data["CustomerDetails"] = customer_info.get("customer", {})
+        
+        log(f"✅ Devis {doc_entry} récupéré avec succès - {len(quote_data.get('DocumentLines', []))} lignes")
+        
+        return {
+            "success": True,
+            "quote": quote_data,
+            "metadata": {
+                "doc_entry": doc_entry,
+                "lines_count": len(quote_data.get("DocumentLines", [])),
+                "retrieved_at": datetime.now().isoformat(),
+                "include_lines": include_lines,
+                "include_customer": include_customer
+            }
+        }
+        
+    except Exception as e:
+        error_msg = f"Erreur récupération devis {doc_entry}: {str(e)}"
+        log(f"❌ {error_msg}", "ERROR")
+        return {"success": False, "error": error_msg}
+
+async def _get_customer_details(card_code: str) -> dict:
+    """
+    Récupère les détails d'un client SAP
+    
+    Args:
+        card_code: Code client SAP
+        
+    Returns:
+        Dict contenant les informations client
+    """
+    
+    try:
+        response = await call_sap(f"/BusinessPartners('{card_code}')")
+        
+        if "error" not in response:
+            return {
+                "success": True,
+                "customer": {
+                    "CardCode": response.get("CardCode"),
+                    "CardName": response.get("CardName"),
+                    "Phone1": response.get("Phone1"),
+                    "Phone2": response.get("Phone2"),
+                    "EmailAddress": response.get("EmailAddress"),
+                    "Website": response.get("Website"),
+                    "BillingAddress": {
+                        "Street": response.get("BillToState"),
+                        "City": response.get("BillToCity"),
+                        "ZipCode": response.get("BillToZipCode"),
+                        "Country": response.get("BillToCountry")
+                    },
+                    "ShippingAddress": {
+                        "Street": response.get("ShipToState"), 
+                        "City": response.get("ShipToCity"),
+                        "ZipCode": response.get("ShipToZipCode"),
+                        "Country": response.get("ShipToCountry")
+                    }
+                }
+            }
+        else:
+            return {
+                "success": False,
+                "error": f"Client {card_code} non trouvé"
+            }
+            
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Erreur récupération client {card_code}: {str(e)}"
+        }
+
 # Table de mappage des fonctions MCP
 mcp_functions = {
     "ping": ping,
@@ -682,8 +792,10 @@ mcp_functions = {
     "sap_create_customer_complete": sap_create_customer_complete,
     "sap_create_quotation_complete": sap_create_quotation_complete,
     "sap_create_quotation_draft": sap_create_quotation_draft,
-    "sap_validate_draft_quote": sap_validate_draft_quote
-}
+    "sap_valida te_draft_quote": sap_validate_draft_quote,
+    "get_quotation_details": get_quotation_details,
+    "_get_customer_details": _get_customer_details
+}   
 
 # Initialisation au démarrage
 async def init_sap():

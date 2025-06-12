@@ -1,9 +1,8 @@
 # routes/routes_devis.py
-from datetime import datetime, timedelta
-from fastapi import APIRouter, HTTPException, Depends, Header
+from datetime import datetime
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Dict, List, Any, Optional
-from workflow.devis_workflow import DevisWorkflow
+from typing import Dict, List, Any
 
 router = APIRouter()
 
@@ -17,15 +16,11 @@ async def generate_quote(request: DevisPromptRequest):
     Génère un devis à partir d'une demande en langage naturel
     """
     try:
-        # Désactiver le mode démo
-        demo_mode = False  # Force le mode production
-        
-        # ✅ CORRECTION : Passer draft_mode au workflow
         from workflow.devis_workflow import DevisWorkflow
         workflow = DevisWorkflow()
         result = await workflow.process_prompt(
             request.prompt, 
-            draft_mode=request.draft_mode  # ← AJOUT DE CE PARAMÈTRE
+            draft_mode=request.draft_mode
         )
         return result
     except Exception as e:

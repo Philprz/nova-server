@@ -1,0 +1,39 @@
+{
+  "form_sections": [],
+  "validation_schema": {
+    "success": {
+      "required": false,
+      "type": "bool"
+    },
+    "sap_doc_entry": {
+      "required": false,
+      "type": "int"
+    },
+    "sap_doc_num": {
+      "required": false,
+      "type": "int"
+    },
+    "status": {
+      "required": false,
+      "type": "str"
+    },
+    "mode": {
+      "required": false,
+      "type": "str"
+    },
+    "message": {
+      "required": false,
+      "type": "str"
+    },
+    "draft_mode": {
+      "required": false,
+      "type": "bool"
+    }
+  },
+  "field_groups": {
+    "client_info": [],
+    "product_lines": [],
+    "pricing": [],
+    "comments": []
+  }
+}

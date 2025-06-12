@@ -2,7 +2,7 @@
 import os
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
-
+from routes.routes_quote_details import router as quote_details_router
 # Import seulement des routes qui existent réellement
 try:
     from routes.routes_sync import router as sync_router
@@ -61,7 +61,7 @@ try:
 except ImportError as e:
     sync_available = False
     print(f"⚠️ routes_sync non disponible: {e}")
-
+        
 # Créer l'application FastAPI
 app = FastAPI(
     title="NOVA Middleware",
@@ -103,7 +103,10 @@ if sync_available:
 if products_available:
     app.include_router(products_router, prefix="/products", tags=["Produits"])
     print("✅ Routes Produits chargées")
-    
+
+app.include_router(quote_details_router, tags=["Quote Details"])
+print("✅ Routes Devis chargées")
+
 @app.get("/", tags=["Health"])
 def root():
     """Point d'entrée principal - Vérification de santé"""
@@ -117,10 +120,10 @@ def root():
             "sap": sap_available,
             "devis": devis_available,
             "clients": clients_available,
-            "sync": sync_available
+            "sync": sync_available,
         }
     }
-
+    
 @app.get("/health", tags=["Health"])
 def health_check():
     """Contrôle de santé détaillé"""
