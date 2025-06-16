@@ -222,6 +222,6 @@ Write-Host "Pour tester un workflow complet de devis :" -ForegroundColor "Magent
 Write-Host "python test_devis_generique.py 'faire un devis pour 500 ref A00002 pour le client Edge Communications'" -ForegroundColor "White"
 Write-Host ""
 Write-Host "Pour ouvrir la démo web :" -ForegroundColor "Magenta"
-Write-Host "http://localhost:8000/static/demo_devis.html" -ForegroundColor "White"
+Write-Host "http://localhost:8000/static/nova_interface.html" -ForegroundColor "White"
 
 Write-Header "NOVA DÉMARRÉ"

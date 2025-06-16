@@ -5,9 +5,10 @@ Script pour réinitialiser complètement la base de données et Alembic
 
 import os
 import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from db.models import Base
 from sqlalchemy import create_engine, text
 from dotenv import load_dotenv
-from db.models import Base
 
 def reset_database():
     """Réinitialise complètement la base de données"""

@@ -3,10 +3,11 @@
 Script de diagnostic pour vérifier l'état de la base de données et d'Alembic
 """
 
-import os
-import sys
 from sqlalchemy import create_engine, text, inspect
 from dotenv import load_dotenv
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from db.models import Base
 import subprocess
 
@@ -142,13 +143,16 @@ def check_alembic_commands():
     print("\n6️⃣ TEST DES COMMANDES ALEMBIC:")
     print("-" * 30)
     
+    # Définir le répertoire racine du projet (parent du dossier tests)
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    
     try:
         # Test alembic current
         result = subprocess.run(
             [sys.executable, "-m", "alembic", "current"],
             capture_output=True,
             text=True,
-            cwd=os.path.dirname(os.path.abspath(__file__))
+            cwd=project_root  # ← CORRECTION: exécuter depuis la racine
         )
         
         if result.returncode == 0:
@@ -166,7 +170,7 @@ def check_alembic_commands():
             [sys.executable, "-m", "alembic", "history"],
             capture_output=True,
             text=True,
-            cwd=os.path.dirname(os.path.abspath(__file__))
+            cwd=project_root  # ← CORRECTION: exécuter depuis la racine
         )
         
         if result.returncode == 0:
