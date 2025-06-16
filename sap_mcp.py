@@ -692,29 +692,80 @@ async def get_quotation_details(doc_entry: int, include_lines: bool = True, incl
     try:
         log(f"Récupération détails devis SAP DocEntry: {doc_entry}")
         
-        # URL pour récupérer le devis complet avec ses lignes
-        url_params = ""
+        # CORRECTION: Récupérer d'abord le devis sans expansion
+        quote_response = await call_sap(f"/Quotations({doc_entry})")
+        
+        # Vérifier le type de réponse
+        if isinstance(quote_response, str):
+            return {"success": False, "error": quote_response}
+        
+        if isinstance(quote_response, dict) and "error" in quote_response:
+            log(f"❌ Erreur récupération devis {doc_entry}: {quote_response['error']}", "ERROR")
+            return {"success": False, "error": quote_response["error"]}
+        
+        if not isinstance(quote_response, dict):
+            return {"success": False, "error": f"Réponse SAP invalide: {type(quote_response)}"}
+        
+        quote_data = quote_response
+        
+        # Récupérer les lignes séparément si demandé
         if include_lines:
-            url_params = "?$expand=DocumentLines"
-        
-        endpoint = f"/Quotations({doc_entry}){url_params}"
-        
-        # Appel API SAP
-        response = await call_sap(endpoint)
-        
-        if "error" in response:
-            log(f"❌ Erreur récupération devis {doc_entry}: {response['error']}", "ERROR")
-            return {"success": False, "error": response["error"]}
-        
-        quote_data = response
+            try:
+                # Tenter plusieurs approches pour les lignes
+                lines_data = None
+                
+                # Approche 1: Endpoint dédié aux lignes
+                try:
+                    lines_response = await call_sap(f"/Quotations({doc_entry})/DocumentLines")
+                    if isinstance(lines_response, dict) and "error" not in lines_response:
+                        lines_data = lines_response
+                        log(f"✅ Lignes récupérées via endpoint dédié: {len(lines_data)} lignes")
+                except Exception:
+                    pass
+                
+                # Approche 2: Query avec filter
+                if not lines_data:
+                    try:
+                        lines_response = await call_sap(f"/QuotationLines?$filter=DocEntry eq {doc_entry}")
+                        if isinstance(lines_response, dict) and "error" not in lines_response and "value" in lines_response:
+                            lines_data = lines_response["value"]
+                            log(f"✅ Lignes récupérées via QuotationLines: {len(lines_data)} lignes")
+                    except Exception:
+                        pass
+                
+                # Approche 3: Document_Lines (variante naming)
+                if not lines_data:
+                    try:
+                        lines_response = await call_sap(f"/Quotations({doc_entry})?$expand=Document_Lines")
+                        if isinstance(lines_response, dict) and "error" not in lines_response and "Document_Lines" in lines_response:
+                            lines_data = lines_response["Document_Lines"]
+                            log(f"✅ Lignes récupérées via Document_Lines: {len(lines_data)} lignes")
+                    except Exception:
+                        pass
+                
+                # Approche 4: Lignes déjà dans le document principal
+                if not lines_data and "DocumentLines" in quote_data:
+                    lines_data = quote_data["DocumentLines"]
+                    log(f"✅ Lignes trouvées dans document principal: {len(lines_data)} lignes")
+                
+                # Intégrer les lignes dans quote_data
+                if lines_data:
+                    quote_data["DocumentLines"] = lines_data
+                else:
+                    log("⚠️ Aucune ligne trouvée avec les méthodes disponibles", "WARNING")
+                    quote_data["DocumentLines"] = []
+            
+            except Exception as e:
+                log(f"⚠️ Erreur récupération lignes: {str(e)}", "WARNING")
+                quote_data["DocumentLines"] = []
         
         # Enrichissement avec informations client si demandé
-        if include_customer and "CardCode" in quote_data:
+        if include_customer and isinstance(quote_data, dict) and "CardCode" in quote_data:
             customer_info = await _get_customer_details(quote_data["CardCode"])
-            if customer_info.get("success"):
+            if isinstance(customer_info, dict) and customer_info.get("success"):
                 quote_data["CustomerDetails"] = customer_info.get("customer", {})
         
-        log(f"✅ Devis {doc_entry} récupéré avec succès - {len(quote_data.get('DocumentLines', []))} lignes")
+        log(f"✅ Devis {doc_entry} récupéré avec succès")
         
         return {
             "success": True,
@@ -722,17 +773,15 @@ async def get_quotation_details(doc_entry: int, include_lines: bool = True, incl
             "metadata": {
                 "doc_entry": doc_entry,
                 "lines_count": len(quote_data.get("DocumentLines", [])),
-                "retrieved_at": datetime.now().isoformat(),
-                "include_lines": include_lines,
-                "include_customer": include_customer
+                "has_customer_details": "CustomerDetails" in quote_data,
+                "retrieved_at": datetime.now().isoformat()
             }
         }
         
     except Exception as e:
-        error_msg = f"Erreur récupération devis {doc_entry}: {str(e)}"
-        log(f"❌ {error_msg}", "ERROR")
-        return {"success": False, "error": error_msg}
-
+        log(f"❌ Erreur récupération détails devis {doc_entry}: {str(e)}", "ERROR")
+        return {"success": False, "error": str(e)}
+        
 async def _get_customer_details(card_code: str) -> dict:
     """
     Récupère les détails d'un client SAP

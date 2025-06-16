@@ -84,22 +84,47 @@ async def get_sap_quote_details(
             }
         )
         
-        if not sap_response or not sap_response.get("success", False):
+        # CORRECTION: Vérifier le type de réponse d'abord
+        if isinstance(sap_response, str):
+            # Réponse est un message d'erreur string
+            raise HTTPException(
+                status_code=500,
+                detail=f"Erreur SAP: {sap_response}"
+            )
+        
+        if not sap_response or not isinstance(sap_response, dict):
+            raise HTTPException(
+                status_code=500,
+                detail="Réponse SAP invalide ou vide"
+            )
+        
+        if not sap_response.get("success", False):
+            error_msg = sap_response.get('error', 'Erreur inconnue')
             raise HTTPException(
                 status_code=404,
-                detail=f"Devis SAP {doc_entry} non trouvé ou erreur: {sap_response.get('error', 'Erreur inconnue') if sap_response else 'Pas de réponse'}"
+                detail=f"Devis SAP {doc_entry} non trouvé ou erreur: {error_msg}"
             )
         
         # Structure la réponse pour l'édition
         quote_data = sap_response.get("quote", {})
         
+        if not quote_data:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Données de devis vides pour DocEntry {doc_entry}"
+            )
+        
         # Enrichissement avec métadonnées d'édition
         editable_structure = structure_quote_for_editing(quote_data, int(doc_entry))
         
-        logger.info(f"Devis SAP {doc_entry} récupéré avec succès - {len(editable_structure['quote']['lines'])} lignes")
+        lines_count = len(editable_structure.get('quote', {}).get('lines', []))
+        logger.info(f"Devis SAP {doc_entry} récupéré avec succès - {lines_count} lignes")
         
         return editable_structure
     
+    except HTTPException:
+        # Re-raise HTTPException without modification
+        raise
     except Exception as e:
         logger.error(f"Erreur SAP pour devis {doc_entry}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Erreur SAP: {str(e)}")
