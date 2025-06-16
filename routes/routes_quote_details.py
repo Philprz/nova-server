@@ -1,12 +1,12 @@
 """
-API Routes pour la récupération détaillée des devis
-Permet de récupérer le contenu complet d'un devis SAP/Salesforce pour édition
+API Routes pour la récupération détaillée des devis (Version MCPConnector Corrigée)
+Utilise la bonne méthode du MCPConnector - performance optimale
 """
 
 from fastapi import APIRouter, HTTPException
 from typing import Dict, Any
 import logging
-from services.mcp_connector import MCPConnector
+from datetime import datetime
 
 # Configuration du logging
 logger = logging.getLogger(__name__)
@@ -51,7 +51,7 @@ async def get_quote_details(
         else:
             raise HTTPException(
                 status_code=400, 
-                detail=f"Format d'ID invalide: {quote_id}. Attendu: SAP-<DocEntry> ou SF-<OpportunityId>"
+                detail=f"Format d'ID invalide: {quote_id}. Attendu: SAP-{{DocEntry}} ou SF-{{OpportunityId}}"
             )
     
     except Exception as e:
@@ -68,126 +68,37 @@ async def get_sap_quote_details(
     """
     
     try:
+        # Utilisation correcte du MCPConnector avec la bonne méthode
+        from services.mcp_connector import MCPConnector
+        
         connector = MCPConnector()
         
-        # Récupération du document SAP complet
-        sap_request = {
-            "tool": "get_quotation_details",
-            "doc_entry": int(doc_entry),
-            "include_lines": include_lines,
-            "include_customer": include_customer
-        }
+        # Utiliser la méthode call_sap_mcp qui existe avec la bonne signature
+        logger.info(f"Appel SAP MCP pour devis {doc_entry}")
+        sap_response = await connector.call_sap_mcp(
+            "get_quotation_details",
+            {
+                "doc_entry": int(doc_entry),
+                "include_lines": include_lines,
+                "include_customer": include_customer
+            }
+        )
         
-        sap_response = await connector.call_mcp("sap_mcp", sap_request)
-        
-        if not sap_response.get("success", False):
+        if not sap_response or not sap_response.get("success", False):
             raise HTTPException(
                 status_code=404,
-                detail=f"Devis SAP {doc_entry} non trouvé ou erreur: {sap_response.get('error', 'Erreur inconnue')}"
+                detail=f"Devis SAP {doc_entry} non trouvé ou erreur: {sap_response.get('error', 'Erreur inconnue') if sap_response else 'Pas de réponse'}"
             )
         
         # Structure la réponse pour l'édition
         quote_data = sap_response.get("quote", {})
         
         # Enrichissement avec métadonnées d'édition
-        editable_structure = {
-            "quote_id": f"SAP-{doc_entry}",
-            "source_system": "SAP Business One",
-            "editable": True,
-            "last_updated": quote_data.get("UpdateDate"),
-            
-            # Informations header
-            "header": {
-                "doc_entry": quote_data.get("DocEntry"),
-                "doc_num": quote_data.get("DocNum"), 
-                "doc_date": quote_data.get("DocDate"),
-                "doc_due_date": quote_data.get("DocDueDate"),
-                "status": quote_data.get("DocumentStatus"),
-                "remarks": quote_data.get("Comments", ""),
-                "reference": quote_data.get("NumAtCard", ""),
-                "sales_person": quote_data.get("SalesPersonCode"),
-                "payment_terms": quote_data.get("PaymentGroupCode")
-            },
-            
-            # Informations client
-            "customer": {},
-            
-            # Lignes de produits
-            "lines": [],
-            
-            # Totaux
-            "totals": {
-                "subtotal": quote_data.get("DocTotal", 0),
-                "tax_total": quote_data.get("VatSum", 0),
-                "total": quote_data.get("DocTotal", 0) + quote_data.get("VatSum", 0),
-                "currency": quote_data.get("DocCurrency", "EUR")
-            },
-            
-            # Métadonnées pour validation
-            "validation_rules": {
-                "can_modify_lines": True,
-                "can_modify_pricing": True,
-                "can_modify_customer": False,  # Généralement non modifiable
-                "required_fields": ["DocDate", "CardCode", "Lines"]
-            }
-        }
+        editable_structure = structure_quote_for_editing(quote_data, int(doc_entry))
         
-        # Informations client si demandées
-        if include_customer and "CardCode" in quote_data:
-            editable_structure["customer"] = {
-                "card_code": quote_data.get("CardCode"),
-                "card_name": quote_data.get("CardName"),
-                "contact_person": quote_data.get("ContactPersonCode"),
-                "address": {
-                    "bill_to": quote_data.get("Address"),
-                    "ship_to": quote_data.get("Address2")
-                },
-                "phone": quote_data.get("Phone1"),
-                "email": quote_data.get("EmailAddress")
-            }
+        logger.info(f"Devis SAP {doc_entry} récupéré avec succès - {len(editable_structure['quote']['lines'])} lignes")
         
-        # Lignes de produits si demandées
-        if include_lines and "DocumentLines" in quote_data:
-            for idx, line in enumerate(quote_data["DocumentLines"]):
-                editable_line = {
-                    "line_num": line.get("LineNum", idx),
-                    "item_code": line.get("ItemCode"),
-                    "item_description": line.get("ItemDescription"),
-                    "quantity": line.get("Quantity", 1),
-                    "unit_price": line.get("UnitPrice", 0),
-                    "discount_percent": line.get("DiscountPercent", 0),
-                    "line_total": line.get("LineTotal", 0),
-                    "tax_code": line.get("TaxCode"),
-                    "warehouse": line.get("WarehouseCode"),
-                    "currency": line.get("Currency", "EUR"),
-                    
-                    # Métadonnées d'édition pour cette ligne
-                    "editable_fields": [
-                        "quantity", "unit_price", "discount_percent", 
-                        "item_description", "warehouse"
-                    ],
-                    "validation": {
-                        "min_quantity": 1,
-                        "max_quantity": 999999,
-                        "min_price": 0.01,
-                        "max_discount": 100
-                    }
-                }
-                
-                editable_structure["lines"].append(editable_line)
-        
-        logger.info(f"Devis SAP {doc_entry} récupéré avec succès - {len(editable_structure['lines'])} lignes")
-        
-        return {
-            "success": True,
-            "quote": editable_structure,
-            "metadata": {
-                "source": "SAP Business One",
-                "retrieved_at": "now",
-                "total_lines": len(editable_structure["lines"]),
-                "editable_fields_count": count_editable_fields(editable_structure)
-            }
-        }
+        return editable_structure
     
     except Exception as e:
         logger.error(f"Erreur SAP pour devis {doc_entry}: {str(e)}")
@@ -203,6 +114,8 @@ async def get_salesforce_quote_details(
     """
     
     try:
+        from services.mcp_connector import MCPConnector
+        
         connector = MCPConnector()
         
         # Récupération de l'opportunité Salesforce complète
@@ -213,12 +126,13 @@ async def get_salesforce_quote_details(
             "include_account": include_customer
         }
         
-        sf_response = await connector.call_mcp("salesforce_mcp", sf_request)
+        logger.info(f"Appel Salesforce MCP pour opportunité {opportunity_id}")
+        sf_response = await connector.call_salesforce_mcp(sf_request)
         
-        if not sf_response.get("success", False):
+        if not sf_response or not sf_response.get("success", False):
             raise HTTPException(
                 status_code=404,
-                detail=f"Opportunité Salesforce {opportunity_id} non trouvée: {sf_response.get('error', 'Erreur inconnue')}"
+                detail=f"Opportunité Salesforce {opportunity_id} non trouvée: {sf_response.get('error', 'Erreur inconnue') if sf_response else 'Pas de réponse'}"
             )
         
         # Structure la réponse Salesforce pour l'édition
@@ -252,7 +166,7 @@ async def get_salesforce_quote_details(
             # Totaux
             "totals": {
                 "total": opportunity.get("Amount", 0),
-                "currency": "EUR"  # À adapter selon Salesforce
+                "currency": "EUR"
             },
             
             # Métadonnées pour validation
@@ -311,7 +225,7 @@ async def get_salesforce_quote_details(
             "quote": editable_structure,
             "metadata": {
                 "source": "Salesforce",
-                "retrieved_at": "now",
+                "retrieved_at": datetime.now().isoformat(),
                 "total_lines": len(editable_structure["lines"]),
                 "editable_fields_count": count_editable_fields(editable_structure)
             }
@@ -320,6 +234,137 @@ async def get_salesforce_quote_details(
     except Exception as e:
         logger.error(f"Erreur Salesforce pour opportunité {opportunity_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Erreur Salesforce: {str(e)}")
+
+def structure_quote_for_editing(quote_data: Dict[str, Any], doc_entry: int) -> Dict[str, Any]:
+    """Structure les données SAP pour l'interface d'édition"""
+    
+    # Informations header du devis
+    header = {
+        "doc_entry": quote_data.get("DocEntry"),
+        "doc_num": quote_data.get("DocNum"),
+        "doc_date": quote_data.get("DocDate"),
+        "doc_due_date": quote_data.get("DocDueDate"),
+        "valid_until": quote_data.get("ValidUntil"),
+        "card_code": quote_data.get("CardCode"),
+        "card_name": quote_data.get("CardName"),
+        "comments": quote_data.get("Comments", ""),
+        "reference": quote_data.get("NumAtCard", ""),
+        "sales_person": quote_data.get("SalesPersonCode"),
+        "payment_terms": quote_data.get("PaymentGroupCode"),
+        "document_status": quote_data.get("DocumentStatus")
+    }
+    
+    # Informations client détaillées
+    customer = {}
+    customer_details = quote_data.get("CustomerDetails", {})
+    if customer_details:
+        customer = {
+            "card_code": customer_details.get("CardCode"),
+            "card_name": customer_details.get("CardName"),
+            "phone": customer_details.get("Phone1"),
+            "email": customer_details.get("EmailAddress"),
+            "website": customer_details.get("Website"),
+            "billing_address": customer_details.get("BillingAddress", {}),
+            "shipping_address": customer_details.get("ShippingAddress", {})
+        }
+    else:
+        # Fallback avec les données de base du devis
+        customer = {
+            "card_code": quote_data.get("CardCode"),
+            "card_name": quote_data.get("CardName"),
+            "phone": "",
+            "email": "",
+            "website": "",
+            "billing_address": {},
+            "shipping_address": {}
+        }
+    
+    # Lignes de produits
+    lines = []
+    for line_data in quote_data.get("DocumentLines", []):
+        line = {
+            "line_num": line_data.get("LineNum"),
+            "item_code": line_data.get("ItemCode"),
+            "item_description": line_data.get("ItemDescription"),
+            "quantity": line_data.get("Quantity", 1),
+            "unit_price": line_data.get("UnitPrice", 0),
+            "price_after_vat": line_data.get("PriceAfterVAT", 0),
+            "discount_percent": line_data.get("DiscountPercent", 0),
+            "line_total": line_data.get("LineTotal", 0),
+            "line_total_with_vat": line_data.get("LineTotalSys", 0),
+            "tax_code": line_data.get("TaxCode"),
+            "tax_percent": line_data.get("TaxPercentagePerRow", 0),
+            "warehouse_code": line_data.get("WarehouseCode"),
+            "currency": line_data.get("Currency", "EUR"),
+            "free_text": line_data.get("FreeText", ""),
+            
+            # Métadonnées d'édition
+            "editable_fields": [
+                "quantity", "unit_price", "discount_percent",
+                "item_description", "warehouse_code", "free_text"
+            ],
+            "validation": {
+                "min_quantity": 1,
+                "max_quantity": 999999,
+                "min_price": 0.01,
+                "max_discount": 100,
+                "step_quantity": 1,
+                "step_price": 0.01,
+                "step_discount": 0.01
+            }
+        }
+        lines.append(line)
+    
+    # Totaux
+    totals = {
+        "subtotal": quote_data.get("DocTotal", 0),
+        "total_before_discount": quote_data.get("TotalDiscount", 0),
+        "discount_total": quote_data.get("TotalDiscountFC", 0),
+        "tax_total": quote_data.get("VatSum", 0),
+        "total_with_tax": (quote_data.get("DocTotal", 0) + quote_data.get("VatSum", 0)),
+        "currency": quote_data.get("DocCurrency", "EUR"),
+        "rounding": quote_data.get("RoundingDiffAmount", 0)
+    }
+    
+    # Structure finale pour l'édition
+    editable_structure = {
+        "quote_id": f"SAP-{quote_data.get('DocEntry')}",
+        "source_system": "SAP Business One",
+        "last_updated": quote_data.get("UpdateDate"),
+        "editable": True,
+        
+        "header": header,
+        "customer": customer,
+        "lines": lines,
+        "totals": totals,
+        
+        # Règles de validation globales
+        "validation_rules": {
+            "can_modify_header": True,
+            "can_modify_lines": True,
+            "can_add_lines": True,
+            "can_remove_lines": True,
+            "can_modify_customer": False,  # Généralement non modifiable
+            "required_fields": ["DocDate", "CardCode"],
+            "business_rules": {
+                "auto_recalculate_totals": True,
+                "validate_stock_availability": True,
+                "apply_customer_discounts": True
+            }
+        }
+    }
+    
+    return {
+        "success": True,
+        "quote": editable_structure,
+        "metadata": {
+            "source": "SAP Business One",
+            "retrieved_at": datetime.now().isoformat(),
+            "total_lines": len(lines),
+            "editable_fields_count": count_editable_fields(editable_structure),
+            "doc_entry": doc_entry
+        }
+    }
 
 def count_editable_fields(structure: Dict[str, Any]) -> int:
     """
@@ -349,51 +394,136 @@ async def get_quote_structure_for_editing(quote_id: str) -> Dict[str, Any]:
     """
     
     try:
-        # Pour l'instant, retourne une structure générique
-        # TODO: Adapter selon le type de devis (SAP vs Salesforce)
-        
-        return {
-            "success": True,
-            "structure": {
-                "sections": [
-                    {
-                        "id": "header",
-                        "title": "Informations générales",
-                        "fields": [
-                            {"name": "doc_date", "type": "date", "required": True, "label": "Date du devis"},
-                            {"name": "doc_due_date", "type": "date", "required": False, "label": "Date d'échéance"},
-                            {"name": "remarks", "type": "textarea", "required": False, "label": "Commentaires"},
-                            {"name": "reference", "type": "text", "required": False, "label": "Référence client"}
-                        ]
-                    },
-                    {
-                        "id": "customer",
-                        "title": "Informations client",
-                        "editable": False,
-                        "fields": [
-                            {"name": "card_name", "type": "text", "readonly": True, "label": "Nom du client"},
-                            {"name": "phone", "type": "tel", "required": False, "label": "Téléphone"},
-                            {"name": "email", "type": "email", "required": False, "label": "Email"}
-                        ]
-                    },
-                    {
-                        "id": "lines",
-                        "title": "Lignes de produits",
-                        "type": "array",
-                        "can_add": True,
-                        "can_remove": True,
-                        "fields": [
-                            {"name": "item_code", "type": "text", "required": True, "label": "Code produit"},
-                            {"name": "item_description", "type": "text", "required": True, "label": "Description"},
-                            {"name": "quantity", "type": "number", "required": True, "min": 1, "step": 1, "label": "Quantité"},
-                            {"name": "unit_price", "type": "number", "required": True, "min": 0.01, "step": 0.01, "label": "Prix unitaire"},
-                            {"name": "discount_percent", "type": "number", "required": False, "min": 0, "max": 100, "step": 0.01, "label": "Remise %"}
-                        ]
-                    }
-                ]
-            }
-        }
-    
+        # Structure adaptée selon le type de devis (SAP vs Salesforce)
+        if quote_id.startswith("SAP-"):
+            return get_sap_structure()
+        elif quote_id.startswith("SF-"):
+            return get_salesforce_structure()
+        else:
+            return get_generic_structure()
+            
     except Exception as e:
         logger.error(f"Erreur structure pour {quote_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Erreur: {str(e)}")
+
+def get_sap_structure() -> Dict[str, Any]:
+    """Structure spécifique pour les devis SAP"""
+    return {
+        "success": True,
+        "structure": {
+            "sections": [
+                {
+                    "id": "header",
+                    "title": "Informations générales",
+                    "icon": "📋",
+                    "fields": [
+                        {"name": "doc_date", "type": "date", "required": True, "label": "Date du devis", "editable": True},
+                        {"name": "doc_due_date", "type": "date", "required": False, "label": "Date d'échéance", "editable": True},
+                        {"name": "valid_until", "type": "date", "required": False, "label": "Valide jusqu'au", "editable": True},
+                        {"name": "comments", "type": "textarea", "required": False, "label": "Commentaires", "editable": True, "max_length": 254},
+                        {"name": "reference", "type": "text", "required": False, "label": "Référence client", "editable": True, "max_length": 100}
+                    ]
+                },
+                {
+                    "id": "customer",
+                    "title": "Informations client",
+                    "icon": "🏢",
+                    "editable": False,
+                    "description": "Informations client (lecture seule)",
+                    "fields": [
+                        {"name": "card_name", "type": "text", "readonly": True, "label": "Nom du client"},
+                        {"name": "phone", "type": "tel", "readonly": True, "label": "Téléphone"},
+                        {"name": "email", "type": "email", "readonly": True, "label": "Email"}
+                    ]
+                },
+                {
+                    "id": "lines",
+                    "title": "Lignes de produits",
+                    "icon": "📦",
+                    "type": "array",
+                    "can_add": True,
+                    "can_remove": True,
+                    "can_reorder": True,
+                    "fields": [
+                        {"name": "item_code", "type": "text", "required": True, "label": "Code produit", "editable": True},
+                        {"name": "item_description", "type": "text", "required": True, "label": "Description", "editable": True, "max_length": 200},
+                        {"name": "quantity", "type": "number", "required": True, "min": 1, "max": 999999, "step": 1, "label": "Quantité", "editable": True},
+                        {"name": "unit_price", "type": "number", "required": True, "min": 0.01, "step": 0.01, "label": "Prix unitaire", "editable": True, "currency": "EUR"},
+                        {"name": "discount_percent", "type": "number", "required": False, "min": 0, "max": 100, "step": 0.01, "label": "Remise %", "editable": True},
+                        {"name": "line_total", "type": "number", "readonly": True, "label": "Total ligne", "currency": "EUR", "calculated": True}
+                    ]
+                },
+                {
+                    "id": "totals",
+                    "title": "Totaux",
+                    "icon": "💰", 
+                    "editable": False,
+                    "description": "Totaux calculés automatiquement",
+                    "fields": [
+                        {"name": "subtotal", "type": "number", "readonly": True, "label": "Sous-total HT", "currency": "EUR"},
+                        {"name": "tax_total", "type": "number", "readonly": True, "label": "Total TVA", "currency": "EUR"},
+                        {"name": "total_with_tax", "type": "number", "readonly": True, "label": "Total TTC", "currency": "EUR", "highlight": True}
+                    ]
+                }
+            ],
+            "validation_rules": {
+                "business_rules": [
+                    "Auto-calcul des totaux de lignes",
+                    "Validation des stocks disponibles", 
+                    "Application des remises client",
+                    "Contrôle des prix minimum"
+                ],
+                "required_sections": ["header", "lines"],
+                "min_lines": 1
+            }
+        }
+    }
+
+def get_salesforce_structure() -> Dict[str, Any]:
+    """Structure spécifique pour les opportunités Salesforce"""
+    return {
+        "success": True,
+        "structure": {
+            "sections": [
+                {
+                    "id": "header",
+                    "title": "Informations opportunité",
+                    "icon": "💼",
+                    "fields": [
+                        {"name": "name", "type": "text", "required": True, "label": "Nom de l'opportunité", "editable": True},
+                        {"name": "close_date", "type": "date", "required": True, "label": "Date de clôture", "editable": True},
+                        {"name": "stage", "type": "select", "required": True, "label": "Étape", "editable": True},
+                        {"name": "probability", "type": "number", "required": False, "min": 0, "max": 100, "label": "Probabilité %", "editable": True},
+                        {"name": "description", "type": "textarea", "required": False, "label": "Description", "editable": True}
+                    ]
+                }
+            ]
+        }
+    }
+
+def get_generic_structure() -> Dict[str, Any]:
+    """Structure générique pour les devis"""
+    return {
+        "success": True,
+        "structure": {
+            "sections": [
+                {
+                    "id": "header",
+                    "title": "Informations générales",
+                    "fields": [
+                        {"name": "date", "type": "date", "required": True, "label": "Date", "editable": True},
+                        {"name": "comments", "type": "textarea", "required": False, "label": "Commentaires", "editable": True}
+                    ]
+                }
+            ]
+        }
+    }
+
+@router.get("/structure")
+async def get_quote_edit_structure() -> Dict[str, Any]:
+    """
+    Retourne la structure d'édition générique pour les devis SAP
+    Utile pour construire l'interface d'édition dynamique
+    """
+    
+    return get_sap_structure()
