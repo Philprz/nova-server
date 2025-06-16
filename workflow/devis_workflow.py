@@ -42,6 +42,8 @@ class DevisWorkflow:
     def __init__(self):
         self.context = {}
         self.draft_mode = False  # ← AJOUT NOUVEAU ATTRIBUT
+        self.current_step = ""        # AJOUTER ICI
+        self.workflow_steps = []      # AJOUTER ICI
         self.validation_enabled = VALIDATOR_AVAILABLE
         self.client_validator = ClientValidator() if VALIDATOR_AVAILABLE else None
         logger.info(f"Initialisation du workflow de devis - Validation client: {'✅ Activée' if self.validation_enabled else '❌ Désactivée'}")
@@ -64,12 +66,22 @@ class DevisWorkflow:
             
             if not extracted_info.get("client") and not extracted_info.get("products"):
                 return self._build_error_response("Impossible d'extraire les informations du prompt", "Client ou produits manquants")
-            
+            extracted_info = await self._extract_info_from_prompt(prompt)
+            self.context["extracted_info"] = extracted_info
+            # AJOUTER CES 3 LIGNES :
+            self.workflow_steps.append({
+                "step": "extraction",
+                "message": f"Client: {extracted_info.get('client')}, {len(extracted_info.get('products', []))} produits"
+            })
+            logger.info(f"Étape 1 - Extraction: {extracted_info}")
             # Étape 2: Validation et enrichissement du client Salesforce
             client_info = await self._validate_client(extracted_info.get("client"))
             self.context["client_info"] = client_info
             logger.info(f"Étape 2 - Client Salesforce: {'Trouvé' if client_info.get('found') else 'Non trouvé'}")
-            
+            self.workflow_steps.append({
+                "step": "client_validation",
+                "message": f"Client {'trouvé' if client_info.get('found') else 'non trouvé'}"
+            })
             # NOUVELLE LOGIQUE: Si client non trouvé ET validateur disponible
             if not client_info.get("found") and self.validation_enabled:
                 logger.info("🔍 Client non trouvé - Activation du processus de validation/création")
@@ -1139,6 +1151,7 @@ class DevisWorkflow:
         }
         
         logger.info("Réponse finale enrichie construite avec succès")
+        response["workflow_steps"] = self.workflow_steps
         return response
     
     def _build_error_response(self, message: str, error_details: str = None) -> Dict[str, Any]:
