@@ -562,79 +562,81 @@ Exemples :
         }
 
         async function generateQuote() {
-    console.log("🔄 Début generateQuote()");
-    
-    const generateBtn = document.getElementById('generateBtn');
-    const promptInput = document.getElementById('promptInput');
-    const prompt = promptInput?.value?.trim();
-    
-    if (!prompt) {
-        showError('Veuillez saisir une demande de devis');
-        return;
-    }
-    
-    // ✅ CORRECTION 1: Simplifier le verrouillage
-    const processing = document.getElementById('processing');
-    const resultPanel = document.getElementById('resultPanel');
-    
-    generateBtn.disabled = true;
-    processing.style.display = 'block';
-    resultPanel.style.display = 'none';
-    
-    try {
-        console.log("🚀 Appel API:", prompt);
-        
-        const response = await fetch('/generate_quote', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                prompt: prompt,
-                draft_mode: document.getElementById('draftMode')?.checked || false
-            })
-        });
-        
-        console.log("📡 Réponse reçue, status:", response.status);
-        
-        if (!response.ok) {
-            throw new Error(`Erreur HTTP ${response.status}`);
+            console.log("🔄 Début generateQuote()");
+            
+            const generateBtn = document.getElementById('generateBtn');
+            const promptInput = document.getElementById('mainInput');
+            const prompt = promptInput?.value?.trim();
+            
+            if (!prompt) {
+                showError('Veuillez saisir une demande de devis');
+                return;
+            }
+            
+            // ✅ CORRECTION 1: Simplifier le verrouillage
+            const processing = document.getElementById('processing');
+            const resultPanel = document.getElementById('resultPanel');
+            
+            generateBtn.disabled = true;
+            processing.style.display = 'block';
+            resultPanel.style.display = 'none';
+            
+            try {
+                console.log("🚀 Appel API:", prompt);
+                
+                const response = await fetch('/generate_quote', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        prompt: prompt,
+                        draft_mode: document.getElementById('draftMode')?.checked || false
+                    })
+                });
+                
+                console.log("📡 Réponse reçue, status:", response.status);
+                
+                if (!response.ok) {
+                    throw new Error(`Erreur HTTP ${response.status}`);
+                }
+                
+                const result = await response.json();
+                console.log("✅ JSON parsé:", result);
+                
+                // ✅ CORRECTION 2: Toujours déverrouiller l'interface
+                generateBtn.disabled = false;
+                processing.style.display = 'none';
+                
+                if (result.status === 'success') {
+                    console.log("🎉 Succès - Affichage des résultats");
+                    showQuoteResult(result);
+                } else {
+                    console.log("❌ Erreur dans la réponse:", result.message);
+                    showError(result.message || 'Erreur de traitement');
+
+                }
+                alert('Erreur: ' + (result.message || 'Erreur inconnue'));
+            } catch (error) {
+                console.error("❌ Erreur fatale:", error);
+                
+                // ✅ CORRECTION 3: Toujours déverrouiller en cas d'erreur
+                generateBtn.disabled = false;
+                processing.style.display = 'none';
+                
+                showError(`Communication échouée: ${error.message}`);
+            }
         }
-        
-        const result = await response.json();
-        console.log("✅ JSON parsé:", result);
-        
-        // ✅ CORRECTION 2: Toujours déverrouiller l'interface
-        generateBtn.disabled = false;
-        processing.style.display = 'none';
-        
-        if (result.status === 'success') {
-            console.log("🎉 Succès - Affichage des résultats");
-            showQuoteResult(result);
-        } else {
-            console.log("❌ Erreur dans la réponse:", result.message);
-            showError(result.message || 'Erreur de traitement');
-        }
-        
-    } catch (error) {
-        console.error("❌ Erreur fatale:", error);
-        
-        // ✅ CORRECTION 3: Toujours déverrouiller en cas d'erreur
-        generateBtn.disabled = false;
-        processing.style.display = 'none';
-        
-        showError(`Communication échouée: ${error.message}`);
-    }
-}
 
         // Correction callNovaAPI - Protection contre double exécution
         async function callNovaAPI() {
             // PROTECTION CRITIQUE contre double exécution
             const generateBtn = document.getElementById('generateBtn');
+            console.log("🔄 Début callNovaAPI()");
             if (generateBtn && generateBtn.disabled) {
                 console.log("⛔ Génération déjà en cours, abandon");
                 return;
             }
             
-            const promptInput = document.getElementById('promptInput');
+            const promptInput = document.getElementById('mainInput');
             const prompt = promptInput?.value?.trim();
             
             if (!prompt) {
@@ -647,6 +649,9 @@ Exemples :
             const resultPanel = document.getElementById('resultPanel');
             
             if (generateBtn) generateBtn.disabled = true;
+            generateBtn.disabled = true;
+generateBtn.textContent = 'Génération...';
+
             if (processing) processing.style.display = 'block';
             if (resultPanel) resultPanel.style.display = 'none';
             
@@ -676,9 +681,16 @@ Exemples :
                 }
                 
             } catch (error) {
-                console.error("❌ Erreur API:", error);
-                showError(`Communication échouée: ${error.message}`);
+                console.error("❌ Erreur:", error);
+                alert('Erreur de communication: ' + error.message);
+            } finally {
+                // TOUJOURS remettre l'interface en état normal
+                generateBtn.disabled = false;
+                generateBtn.textContent = '🚀 Générer le Devis';
+                processing.style.display = 'none';
+                console.log("🔄 Interface restaurée");
             }
+
         }
 
 
@@ -1923,7 +1935,7 @@ L'équipe commerciale</textarea>
             if (generateBtn) generateBtn.disabled = false;
             
             // Vider champ
-            const promptInput = document.getElementById('promptInput');
+            const promptInput = document.getElementById('mainInput');
             if (promptInput) {
                 promptInput.value = '';
                 promptInput.focus();
@@ -1936,15 +1948,23 @@ L'équipe commerciale</textarea>
 
         // Protection event listeners - Une seule assignation
         document.addEventListener('DOMContentLoaded', function() {
+            console.log("🔄 Initialisation interface...");
+            
+            // Nettoyer les anciens listeners
             const generateBtn = document.getElementById('generateBtn');
             if (generateBtn) {
-                // Supprimer anciens listeners
-                generateBtn.replaceWith(generateBtn.cloneNode(true));
+                // Supprimer tous les anciens listeners en clonant l'élément
+                const newBtn = generateBtn.cloneNode(true);
+                generateBtn.parentNode.replaceChild(newBtn, generateBtn);
                 
-                // Assigner nouveau listener unique
-                document.getElementById('generateBtn').addEventListener('click', callNovaAPI);
+                // Assigner UN SEUL listener
+                document.getElementById('generateBtn').onclick = function() {
+                    console.log("🚀 Clic bouton détecté");
+                    callNovaAPI();
+                };
+                
                 console.log("✅ Event listener unique assigné");
-        }
+            }
         });
 
         async function loadRealClients(searchTerm = '') {
@@ -2121,7 +2141,7 @@ L'équipe commerciale</textarea>
             const resultPanel = document.getElementById('resultPanel');
             if (resultPanel) resultPanel.style.display = 'none';
             
-            const promptInput = document.getElementById('promptInput');
+            const promptInput = document.getElementById('mainInput');
             if (promptInput) {
                 promptInput.value = '';
                 promptInput.focus();
