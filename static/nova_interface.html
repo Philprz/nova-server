@@ -597,30 +597,59 @@ Exemples :
             }, 1200);
         }
 
-        async function callNovaAPI(prompt) {
+        // Correction callNovaAPI - Protection contre double exécution
+        async function callNovaAPI() {
+            // PROTECTION CRITIQUE contre double exécution
+            const generateBtn = document.getElementById('generateBtn');
+            if (generateBtn && generateBtn.disabled) {
+                console.log("⛔ Génération déjà en cours, abandon");
+                return;
+            }
+            
+            const promptInput = document.getElementById('promptInput');
+            const prompt = promptInput?.value?.trim();
+            
+            if (!prompt) {
+                showError('Veuillez saisir une demande de devis');
+                return;
+            }
+            
+            // Verrouillage immédiat
+            const processing = document.getElementById('processing');
+            const resultPanel = document.getElementById('resultPanel');
+            
+            if (generateBtn) generateBtn.disabled = true;
+            if (processing) processing.style.display = 'block';
+            if (resultPanel) resultPanel.style.display = 'none';
+            
             try {
-                // APPEL API RÉEL NOVA
+                console.log("🚀 Appel API unique:", prompt);
+                
                 const response = await fetch('/generate_quote', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         prompt: prompt,
-                        draft_mode: currentMode === 'draft'
+                        draft_mode: document.getElementById('draftMode')?.checked || false
                     })
                 });
-
+                
+                if (!response.ok) {
+                    throw new Error(`Erreur ${response.status}`);
+                }
+                
                 const result = await response.json();
+                console.log("✅ Résultat unique reçu");
                 
                 if (result.status === 'success') {
                     showQuoteResult(result);
                 } else {
-                    showError(result.message || 'Erreur lors de la génération du devis');
+                    showError(result.message || 'Erreur de traitement');
                 }
                 
             } catch (error) {
-                showError(error.message || 'Erreur lors de la génération du devis');
+                console.error("❌ Erreur API:", error);
+                showError(`Communication échouée: ${error.message}`);
             }
         }
 
@@ -1849,25 +1878,47 @@ L'équipe commerciale</textarea>
             showNotification('PDF ouvert dans un nouvel onglet !', 'success');
         }
 
+        // Correction newQuote - Réinitialisation complète
         function newQuote() {
-            document.getElementById('mainInput').value = '';
-            document.getElementById('resultPanel').style.display = 'none';
-            document.getElementById('mainInput').focus();
-            showNotification('Prêt pour un nouveau devis !', 'success');
+            console.log("🔄 Réinitialisation interface");
+            
+            // Masquer résultats
+            const resultPanel = document.getElementById('resultPanel');
+            if (resultPanel) resultPanel.style.display = 'none';
+            
+            // Masquer progression
+            const processing = document.getElementById('processing');
+            if (processing) processing.style.display = 'none';
+            
+            // Réactiver bouton
+            const generateBtn = document.getElementById('generateBtn');
+            if (generateBtn) generateBtn.disabled = false;
+            
+            // Vider champ
+            const promptInput = document.getElementById('promptInput');
+            if (promptInput) {
+                promptInput.value = '';
+                promptInput.focus();
+            }
+            
+            // Supprimer notifications
+            const notifications = document.querySelectorAll('.notification');
+            notifications.forEach(n => n.remove());
         }
 
-        // Focus automatique au chargement
-        window.addEventListener('load', function() {
-            var mainInput = document.getElementById('mainInput');
-            if (mainInput) mainInput.focus();
+        // Protection event listeners - Une seule assignation
+        document.addEventListener('DOMContentLoaded', function() {
+            const generateBtn = document.getElementById('generateBtn');
+            if (generateBtn) {
+                // Supprimer anciens listeners
+                generateBtn.replaceWith(generateBtn.cloneNode(true));
+                
+                // Assigner nouveau listener unique
+                document.getElementById('generateBtn').addEventListener('click', callNovaAPI);
+                console.log("✅ Event listener unique assigné");
+        }
         });
 
-        // Raccourci clavier Ctrl+Enter pour générer
-        document.getElementById('mainInput').addEventListener('keydown', function(e) {
-            if (e.ctrlKey && e.key === 'Enter') {
-                generateQuote();
-            }
-        });
         async function loadRealClients(searchTerm = '') {
             try {
                 const response = await fetch(`/clients/search_clients_advanced?q=${encodeURIComponent(searchTerm)}&limit=10`);
@@ -1997,7 +2048,99 @@ L'équipe commerciale</textarea>
             // Optionnel : mettre à jour l'aperçu
             updateAdvancedPreview();
         }
+        function showError(message) {
+            console.error("❌ Erreur:", message);
+            
+            // Masquer indicateur de progression
+            const processing = document.getElementById('processing');
+            if (processing) processing.style.display = 'none';
+            
+            // Réactiver bouton
+            const generateBtn = document.getElementById('generateBtn');
+            if (generateBtn) generateBtn.disabled = false;
+            
+            // Afficher message d'erreur
+            const resultPanel = document.getElementById('resultPanel');
+            if (resultPanel) {
+                resultPanel.style.display = 'block';
+                const resultContent = document.getElementById('resultContent');
+                if (resultContent) {
+                    resultContent.innerHTML = `
+                        <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 20px; text-align: center;">
+                            <div style="color: #dc2626; font-size: 2em; margin-bottom: 10px;">⚠️</div>
+                            <h3 style="color: #dc2626; margin: 0 0 10px 0;">Erreur de génération</h3>
+                            <p style="color: #7f1d1d; margin: 0;">${message}</p>
+                            <button onclick="newQuote()" style="
+                                margin-top: 15px;
+                                padding: 8px 16px;
+                                background: #dc2626;
+                                color: white;
+                                border: none;
+                                border-radius: 6px;
+                                cursor: pointer;
+                            ">Réessayer</button>
+                        </div>
+                    `;
+                }
+            }
+            
+            // Notification d'erreur
+            showNotification(message, 'error');
+        }
 
+        function newQuote() {
+            // Réinitialiser l'interface
+            const resultPanel = document.getElementById('resultPanel');
+            if (resultPanel) resultPanel.style.display = 'none';
+            
+            const promptInput = document.getElementById('promptInput');
+            if (promptInput) {
+                promptInput.value = '';
+                promptInput.focus();
+            }
+            
+            console.log("🔄 Interface réinitialisée");
+        }
+
+        function showNotification(message, type = 'success') {
+            // Supprimer notification existante
+            const existing = document.querySelector('.notification');
+            if (existing) existing.remove();
+            
+            const notification = document.createElement('div');
+            notification.className = 'notification';
+            notification.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                padding: 15px 20px;
+                border-radius: 8px;
+                color: white;
+                font-weight: 600;
+                z-index: 10000;
+                transform: translateX(100%);
+                transition: transform 0.3s ease;
+                ${type === 'success' ? 'background: #10b981;' : 'background: #dc2626;'}
+            `;
+            notification.textContent = message;
+            
+            document.body.appendChild(notification);
+            
+            // Animation d'entrée
+            setTimeout(() => {
+                notification.style.transform = 'translateX(0)';
+            }, 100);
+            
+            // Auto-suppression
+            setTimeout(() => {
+                notification.style.transform = 'translateX(100%)';
+                setTimeout(() => {
+                    if (document.body.contains(notification)) {
+                        document.body.removeChild(notification);
+                    }
+                }, 300);
+            }, 3000);
+        }
     </script>
 
 </body>
