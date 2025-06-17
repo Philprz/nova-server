@@ -1055,6 +1055,38 @@ class DevisWorkflow:
                 "message": "Erreur lors de la création du devis dans Salesforce"
             }
     
+    def _get_stock_value(self, product: Dict[str, Any]) -> float:  # ← BON
+        """Extrait la valeur du stock, qu'il soit un float ou un dict"""
+        stock = product.get("stock", 0)
+        
+        # Si c'est déjà un float/int, le retourner directement
+        if isinstance(stock, (int, float)):
+            return float(stock)
+        
+        # Si c'est un dictionnaire, chercher 'total'
+        if isinstance(stock, dict):
+            return float(stock.get("total", 0))
+        
+        # Fallback
+        return 0.0
+    def _get_stock_safely(self, product: Dict[str, Any]) -> float:
+        """
+        Extrait la valeur du stock de manière robuste
+        Gère les cas où stock est un float OU un dictionnaire
+        """
+        stock = product.get("stock", 0)
+        
+        # Cas 1: stock est déjà un nombre (float/int)
+        if isinstance(stock, (int, float)):
+            return float(stock)
+        
+        # Cas 2: stock est un dictionnaire avec 'total'
+        if isinstance(stock, dict):
+            return float(stock.get("total", 0))
+        
+        # Cas 3: fallback
+        return 0.0
+
     def _build_response(self) -> Dict[str, Any]:
         """🔧 CORRECTION : Construit la réponse finale avec nom client correct"""
         logger.info("Construction de la réponse finale enrichie")
@@ -1136,8 +1168,8 @@ class DevisWorkflow:
                     "quantity": product.get("requested_quantity", 0),
                     "unit_price": product.get("Price", 0.0),
                     "line_total": product.get("requested_quantity", 0) * product.get("Price", 0.0),
-                    "stock_available": product.get("stock", {}).get("total", 0),
-                    "available": product.get("stock", {}).get("total", 0) >= product.get("requested_quantity", 0)
+                    "stock_available": self._get_stock_value(product),
+                    "available": self._get_stock_safely(product) >= product.get("requested_quantity", 0)
                 }
                 products_response.append(product_data)
         
