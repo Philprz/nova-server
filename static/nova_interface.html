@@ -694,75 +694,165 @@ generateBtn.textContent = 'Génération...';
         }
 
 
-        // Remplacer la fonction showQuoteResult par celle-ci (pour debug)
         function showQuoteResult(result) {
-            // DEBUG: Afficher la structure des données dans la console
-            console.log("=== STRUCTURE COMPLETE DES DONNEES ===");
+            // ✅ DIAGNOSTIC COMPLET
+            console.log("=== 🔍 DIAGNOSTIC COMPLET DES DONNEES ===");
+            console.log("📋 Structure complète reçue:");
             console.log(JSON.stringify(result, null, 2));
-            console.log("=== CLIENT DATA ===");
-            console.log("result.client:", result.client);
-            console.log("=== PRODUCTS DATA ===");
-            console.log("result.products:", result.products);
-            console.log("=== TOTAL AMOUNT ===");
-            console.log("result.total_amount:", result.total_amount);
             
+            console.log("\n🏢 ANALYSE CLIENT:");
+            console.log("- result.client:", result.client);
+            console.log("- result.client?.name:", result.client?.name);
+            console.log("- result.client_name:", result.client_name);
+            console.log("- result.client_info:", result.client_info);
+            
+            console.log("\n📦 ANALYSE PRODUITS:");
+            console.log("- result.products:", result.products);
+            console.log("- Nombre de produits:", result.products?.length || 0);
+            
+            console.log("\n💰 ANALYSE MONTANTS:");
+            console.log("- result.total_amount:", result.total_amount);
+            console.log("- result.currency:", result.currency);
+            
+            // Masquer le processing et afficher le résultat
             document.getElementById('processing').style.display = 'none';
             document.getElementById('resultPanel').style.display = 'block';
             document.getElementById('generateBtn').disabled = false;
             
+            // ✅ LOGIQUE D'AFFICHAGE CLIENT ROBUSTE
+            let clientName = 'Client non identifié';
+            
+            // Essayer différentes structures possibles
+            if (result.client?.name) {
+                clientName = result.client.name;
+                console.log("✅ Client trouvé via result.client.name:", clientName);
+            } else if (result.client_name) {
+                clientName = result.client_name;
+                console.log("✅ Client trouvé via result.client_name:", clientName);
+            } else if (result.client_info?.name) {
+                clientName = result.client_info.name;
+                console.log("✅ Client trouvé via result.client_info.name:", clientName);
+            } else if (typeof result.client === 'string') {
+                clientName = result.client;
+                console.log("✅ Client trouvé comme string directe:", clientName);
+            } else {
+                console.log("❌ PROBLÈME: Aucune structure client trouvée!");
+                console.log("📋 Structures client disponibles:");
+                Object.keys(result).filter(key => key.toLowerCase().includes('client')).forEach(key => {
+                    console.log(`   - ${key}:`, result[key]);
+                });
+            }
+            
+            // ✅ LOGIQUE D'AFFICHAGE PRODUITS ROBUSTE  
+            let productsDisplay = '';
+            let productsCount = 0;
+            
+            if (result.products && Array.isArray(result.products) && result.products.length > 0) {
+                productsCount = result.products.length;
+                const displayedProducts = result.products.slice(0, 3); // Montrer max 3
+                
+                productsDisplay = displayedProducts.map(product => {
+                    const code = product.code || product.item_code || 'N/A';
+                    const name = product.name || product.item_name || 'Produit';
+                    const quantity = product.quantity || 1;
+                    
+                    return `${code} (${quantity}x)`;
+                }).join(', ');
+                
+                if (result.products.length > 3) {
+                    productsDisplay += ` et ${result.products.length - 3} autre(s)`;
+                }
+            } else {
+                productsDisplay = 'Aucun produit détaillé';
+                console.log("⚠️ Pas de produits dans result.products");
+            }
+            
+            // ✅ MONTANT TOTAL ROBUSTE
+            const totalAmount = parseFloat(result.total_amount) || 0;
+            const currency = result.currency || 'EUR';
+            const formattedAmount = totalAmount.toLocaleString('fr-FR', {
+                style: 'currency',
+                currency: currency
+            });
+            
+            // ✅ AFFICHAGE AVEC DIAGNOSTICS VISUELS
             const resultContent = `
-                <div class="result-item">
-                    <span class="result-label">📋 Devis N°</span>
-                    <span class="result-value">${result.quote_id || 'NOVA-' + Date.now().toString().slice(-6)}</span>
-                </div>
-                <div class="result-item">
-                    <span class="result-label">🏢 Client</span>
-                    <span class="result-value">${result.client?.name || 'Client extrait'}</span>
-                </div>
-                <div class="result-item">
-                    <span class="result-label">📦 Produits</span>
-                    <span class="result-value">${result.products?.length || 1} article(s)</span>
-                </div>
-                <div class="result-item">
-                    <span class="result-label">💰 Montant Total</span>
-                    <span class="result-value">${result.total_amount || '0.00'} ${result.currency || 'EUR'}</span>
-                </div>
-                <div class="result-item">
-                    <span class="result-label">📅 Date de création</span>
-                    <span class="result-value">${result.date || new Date().toLocaleDateString('fr-FR')}</span>
-                </div>
-                <div class="result-item">
-                    <span class="result-label">🎯 Statut</span>
-                    <span class="result-value">✅ Créé dans Salesforce et SAP</span>
+                <div style="background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%); padding: 20px; border-radius: 12px; margin-bottom: 20px;">
+                    <h3 style="color: #0369a1; margin: 0 0 15px 0; display: flex; align-items: center; gap: 10px;">
+                        <span style="font-size: 1.5em;">✅</span>
+                        Devis généré avec succès
+                    </h3>
+                    
+                    <!-- DIAGNOSTIC CLIENT VISIBLE -->
+                    <div class="result-item" style="background: ${clientName === 'Client non identifié' ? '#fef3c7' : '#f0fdf4'}; padding: 10px; border-radius: 8px; margin-bottom: 10px;">
+                        <span class="result-label">🏢 Client</span>
+                        <span class="result-value" style="font-weight: bold; color: ${clientName === 'Client non identifié' ? '#d97706' : '#059669'};">
+                            ${clientName}
+                        </span>
+                        ${clientName === 'Client non identifié' ? '<div style="font-size: 0.8em; color: #d97706; margin-top: 5px;">⚠️ Nom client non récupéré - voir console pour diagnostic</div>' : ''}
+                    </div>
+                    
+                    <div class="result-item">
+                        <span class="result-label">📋 Devis N°</span>
+                        <span class="result-value">${result.quote_id || 'NOVA-' + Date.now().toString().slice(-6)}</span>
+                    </div>
+                    
+                    <div class="result-item">
+                        <span class="result-label">📦 Produits (${productsCount})</span>
+                        <span class="result-value">${productsDisplay}</span>
+                    </div>
+                    
+                    <div class="result-item">
+                        <span class="result-label">💰 Montant Total</span>
+                        <span class="result-value" style="font-size: 1.2em; font-weight: bold; color: #059669;">
+                            ${formattedAmount}
+                        </span>
+                    </div>
+                    
+                    <div class="result-item">
+                        <span class="result-label">📅 Date</span>
+                        <span class="result-value">${result.date || new Date().toLocaleDateString('fr-FR')}</span>
+                    </div>
+                    
+                    <div class="result-item">
+                        <span class="result-label">📊 Statut</span>
+                        <span class="result-value" style="color: #059669; font-weight: bold;">
+                            ${result.quote_status || 'Créé'} ${result.draft_mode ? '(Brouillon)' : '(Validé)'}
+                        </span>
+                    </div>
                 </div>
                 
-                <div class="result-actions">
-                    <button id="dynamicSendEmailButton" class="result-btn result-btn-primary">
-                        📧 Envoyer au client
+                <!-- Actions disponibles -->
+                <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 20px;">
+                    <button onclick="generatePDFWorking(arguments[0])" data-result='${JSON.stringify(result).replace(/'/g, "&apos;")}' 
+                        style="background: #2563eb; color: white; padding: 10px 20px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">
+                        📄 Générer PDF
                     </button>
-                    <button id="dynamicShowPdfButton" class="result-btn result-btn-secondary">
-                        📄 Voir PDF
-
-
-                    </button>
-                    <button class="result-btn result-btn-secondary" onclick="newQuote()">
-                        🆕 Nouveau devis
+                    <button onclick="newQuote()" style="background: #f3f4f6; color: #374151; padding: 10px 20px; border: 1px solid #d1d5db; border-radius: 6px; cursor: pointer;">
+                        🔄 Nouveau Devis
                     </button>
                 </div>
+                
+                <!-- Diagnostic technique (masquable) -->
+                <details style="margin-top: 20px; font-size: 0.9em;">
+                    <summary style="cursor: pointer; color: #6b7280;">🔧 Informations techniques</summary>
+                    <div style="background: #f9fafb; padding: 15px; border-radius: 6px; margin-top: 10px; font-family: monospace; white-space: pre-wrap;">Mode: ${result.draft_mode ? 'Brouillon' : 'Production'}
+        SAP DocNum: ${result.sap_doc_num || 'N/A'}
+        Salesforce ID: ${result.salesforce_quote_id || 'N/A'}
+        Données client brutes: ${JSON.stringify(result.client || {}, null, 2)}</div>
+                </details>
             `;
             
             document.getElementById('resultContent').innerHTML = resultContent;
-
-            const btnPDF = document.getElementById('dynamicShowPdfButton');
-            if (btnPDF) {
-                btnPDF.addEventListener('click', () => showQuotePreview(result));
-            }
-            const btnEmail = document.getElementById('dynamicSendEmailButton');
-            if (btnEmail) {
-                btnEmail.addEventListener('click', sendQuoteByEmail);
-            }
-
-            showNotification('Devis généré avec succès !', 'success');
+            
+            // Notification de fin avec résumé
+            showNotification(`✅ Devis créé pour ${clientName} - ${formattedAmount}`, 'success');
+            
+            console.log("=== 🎯 RÉSUMÉ DIAGNOSTIC ===");
+            console.log(`Client affiché: "${clientName}"`);
+            console.log(`Produits: ${productsCount}`);
+            console.log(`Montant: ${formattedAmount}`);
+            console.log("=== FIN DIAGNOSTIC ===");
         }
         // 1. Remplacer showQuotePreview par cette version avec VRAIES DONNÉES
         function showQuotePreview(result) {

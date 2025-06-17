@@ -1074,102 +1074,126 @@ class DevisWorkflow:
                 "message": "Erreur lors de la création du devis dans Salesforce"
             }
     
-    def _build_response(self) -> Dict[str, Any]:
-        """🔧 CORRECTION : Construit la réponse finale avec informations client correctes"""
+    def _build_response(self, status: str, message: str, details: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Construit la réponse finale enrichie du workflow"""
         logger.info("Construction de la réponse finale enrichie")
         
+        # ✅ CORRECTION - Récupération correcte des données client
         client_info = self.context.get("client_info", {})
-        # Variables non utilisées commentées pour résoudre les avertissements IDE
-        # quote_data = self.context.get("quote_data", {})
-        # availability = self.context.get("availability", {})
-        quote_result = self.context.get("quote_result", {})
-        sap_client = self.context.get("sap_client", {})
-        client_validation = self.context.get("client_validation", {})
-        products_info = self.context.get("products_info", [])
-        
-        if not client_info.get("found", False):
-            return {
-                "status": "error",
-                "message": f"Client non trouvé: {client_info.get('error', 'Erreur inconnue')}",
-                "next_steps": "Veuillez vérifier le nom du client et réessayer."
-            }
-        
-        if not quote_result.get("success", False):
-            return {
-                "status": "error",
-                "message": f"Échec de la création du devis: {quote_result.get('error', 'Erreur inconnue')}",
-                "next_steps": "Veuillez contacter le support technique."
-            }
-        
-        # 🔧 CORRECTION CRITIQUE : Construire correctement les données client
         client_data = client_info.get("data", {})
         
-        # Extraire les informations client depuis Salesforce
-        client_response = {
-            "name": client_data.get("Name") or client_data.get("CardName") or "Client trouvé",
-            "account_number": client_data.get("AccountNumber") or client_data.get("CardCode") or "",
-            "salesforce_id": client_data.get("Id", ""),
-            "phone": client_data.get("Phone", ""),
-            "email": client_data.get("Email", ""),
-            "city": client_data.get("BillingCity", ""),
-            "country": client_data.get("BillingCountry", "")
-        }
+        # Extraire le nom client depuis différentes sources possibles
+        client_name = None
+        if client_data:
+            # Priorité 1: Nom depuis Salesforce
+            client_name = client_data.get("Name") or client_data.get("name")
+            
+            # Priorité 2: Nom depuis les données extraites
+            if not client_name:
+                extracted_info = self.context.get("extracted_info", {})
+                client_name = extracted_info.get("client")
+                
+            # Priorité 3: Nom depuis l'enrichissement
+            if not client_name and hasattr(self, 'enriched_client_name'):
+                client_name = self.enriched_client_name
         
-        # 🔧 CORRECTION : Construire correctement les données produits
-        products_response = []
+        # Si toujours pas trouvé, utiliser les données extraites
+        if not client_name:
+            extracted_info = self.context.get("extracted_info", {})
+            client_name = extracted_info.get("client", "Client non identifié")
+        
+        logger.info(f"✅ Client name résolu: '{client_name}' (source: {type(client_data).__name__})")
+        
+        # ✅ CORRECTION - Récupération correcte des produits
+        products_info = self.context.get("products_info", [])
+        
+        # Formater les produits correctement
+        formatted_products = []
+        total_amount = 0.0
+        
         for product in products_info:
-            if "error" not in product:
-                product_data = {
-                    "code": product.get("ItemCode", ""),
-                    "name": product.get("ItemDescription", ""),
-                    "quantity": product.get("requested_quantity", 0),
-                    "unit_price": product.get("Price", 0.0),
-                    "line_total": product.get("requested_quantity", 0) * product.get("Price", 0.0),
-                    "stock_available": product.get("stock", {}).get("total", 0),
-                    "available": product.get("stock", {}).get("total", 0) >= product.get("requested_quantity", 0)
+            if isinstance(product, dict):
+                # Extraire les données produit depuis différentes sources
+                product_code = (product.get("code") or 
+                            product.get("item_code") or 
+                            product.get("ItemCode", ""))
+                
+                product_name = (product.get("name") or 
+                            product.get("item_name") or 
+                            product.get("ItemName", ""))
+                
+                quantity = float(product.get("quantity", 1))
+                unit_price = float(product.get("price", 0) or product.get("unit_price", 0) or product.get("Price", 0))
+                line_total = quantity * unit_price
+                
+                formatted_product = {
+                    "code": product_code,
+                    "name": product_name,
+                    "quantity": quantity,
+                    "unit_price": unit_price,
+                    "line_total": line_total,
+                    "availability": product.get("availability", "Disponible"),
+                    "stock": product.get("stock", 0)
                 }
-                products_response.append(product_data)
+                
+                formatted_products.append(formatted_product)
+                total_amount += line_total
+                
+                logger.info(f"✅ Produit formaté: {product_code} x{quantity} = {line_total}€")
         
-        # 🔧 CORRECTION : Construire la réponse finale complète
+        logger.info(f"✅ Total calculé: {total_amount}€ pour {len(formatted_products)} produits")
+        
+        # Construction de la réponse avec données corrigées
         response = {
-            "success": True,
-            "status": "success",
-            "quote_id": quote_result.get("opportunity_id", f"NOVA-{datetime.now().strftime('%Y%m%d-%H%M%S')}"),
+            "status": status,
+            "success": status == "success",  # ← Ajouter pour compatibilité
+            "message": message,
+            "timestamp": datetime.now().isoformat(),
             
-            # 🎯 DONNÉES CLIENT CORRIGÉES
-            "client": client_response,
+            # ✅ DONNÉES CLIENT CORRIGÉES
+            "client": {
+                "name": client_name,
+                "account_number": client_data.get("AccountNumber") or client_data.get("account_number", "N/A"),
+                "salesforce_id": client_data.get("Id") or client_data.get("id", ""),
+                "type": client_data.get("Type", "Client standard"),
+                "industry": client_data.get("Industry", ""),
+                "phone": client_data.get("Phone", ""),
+                "city": client_data.get("BillingCity", "")
+            },
             
-            # 🎯 DONNÉES PRODUITS CORRIGÉES  
-            "products": products_response,
-            
-            # Calculs financiers
-            "total_amount": sum(p.get("line_total", 0) for p in products_response),
+            # ✅ DONNÉES PRODUITS CORRIGÉES
+            "products": formatted_products,
+            "total_amount": round(total_amount, 2),
             "currency": "EUR",
+            "products_count": len(formatted_products),
+            
+            # Informations du devis
+            "quote_id": details.get("quote_id") if details else f"NOVA-{datetime.now().strftime('%Y%m%d%H%M%S')}",
             "date": datetime.now().strftime("%Y-%m-%d"),
-            "quote_status": "Created",
+            "quote_status": details.get("quote_status", "Created"),
             
-            # Disponibilité
-            "all_products_available": all(p.get("available", False) for p in products_response),
+            # Statuts système
+            "all_products_available": all(p.get("availability") == "Disponible" for p in formatted_products),
+            "sap_doc_num": details.get("sap_doc_num") if details else None,
+            "salesforce_quote_id": details.get("salesforce_quote_id") if details else None,
             
-            # Informations système
-            "sap_doc_num": quote_result.get("sap_doc_num"),
-            "salesforce_quote_id": quote_result.get("opportunity_id"),
-            "message": "Devis généré avec succès",
-            
-            # Mode draft
-            "draft_mode": self.draft_mode
+            # Mode de traitement
+            "draft_mode": self.context.get("draft_mode", False)
         }
         
-        # Ajouter les informations de validation client si disponibles
+        # ✅ DEBUG - Afficher les données pour vérification
+        logger.info(f"🔍 DEBUG - Client final: name='{response['client']['name']}', id='{response['client']['salesforce_id']}'")
+        logger.info(f"🔍 DEBUG - Produits: {len(response['products'])} items, total={response['total_amount']}€")
+        
+        # Validation enrichie client si disponible
+        client_validation = self.context.get("client_validation")
         if client_validation:
             response["client_validation"] = {
                 "validation_used": True,
                 "country": client_validation.get("country", "Unknown"),
                 "validation_level": client_validation.get("validation_level", "basic"),
                 "warnings": client_validation.get("warnings", []),
-                "suggestions": client_validation.get("suggestions", []),
-                "enriched_data": client_validation.get("enriched_data", {}),
-                "duplicate_check": client_validation.get("duplicate_check", {})
+                "suggestions": client_validation.get("suggestions", [])
             }
         else:
             response["client_validation"] = {
@@ -1177,18 +1201,18 @@ class DevisWorkflow:
                 "reason": "Client existant trouvé dans Salesforce"
             }
         
-        # Ajouter les références système pour traçabilité
+        # Références système pour traçabilité
         response["system_references"] = {
-            "sap_client_created": sap_client.get("created", False) if sap_client else False,
-            "sap_client_card_code": sap_client.get("data", {}).get("CardCode") if sap_client and sap_client.get("data") else None,
+            "sap_client_created": False,  # À implémenter si nécessaire
             "quote_creation_timestamp": datetime.now().isoformat(),
             "validation_enabled": self.validation_enabled
         }
         
-        logger.info("Réponse finale enrichie construite avec succès")
-        response["workflow_steps"] = self.workflow_steps
+        # Étapes du workflow pour debug
+        response["workflow_steps"] = getattr(self, 'workflow_steps', [])
+        
+        logger.info("✅ Réponse finale enrichie construite avec données complètes")
         return response
-    
     # ✅ MÉTHODE D'AIDE - Ajouter aussi cette méthode pour enrichir les données client
     def _enrich_client_data(self, client_name: str, salesforce_data: Dict[str, Any]) -> None:
         """Enrichit les données client dans le contexte"""
