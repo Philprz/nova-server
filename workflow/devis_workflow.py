@@ -115,7 +115,7 @@ class DevisWorkflow:
             self.context["sap_client"] = sap_client
             logger.info(f"Étape 6 - Client SAP: {'Créé/Trouvé' if sap_client.get('created') is not None else 'Erreur'}")
             # Créer le devis dans SAP si un client SAP est disponible
-            sap_quote = None
+            #sap_quote = None
             if sap_client.get("data") and sap_client["data"].get("CardCode"):
                 logger.info(f"Création du devis dans SAP en mode {'DRAFT' if self.draft_mode else 'NORMAL'}...")
                 
@@ -161,34 +161,15 @@ class DevisWorkflow:
                         })
                     
                     if sap_result.get("success"):
-                        sap_quote = sap_result
+                        #sap_quote = sap_result
                         mode_text = "BROUILLON" if self.draft_mode else "VALIDÉ"
                         logger.info(f"✅ Devis SAP {mode_text} créé: DocNum {sap_result.get('doc_num')}")
                     else:
                         logger.error(f"❌ Erreur création devis SAP: {sap_result.get('error')}")
             
             # 2. Créer/Synchroniser avec Salesforce (optionnel mais recommandé)
-            salesforce_quote = await self._create_salesforce_quote(quote_data, sap_quote)
+            #salesforce_quote = await self._create_salesforce_quote(quote_data, sap_quote)
 
-            # Construire la réponse
-            success = sap_quote and sap_quote.get("success", False)
-            
-            result = {
-                "success": success,
-                "quote_id": f"SAP-{sap_quote.get('doc_num', 'DRAFT')}" if sap_quote else f"DRAFT-{datetime.now().strftime('%Y%m%d-%H%M%S')}",
-                "sap_doc_entry": sap_quote.get("doc_entry") if sap_quote else None,
-                "sap_doc_num": sap_quote.get("doc_num") if sap_quote else None,
-                "salesforce_quote_id": salesforce_quote.get("id") if salesforce_quote and salesforce_quote.get("success") else None,
-                "status": "Draft" if self.draft_mode else ("Created" if success else "Failed"),
-                "mode": "DRAFT" if self.draft_mode else "NORMAL",  # ✅ NOUVEAU CHAMP
-                "message": f"Devis créé en mode {'brouillon' if self.draft_mode else 'validé'} dans SAP (DocNum: {sap_quote.get('doc_num')})" if success else f"Devis en {'brouillon' if self.draft_mode else 'échec'}",
-                "sap_result": sap_quote,
-                "salesforce_result": salesforce_quote,
-                "draft_mode": self.draft_mode  # ✅ NOUVEAU CHAMP pour le frontend
-            }
-            
-            logger.info(f"Création devis terminée: {result['status']} en mode {result['mode']}")
-            return result            
             # Étape 7: Création RÉELLE du devis dans Salesforce ET SAP
             quote_result = await self._create_quote_in_salesforce()
             self.context["quote_result"] = quote_result
@@ -1075,17 +1056,15 @@ class DevisWorkflow:
             }
     
     def _build_response(self) -> Dict[str, Any]:
-        """🔧 CORRECTION : Construit la réponse finale avec informations client correctes"""
+        """🔧 CORRECTION : Construit la réponse finale avec nom client correct"""
         logger.info("Construction de la réponse finale enrichie")
         
         client_info = self.context.get("client_info", {})
-        # Variables non utilisées commentées pour résoudre les avertissements IDE
-        # quote_data = self.context.get("quote_data", {})
-        # availability = self.context.get("availability", {})
         quote_result = self.context.get("quote_result", {})
         sap_client = self.context.get("sap_client", {})
         client_validation = self.context.get("client_validation", {})
         products_info = self.context.get("products_info", [])
+        extracted_info = self.context.get("extracted_info", {})
         
         if not client_info.get("found", False):
             return {
@@ -1101,13 +1080,45 @@ class DevisWorkflow:
                 "next_steps": "Veuillez contacter le support technique."
             }
         
-        # 🔧 CORRECTION CRITIQUE : Construire correctement les données client
-        client_data = client_info.get("data", {})
+        # 🎯 CORRECTION CRITIQUE : Extraction intelligente du nom client
+        client_name = "Client non identifié"
         
-        # Extraire les informations client depuis Salesforce
+        # 1. Essayer le nom enrichi (méthode _enrich_client_data)
+        if hasattr(self, 'enriched_client_name') and self.enriched_client_name:
+            client_name = self.enriched_client_name
+            logger.info(f"✅ Nom client depuis enrichissement: {client_name}")
+        
+        # 2. Essayer les données Salesforce
+        elif client_info.get("data", {}).get("Name"):
+            client_name = client_info["data"]["Name"]
+            logger.info(f"✅ Nom client depuis Salesforce: {client_name}")
+        
+        # 3. Essayer les données SAP (nettoyer le format "CODE - NOM")
+        elif sap_client and sap_client.get("data", {}).get("CardName"):
+            sap_name = sap_client["data"]["CardName"]
+            # Nettoyer le format "CSAFRAN8267 - SAFRAN" -> "SAFRAN"
+            if " - " in sap_name:
+                client_name = sap_name.split(" - ", 1)[1].strip()
+            else:
+                client_name = sap_name
+            logger.info(f"✅ Nom client depuis SAP (nettoyé): {client_name}")
+        
+        # 4. En dernier recours, utiliser l'extraction LLM
+        elif extracted_info.get("client"):
+            client_name = extracted_info["client"]
+            logger.info(f"✅ Nom client depuis extraction LLM: {client_name}")
+        
+        # 5. NOUVEAU: Utiliser les données SAP brutes depuis le résultat du devis
+        elif quote_result.get("sap_result", {}).get("raw_result", {}).get("CardName"):
+            sap_card_name = quote_result["sap_result"]["raw_result"]["CardName"]
+            client_name = sap_card_name
+            logger.info(f"✅ Nom client depuis SAP raw result: {client_name}")
+        
+        # Construction des données client pour l'interface
+        client_data = client_info.get("data", {})
         client_response = {
-            "name": client_data.get("Name") or client_data.get("CardName") or "Client trouvé",
-            "account_number": client_data.get("AccountNumber") or client_data.get("CardCode") or "",
+            "name": client_name,  # ← UTILISER LE NOM CORRECTEMENT EXTRAIT
+            "account_number": client_data.get("AccountNumber") or sap_client.get("data", {}).get("CardCode") or "",
             "salesforce_id": client_data.get("Id", ""),
             "phone": client_data.get("Phone", ""),
             "email": client_data.get("Email", ""),
@@ -1115,7 +1126,7 @@ class DevisWorkflow:
             "country": client_data.get("BillingCountry", "")
         }
         
-        # 🔧 CORRECTION : Construire correctement les données produits
+        # Construction des données produits (garder la logique existante)
         products_response = []
         for product in products_info:
             if "error" not in product:
@@ -1130,16 +1141,16 @@ class DevisWorkflow:
                 }
                 products_response.append(product_data)
         
-        # 🔧 CORRECTION : Construire la réponse finale complète
+        # 🔧 CONSTRUCTION RÉPONSE FINALE CORRIGÉE
         response = {
             "success": True,
             "status": "success",
             "quote_id": quote_result.get("opportunity_id", f"NOVA-{datetime.now().strftime('%Y%m%d-%H%M%S')}"),
             
-            # 🎯 DONNÉES CLIENT CORRIGÉES
+            # 🎯 DONNÉES CLIENT CORRIGÉES AVEC BON NOM
             "client": client_response,
             
-            # 🎯 DONNÉES PRODUITS CORRIGÉES  
+            # 🎯 DONNÉES PRODUITS
             "products": products_response,
             
             # Calculs financiers
@@ -1154,7 +1165,7 @@ class DevisWorkflow:
             # Informations système
             "sap_doc_num": quote_result.get("sap_doc_num"),
             "salesforce_quote_id": quote_result.get("opportunity_id"),
-            "message": "Devis généré avec succès",
+            "message": f"Devis généré avec succès pour {client_name}",  # ← INCLURE LE NOM
             
             # Mode draft
             "draft_mode": self.draft_mode
@@ -1185,7 +1196,7 @@ class DevisWorkflow:
             "validation_enabled": self.validation_enabled
         }
         
-        logger.info("Réponse finale enrichie construite avec succès")
+        logger.info(f"✅ Réponse finale enrichie construite avec nom client: {client_name}")
         response["workflow_steps"] = self.workflow_steps
         return response
     
