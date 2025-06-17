@@ -1161,17 +1161,32 @@ class DevisWorkflow:
         # Construction des données produits (garder la logique existante)
         products_response = []
         for product in products_info:
-            if "error" not in product:
+            if isinstance(product, dict) and "error" not in product:
+                # 🔧 EXTRACTION CORRIGÉE DES DONNÉES PRODUIT
+                product_code = (product.get("code") or 
+                            product.get("item_code") or 
+                            product.get("ItemCode", ""))
+                
+                product_name = (product.get("name") or 
+                            product.get("item_name") or 
+                            product.get("ItemName", "Sans nom"))
+                
+                quantity = float(product.get("quantity", 1))
+                unit_price = float(product.get("unit_price", 0))
+                line_total = quantity * unit_price
+                
                 product_data = {
-                    "code": product.get("ItemCode", ""),
-                    "name": product.get("ItemDescription", ""),
-                    "quantity": product.get("requested_quantity", 0),
-                    "unit_price": product.get("Price", 0.0),
-                    "line_total": product.get("requested_quantity", 0) * product.get("Price", 0.0),
+                    "code": product_code,                    # ✅ CORRIGÉ
+                    "name": product_name,                    # ✅ CORRIGÉ  
+                    "quantity": quantity,                    # ✅ CORRIGÉ
+                    "unit_price": unit_price,               # ✅ CORRIGÉ
+                    "line_total": line_total,               # ✅ CORRIGÉ
                     "stock_available": self._get_stock_value(product),
-                    "available": self._get_stock_safely(product) >= product.get("requested_quantity", 0)
+                    "available": self._get_stock_safely(product) >= quantity
                 }
                 products_response.append(product_data)
+                
+                logger.info(f"✅ Produit formaté dans réponse: {product_code} x{quantity} = {line_total}€")
         
         # 🔧 CONSTRUCTION RÉPONSE FINALE CORRIGÉE
         response = {
@@ -1186,7 +1201,7 @@ class DevisWorkflow:
             "products": products_response,
             
             # Calculs financiers
-            "total_amount": sum(p.get("line_total", 0) for p in products_response),
+            "total_amount": sum(float(p.get("line_total", 0)) for p in products_response),
             "currency": "EUR",
             "date": datetime.now().strftime("%Y-%m-%d"),
             "quote_status": "Created",
