@@ -3,6 +3,7 @@ import os
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from routes.routes_quote_details import router as quote_details_router
+from routes.routes_progress import router as progress_router
 # Import seulement des routes qui existent réellement
 try:
     from routes.routes_sync import router as sync_router
@@ -106,7 +107,8 @@ if products_available:
 
 app.include_router(quote_details_router, tags=["Quote Details"])
 print("✅ Routes Devis chargées")
-
+app.include_router(progress_router, prefix="/progress", tags=["progress"])
+print("✅ Routes Progression chargées")
 @app.get("/", tags=["Health"])
 def root():
     """Point d'entrée principal - Vérification de santé"""

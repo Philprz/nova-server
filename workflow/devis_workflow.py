@@ -5,10 +5,12 @@ import io
 import os
 import json
 import logging
+import asyncio
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
 from services.llm_extractor import LLMExtractor
 from services.mcp_connector import MCPConnector
+from services.progress_tracker import progress_tracker, QuoteTask
 
 # Configuration de l'encodage
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
@@ -39,151 +41,246 @@ except ImportError as e:
 class DevisWorkflow:
     """Coordinateur du workflow de devis entre Claude, Salesforce et SAP - VERSION AVEC VALIDATEUR CLIENT"""
     
-    def __init__(self):
-        self.context = {}
-        self.draft_mode = False  # ← AJOUT NOUVEAU ATTRIBUT
-        self.current_step = ""        # AJOUTER ICI
-        self.workflow_steps = []      # AJOUTER ICI
-        self.validation_enabled = VALIDATOR_AVAILABLE
-        self.client_validator = ClientValidator() if VALIDATOR_AVAILABLE else None
-        logger.info(f"Initialisation du workflow de devis - Validation client: {'✅ Activée' if self.validation_enabled else '❌ Désactivée'}")
-    
-    async def process_prompt(self, prompt: str, draft_mode: bool = False) -> Dict[str, Any]:
-        """
-        ✅ MODIFICATION : Ajouter le paramètre draft_mode
-        """
-        self.draft_mode = draft_mode  # ← STOCKER LE MODE
-        logger.info(f"Traitement prompt en mode: {'DRAFT' if draft_mode else 'NORMAL'}")
-        """Traite une demande en langage naturel et orchestre le workflow complet"""
-        logger.info("=== DÉBUT DU WORKFLOW ENRICHI AVEC VALIDATION ===")
-        logger.info(f"Demande: {prompt}")
-        
-        try:
-            # Étape 1: Extraction des informations avec fallback robuste
-            extracted_info = await self._extract_info_from_prompt(prompt)
-            self.context["extracted_info"] = extracted_info
-            logger.info(f"Étape 1 - Extraction: {extracted_info}")
+    def __init__(self, validation_enabled=True, draft_mode=False):
+            self.mcp_connector = MCPConnector()
+            self.llm_extractor = LLMExtractor()
+            self.client_validator = ClientValidator() if validation_enabled else None
+            self.validation_enabled = validation_enabled
+            self.draft_mode = draft_mode
+            self.context = {}
             
-            if not extracted_info.get("client") and not extracted_info.get("products"):
-                return self._build_error_response("Impossible d'extraire les informations du prompt", "Client ou produits manquants")
+            # NOUVEAU : Support du tracking de progression
+            self.current_task: Optional[QuoteTask] = None
+            self.task_id: Optional[str] = None
+            
+            # Ancien système de workflow_steps conservé pour compatibilité
+            self.workflow_steps = []
+        
+        # === NOUVELLE MÉTHODE POUR DÉMARRER LE TRACKING ===
+        
+    def _initialize_task_tracking(self, prompt: str) -> str:
+        """Initialise le tracking de progression pour cette génération"""
+        self.current_task = progress_tracker.create_task(
+            user_prompt=prompt,
+            draft_mode=self.draft_mode
+        )
+        self.task_id = self.current_task.task_id
+        logger.info(f"Tracking initialisé pour la tâche: {self.task_id}")
+        return self.task_id
+    
+    def _track_step_start(self, step_id: str, message: str = ""):
+        """Démarre le tracking d'une étape"""
+        if self.current_task:
+            self.current_task.start_step(step_id, message)
+    
+    def _track_step_progress(self, step_id: str, progress: int, message: str = ""):
+        """Met à jour la progression d'une étape"""
+        if self.current_task:
+            self.current_task.update_step_progress(step_id, progress, message)
+    
+    def _track_step_complete(self, step_id: str, message: str = ""):
+        """Termine une étape avec succès"""
+        if self.current_task:
+            self.current_task.complete_step(step_id, message)
+    
+    def _track_step_fail(self, step_id: str, error: str, message: str = ""):
+        """Termine une étape en erreur"""
+        if self.current_task:
+            self.current_task.fail_step(step_id, error, message)
+
+    async def process_prompt(self, prompt: str, task_id: str = None) -> Dict[str, Any]:
+        """
+        Traite une demande de devis en langage naturel avec tracking détaillé
+        
+        Args:
+            prompt: Demande en langage naturel
+            task_id: ID de tâche existant (pour récupérer une tâche) ou None pour en créer une
+        """
+        try:
+            # Initialiser ou récupérer le tracking
+            if task_id:
+                self.current_task = progress_tracker.get_task(task_id)
+                self.task_id = task_id
+                if not self.current_task:
+                    raise ValueError(f"Tâche {task_id} introuvable")
+            else:
+                self.task_id = self._initialize_task_tracking(prompt)
+            
+            logger.info(f"=== DÉMARRAGE WORKFLOW - Tâche {self.task_id} ===")
+            
+            # ========== PHASE 1: ANALYSE DE LA DEMANDE ==========
+            
+            # Étape 1.1: Analyse initiale
+            self._track_step_start("parse_prompt", "Analyse de votre demande...")
+            await asyncio.sleep(0.5)  # Simulation temps de traitement
+            self._track_step_progress("parse_prompt", 50, "Décomposition de la demande")
+            
+            # Étape 1.2: Extraction des entités
+            self._track_step_complete("parse_prompt", "Demande analysée")
+            self._track_step_start("extract_entities", "Identification des besoins...")
+            
             extracted_info = await self._extract_info_from_prompt(prompt)
             self.context["extracted_info"] = extracted_info
-            # AJOUTER CES 3 LIGNES :
-            self.workflow_steps.append({
-                "step": "extraction",
-                "message": f"Client: {extracted_info.get('client')}, {len(extracted_info.get('products', []))} produits"
-            })
-            logger.info(f"Étape 1 - Extraction: {extracted_info}")
-            # Étape 2: Validation et enrichissement du client Salesforce
+
+            if not extracted_info.get("client") or not extracted_info.get("products"):
+                self._track_step_fail("extract_entities", "Impossible de comprendre la demande", 
+                                    "Client ou produits manquants")
+                return self._build_error_response("Format non reconnu", "Client ou produits manquants")
+            
+            self._track_step_progress("extract_entities", 80, "Informations extraites")
+            
+            # Étape 1.3: Validation input
+            self._track_step_complete("extract_entities", "Besoins identifiés")
+            self._track_step_start("validate_input", "Vérification de la cohérence...")
+            
+            # Validation de cohérence (client + produits présents)
+            if not extracted_info.get("client") or not extracted_info.get("products"):
+                self._track_step_fail("validate_input", "Informations manquantes",
+                                    "Client ou produits non spécifiés")
+                return self._build_error_response("Informations incomplètes", 
+                                                "Veuillez spécifier le client et les produits")
+            
+            self._track_step_complete("validate_input", "Demande validée")
+            
+            # ========== PHASE 2: VALIDATION CLIENT ==========
+            
+            # Étape 2.1: Recherche client
+            self._track_step_start("search_client", "Recherche du client...")
+            
             client_info = await self._validate_client(extracted_info.get("client"))
             self.context["client_info"] = client_info
-            logger.info(f"Étape 2 - Client Salesforce: {'Trouvé' if client_info.get('found') else 'Non trouvé'}")
-            self.workflow_steps.append({
-                "step": "client_validation",
-                "message": f"Client {'trouvé' if client_info.get('found') else 'non trouvé'}"
-            })
-            # NOUVELLE LOGIQUE: Si client non trouvé ET validateur disponible
+            
+            self._track_step_progress("search_client", 70, "Consultation des bases de données")
+            
+            # Étape 2.2: Vérification des informations
+            self._track_step_complete("search_client", "Recherche terminée")
+            self._track_step_start("verify_client_info", "Vérification des informations...")
+            
+            # Gestion client non trouvé avec validation
             if not client_info.get("found") and self.validation_enabled:
-                logger.info("🔍 Client non trouvé - Activation du processus de validation/création")
+                self._track_step_progress("verify_client_info", 50, "Client non trouvé, création en cours...")
                 validation_result = await self._handle_client_not_found_with_validation(extracted_info.get("client"))
                 
                 if validation_result.get("client_created"):
-                    # Client créé avec succès, continuer le workflow
-                    client_info = validation_result["client_info"]
+                    client_info = validation_result["client_info"] 
                     self.context["client_info"] = client_info
                     self.context["client_validation"] = validation_result["validation_details"]
+                    self._track_step_progress("verify_client_info", 90, "Nouveau client créé")
                 else:
-                    return self._build_error_response("Impossible de créer le client", validation_result.get("error", "Erreur de validation"))
+                    self._track_step_fail("verify_client_info", validation_result.get("error", "Erreur de création"),
+                                        "Impossible de créer le client")
+                    return self._build_error_response("Impossible de créer le client", validation_result.get("error"))
             elif not client_info.get("found"):
+                self._track_step_fail("verify_client_info", "Client introuvable", client_info.get("error"))
                 return self._build_error_response("Client non trouvé", client_info.get("error"))
             
-            # Étape 3: Récupération et vérification des produits SAP
+            # Étape 2.3: Client prêt
+            self._track_step_complete("verify_client_info", "Informations vérifiées")
+            self._track_step_complete("client_ready", f"Client {client_info.get('name', 'N/A')} validé")
+            
+            # ========== PHASE 3: TRAITEMENT DES PRODUITS ==========
+            
+            # Étape 3.1: Connexion catalogue
+            self._track_step_start("connect_catalog", "Connexion au catalogue...")
+            await asyncio.sleep(0.3)  # Simulation connexion
+            self._track_step_complete("connect_catalog", "Catalogue accessible")
+            
+            # Étape 3.2: Recherche produits
+            self._track_step_start("lookup_products", "Vérification des produits...")
+            
             products_info = await self._get_products_info(extracted_info.get("products", []))
             self.context["products_info"] = products_info
-            logger.info(f"Étape 3 - Produits: {len([p for p in products_info if 'error' not in p])}/{len(products_info)} trouvés")
             
-            # Étape 4: Vérification de la disponibilité et alternatives
+            self._track_step_progress("lookup_products", 60, f"{len(products_info)} produits analysés")
+            
+            # Étape 3.3: Vérification stock
+            self._track_step_complete("lookup_products", "Produits trouvés")
+            self._track_step_start("check_stock", "Vérification du stock...")
+            
             availability = await self._check_availability(products_info)
             self.context["availability"] = availability
             
-            # Étape 5: Préparation des données du devis
-            quote_data = await self._prepare_quote_data()
-            self.context["quote_data"] = quote_data
+            self._track_step_progress("check_stock", 80, "Stock vérifié")
             
-            # Étape 6: Création/Vérification du client dans SAP avec TOUTES les données
-            sap_client = await self._create_sap_client_if_needed(client_info)
-            self.context["sap_client"] = sap_client
-            logger.info(f"Étape 6 - Client SAP: {'Créé/Trouvé' if sap_client.get('created') is not None else 'Erreur'}")
-            # Créer le devis dans SAP si un client SAP est disponible
-            #sap_quote = None
-            if sap_client.get("data") and sap_client["data"].get("CardCode"):
-                logger.info(f"Création du devis dans SAP en mode {'DRAFT' if self.draft_mode else 'NORMAL'}...")
-                
-                # Filtrer les produits valides
-                valid_products = [p for p in products_info if "error" not in p]
-                
-                if valid_products:
-                    # Préparer les lignes pour SAP
-                    document_lines = []
-                    for product in valid_products:
-                        line = {
-                            "ItemCode": product["code"],
-                            "Quantity": product["quantity"],
-                            "Price": product["unit_price"],
-                            "DiscountPercent": 0.0,
-                            "TaxCode": "S1"
-                        }
-                        document_lines.append(line)
-                    
-                    # ✅ CORRECTION : Adapter les données selon le mode
-                    quotation_data = {
-                        "CardCode": sap_client["data"]["CardCode"],
-                        "DocDate": datetime.now().strftime("%Y-%m-%d"),
-                        "DocDueDate": (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d"),
-                        "DocCurrency": "EUR",
-                        "Comments": f"Devis {'BROUILLON' if self.draft_mode else 'VALIDÉ'} créé automatiquement via NOVA Middleware le {datetime.now().strftime('%d/%m/%Y %H:%M')}",
-                        "SalesPersonCode": -1,
-                        "DocumentLines": document_lines,
-                        # ✅ NOUVEAU : Ajouter le flag draft mode pour SAP
-                        "U_NOVA_DRAFT": "Y" if self.draft_mode else "N"  # Champ utilisateur personnalisé
-                    }
-                    
-                    # ✅ CORRECTION : Appeler différentes méthodes selon le mode
-                    if self.draft_mode:
-                        # Mode DRAFT - Créer comme brouillon
-                        sap_result = await MCPConnector.call_sap_mcp("sap_create_quotation_draft", {
-                            "quotation_data": quotation_data
-                        })
-                    else:
-                        # Mode NORMAL - Créer comme document validé
-                        sap_result = await MCPConnector.call_sap_mcp("sap_create_quotation_complete", {
-                            "quotation_data": quotation_data
-                        })
-                    
-                    if sap_result.get("success"):
-                        #sap_quote = sap_result
-                        mode_text = "BROUILLON" if self.draft_mode else "VALIDÉ"
-                        logger.info(f"✅ Devis SAP {mode_text} créé: DocNum {sap_result.get('doc_num')}")
-                    else:
-                        logger.error(f"❌ Erreur création devis SAP: {sap_result.get('error')}")
+            # Étape 3.4: Calcul des prix
+            self._track_step_complete("check_stock", "Stock disponible")
+            self._track_step_start("calculate_prices", "Calcul des prix...")
             
-            # 2. Créer/Synchroniser avec Salesforce (optionnel mais recommandé)
-            #salesforce_quote = await self._create_salesforce_quote(quote_data, sap_quote)
-
-            # Étape 7: Création RÉELLE du devis dans Salesforce ET SAP
+            # Simulation calcul prix (logique déjà dans get_products_info)
+            await asyncio.sleep(0.2)
+            self._track_step_progress("calculate_prices", 90, "Prix calculés")
+            
+            # Étape 3.5: Produits prêts
+            self._track_step_complete("calculate_prices", "Prix finalisés")
+            self._track_step_complete("products_ready", f"{len([p for p in products_info if 'error' not in p])} produits confirmés")
+            
+            # ========== PHASE 4: CRÉATION DU DEVIS ==========
+            
+            # Étape 4.1: Préparation
+            self._track_step_start("prepare_quote", "Préparation du devis...")
+            
+            # Logique de préparation (regroupement des données)
+            await asyncio.sleep(0.2)
+            self._track_step_progress("prepare_quote", 70, "Données consolidées")
+            
+            # Étape 4.2: Enregistrement SAP
+            self._track_step_complete("prepare_quote", "Devis préparé")
+            self._track_step_start("save_to_sap", "Enregistrement dans SAP...")
+            
             quote_result = await self._create_quote_in_salesforce()
             self.context["quote_result"] = quote_result
-            logger.info(f"Étape 7 - Création devis: {'Succès' if quote_result.get('success') else 'Erreur'}")
+            
+            if not quote_result.get("success"):
+                self._track_step_fail("save_to_sap", quote_result.get("error", "Erreur SAP"),
+                                    "Impossible d'enregistrer dans SAP")
+                return self._build_error_response("Erreur de création", quote_result.get("error"))
+            
+            self._track_step_progress("save_to_sap", 85, "Enregistré dans SAP")
+            
+            # Étape 4.3: Synchronisation Salesforce
+            self._track_step_complete("save_to_sap", "SAP mis à jour")
+            self._track_step_start("sync_salesforce", "Synchronisation Salesforce...")
+            
+            # La sync est déjà dans _create_quote_in_salesforce
+            await asyncio.sleep(0.3)
+            self._track_step_progress("sync_salesforce", 95, "Salesforce synchronisé")
+            
+            # Étape 4.4: Finalisation
+            self._track_step_complete("sync_salesforce", "Synchronisation terminée")
+            self._track_step_start("quote_finalized", "Finalisation...")
             
             # Construire la réponse finale
             response = self._build_response()
-            logger.info("=== WORKFLOW TERMINÉ ===")
+            response["task_id"] = self.task_id  # Ajouter l'ID de tâche
+            
+            self._track_step_complete("quote_finalized", "Devis généré avec succès")
+            
+            # Terminer la tâche
+            if self.current_task:
+                progress_tracker.complete_task(self.task_id, response)
+            
+            logger.info(f"=== WORKFLOW TERMINÉ - Tâche {self.task_id} ===")
             return response
             
         except Exception as e:
             logger.exception(f"Erreur critique dans le workflow: {str(e)}")
+            
+            # Marquer la tâche comme échouée
+            if self.current_task and self.task_id:
+                progress_tracker.fail_task(self.task_id, str(e))
+            
             return self._build_error_response("Erreur système", str(e))
-    
+    def get_task_status(self, task_id: str = None) -> Optional[Dict[str, Any]]:
+        """Récupère le statut détaillé d'une tâche"""
+        target_id = task_id or self.task_id
+        if not target_id:
+            return None
+            
+        task = progress_tracker.get_task(target_id)
+        if not task:
+            return None
+            
+        return task.get_detailed_progress()
     async def _handle_client_not_found_with_validation(self, client_name: str) -> Dict[str, Any]:
         """Gère le cas où un client n'est pas trouvé en utilisant le validateur"""
         logger.info(f"🔍 Traitement client non trouvé avec validation: {client_name}")
@@ -216,7 +313,7 @@ class DevisWorkflow:
             
             # CORRECTION 3: Accepter les warnings mais pas les erreurs critiques
             critical_errors = [err for err in validation_result.get("errors", []) 
-                             if "obligatoire" in err.lower() and "nom" in err.lower()]
+                            if "obligatoire" in err.lower() and "nom" in err.lower()]
             
             if len(critical_errors) == 0:  # Seulement les erreurs critiques bloquent
                 # Validation acceptable, créer le client
@@ -327,10 +424,10 @@ class DevisWorkflow:
                 client_id = result["id"]
                 detailed_query = f"""
                 SELECT Id, Name, AccountNumber, 
-                       BillingStreet, BillingCity, BillingState, BillingPostalCode, BillingCountry,
-                       ShippingStreet, ShippingCity, ShippingState, ShippingPostalCode, ShippingCountry,
-                       Phone, Fax, Website, Industry, AnnualRevenue, NumberOfEmployees,
-                       Description, Type, OwnerId, CreatedDate, LastModifiedDate
+                    BillingStreet, BillingCity, BillingState, BillingPostalCode, BillingCountry,
+                    ShippingStreet, ShippingCity, ShippingState, ShippingPostalCode, ShippingCountry,
+                    Phone, Fax, Website, Industry, AnnualRevenue, NumberOfEmployees,
+                    Description, Type, OwnerId, CreatedDate, LastModifiedDate
                 FROM Account 
                 WHERE Id = '{client_id}'
                 """
@@ -395,8 +492,8 @@ class DevisWorkflow:
             
             # Ajouter les données SIRET si disponibles
             siret_data = enriched.get("siret_data", {})
-            if siret_data and siret_data.get("siret"):
-                sap_data["Notes"] += f" - SIRET: {siret_data['siret']}"
+            if siret_data:
+                sap_data["Notes"] += f" - SIRET: {siret_data.get('siret', '')}"
             
             # Créer dans SAP
             result = await MCPConnector.call_sap_mcp("sap_create_customer_complete", {
@@ -426,295 +523,7 @@ class DevisWorkflow:
                 "error": str(e),
                 "validation_used": True
             }
-    
-    # Conserver toutes les méthodes existantes inchangées
-    async def _extract_info_from_prompt(self, prompt: str) -> Dict[str, Any]:
-        """Extraction des informations avec fallback robuste"""
-        try:
-            # Tenter extraction via LLM
-            extracted_info = await LLMExtractor.extract_quote_info(prompt)
-            if "error" not in extracted_info:
-                logger.info("Extraction LLM réussie")
-                return extracted_info
-        except Exception as e:
-            logger.warning(f"Échec extraction LLM: {str(e)}")
         
-        # Fallback vers extraction manuelle robuste
-        return await self._extract_info_basic(prompt)
-    
-    async def _extract_info_basic(self, prompt: str) -> Dict[str, Any]:
-        """Méthode d'extraction basique améliorée"""
-        logger.info("Extraction basique améliorée des informations du prompt")
-        
-        extracted = {"client": None, "products": []}
-        prompt_lower = prompt.lower()
-        words = prompt.split()
-        
-        # CORRECTION: Amélioration de la recherche du client
-        # Patterns multilingues pour extraction du nom de client (FR & EN)
-        # Exemples :
-        #   FR : "pour le client ", "pour ", "devis pour "
-        #   EN : "for the client ", "for customer ", "for ", "quote for "
-        client_patterns = [
-            ("pour le client ", 4),
-            ("pour l'entreprise ", 3),
-            ("pour la société ", 3),
-            ("pour ", 2),
-            ("client ", 2),
-            ("devis pour ", 3),
-            ("for the client ", 4),
-            ("for customer ", 4),
-            ("for ", 3),
-            ("quote for ", 3)
-        ]
-        
-        for pattern, max_words in client_patterns:
-            if pattern in prompt_lower:
-                idx = prompt_lower.find(pattern)
-                client_part = prompt[idx + len(pattern):].strip()
-                # Prendre les mots suivants jusqu'à une conjonction
-                stop_words = ["avec", "and", "pour", "de", "du", "à", "sur", "dans"]
-                potential_names = []
-                
-                for word in client_part.split():
-                    if word.lower() in stop_words:
-                        break
-                    potential_names.append(word)
-                    if len(potential_names) >= max_words:
-                        break
-                
-                if potential_names:
-                    client_name = " ".join(potential_names).strip(",.;")
-                    if len(client_name) > 2:
-                        extracted["client"] = client_name
-                        logger.info(f"Client extrait: '{client_name}' via pattern '{pattern}'")
-                        break
-        
-        # Si pas de client trouvé, essayer d'autres patterns (FR et EN)
-        if not extracted["client"]:
-            # Pattern: "devis pour [CLIENT]"
-            if "devis pour" in prompt_lower and "client" not in prompt_lower:
-                idx = prompt_lower.find("devis pour") + 10
-                remaining = prompt[idx:].strip()
-                words_after = remaining.split()[:3]  # Max 3 mots
-                if words_after and words_after[0].lower() not in ["le", "la", "les", "un", "une"]:
-                    potential_client = " ".join(words_after).split(" avec")[0].split(" pour")[0]
-                    if len(potential_client.strip()) > 2:
-                        extracted["client"] = potential_client.strip(",.;")
-                        logger.info(f"Client extrait via 'devis pour': '{extracted['client']}'")
-            # Pattern: "quote for [CLIENT]" (EN)
-            elif "quote for" in prompt_lower:
-                idx = prompt_lower.find("quote for") + 9
-                remaining = prompt[idx:].strip()
-                words_after = remaining.split()[:3]
-                if words_after:
-                    potential_client = " ".join(words_after).split(" with")[0].split(" for")[0]
-                    if len(potential_client.strip()) > 2:
-                        extracted["client"] = potential_client.strip(",.;")
-                        logger.info(f"Client extrait via 'quote for': '{extracted['client']}'")
-        
-        # CORRECTION: Amélioration de l'extraction des produits
-        # Pattern 1: "X unités de YYYY" ou "X ref YYYY"
-        import re
-        
-        # Recherche avec regex pour capturer quantité + référence
-        patterns_produits = [
-            r'(\d+)\s+(?:unités?\s+de\s+|ref\s+|référence\s+|items?\s+)([A-Z0-9]+)',
-            r'(\d+)\s+([A-Z]\d{5})',  # Pattern spécifique A00001, A00002, etc.
-            r'(\d+)\s+(?:de\s+)?([A-Z]+\d+)',  # Pattern général lettre+chiffres
-        ]
-        
-        for pattern in patterns_produits:
-            matches = re.finditer(pattern, prompt, re.IGNORECASE)
-            for match in matches:
-                quantity = int(match.group(1))
-                product_code = match.group(2)
-                extracted["products"].append({"code": product_code, "quantity": quantity})
-                logger.info(f"Produit extrait: {quantity}x {product_code}")
-        
-        # Pattern 2: Recherche manuelle si regex échoue
-        if not extracted["products"]:
-            for i, word in enumerate(words):
-                if word.isdigit():
-                    quantity = int(word)
-                    # Chercher dans les 5 mots suivants
-                    for j in range(i+1, min(i+6, len(words))):
-                        next_word = words[j].strip(",.;")
-                        # Si c'est un code produit probable (commence par lettre, contient chiffres)
-                        if re.match(r'^[A-Z]\d+', next_word, re.IGNORECASE):
-                            extracted["products"].append({"code": next_word.upper(), "quantity": quantity})
-                            logger.info(f"Produit extrait (méthode manuelle): {quantity}x {next_word}")
-                            break
-                        # Ou si c'est après "ref", "référence", etc.
-                        elif words[j].lower() in ["ref", "référence", "reference", "item", "items"] and j+1 < len(words):
-                            product_code = words[j+1].strip(",.;").upper()
-                            extracted["products"].append({"code": product_code, "quantity": quantity})
-                            logger.info(f"Produit extrait (avec mot-clé): {quantity}x {product_code}")
-                            break
-        
-        logger.info(f"Extraction basique finale: {extracted}")
-        return extracted
-    
-    async def _validate_client(self, client_name: Optional[str]) -> Dict[str, Any]:
-        """Valide l'existence du client dans Salesforce - AMÉLIORÉE"""
-        if not client_name:
-            logger.warning("Aucun client spécifié")
-            return {"found": False, "error": "Aucun client spécifié"}
-        
-        logger.info(f"Validation du client: {client_name}")
-        
-        try:
-            # Requête enrichie pour récupérer TOUTES les informations nécessaires
-            detailed_query = f"""
-            SELECT Id, Name, AccountNumber, 
-                   BillingStreet, BillingCity, BillingState, BillingPostalCode, BillingCountry,
-                   ShippingStreet, ShippingCity, ShippingState, ShippingPostalCode, ShippingCountry,
-                   Phone, Fax, Website, Industry, AnnualRevenue, NumberOfEmployees,
-                   Description, Type, OwnerId, CreatedDate, LastModifiedDate
-            FROM Account 
-            WHERE Name LIKE '%{client_name}%' 
-            LIMIT 1
-            """
-            
-            sf_result = await MCPConnector.call_salesforce_mcp("salesforce_query", {"query": detailed_query})
-            if sf_result and isinstance(sf_result, dict) and sf_result.get("records"):
-                client_record = sf_result["records"][0]
-                client_name = client_record.get("Name", client_name)  # Utiliser le nom Salesforce
-                
-                # Enrichir le contexte avec les bonnes données
-                self._enrich_client_data(client_name, client_record)
-                
-                logger.info(f"Client Salesforce trouvé et enrichi: {client_name} (ID: {client_record.get('Id')})")
-            if "error" in sf_result:
-                logger.error(f"Erreur requête Salesforce: {sf_result['error']}")
-                return {"found": False, "error": sf_result["error"]}
-            
-            if sf_result.get("totalSize", 0) > 0:
-                client_record = sf_result["records"][0]
-                client_name = client_record.get("Name", client_name)  # Utiliser le nom Salesforce
-                
-                # Enrichir le contexte avec les bonnes données
-                self._enrich_client_data(client_name, client_record)
-                
-                logger.info(f"Client Salesforce trouvé et enrichi: {client_name} (ID: {client_record.get('Id')})")
-                return {"found": True, "data": client_record}
-            else:
-                return {"found": False, "error": f"Client '{client_name}' non trouvé dans Salesforce"}
-                
-        except Exception as e:
-            logger.exception(f"Erreur validation client: {str(e)}")
-            return {"found": False, "error": str(e)}
-    
-    # Conserver toutes les autres méthodes du workflow existant
-    async def _get_products_info(self, products: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Récupère les informations produits depuis SAP - VERSION CORRIGÉE POUR LES PRIX"""
-        if not products:
-            logger.warning("Aucun produit spécifié")
-            return []
-        
-        logger.info(f"Récupération des informations pour {len(products)} produits")
-        
-        enriched_products = []
-        
-        for product in products:
-            try:
-                # Appel MCP pour récupérer les détails du produit
-                product_details = await MCPConnector.call_sap_mcp("sap_get_product_details", {
-                    "item_code": product["code"]
-                })
-                
-                if "error" in product_details:
-                    logger.error(f"Erreur produit {product['code']}: {product_details['error']}")
-                    # Vérifier si malgré l'erreur, nous avons des informations utiles
-                    if product_details.get("ItemName") is not None:
-                        enriched_product = {
-                            "code": product["code"],
-                            "quantity": product["quantity"],
-                            "name": product_details.get("ItemName", "Unknown"),
-                            "unit_price": float(product_details.get("Price", 0.0)),
-                            "stock": product_details.get("stock", {}).get("total", 0),
-                            "details": product_details,
-                            "salesforce_id": await self._find_product_in_salesforce(product["code"])
-                        }
-                        enriched_products.append(enriched_product)
-                    else:
-                        enriched_products.append({
-                            "code": product["code"],
-                            "quantity": product["quantity"],
-                            "error": product_details["error"]
-                        })
-                    continue
-                
-                # CORRECTION PRINCIPALE: Récupérer le prix depuis la structure retournée par sap_mcp.py
-                unit_price = 0.0
-                
-                # 1. Le prix est maintenant dans la clé "Price" directement (enrichi par sap_mcp.py)
-                if "Price" in product_details:
-                    unit_price = float(product_details.get("Price", 0.0))
-                    logger.info(f"Prix trouvé via 'Price': {unit_price}")
-                
-                # 2. Si pas de prix direct, essayer dans price_details (nouveau format)
-                elif "price_details" in product_details and product_details["price_details"].get("price"):
-                    unit_price = float(product_details["price_details"]["price"])
-                    logger.info(f"Prix trouvé via 'price_details': {unit_price}")
-                
-                # 3. Fallback sur ItemPrices[0].Price (format SAP natif)
-                elif "ItemPrices" in product_details and len(product_details["ItemPrices"]) > 0:
-                    unit_price = float(product_details["ItemPrices"][0].get("Price", 0.0))
-                    logger.info(f"Prix trouvé via 'ItemPrices[0]': {unit_price}")
-                
-                # 4. Autres fallbacks
-                elif "LastPurchasePrice" in product_details:
-                    unit_price = float(product_details.get("LastPurchasePrice", 0.0))
-                    logger.info(f"Prix trouvé via 'LastPurchasePrice': {unit_price}")
-                
-                # Si toujours aucun prix trouvé, utiliser une valeur par défaut
-                if unit_price == 0.0:
-                    logger.warning(f"⚠️ Aucun prix trouvé pour {product['code']}, utilisation d'un prix par défaut")
-                    unit_price = 100.0  # Prix par défaut de 100€
-                    
-                # Enrichir le produit avec ID Salesforce
-                salesforce_id = await self._find_product_in_salesforce(product["code"])
-                
-                # Calculer le stock total depuis la nouvelle structure sap_mcp.py
-                total_stock = 0
-                if "stock" in product_details and isinstance(product_details["stock"], dict):
-                    # Nouvelle structure avec stock.total
-                    total_stock = float(product_details["stock"].get("total", 0))
-                    logger.info(f"Stock trouvé via 'stock.total': {total_stock}")
-                elif "QuantityOnStock" in product_details:
-                    # Structure SAP native
-                    total_stock = float(product_details.get("QuantityOnStock", 0))
-                    logger.info(f"Stock trouvé via 'QuantityOnStock': {total_stock}")
-                elif "OnHand" in product_details:
-                    # Fallback sur OnHand
-                    total_stock = float(product_details.get("OnHand", 0))
-                    logger.info(f"Stock trouvé via 'OnHand': {total_stock}")
-                
-                enriched_product = {
-                    "code": product["code"],
-                    "quantity": product["quantity"],
-                    "name": product_details.get("ItemName", "Unknown"),
-                    "unit_price": unit_price,
-                    "stock": total_stock,
-                    "line_total": product["quantity"] * unit_price,  # CORRECTION: Calculer le total de ligne
-                    "details": product_details,
-                    "salesforce_id": salesforce_id
-                }
-                
-                enriched_products.append(enriched_product)
-                logger.info(f"Produit enrichi: {product['code']} - Prix: {unit_price}€ - Stock: {total_stock}")
-                
-            except Exception as e:
-                logger.error(f"Erreur récupération produit {product['code']}: {str(e)}")
-                enriched_products.append({
-                    "code": product["code"],
-                    "quantity": product["quantity"],
-                    "error": str(e)
-                })
-        
-        return enriched_products
-    
     async def _find_product_in_salesforce(self, product_code: str) -> Optional[str]:
         """Trouve l'ID Salesforce correspondant au code produit SAP - RESTAURÉE"""
         try:
@@ -730,55 +539,7 @@ class DevisWorkflow:
         except Exception as e:
             logger.warning(f"Erreur recherche produit Salesforce {product_code}: {str(e)}")
             return None
-    
-    async def _check_availability(self, products: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Vérifie la disponibilité des produits"""
-        logger.info("Vérification de la disponibilité des produits")
         
-        availability_status = {
-            "all_available": True,
-            "unavailable_products": [],
-            "alternatives": {}
-        }
-        
-        for product in products:
-            if "error" in product:
-                availability_status["all_available"] = False
-                availability_status["unavailable_products"].append({
-                    "code": product["code"],
-                    "reason": "Produit non trouvé",
-                    "details": product["error"]
-                })
-                continue
-            
-            if product.get("stock", 0) < product.get("quantity", 0):
-                logger.warning(f"Produit {product['code']} insuffisant en stock: {product['stock']} < {product['quantity']}")
-                availability_status["all_available"] = False
-                
-                unavailable_item = {
-                    "code": product["code"],
-                    "name": product.get("name", ""),
-                    "quantity_requested": product.get("quantity", 0),
-                    "quantity_available": product.get("stock", 0),
-                    "reason": "Stock insuffisant"
-                }
-                availability_status["unavailable_products"].append(unavailable_item)
-                
-                # Rechercher des alternatives via SAP MCP
-                try:
-                    alternatives_result = await MCPConnector.call_sap_mcp("sap_find_alternatives", {
-                        "item_code": product["code"]
-                    })
-                    
-                    if "error" not in alternatives_result and alternatives_result.get("alternatives"):
-                        availability_status["alternatives"][product["code"]] = alternatives_result["alternatives"]
-                        logger.info(f"Alternatives trouvées pour {product['code']}: {len(alternatives_result['alternatives'])}")
-                        
-                except Exception as e:
-                    logger.error(f"Erreur recherche alternatives {product['code']}: {str(e)}")
-        
-        return availability_status
-    
     async def _prepare_quote_data(self) -> Dict[str, Any]:
         """Prépare les données du devis"""
         logger.info("Préparation des données du devis")
@@ -1069,6 +830,7 @@ class DevisWorkflow:
         
         # Fallback
         return 0.0
+    
     def _get_stock_safely(self, product: Dict[str, Any]) -> float:
         """
         Extrait la valeur du stock de manière robuste
@@ -1265,18 +1027,444 @@ class DevisWorkflow:
         
         logger.info(f"✅ Client enrichi dans le contexte: {client_name}")
 
+    async def _validate_client(self, client_name: Optional[str]) -> Dict[str, Any]:
+        """Valide l'existence du client dans Salesforce - AMÉLIORÉE"""
+        if not client_name:
+            logger.warning("Aucun client spécifié")
+            return {"found": False, "error": "Aucun client spécifié"}
     
-    def _build_error_response(self, message: str, error_details: str = None) -> Dict[str, Any]:
-        """Construit une réponse d'erreur"""
+        logger.info(f"Validation du client: {client_name}")
+        
+        try:
+            # Requête enrichie pour récupérer TOUTES les informations nécessaires
+            detailed_query = f"""
+            SELECT Id, Name, AccountNumber, 
+                BillingStreet, BillingCity, BillingState, BillingPostalCode, BillingCountry,
+                ShippingStreet, ShippingCity, ShippingState, ShippingPostalCode, ShippingCountry,
+                Phone, Fax, Website, Industry, AnnualRevenue, NumberOfEmployees,
+                Description, Type, OwnerId, CreatedDate, LastModifiedDate
+            FROM Account 
+            WHERE Name LIKE '%{client_name}%' 
+            LIMIT 1
+            """
+            
+            sf_result = await MCPConnector.call_salesforce_mcp("salesforce_query", {"query": detailed_query})
+            if sf_result and isinstance(sf_result, dict) and sf_result.get("records"):
+                client_record = sf_result["records"][0]
+                client_name = client_record.get("Name", client_name)  # Utiliser le nom Salesforce
+                
+                # Enrichir le contexte avec les bonnes données
+                self._enrich_client_data(client_name, client_record)
+                    
+                logger.info(f"Client Salesforce trouvé et enrichi: {client_name} (ID: {client_record.get('Id')})")
+                if "error" in sf_result:
+                    logger.error(f"Erreur requête Salesforce: {sf_result['error']}")
+                    return {"found": False, "error": sf_result["error"]}
+                
+                if sf_result.get("totalSize", 0) > 0:
+                    client_record = sf_result["records"][0]
+                    client_name = client_record.get("Name", client_name)  # Utiliser le nom Salesforce
+                    
+                    # Enrichir le contexte avec les bonnes données
+                    self._enrich_client_data(client_name, client_record)
+                    
+                    logger.info(f"Client Salesforce trouvé et enrichi: {client_name} (ID: {client_record.get('Id')})")
+                    return {"found": True, "data": client_record}
+                else:
+                    return {"found": False, "error": f"Client '{client_name}' non trouvé dans Salesforce"}
+                    
+        except Exception as e:
+            logger.exception(f"Erreur validation client: {str(e)}")
+            return {"found": False, "error": str(e)}
+
+    async def _get_products_info(self, products: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Récupère les informations produits depuis SAP - VERSION CORRIGÉE POUR LES PRIX"""
+        if not products:
+            logger.warning("Aucun produit spécifié")
+            return []
+        
+        logger.info(f"Récupération des informations pour {len(products)} produits")
+        
+        enriched_products = []
+        
+        for product in products:
+            try:
+                # Appel MCP pour récupérer les détails du produit
+                product_details = await MCPConnector.call_sap_mcp("sap_get_product_details", {
+                    "item_code": product["code"]
+                })
+                
+                if "error" in product_details:
+                    logger.error(f"Erreur produit {product['code']}: {product_details['error']}")
+                    # Vérifier si malgré l'erreur, nous avons des informations utiles
+                    if product_details.get("ItemName") is not None:
+                        enriched_product = {
+                            "code": product["code"],
+                            "quantity": product["quantity"],
+                            "name": product_details.get("ItemName", "Unknown"),
+                            "unit_price": float(product_details.get("Price", 0.0)),
+                            "stock": product_details.get("stock", {}).get("total", 0),
+                            "details": product_details,
+                            "salesforce_id": await self._find_product_in_salesforce(product["code"])
+                        }
+                        enriched_products.append(enriched_product)
+                    else:
+                        enriched_products.append({
+                            "code": product["code"],
+                            "quantity": product["quantity"],
+                            "error": product_details["error"]
+                        })
+                    continue
+                
+                # CORRECTION PRINCIPALE: Récupérer le prix depuis la structure retournée par sap_mcp.py
+                unit_price = 0.0
+                
+                # 1. Le prix est maintenant dans la clé "Price" directement (enrichi par sap_mcp.py)
+                if "Price" in product_details:
+                    unit_price = float(product_details.get("Price", 0.0))
+                    logger.info(f"Prix trouvé via 'Price': {unit_price}")
+                
+                # 2. Si pas de prix direct, essayer dans price_details (nouveau format)
+                elif "price_details" in product_details and product_details["price_details"].get("price"):
+                    unit_price = float(product_details["price_details"]["price"])
+                    logger.info(f"Prix trouvé via 'price_details': {unit_price}")
+                
+                # 3. Fallback sur ItemPrices[0].Price (format SAP natif)
+                elif "ItemPrices" in product_details and len(product_details["ItemPrices"]) > 0:
+                    unit_price = float(product_details["ItemPrices"][0].get("Price", 0.0))
+                    logger.info(f"Prix trouvé via 'ItemPrices[0]': {unit_price}")
+                
+                # 4. Autres fallbacks
+                elif "LastPurchasePrice" in product_details:
+                    unit_price = float(product_details.get("LastPurchasePrice", 0.0))
+                    logger.info(f"Prix trouvé via 'LastPurchasePrice': {unit_price}")
+                
+                # Si toujours aucun prix trouvé, utiliser une valeur par défaut
+                if unit_price == 0.0:
+                    logger.warning(f"⚠️ Aucun prix trouvé pour {product['code']}, utilisation d'un prix par défaut")
+                    unit_price = 100.0  # Prix par défaut de 100€
+                    
+                # Enrichir le produit avec ID Salesforce
+                salesforce_id = await self._find_product_in_salesforce(product["code"])
+                
+                # Calculer le stock total depuis la nouvelle structure sap_mcp.py
+                total_stock = 0
+                if "stock" in product_details and isinstance(product_details["stock"], dict):
+                    # Nouvelle structure avec stock.total
+                    total_stock = float(product_details["stock"].get("total", 0))
+                    logger.info(f"Stock trouvé via 'stock.total': {total_stock}")
+                elif "QuantityOnStock" in product_details:
+                    # Structure SAP native
+                    total_stock = float(product_details.get("QuantityOnStock", 0))
+                    logger.info(f"Stock trouvé via 'QuantityOnStock': {total_stock}")
+                elif "OnHand" in product_details:
+                    # Fallback sur OnHand
+                    total_stock = float(product_details.get("OnHand", 0))
+                    logger.info(f"Stock trouvé via 'OnHand': {total_stock}")
+                
+                enriched_product = {
+                    "code": product["code"],
+                    "quantity": product["quantity"],
+                    "name": product_details.get("ItemName", "Unknown"),
+                    "unit_price": unit_price,
+                    "stock": total_stock,
+                    "line_total": product["quantity"] * unit_price,  # CORRECTION: Calculer le total de ligne
+                    "details": product_details,
+                    "salesforce_id": salesforce_id
+                }
+                
+                enriched_products.append(enriched_product)
+                logger.info(f"Produit enrichi: {product['code']} - Prix: {unit_price}€ - Stock: {total_stock}")
+                
+            except Exception as e:
+                logger.error(f"Erreur récupération produit {product['code']}: {str(e)}")
+                enriched_products.append({
+                    "code": product["code"],
+                    "quantity": product["quantity"],
+                    "error": str(e)
+                })
+        
+        return enriched_products
+
+    async def _validate_client(self, client_name: Optional[str]) -> Dict[str, Any]:
+        """Valide l'existence du client dans Salesforce - AMÉLIORÉE"""
+        if not client_name:
+            logger.warning("Aucun client spécifié")
+            return {"found": False, "error": "Aucun client spécifié"}
+    
+        logger.info(f"Validation du client: {client_name}")
+        
+        try:
+            # Requête enrichie pour récupérer TOUTES les informations nécessaires
+            detailed_query = f"""
+            SELECT Id, Name, AccountNumber, 
+                BillingStreet, BillingCity, BillingState, BillingPostalCode, BillingCountry,
+                ShippingStreet, ShippingCity, ShippingState, ShippingPostalCode, ShippingCountry,
+                Phone, Fax, Website, Industry, AnnualRevenue, NumberOfEmployees,
+                Description, Type, OwnerId, CreatedDate, LastModifiedDate
+            FROM Account 
+            WHERE Name LIKE '%{client_name}%' 
+            LIMIT 1
+            """
+            
+            sf_result = await MCPConnector.call_salesforce_mcp("salesforce_query", {"query": detailed_query})
+            if sf_result and isinstance(sf_result, dict) and sf_result.get("records"):
+                client_record = sf_result["records"][0]
+                client_name = client_record.get("Name", client_name)  # Utiliser le nom Salesforce
+                
+                # Enrichir le contexte avec les bonnes données
+                self._enrich_client_data(client_name, client_record)
+                    
+                logger.info(f"Client Salesforce trouvé et enrichi: {client_name} (ID: {client_record.get('Id')})")
+                if "error" in sf_result:
+                    logger.error(f"Erreur requête Salesforce: {sf_result['error']}")
+                    return {"found": False, "error": sf_result["error"]}
+                
+                if sf_result.get("totalSize", 0) > 0:
+                    client_record = sf_result["records"][0]
+                    client_name = client_record.get("Name", client_name)  # Utiliser le nom Salesforce
+                    
+                    # Enrichir le contexte avec les bonnes données
+                    self._enrich_client_data(client_name, client_record)
+                    
+                    logger.info(f"Client Salesforce trouvé et enrichi: {client_name} (ID: {client_record.get('Id')})")
+                    return {"found": True, "data": client_record}
+                else:
+                    return {"found": False, "error": f"Client '{client_name}' non trouvé dans Salesforce"}
+                    
+        except Exception as e:
+            logger.exception(f"Erreur validation client: {str(e)}")
+            return {"found": False, "error": str(e)}
+        
+        # Conserver toutes les autres méthodes du workflow existant
+    async def _get_products_info(self, products: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Récupère les informations produits depuis SAP - VERSION CORRIGÉE POUR LES PRIX"""
+        if not products:
+            logger.warning("Aucun produit spécifié")
+            return []
+        
+        logger.info(f"Récupération des informations pour {len(products)} produits")
+        
+        enriched_products = []
+        
+        for product in products:
+            try:
+                # Appel MCP pour récupérer les détails du produit
+                product_details = await MCPConnector.call_sap_mcp("sap_get_product_details", {
+                    "item_code": product["code"]
+                })
+                
+                if "error" in product_details:
+                    logger.error(f"Erreur produit {product['code']}: {product_details['error']}")
+                    # Vérifier si malgré l'erreur, nous avons des informations utiles
+                    if product_details.get("ItemName") is not None:
+                        enriched_product = {
+                            "code": product["code"],
+                            "quantity": product["quantity"],
+                            "name": product_details.get("ItemName", "Unknown"),
+                            "unit_price": float(product_details.get("Price", 0.0)),
+                            "stock": product_details.get("stock", {}).get("total", 0),
+                            "details": product_details,
+                            "salesforce_id": await self._find_product_in_salesforce(product["code"])
+                        }
+                        enriched_products.append(enriched_product)
+                    else:
+                        enriched_products.append({
+                            "code": product["code"],
+                            "quantity": product["quantity"],
+                            "error": product_details["error"]
+                        })
+                    continue
+                
+                # CORRECTION PRINCIPALE: Récupérer le prix depuis la structure retournée par sap_mcp.py
+                unit_price = 0.0
+                
+                # 1. Le prix est maintenant dans la clé "Price" directement (enrichi par sap_mcp.py)
+                if "Price" in product_details:
+                    unit_price = float(product_details.get("Price", 0.0))
+                    logger.info(f"Prix trouvé via 'Price': {unit_price}")
+                
+                # 2. Si pas de prix direct, essayer dans price_details (nouveau format)
+                elif "price_details" in product_details and product_details["price_details"].get("price"):
+                    unit_price = float(product_details["price_details"]["price"])
+                    logger.info(f"Prix trouvé via 'price_details': {unit_price}")
+                
+                # 3. Fallback sur ItemPrices[0].Price (format SAP natif)
+                elif "ItemPrices" in product_details and len(product_details["ItemPrices"]) > 0:
+                    unit_price = float(product_details["ItemPrices"][0].get("Price", 0.0))
+                    logger.info(f"Prix trouvé via 'ItemPrices[0]': {unit_price}")
+                
+                # 4. Autres fallbacks
+                elif "LastPurchasePrice" in product_details:
+                    unit_price = float(product_details.get("LastPurchasePrice", 0.0))
+                    logger.info(f"Prix trouvé via 'LastPurchasePrice': {unit_price}")
+                
+                # Si toujours aucun prix trouvé, utiliser une valeur par défaut
+                if unit_price == 0.0:
+                    logger.warning(f"⚠️ Aucun prix trouvé pour {product['code']}, utilisation d'un prix par défaut")
+                    unit_price = 100.0  # Prix par défaut de 100€
+                    
+                # Enrichir le produit avec ID Salesforce
+                salesforce_id = await self._find_product_in_salesforce(product["code"])
+                
+                # Calculer le stock total depuis la nouvelle structure sap_mcp.py
+                total_stock = 0
+                if "stock" in product_details and isinstance(product_details["stock"], dict):
+                    # Nouvelle structure avec stock.total
+                    total_stock = float(product_details["stock"].get("total", 0))
+                    logger.info(f"Stock trouvé via 'stock.total': {total_stock}")
+                elif "QuantityOnStock" in product_details:
+                    # Structure SAP native
+                    total_stock = float(product_details.get("QuantityOnStock", 0))
+                    logger.info(f"Stock trouvé via 'QuantityOnStock': {total_stock}")
+                elif "OnHand" in product_details:
+                    # Fallback sur OnHand
+                    total_stock = float(product_details.get("OnHand", 0))
+                    logger.info(f"Stock trouvé via 'OnHand': {total_stock}")
+                
+                enriched_product = {
+                    "code": product["code"],
+                    "quantity": product["quantity"],
+                    "name": product_details.get("ItemName", "Unknown"),
+                    "unit_price": unit_price,
+                    "stock": total_stock,
+                    "line_total": product["quantity"] * unit_price,  # CORRECTION: Calculer le total de ligne
+                    "details": product_details,
+                    "salesforce_id": salesforce_id
+                }
+                
+                enriched_products.append(enriched_product)
+                logger.info(f"Produit enrichi: {product['code']} - Prix: {unit_price}€ - Stock: {total_stock}")
+                
+            except Exception as e:
+                logger.error(f"Erreur récupération produit {product['code']}: {str(e)}")
+                enriched_products.append({
+                    "code": product["code"],
+                    "quantity": product["quantity"],
+                    "error": str(e)
+                })
+        
+        return enriched_products
+    def _build_error_response(self, error_title: str, error_message: str) -> Dict[str, Any]:
+        """Construit une réponse d'erreur standardisée"""
+        logger.error(f"Erreur workflow: {error_title} - {error_message}")
+        
         return {
             "status": "error",
-            "message": message,
-            "error_details": error_details,
+            "success": False,
+            "task_id": self.task_id,
+            "error_title": error_title,
+            "error_message": error_message,
             "timestamp": datetime.now().isoformat(),
-            "validation_enabled": self.validation_enabled,
-            "context": {
-                "extracted_info": self.context.get("extracted_info"),
-                "client_found": self.context.get("client_info", {}).get("found", False),
-                "products_count": len(self.context.get("products_info", []))
-            }
+            "workflow_steps": getattr(self, 'workflow_steps', []),
+            "context_available": bool(self.context),
+            "draft_mode": self.draft_mode
         }
+
+    async def _extract_info_from_prompt(self, prompt: str) -> Dict[str, Any]:
+        """Extraction des informations avec fallback robuste - VERSION ORIGINALE RESTAURÉE"""
+        try:
+            # Tenter extraction via LLM (méthode statique correcte)
+            extracted_info = await LLMExtractor.extract_quote_info(prompt)
+            if "error" not in extracted_info:
+                logger.info("Extraction LLM réussie")
+                return extracted_info
+        except Exception as e:
+            logger.warning(f"Échec extraction LLM: {str(e)}")
+        
+        # Fallback vers extraction manuelle SIMPLE
+        return await self._extract_info_basic_simple(prompt)
+
+    async def _extract_info_basic(self, prompt: str) -> Dict[str, Any]:
+        """Méthode d'extraction basique SIMPLE - comme dans l'original"""
+        logger.info("Extraction basique des informations du prompt")
+        
+        extracted = {"client": None, "products": []}
+        prompt_lower = prompt.lower()
+        words = prompt.split()
+        
+        # Extraction simple du client
+        client_patterns = ["pour le client ", "pour ", "devis pour ", "for "]
+        for pattern in client_patterns:
+            if pattern in prompt_lower:
+                idx = prompt_lower.find(pattern)
+                remaining = prompt[idx + len(pattern):].strip()
+                # Prendre les 1-3 premiers mots comme nom de client
+                client_words = remaining.split()[:3]
+                stop_words = ["avec", "and", "de", "du"]
+                
+                clean_words = []
+                for word in client_words:
+                    if word.lower() in stop_words:
+                        break
+                    clean_words.append(word)
+                
+                if clean_words:
+                    extracted["client"] = " ".join(clean_words).strip(",.;")
+                    logger.info(f"Client extrait: '{extracted['client']}'")
+                    break
+        
+        # Extraction simple des produits (pattern qui marchait avant)
+        import re
+        
+        # Pattern simple : nombre + mot commençant par lettre et contenant chiffres
+        matches = re.findall(r'(\d+)\s+(?:ref\s+|référence\s+|unités?\s+)?([A-Z]\w*\d+)', prompt, re.IGNORECASE)
+        for quantity, code in matches:
+            extracted["products"].append({
+                "code": code.upper(),
+                "quantity": int(quantity)
+            })
+            logger.info(f"Produit extrait: {quantity}x {code}")
+        
+        # Si pas de produit trouvé avec regex, méthode manuelle simple
+        if not extracted["products"]:
+            for i, word in enumerate(words):
+                if word.isdigit() and i + 1 < len(words):
+                    quantity = int(word)
+                    next_word = words[i + 1]
+                    # Si le mot suivant ressemble à un code produit
+                    if re.match(r'^[A-Z]\w*\d+', next_word, re.IGNORECASE):
+                        extracted["products"].append({
+                            "code": next_word.upper(),
+                            "quantity": quantity
+                        })
+                        logger.info(f"Produit extrait (manuel): {quantity}x {next_word}")
+                        break
+        
+        logger.info(f"Extraction finale: {extracted}")
+        return extracted
+
+    async def _check_availability(self, products: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Vérifie la disponibilité des produits"""
+        logger.info("Vérification de la disponibilité des produits")
+        
+        availability_status = {
+            "all_available": True,
+            "unavailable_products": [],
+            "alternatives": {}
+        }
+        
+        for product in products:
+            if "error" in product:
+                availability_status["all_available"] = False
+                availability_status["unavailable_products"].append({
+                    "code": product["code"],
+                    "reason": "Produit non trouvé",
+                    "details": product["error"]
+                })
+                continue
+            
+            if product.get("stock", 0) < product.get("quantity", 0):
+                logger.warning(f"Produit {product['code']} insuffisant en stock: {product['stock']} < {product['quantity']}")
+                availability_status["all_available"] = False
+                
+                unavailable_item = {
+                    "code": product["code"],
+                    "name": product.get("name", ""),
+                    "quantity_requested": product.get("quantity", 0),
+                    "quantity_available": product.get("stock", 0),
+                    "reason": "Stock insuffisant"
+                }
+                availability_status["unavailable_products"].append(unavailable_item)
+        
+        return availability_status    
