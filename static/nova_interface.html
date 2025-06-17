@@ -562,40 +562,68 @@ Exemples :
         }
 
         async function generateQuote() {
-            const input = document.getElementById('mainInput').value.trim();
-            
-            if (!input) {
-                showNotification('Veuillez saisir votre demande de devis', 'error');
-                return;
-            }
-
-            // Démarrer le traitement
-            document.getElementById('generateBtn').disabled = true;
-            document.getElementById('processing').style.display = 'block';
-            document.getElementById('resultPanel').style.display = 'none';
-            
-            const steps = [
-                '🔍 Analyse de votre demande via Claude...',
-                '👤 Recherche du client dans Salesforce...',
-                '📦 Vérification des produits dans SAP...',
-                '💰 Récupération des prix et stocks...',
-                '📋 Génération du devis...',
-                '✅ Création dans Salesforce et SAP...'
-            ];
-            
-            let currentStep = 0;
-            const stepInterval = setInterval(() => {
-                if (currentStep < steps.length) {
-                    document.getElementById('processingText').textContent = steps[currentStep];
-                    currentStep++;
-                } else {
-                    clearInterval(stepInterval);
-                    
-                    // Simulation de l'appel API réel
-                    callNovaAPI(input);
-                }
-            }, 1200);
+    console.log("🔄 Début generateQuote()");
+    
+    const generateBtn = document.getElementById('generateBtn');
+    const promptInput = document.getElementById('promptInput');
+    const prompt = promptInput?.value?.trim();
+    
+    if (!prompt) {
+        showError('Veuillez saisir une demande de devis');
+        return;
+    }
+    
+    // ✅ CORRECTION 1: Simplifier le verrouillage
+    const processing = document.getElementById('processing');
+    const resultPanel = document.getElementById('resultPanel');
+    
+    generateBtn.disabled = true;
+    processing.style.display = 'block';
+    resultPanel.style.display = 'none';
+    
+    try {
+        console.log("🚀 Appel API:", prompt);
+        
+        const response = await fetch('/generate_quote', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                prompt: prompt,
+                draft_mode: document.getElementById('draftMode')?.checked || false
+            })
+        });
+        
+        console.log("📡 Réponse reçue, status:", response.status);
+        
+        if (!response.ok) {
+            throw new Error(`Erreur HTTP ${response.status}`);
         }
+        
+        const result = await response.json();
+        console.log("✅ JSON parsé:", result);
+        
+        // ✅ CORRECTION 2: Toujours déverrouiller l'interface
+        generateBtn.disabled = false;
+        processing.style.display = 'none';
+        
+        if (result.status === 'success') {
+            console.log("🎉 Succès - Affichage des résultats");
+            showQuoteResult(result);
+        } else {
+            console.log("❌ Erreur dans la réponse:", result.message);
+            showError(result.message || 'Erreur de traitement');
+        }
+        
+    } catch (error) {
+        console.error("❌ Erreur fatale:", error);
+        
+        // ✅ CORRECTION 3: Toujours déverrouiller en cas d'erreur
+        generateBtn.disabled = false;
+        processing.style.display = 'none';
+        
+        showError(`Communication échouée: ${error.message}`);
+    }
+}
 
         // Correction callNovaAPI - Protection contre double exécution
         async function callNovaAPI() {

@@ -11,11 +11,13 @@ class DevisPromptRequest(BaseModel):
     prompt: str
     draft_mode: bool = False
 
+# routes/routes_devis.py - CORRECTION DU BUG
+
 @router.post("/generate_quote")
 async def generate_quote(request: DevisPromptRequest):
     """
     Génère un devis à partir d'une demande en langage naturel
-    CORRIGÉ pour compatibilité interface frontend
+    CORRIGÉ: Vérifie le bon champ pour déterminer le succès
     """
     try:
         from workflow.devis_workflow import DevisWorkflow
@@ -29,13 +31,13 @@ async def generate_quote(request: DevisPromptRequest):
             draft_mode=request.draft_mode
         )
         
-        logger.info(f"Workflow terminé avec statut: {workflow_result.get('status')}")
+        logger.info(f"Workflow terminé avec statut: {workflow_result.get('success')}")
         
-        # CORRECTION CRITIQUE: Normaliser la réponse pour l'interface
-        if workflow_result.get("status") == "success":
+        # ✅ CORRECTION CRITIQUE: Vérifier le bon champ
+        if workflow_result.get("success"):  # Comparaison simplifiée
             # Structure attendue par showQuoteResult()
             formatted_response = {
-                "status": "success",
+                "status": "success",  # ← Pour l'interface
                 "quote_id": workflow_result.get("quote_id", f"NOVA-{datetime.now().strftime('%Y%m%d%H%M%S')}"),
                 "client": {
                     "name": workflow_result.get("client", {}).get("name", "Client extrait"),
