@@ -277,20 +277,6 @@ class DevisWorkflow:
                 progress_tracker.fail_task(self.task_id, str(e))
             
             return self._build_error_response("Erreur système", str(e))
-    async def _extract_info_from_prompt(self, prompt: str) -> Dict[str, Any]:
-        """Extraction des informations avec fallback robuste - VERSION ORIGINALE RESTAURÉE"""
-        try:
-            # Tenter extraction via LLM (méthode statique correcte)
-            extracted_info = await LLMExtractor.extract_quote_info(prompt)
-            if "error" not in extracted_info:
-                logger.info("Extraction LLM réussie")
-                return extracted_info
-        except Exception as e:
-            logger.warning(f"Échec extraction LLM: {str(e)}")
-        
-        # Fallback vers extraction manuelle SIMPLE
-        return await self._extract_info_basic_simple(prompt)
-    
     def get_task_status(self, task_id: str = None) -> Optional[Dict[str, Any]]:
         """Récupère le statut détaillé d'une tâche"""
         target_id = task_id or self.task_id
@@ -1256,32 +1242,18 @@ class DevisWorkflow:
         self.context["client_info"]["data"]["Name"] = client_name
         self.context["client_info"]["data"].update(salesforce_data)
         
-        logger.info(f"✅ Client enrichi dans le contexte: {client_name}")    
-    def _build_error_response(self, error_title: str, error_message: str) -> Dict[str, Any]:
-        """Construit une réponse d'erreur standardisée"""
-        logger.error(f"Erreur workflow: {error_title} - {error_message}")
-        
-        return {
-            "status": "error",
-            "success": False,
-            "task_id": self.task_id,
-            "error_title": error_title,
-            "error_message": error_message,
-            "timestamp": datetime.now().isoformat(),
-            "workflow_steps": getattr(self, 'workflow_steps', []),
-            "context_available": bool(self.context),
-            "draft_mode": self.draft_mode
-        }    
-    
+        logger.info(f"✅ Client enrichi dans le contexte: {client_name}")
+
     async def _validate_client(self, client_name: Optional[str]) -> Dict[str, Any]:
-        """Valide l'existence du client dans Salesforce - VERSION CORRIGÉE"""
+        """Valide l'existence du client dans Salesforce - AMÉLIORÉE"""
         if not client_name:
             logger.warning("Aucun client spécifié")
             return {"found": False, "error": "Aucun client spécifié"}
-
+    
         logger.info(f"Validation du client: {client_name}")
         
         try:
+            # Requête enrichie pour récupérer TOUTES les informations nécessaires
             detailed_query = f"""
             SELECT Id, Name, AccountNumber, 
                 BillingStreet, BillingCity, BillingState, BillingPostalCode, BillingCountry,
@@ -1294,33 +1266,30 @@ class DevisWorkflow:
             """
             
             sf_result = await MCPConnector.call_salesforce_mcp("salesforce_query", {"query": detailed_query})
-            
-            # CORRECTION CRITIQUE: Vérification complète du retour MCP
-            if sf_result is None:
-                logger.error("sf_result est None")
-                return {"found": False, "error": "Réponse Salesforce vide"}
-            
-            if not isinstance(sf_result, dict):
-                logger.error(f"sf_result n'est pas un dict: {type(sf_result)}")
-                return {"found": False, "error": "Format de réponse Salesforce invalide"}
-            
-            if "error" in sf_result:
-                logger.error(f"Erreur requête Salesforce: {sf_result['error']}")
-                return {"found": False, "error": sf_result["error"]}
-            
-            if sf_result.get("totalSize", 0) > 0 and sf_result.get("records"):
+            if sf_result and isinstance(sf_result, dict) and sf_result.get("records"):
                 client_record = sf_result["records"][0]
-                client_name = client_record.get("Name", client_name)
+                client_name = client_record.get("Name", client_name)  # Utiliser le nom Salesforce
                 
-                # Enrichir le contexte
+                # Enrichir le contexte avec les bonnes données
                 self._enrich_client_data(client_name, client_record)
+                    
+                logger.info(f"Client Salesforce trouvé et enrichi: {client_name} (ID: {client_record.get('Id')})")
+                if "error" in sf_result:
+                    logger.error(f"Erreur requête Salesforce: {sf_result['error']}")
+                    return {"found": False, "error": sf_result["error"]}
                 
-                logger.info(f"✅ Client trouvé: {client_name} (ID: {client_record.get('Id')})")
-                return {"found": True, "data": client_record}
-            else:
-                logger.info(f"❌ Client '{client_name}' non trouvé dans Salesforce")
-                return {"found": False, "error": f"Client '{client_name}' non trouvé dans Salesforce"}
-                
+                if sf_result.get("totalSize", 0) > 0:
+                    client_record = sf_result["records"][0]
+                    client_name = client_record.get("Name", client_name)  # Utiliser le nom Salesforce
+                    
+                    # Enrichir le contexte avec les bonnes données
+                    self._enrich_client_data(client_name, client_record)
+                    
+                    logger.info(f"Client Salesforce trouvé et enrichi: {client_name} (ID: {client_record.get('Id')})")
+                    return {"found": True, "data": client_record}
+                else:
+                    return {"found": False, "error": f"Client '{client_name}' non trouvé dans Salesforce"}
+                    
         except Exception as e:
             logger.exception(f"Erreur validation client: {str(e)}")
             return {"found": False, "error": str(e)}
@@ -1432,8 +1401,59 @@ class DevisWorkflow:
                     "error": str(e)
                 })
         
-        return enriched_products    
+        return enriched_products
+
+    async def _validate_client(self, client_name: Optional[str]) -> Dict[str, Any]:
+        """Valide l'existence du client dans Salesforce - AMÉLIORÉE"""
+        if not client_name:
+            logger.warning("Aucun client spécifié")
+            return {"found": False, "error": "Aucun client spécifié"}
+    
+        logger.info(f"Validation du client: {client_name}")
         
+        try:
+            # Requête enrichie pour récupérer TOUTES les informations nécessaires
+            detailed_query = f"""
+            SELECT Id, Name, AccountNumber, 
+                BillingStreet, BillingCity, BillingState, BillingPostalCode, BillingCountry,
+                ShippingStreet, ShippingCity, ShippingState, ShippingPostalCode, ShippingCountry,
+                Phone, Fax, Website, Industry, AnnualRevenue, NumberOfEmployees,
+                Description, Type, OwnerId, CreatedDate, LastModifiedDate
+            FROM Account 
+            WHERE Name LIKE '%{client_name}%' 
+            LIMIT 1
+            """
+            
+            sf_result = await MCPConnector.call_salesforce_mcp("salesforce_query", {"query": detailed_query})
+            if sf_result and isinstance(sf_result, dict) and sf_result.get("records"):
+                client_record = sf_result["records"][0]
+                client_name = client_record.get("Name", client_name)  # Utiliser le nom Salesforce
+                
+                # Enrichir le contexte avec les bonnes données
+                self._enrich_client_data(client_name, client_record)
+                    
+                logger.info(f"Client Salesforce trouvé et enrichi: {client_name} (ID: {client_record.get('Id')})")
+                if "error" in sf_result:
+                    logger.error(f"Erreur requête Salesforce: {sf_result['error']}")
+                    return {"found": False, "error": sf_result["error"]}
+                
+                if sf_result.get("totalSize", 0) > 0:
+                    client_record = sf_result["records"][0]
+                    client_name = client_record.get("Name", client_name)  # Utiliser le nom Salesforce
+                    
+                    # Enrichir le contexte avec les bonnes données
+                    self._enrich_client_data(client_name, client_record)
+                    
+                    logger.info(f"Client Salesforce trouvé et enrichi: {client_name} (ID: {client_record.get('Id')})")
+                    return {"found": True, "data": client_record}
+                else:
+                    return {"found": False, "error": f"Client '{client_name}' non trouvé dans Salesforce"}
+                    
+        except Exception as e:
+            logger.exception(f"Erreur validation client: {str(e)}")
+            return {"found": False, "error": str(e)}
+        
+        # Conserver toutes les autres méthodes du workflow existant
     async def _get_products_info(self, products: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Récupère les informations produits depuis SAP - VERSION CORRIGÉE POUR LES PRIX"""
         if not products:

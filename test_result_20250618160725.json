@@ -1,0 +1,46 @@
+{
+  "success": true,
+  "status": "success",
+  "quote_id": "006gL000007zMHJQA2",
+  "client": {
+    "name": "Safran",
+    "account_number": "CSAFRAN8267",
+    "salesforce_id": "001gL000008JsBNQA0",
+    "phone": null,
+    "email": "",
+    "city": null,
+    "country": null
+  },
+  "products": [
+    {
+      "code": "A00002",
+      "name": "Imprimante IBM type Infoprint 1222",
+      "quantity": 500.0,
+      "unit_price": 200.0,
+      "line_total": 100000.0,
+      "stock_available": 1123.0,
+      "available": true
+    }
+  ],
+  "total_amount": 100000.0,
+  "currency": "EUR",
+  "date": "2025-06-18",
+  "quote_status": "Created",
+  "all_products_available": true,
+  "sap_doc_num": 449,
+  "salesforce_quote_id": "006gL000007zMHJQA2",
+  "message": "Devis généré avec succès pour Safran",
+  "draft_mode": false,
+  "client_validation": {
+    "validation_used": false,
+    "reason": "Client existant trouvé dans Salesforce"
+  },
+  "system_references": {
+    "sap_client_created": false,
+    "sap_client_card_code": "CSAFRAN8267",
+    "quote_creation_timestamp": "2025-06-18T16:07:25.400589",
+    "validation_enabled": true
+  },
+  "workflow_steps": [],
+  "task_id": "quote_20250618_160641_5733225e"
+}
