@@ -713,7 +713,19 @@ generateBtn.textContent = 'Génération...';
             console.log("\n💰 ANALYSE MONTANTS:");
             console.log("- result.total_amount:", result.total_amount);
             console.log("- result.currency:", result.currency);
-            
+            console.log("\n🔑 ANALYSE CODE CLIENT:");
+            console.log("- result.system_references:", result.system_references);
+            if (result.system_references) {
+                console.log("- result.system_references.sap_client_card_code:", result.system_references.sap_client_card_code);
+            }
+            console.log("- result.client:", result.client);
+            if (result.client) {
+                console.log("- result.client.CardCode:", result.client.CardCode);
+                console.log("- result.client.sap_card_code:", result.client.sap_card_code);
+                console.log("- result.client.card_code:", result.client.card_code);
+            }
+            console.log("- result.sap_card_code:", result.sap_card_code);
+            console.log("- result.CardCode:", result.CardCode);
             // Masquer le processing et afficher le résultat
             document.getElementById('processing').style.display = 'none';
             document.getElementById('resultPanel').style.display = 'block';
@@ -824,7 +836,7 @@ generateBtn.textContent = 'Génération...';
                 
                 <!-- Actions disponibles -->
                 <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 20px;">
-                    <button onclick="generatePDFWorking(arguments[0])" data-result='${JSON.stringify(result).replace(/'/g, "&apos;")}' 
+                    <button onclick="generatePDFFromButton(this)" data-result='${JSON.stringify(result).replace(/'/g, "&apos;")}' 
                         style="background: #2563eb; color: white; padding: 10px 20px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">
                         📄 Générer PDF
                     </button>
@@ -904,7 +916,8 @@ generateBtn.textContent = 'Génération...';
 
             // VRAIES DONNÉES extraites de votre structure JSON
             const clientName = result.client?.name || 'Client non défini';
-            const clientCode = result.client?.sap_card_code || result.client?.salesforce_id || 'N/A';
+            const clientCode = result.client?.account_number || 'N/A';
+            const clientSalesforceId = result.client?.salesforce_id || 'N/A';
             const quoteNumber = result.quote_id || 'NOVA-' + Date.now().toString().slice(-6);
             const totalAmount = parseFloat(result.total_amount) || 0;
             const currency = result.currency || 'EUR';
@@ -1396,7 +1409,7 @@ generateBtn.textContent = 'Génération...';
                                 <div style="background: #f0fdf4; padding: 20px; border-radius: 8px; border-left: 4px solid #22c55e;">
                                     <h3 style="margin: 0 0 15px 0; color: #1f2937;">🏢 Informations Client</h3>
                                     <p style="margin: 5px 0;"><strong>Nom :</strong> ${clientName}</p>
-                                    <p style="margin: 5px 0;"><strong>Code client :</strong> ${result.client?.sap_card_code || 'N/A'}</p>
+                                    <p style="margin: 5px 0;"><strong>Code client :</strong> ${result.client?.account_number || 'N/A'}</p>
                                     <p style="margin: 5px 0;"><strong>ID Salesforce :</strong> ${result.client?.salesforce_id || 'N/A'}</p>
                                     <p style="margin: 5px 0;"><strong>SAP DocNum :</strong> ${result.sap_doc_num || 'N/A'}</p>
                                 </div>
@@ -1487,7 +1500,16 @@ generateBtn.textContent = 'Génération...';
             console.log("✅ Aperçu PDF affiché en plein écran");
             showNotification('Aperçu PDF ouvert ! Cliquez sur "Imprimer PDF" pour sauvegarder', 'success');
         }
-
+        function generatePDFFromButton(button) {
+            try {
+                const resultData = JSON.parse(button.getAttribute('data-result'));
+                console.log("📄 Données récupérées pour PDF:", resultData);
+                generatePDFWorking(resultData);
+            } catch (error) {
+                console.error("❌ Erreur récupération données PDF:", error);
+                showNotification('Erreur lors de la génération du PDF', 'error');
+            }
+        }
         function showAdvancedInterface() {
             // Créer la modal pour l'interface avancée
             const modal = document.createElement('div');
@@ -2080,8 +2102,11 @@ L'équipe commerciale</textarea>
                                 <strong style="color: #1f2937; font-size: 0.95em;">${client.name}</strong>
                                 ${client.account_number ? `<span style="font-size: 0.8em; color: #6b7280; background: #f3f4f6; padding: 2px 6px; border-radius: 3px;">${client.account_number}</span>` : ''}
                             </div>
-                            <div style="font-size: 0.85em; color: #6b7280; margin-bottom: 2px;">
-                                📍 ${client.location_display}
+                            <div style="margin-bottom: 8px;">
+                                <strong>Code client :</strong> ${clientCode}
+                            </div>
+                            <div style="margin-bottom: 8px;">
+                                <strong>Salesforce ID :</strong> ${clientSalesforceId}
                             </div>
                             <div style="font-size: 0.85em; color: #6b7280;">
                                 🏢 ${client.type_display}
