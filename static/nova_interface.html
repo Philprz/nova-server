@@ -536,6 +536,8 @@ Exemples :
 
     <script>
         let currentMode = 'draft'; // Mode par défaut
+        let currentTaskId = null;  // NOUVEAU : Variable globale pour le task ID
+        let pollingInterval = null; // NOUVEAU : Variable globale pour l'intervalle de polling
 
         function selectMode(mode) {
             currentMode = mode;
@@ -573,7 +575,7 @@ Exemples :
                 return;
             }
             
-            // ✅ CORRECTION 1: Simplifier le verrouillage
+            // Verrouillage interface
             const processing = document.getElementById('processing');
             const resultPanel = document.getElementById('resultPanel');
             
@@ -581,15 +583,70 @@ Exemples :
             processing.style.display = 'block';
             resultPanel.style.display = 'none';
             
+            // Initialiser l'affichage de progression détaillée
+            const progressContent = processing.querySelector('.progress-content') || (() => {
+                const content = document.createElement('div');
+                content.className = 'progress-content';
+                content.style.cssText = `
+                    background: white;
+                    border-radius: 8px;
+                    padding: 15px;
+                    margin-top: 10px;
+                    border-left: 4px solid #667eea;
+                `;
+                processing.appendChild(content);
+                return content;
+            })();
+
+            progressContent.innerHTML = `
+                <div style="display: flex; align-items: center; margin-bottom: 10px;">
+                    <div class="spinner" style="
+                        width: 20px; height: 20px; 
+                        border: 2px solid #f3f3f3; 
+                        border-top: 2px solid #667eea; 
+                        border-radius: 50%; 
+                        animation: spin 1s linear infinite;
+                        margin-right: 10px;
+                    "></div>
+                    <span id="current-step">Initialisation...</span>
+                </div>
+                <div style="background: #f1f5f9; border-radius: 4px; height: 6px; overflow: hidden;">
+                    <div id="progress-bar" style="
+                        height: 100%; 
+                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                        width: 0%; 
+                        transition: width 0.3s ease;
+                    "></div>
+                </div>
+                <div id="progress-details" style="
+                    font-size: 0.85em; 
+                    color: #64748b; 
+                    margin-top: 8px;
+                ">Préparation de votre devis...</div>
+            `;
+
+            // Ajouter styles CSS si pas présents
+            if (!document.querySelector('#progress-styles')) {
+                const styles = document.createElement('style');
+                styles.id = 'progress-styles';
+                styles.textContent = `
+                    @keyframes spin {
+                        0% { transform: rotate(0deg); }
+                        100% { transform: rotate(360deg); }
+                    }
+                `;
+                document.head.appendChild(styles);
+            }
+            
             try {
                 console.log("🚀 Appel API:", prompt);
                 
-                const response = await fetch('/generate_quote', {
+                const response = await fetch('/progress/generate_quote', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         prompt: prompt,
-                        draft_mode: document.getElementById('draftMode')?.checked || false
+                        draft_mode: currentMode === 'draft'
                     })
                 });
                 
@@ -601,100 +658,113 @@ Exemples :
                 
                 const result = await response.json();
                 console.log("✅ JSON parsé:", result);
-                
-                // ✅ CORRECTION 2: Toujours déverrouiller l'interface
-                generateBtn.disabled = false;
-                processing.style.display = 'none';
-                
-                if (result.status === 'success') {
-                    console.log("🎉 Succès - Affichage des résultats");
-                    showQuoteResult(result);
-                } else {
-                    console.log("❌ Erreur dans la réponse:", result.message);
-                    showError(result.message || 'Erreur de traitement');
 
+                // Gestion de la réponse avec task_id
+                if (result.task_id) {
+                    currentTaskId = result.task_id;
+                    console.log("🔄 Démarrage polling pour task:", currentTaskId);
+                    startProgressPolling(currentTaskId);
+                } else {
+                    // Fallback pour l'ancien système
+                    generateBtn.disabled = false;
+                    processing.style.display = 'none';
+                    
+                    if (result.status === 'success') {
+                        showQuoteResult(result);
+                    } else {
+                        showError(result.message || 'Erreur de traitement');
+                    }
                 }
-                alert('Erreur: ' + (result.message || 'Erreur inconnue'));
+                
             } catch (error) {
                 console.error("❌ Erreur fatale:", error);
-                
-                // ✅ CORRECTION 3: Toujours déverrouiller en cas d'erreur
                 generateBtn.disabled = false;
                 processing.style.display = 'none';
-                
                 showError(`Communication échouée: ${error.message}`);
             }
         }
-
-        // Correction callNovaAPI - Protection contre double exécution
-        async function callNovaAPI() {
-            // PROTECTION CRITIQUE contre double exécution
-            const generateBtn = document.getElementById('generateBtn');
-            console.log("🔄 Début callNovaAPI()");
-            if (generateBtn && generateBtn.disabled) {
-                console.log("⛔ Génération déjà en cours, abandon");
-                return;
-            }
+        async function startProgressPolling(taskId) {
+            let attempts = 0;
+            const maxAttempts = 120; // 2 minutes max
             
-            const promptInput = document.getElementById('mainInput');
-            const prompt = promptInput?.value?.trim();
-            
-            if (!prompt) {
-                showError('Veuillez saisir une demande de devis');
-                return;
-            }
-            
-            // Verrouillage immédiat
-            const processing = document.getElementById('processing');
-            const resultPanel = document.getElementById('resultPanel');
-            
-            if (generateBtn) generateBtn.disabled = true;
-            generateBtn.disabled = true;
-generateBtn.textContent = 'Génération...';
-
-            if (processing) processing.style.display = 'block';
-            if (resultPanel) resultPanel.style.display = 'none';
-            
+            pollingInterval = setInterval(async () => {
+                attempts++;
+        
             try {
-                console.log("🚀 Appel API unique:", prompt);
-                
-                const response = await fetch('/generate_quote', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        prompt: prompt,
-                        draft_mode: document.getElementById('draftMode')?.checked || false
-                    })
-                });
-                
+                const response = await fetch(`/progress/quote_status/${taskId}?detailed=true`);
                 if (!response.ok) {
-                    throw new Error(`Erreur ${response.status}`);
+                    throw new Error(`Status ${response.status}`);
                 }
                 
-                const result = await response.json();
-                console.log("✅ Résultat unique reçu");
+                const progress = await response.json();
+                updateProgressDisplay(progress);
                 
-                if (result.status === 'success') {
-                    showQuoteResult(result);
-                } else {
-                    showError(result.message || 'Erreur de traitement');
+                // Vérifier si terminé
+                if (progress.status === 'completed') {
+                    clearInterval(pollingInterval);
+                    showQuoteResult(progress.result || progress);
+                    resetProgressDisplay();
+                } else if (progress.status === 'failed') {
+                    clearInterval(pollingInterval);
+                    showError(progress.error || 'Erreur de génération');
+                    resetProgressDisplay();
                 }
                 
             } catch (error) {
-                console.error("❌ Erreur:", error);
-                alert('Erreur de communication: ' + error.message);
-            } finally {
-                // TOUJOURS remettre l'interface en état normal
-                generateBtn.disabled = false;
-                generateBtn.textContent = '🚀 Générer le Devis';
-                processing.style.display = 'none';
-                console.log("🔄 Interface restaurée");
+                console.error("❌ Erreur polling:", error);
+                if (attempts >= maxAttempts) {
+                    clearInterval(pollingInterval);
+                    showError('Timeout - génération trop longue');
+                    resetProgressDisplay();
+                }
             }
+        }, 1000); // Polling toutes les secondes
+    }
 
+        function updateProgressDisplay(progress) {
+            const currentStepEl = document.getElementById('current-step');
+            const progressBarEl = document.getElementById('progress-bar');
+            const progressDetailsEl = document.getElementById('progress-details');
+            
+            if (currentStepEl && progress.current_step_title) {
+                currentStepEl.textContent = progress.current_step_title;
+            }
+            
+            if (progressBarEl && progress.overall_progress !== undefined) {
+                progressBarEl.style.width = `${progress.overall_progress}%`;
+            }
+            
+            if (progressDetailsEl) {
+                let details = `Étape ${progress.completed_steps || 0}/${progress.total_steps || 8}`;
+                if (progress.phases) {
+                    // Trouver l'étape actuelle dans les phases
+                    for (const phase of Object.values(progress.phases)) {
+                        const currentStep = phase.steps.find(s => s.status === 'running');
+                        if (currentStep) {
+                            details += ` - ${currentStep.message}`;
+                            break;
+                        }
+                    }
+                }
+                progressDetailsEl.textContent = details;
+            }
         }
 
+        function resetProgressDisplay() {
+            const generateBtn = document.getElementById('generateBtn');
+            const processing = document.getElementById('processing');
+            
+            if (generateBtn) generateBtn.disabled = false;
+            if (processing) processing.style.display = 'none';
+            
+            currentTaskId = null;
+            if (pollingInterval) {
+                clearInterval(pollingInterval);
+                pollingInterval = null;
+            }
+        }       
 
-        function showQuoteResult(result) {
+    function showQuoteResult(result) {
             // ✅ DIAGNOSTIC COMPLET
             console.log("=== 🔍 DIAGNOSTIC COMPLET DES DONNEES ===");
             console.log("📋 Structure complète reçue:");
@@ -2072,7 +2142,7 @@ L'équipe commerciale</textarea>
                 // Assigner UN SEUL listener
                 document.getElementById('generateBtn').onclick = function() {
                     console.log("🚀 Clic bouton détecté");
-                    callNovaAPI();
+                    generateQuote();
                 };
                 
                 console.log("✅ Event listener unique assigné");
