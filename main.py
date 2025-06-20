@@ -54,14 +54,6 @@ try:
 except ImportError:
     clients_available = False
     print("⚠️ routes_clients non disponible")
-
-try:
-    from routes.routes_sync import router as sync_router
-    sync_available = True
-    print("✅ routes_sync chargées avec succès")
-except ImportError as e:
-    sync_available = False
-    print(f"⚠️ routes_sync non disponible: {e}")
         
 # Créer l'application FastAPI
 app = FastAPI(

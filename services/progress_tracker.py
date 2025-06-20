@@ -187,7 +187,8 @@ class QuoteTask:
             "duration": (self.end_time - self.start_time).total_seconds() if self.end_time else None,
             "draft_mode": self.draft_mode,
             "user_prompt": self.user_prompt,
-            "error": self.error
+            "error": self.error,
+            "result": self.result if self.status == TaskStatus.COMPLETED else None
         }
     
     def get_detailed_progress(self) -> Dict[str, Any]:
