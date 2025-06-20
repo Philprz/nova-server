@@ -876,7 +876,44 @@ async def _get_customer_details(card_code: str) -> dict:
             "success": False,
             "error": f"Erreur récupération client {card_code}: {str(e)}"
         }
-
+@mcp.tool(name="sap_search_quotes")
+async def sap_search_quotes(client_name: str, date_from: str = None, limit: int = 10) -> dict:
+    """
+    Recherche les devis SAP pour un client avec filtres optionnels
+    
+    Args:
+        client_name: Nom du client à rechercher
+        date_from: Date minimum (YYYY-MM-DD)
+        limit: Nombre maximum de résultats
+    """
+    try:
+        log(f"Recherche devis SAP pour client: {client_name}")
+        
+        # Construire le filtre
+        filters = [f"contains(CardName,'{client_name}')"]
+        
+        if date_from:
+            filters.append(f"DocDate ge '{date_from}'")
+        
+        filter_string = " and ".join(filters)
+        
+        # Requête SAP
+        response = await call_sap(f"/Quotations?$filter={filter_string}&$top={limit}")
+        
+        if "error" in response:
+            return {"success": False, "error": response["error"]}
+        
+        quotes = response.get("value", [])
+        
+        return {
+            "success": True,
+            "count": len(quotes),
+            "quotes": quotes
+        }
+        
+    except Exception as e:
+        log(f"❌ Erreur recherche devis: {str(e)}", "ERROR")
+        return {"success": False, "error": str(e)}
 # Table de mappage des fonctions MCP
 mcp_functions = {
     "ping": ping,
@@ -888,7 +925,8 @@ mcp_functions = {
     "sap_create_quotation_draft": sap_create_quotation_draft,
     "sap_valida te_draft_quote": sap_validate_draft_quote,
     "get_quotation_details": get_quotation_details,
-    "_get_customer_details": _get_customer_details
+    "_get_customer_details": _get_customer_details,
+    "sap_search_quotes": sap_search_quotes
 }   
 
 # Initialisation au démarrage

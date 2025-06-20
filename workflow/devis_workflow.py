@@ -184,7 +184,26 @@ class DevisWorkflow:
             # Étape 2.3: Client prêt
             self._track_step_complete("verify_client_info", "Informations vérifiées")
             self._track_step_complete("client_ready", f"Client {client_info.get('name', 'N/A')} validé")
-            
+            # Étape 2.4: Vérification doublons
+            self._track_step_start("check_duplicates", "Vérification des doublons...")
+
+            duplicate_check = await self._check_duplicate_quotes(
+                client_info, 
+                extracted_info.get("products", [])
+            )
+            self.context["duplicate_check"] = duplicate_check
+
+            if duplicate_check.get("duplicates_found"):
+                self._track_step_progress("check_duplicates", 80, f"⚠️ {len(duplicate_check.get('warnings', []))} alerte(s) détectée(s)")
+                
+                # En mode interactif, on pourrait s'arrêter ici pour demander confirmation
+                # Pour l'instant, on continue avec des warnings
+                logger.warning("Doublons potentiels détectés - Continuation du workflow")
+                
+            else:
+                self._track_step_progress("check_duplicates", 100, "✅ Aucun doublon détecté")
+
+            self._track_step_complete("check_duplicates", "Vérification terminée")
             # ========== PHASE 3: TRAITEMENT DES PRODUITS ==========
             
             # Étape 3.1: Connexion catalogue
@@ -1227,7 +1246,18 @@ class DevisWorkflow:
                 "validation_used": False,
                 "reason": "Client existant trouvé dans Salesforce"
             }
-        
+        # Informations de vérification doublons DEVIS (nouveau)
+        duplicate_check = self.context.get("duplicate_check", {})
+        if duplicate_check:
+            response["duplicate_check"] = {
+                "duplicates_found": duplicate_check.get("duplicates_found", False),
+                "warnings_count": len(duplicate_check.get("warnings", [])),
+                "suggestions_count": len(duplicate_check.get("suggestions", [])),
+                "recent_quotes": len(duplicate_check.get("recent_quotes", [])),
+                "draft_quotes": len(duplicate_check.get("draft_quotes", [])),
+                "similar_quotes": len(duplicate_check.get("similar_quotes", [])),
+                "details": duplicate_check
+            }
         # Ajouter les références système pour traçabilité
         response["system_references"] = {
             "sap_client_created": sap_client.get("created", False) if sap_client else False,
@@ -1324,7 +1354,148 @@ class DevisWorkflow:
         except Exception as e:
             logger.exception(f"Erreur validation client: {str(e)}")
             return {"found": False, "error": str(e)}
+    async def _check_duplicate_quotes(self, client_info: Dict[str, Any], products: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Vérifie s'il existe déjà des devis similaires pour éviter les doublons
+        
+        Args:
+            client_info: Informations du client validé
+            products: Liste des produits demandés
+            
+        Returns:
+            Dict avec statut de vérification et actions suggérées
+        """
+        logger.info("🔍 Vérification des doublons de devis...")
+        
+        duplicate_check = {
+            "duplicates_found": False,
+            "recent_quotes": [],
+            "similar_quotes": [],
+            "draft_quotes": [],
+            "action_required": False,
+            "suggestions": [],
+            "warnings": []
+        }
+        
+        try:
+            # Récupérer les identifiants client
+            client_name = client_info.get("data", {}).get("Name", "")
+            
+            if not client_name:
+                logger.warning("Aucun nom client pour vérification doublons")
+                return duplicate_check
+            
+            # 1. Vérifier les devis SAP récents (dernières 48h)
+            recent_quotes = await self._get_recent_sap_quotes(client_name, hours=48)
+            
+            # 2. Vérifier les devis brouillons existants
+            draft_quotes = await self._get_client_draft_quotes(client_name)
+            
+            # 3. Analyser la similarité des produits
+            similar_quotes = await self._find_similar_product_quotes(client_name, products)
+            
+            # Populate results
+            duplicate_check["recent_quotes"] = recent_quotes
+            duplicate_check["draft_quotes"] = draft_quotes  
+            duplicate_check["similar_quotes"] = similar_quotes
+            
+            # Analyser les résultats
+            total_findings = len(recent_quotes) + len(draft_quotes) + len(similar_quotes)
+            
+            if total_findings > 0:
+                duplicate_check["duplicates_found"] = True
+                duplicate_check["action_required"] = True
+                
+                # Messages d'alerte
+                if recent_quotes:
+                    duplicate_check["warnings"].append(f"⚠️ {len(recent_quotes)} devis récent(s) trouvé(s) pour {client_name}")
+                    
+                if draft_quotes:
+                    duplicate_check["warnings"].append(f"📝 {len(draft_quotes)} devis en brouillon pour {client_name}")
+                    duplicate_check["suggestions"].append("💡 Considérez consolider avec les brouillons existants")
+                    
+                if similar_quotes:
+                    duplicate_check["warnings"].append(f"🔄 {len(similar_quotes)} devis avec produits similaires")
+                    duplicate_check["suggestions"].append("💡 Vérifiez s'il s'agit d'une mise à jour ou d'un nouveau besoin")
+            
+            else:
+                duplicate_check["suggestions"].append("✅ Aucun doublon détecté - Création sécurisée")
+                
+            logger.info(f"Vérification doublons terminée: {total_findings} potentiel(s) doublon(s)")
+            return duplicate_check
+            
+        except Exception as e:
+            logger.exception(f"Erreur vérification doublons devis: {str(e)}")
+            duplicate_check["warnings"].append(f"❌ Erreur vérification doublons: {str(e)}")
+            return duplicate_check
 
+    async def _get_recent_sap_quotes(self, client_name: str, hours: int = 48) -> List[Dict[str, Any]]:
+        """Récupère les devis SAP récents pour un client"""
+        try:
+            from datetime import datetime, timedelta
+            
+            # Calculer la date limite
+            cutoff_date = datetime.now() - timedelta(hours=hours)
+            cutoff_str = cutoff_date.strftime("%Y-%m-%d")
+            
+            # Rechercher dans SAP avec filtre date et client
+            from services.mcp_connector import MCPConnector
+            
+            result = await MCPConnector.call_sap_mcp("sap_search_quotes", {
+                "client_name": client_name,
+                "date_from": cutoff_str,
+                "limit": 10
+            })
+            
+            if result.get("success") and result.get("quotes"):
+                return result["quotes"]
+            
+            return []
+            
+        except Exception as e:
+            logger.warning(f"Erreur recherche devis récents: {str(e)}")
+            return []
+
+    async def _get_client_draft_quotes(self, client_name: str) -> List[Dict[str, Any]]:
+        """Récupère les devis en brouillon pour un client"""
+        try:
+            from sap_mcp import sap_list_draft_quotes
+            
+            # Récupérer tous les brouillons
+            draft_result = await sap_list_draft_quotes()
+            
+            if not draft_result.get("success"):
+                return []
+            
+            # Filtrer par nom client
+            client_drafts = [
+                quote for quote in draft_result.get("draft_quotes", [])
+                if quote.get("card_name", "").lower() == client_name.lower()
+            ]
+            
+            return client_drafts
+            
+        except Exception as e:
+            logger.warning(f"Erreur recherche brouillons client: {str(e)}")
+            return []
+
+    async def _find_similar_product_quotes(self, client_name: str, requested_products: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Trouve les devis avec des produits similaires"""
+        try:
+            # Pour l'instant, implémentation simplifiée
+            # TODO: Logique avancée de comparaison produits
+            
+            # Extraire les codes produits demandés
+            requested_codes = set(product.get("code", "").upper() for product in requested_products)
+            
+            logger.info(f"Recherche produits similaires pour {client_name}: {requested_codes}")
+            
+            # Retourner vide pour l'instant - à implémenter selon les besoins
+            return []
+            
+        except Exception as e:
+            logger.warning(f"Erreur recherche produits similaires: {str(e)}")
+            return []
     async def _get_products_info(self, products: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Récupère les informations produits depuis SAP - VERSION CORRIGÉE POUR LES PRIX"""
         if not products:

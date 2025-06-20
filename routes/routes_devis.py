@@ -118,3 +118,24 @@ async def list_draft_quotes():
             "count": 0,
             "has_pending_quotes": False
         }
+@router.post("/validate_quote")
+async def validate_quote(request: dict):
+    """
+    Valide un devis brouillon pour le transformer en définitif
+    """
+    try:
+        doc_entry = request.get("doc_entry")
+        if not doc_entry:
+            return {"success": False, "error": "doc_entry manquant"}
+            
+        logger.info(f"Validation devis DocEntry: {doc_entry}")
+        
+        # Utiliser la méthode SAP existante
+        from sap_mcp import sap_validate_draft_quote
+        result = await sap_validate_draft_quote(doc_entry)
+        
+        return result
+        
+    except Exception as e:
+        logger.exception(f"Erreur validation devis: {str(e)}")
+        return {"success": False, "error": str(e)}

@@ -649,9 +649,243 @@ Exemples :
             }
         }
 
-        // Afficher les devis en brouillon
-        function showDraftQuotes() {
-            alert(`Vous avez ${pendingDraftsCount} devis en brouillon à valider.\n\nFonctionnalité d'édition en cours de développement...`);
+        // Afficher l'interface d'édition des devis brouillons
+        async function showDraftQuotes() {
+            console.log("🔍 Affichage interface devis brouillons");
+            
+            try {
+                // Récupérer les données fraîches
+                const response = await fetch('/list_draft_quotes');
+                const data = await response.json();
+                
+                if (!data.success) {
+                    showNotification('Erreur lors du chargement des devis', 'error');
+                    return;
+                }
+                
+                // Créer l'interface d'édition
+                createDraftQuotesModal(data.draft_quotes);
+                
+            } catch (error) {
+                console.error('Erreur chargement devis:', error);
+                showNotification('Erreur de connexion', 'error');
+            }
+        }
+
+        // Créer l'interface modale d'édition
+        function createDraftQuotesModal(quotes) {
+            // Créer le modal
+            const modal = document.createElement('div');
+            modal.id = 'draftQuotesModal';
+            modal.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0,0,0,0.8);
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                z-index: 10000;
+                padding: 20px;
+                box-sizing: border-box;
+            `;
+            
+            modal.innerHTML = `
+                <div style="
+                    background: white;
+                    border-radius: 12px;
+                    width: 100%;
+                    max-width: 1200px;
+                    max-height: 90vh;
+                    overflow-y: auto;
+                    box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+                ">
+                    <!-- Header -->
+                    <div style="
+                        padding: 20px;
+                        border-bottom: 1px solid #e2e8f0;
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                        background: #f8fafc;
+                        border-radius: 12px 12px 0 0;
+                    ">
+                        <h2 style="margin: 0; color: #1e293b; font-size: 1.5rem;">
+                            📋 Gestion des Devis Brouillons (${quotes.length})
+                        </h2>
+                        <button onclick="closeDraftModal()" style="
+                            background: none;
+                            border: none;
+                            font-size: 1.5rem;
+                            cursor: pointer;
+                            color: #64748b;
+                            padding: 5px;
+                        ">✕</button>
+                    </div>
+                    
+                    <!-- Content -->
+                    <div style="padding: 20px;">
+                        ${quotes.length === 0 ? 
+                            '<p style="text-align: center; color: #64748b; font-size: 1.1rem;">Aucun devis en brouillon</p>' :
+                            quotes.map(quote => createQuoteCard(quote)).join('')
+                        }
+                    </div>
+                    
+                    <!-- Footer -->
+                    <div style="
+                        padding: 20px;
+                        border-top: 1px solid #e2e8f0;
+                        background: #f8fafc;
+                        border-radius: 0 0 12px 12px;
+                        text-align: center;
+                    ">
+                        <button onclick="closeDraftModal()" style="
+                            background: #64748b;
+                            color: white;
+                            border: none;
+                            padding: 10px 20px;
+                            border-radius: 6px;
+                            cursor: pointer;
+                            font-size: 1rem;
+                        ">Fermer</button>
+                    </div>
+                </div>
+            `;
+            
+            document.body.appendChild(modal);
+        }
+
+        // Créer une carte pour chaque devis
+        function createQuoteCard(quote) {
+            return `
+                <div class="quote-card" style="
+                    border: 1px solid #e2e8f0;
+                    border-radius: 8px;
+                    padding: 16px;
+                    margin-bottom: 16px;
+                    background: #fafafa;
+                ">
+                    <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 12px;">
+                        <div>
+                            <h3 style="margin: 0 0 4px 0; color: #1e293b;">
+                                🧾 Devis #${quote.doc_num} 
+                                <span style="font-size: 0.8rem; color: #64748b;">(ID: ${quote.doc_entry})</span>
+                            </h3>
+                            <p style="margin: 0; color: #475569;">
+                                👤 <strong>${quote.card_name}</strong> (${quote.card_code})
+                            </p>
+                        </div>
+                        <div style="text-align: right;">
+                            <div style="font-size: 1.2rem; font-weight: bold; color: #059669;">
+                                ${parseFloat(quote.doc_total).toLocaleString('fr-FR')} ${quote.currency}
+                            </div>
+                            <div style="font-size: 0.9rem; color: #64748b;">
+                                📅 ${new Date(quote.doc_date).toLocaleDateString('fr-FR')}
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Actions -->
+                    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                        <button onclick="editQuote(${quote.doc_entry})" style="
+                            background: #3b82f6;
+                            color: white;
+                            border: none;
+                            padding: 6px 12px;
+                            border-radius: 4px;
+                            cursor: pointer;
+                            font-size: 0.9rem;
+                        ">✏️ Éditer</button>
+                        
+                        <button onclick="validateQuote(${quote.doc_entry})" style="
+                            background: #059669;
+                            color: white;
+                            border: none;
+                            padding: 6px 12px;
+                            border-radius: 4px;
+                            cursor: pointer;
+                            font-size: 0.9rem;
+                        ">✅ Valider</button>
+                        
+                        <button onclick="duplicateQuote(${quote.doc_entry})" style="
+                            background: #7c3aed;
+                            color: white;
+                            border: none;
+                            padding: 6px 12px;
+                            border-radius: 4px;
+                            cursor: pointer;
+                            font-size: 0.9rem;
+                        ">📄 Dupliquer</button>
+                        
+                        <button onclick="deleteQuote(${quote.doc_entry})" style="
+                            background: #dc2626;
+                            color: white;
+                            border: none;
+                            padding: 6px 12px;
+                            border-radius: 4px;
+                            cursor: pointer;
+                            font-size: 0.9rem;
+                        ">🗑️ Supprimer</button>
+                    </div>
+                    
+                    ${quote.comments ? `
+                        <div style="margin-top: 8px; padding: 8px; background: #fef3cd; border-radius: 4px; font-size: 0.9rem;">
+                            💬 ${quote.comments}
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+        }
+
+        // Fermer le modal
+        function closeDraftModal() {
+            const modal = document.getElementById('draftQuotesModal');
+            if (modal) {
+                modal.remove();
+            }
+        }
+
+        // Actions sur les devis
+        async function validateQuote(docEntry) {
+            if (!confirm('Êtes-vous sûr de vouloir valider ce devis en définitif ?')) return;
+            
+            try {
+                const response = await fetch('/validate_quote', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ doc_entry: docEntry })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showNotification('Devis validé avec succès !', 'success');
+                    closeDraftModal();
+                    checkPendingDrafts(); // Rafraîchir le compteur
+                } else {
+                    showNotification('Erreur lors de la validation', 'error');
+                }
+            } catch (error) {
+                showNotification('Erreur de connexion', 'error');
+            }
+        }
+
+        async function editQuote(docEntry) {
+            showNotification('Fonction d\'édition en développement...', 'info');
+            // TODO: Implémenter l'édition complète
+        }
+
+        async function duplicateQuote(docEntry) {
+            showNotification('Fonction de duplication en développement...', 'info');
+            // TODO: Implémenter la duplication
+        }
+
+        async function deleteQuote(docEntry) {
+            if (!confirm('Êtes-vous sûr de vouloir supprimer ce devis ?')) return;
+            showNotification('Fonction de suppression en développement...', 'info');
+            // TODO: Implémenter la suppression
         }
 
         // Vérifier au chargement de la page
