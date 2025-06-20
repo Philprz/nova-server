@@ -2173,8 +2173,24 @@ L'équipe commerciale</textarea>
             try {
                 const response = await fetch(`/clients/search_clients_advanced?q=${encodeURIComponent(searchTerm)}&limit=10`);
                 const data = await response.json();
-                
+                // Debug: afficher la réponse complète
+                console.log('Réponse API clients:', data);
+
                 const clientsContainer = document.getElementById('clientsContainer');
+
+                // Vérifier d'abord s'il y a une erreur API
+                if (!data.success) {
+                    clientsContainer.innerHTML = `
+                        <div style="padding: 20px; text-align: center; color: #ef4444;">
+                            <div style="font-size: 2em; margin-bottom: 10px;">⚠️</div>
+                            Erreur de chargement des clients
+                            <div style="font-size: 0.8em; margin-top: 5px; color: #6b7280;">
+                                ${data.error || 'Vérifiez la connexion Salesforce'}
+                            </div>
+                        </div>
+                    `;
+                    return;
+                }
                 
                 if (data.success && data.clients.length > 0) {
                     clientsContainer.innerHTML = data.clients.map(client => `
@@ -2193,10 +2209,10 @@ L'équipe commerciale</textarea>
                                 ${client.account_number ? `<span style="font-size: 0.8em; color: #6b7280; background: #f3f4f6; padding: 2px 6px; border-radius: 3px;">${client.account_number}</span>` : ''}
                             </div>
                             <div style="margin-bottom: 8px;">
-                                <strong>Code client :</strong> ${clientCode}
+                                <strong>Code client :</strong> ${client.account_number || 'N/A'}
                             </div>
                             <div style="margin-bottom: 8px;">
-                                <strong>Salesforce ID :</strong> ${clientSalesforceId}
+                                <strong>Salesforce ID :</strong> ${client.id || 'N/A'}
                             </div>
                             <div style="font-size: 0.85em; color: #6b7280;">
                                 🏢 ${client.type_display}
