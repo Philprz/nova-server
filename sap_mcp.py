@@ -673,7 +673,52 @@ async def sap_validate_draft_quote(doc_entry: int) -> dict:
     except Exception as e:
         log(f"❌ Erreur validation devis brouillon: {str(e)}", "ERROR")
         return {"success": False, "error": str(e)}
-
+@mcp.tool(name="sap_list_draft_quotes")
+async def sap_list_draft_quotes() -> dict:
+    """
+    Liste tous les devis en mode BROUILLON dans SAP
+    Filtre par commentaire contenant '[BROUILLON]'
+    """
+    try:
+        log("Récupération des devis en brouillon SAP...")
+        
+        # Filtrer les devis avec commentaire contenant [BROUILLON]
+        filter_param = "$filter=contains(Comments,'[BROUILLON]')"
+        
+        response = await call_sap(f"/Quotations?{filter_param}")
+        
+        if "error" in response:
+            return {"success": False, "error": response["error"]}
+        
+        quotes_list = response.get("value", []) if isinstance(response, dict) else []
+        
+        # Formater les données pour l'interface
+        draft_quotes = []
+        for quote in quotes_list:
+            draft_quotes.append({
+                "doc_entry": quote.get("DocEntry"),
+                "doc_num": quote.get("DocNum"),
+                "card_code": quote.get("CardCode"),
+                "card_name": quote.get("CardName"),
+                "doc_date": quote.get("DocDate"),
+                "doc_total": quote.get("DocTotal", 0),
+                "currency": quote.get("DocCurrency", "EUR"),
+                "comments": quote.get("Comments", ""),
+                "created_date": quote.get("CreateDate"),
+                "update_date": quote.get("UpdateDate")
+            })
+        
+        log(f"✅ {len(draft_quotes)} devis en brouillon trouvés")
+        
+        return {
+            "success": True,
+            "count": len(draft_quotes),
+            "draft_quotes": draft_quotes
+        }
+        
+    except Exception as e:
+        log(f"❌ Erreur récupération devis brouillons: {str(e)}", "ERROR")
+        return {"success": False, "error": str(e)}
 
 @mcp.tool(name="get_quotation_details")
 async def get_quotation_details(doc_entry: int, include_lines: bool = True, include_customer: bool = True) -> dict:

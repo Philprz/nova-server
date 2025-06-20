@@ -444,6 +444,42 @@
             border-radius: 6px;
             border-left: 4px solid #667eea;
         }        
+        /* Animation de clignotement pour alerter */
+        @keyframes blink-warning {
+            0%, 50% { 
+                background: linear-gradient(135deg, #28a745, #20c997);
+                box-shadow: 0 4px 15px rgba(40, 167, 69, 0.3);
+            }
+            51%, 100% { 
+                background: linear-gradient(135deg, #ff6b6b, #ee5a24);
+                box-shadow: 0 4px 15px rgba(255, 107, 107, 0.4);
+                transform: scale(1.02);
+            }
+        }
+
+        .mode-button.has-pending {
+            animation: blink-warning 2s infinite;
+        }
+
+        .pending-alert {
+            background: linear-gradient(135deg, #ff6b6b, #ee5a24);
+            border: 1px solid #ff4757;
+            border-radius: 8px;
+            padding: 12px 16px;
+            margin: 10px 0;
+            color: white;
+            font-weight: 500;
+            display: none;
+        }
+
+        .pending-count {
+            background: #fff;
+            color: #ff4757;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-weight: bold;
+            margin-left: 8px;
+        }
     </style>
 </head>
 
@@ -473,6 +509,12 @@
                 </div>
                 <div class="mode-description" id="modeDescription">
                     <strong>Mode Draft :</strong> Création en brouillon dans SAP - Peut être modifié avant validation finale
+                </div>
+                <div class="pending-alert" id="pendingAlert">
+                    ⚠️ <strong>Attention :</strong> Vous avez <span class="pending-count" id="pendingCount">0</span> devis en attente de validation !
+                    <button onclick="showDraftQuotes()" style="margin-left: 10px; background: #fff; color: #ff4757; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer;">
+                        📋 Voir les devis
+                    </button>
                 </div>
             </div>   
             <textarea 
@@ -562,14 +604,75 @@ Exemples :
             document.getElementById('mainInput').focus();
             showNotification('Exemple chargé !', 'success');
         }
+        // Variables globales
+        let pendingDraftsCount = 0;
+        let pendingDrafts = [];
+
+        // Fonction pour vérifier les devis en brouillon
+        async function checkPendingDrafts() {
+            try {
+                const response = await fetch('/list_draft_quotes');
+                const data = await response.json();
+                
+                if (data.success) {
+                    pendingDraftsCount = data.count || 0;
+                    pendingDrafts = data.draft_quotes || [];
+                    
+                    updatePendingUI();
+                }
+            } catch (error) {
+                console.error('Erreur vérification devis brouillons:', error);
+            }
+        }
+
+        // Mettre à jour l'interface selon les devis en attente
+        function updatePendingUI() {
+            const normalButton = document.getElementById('normalMode');
+            const pendingAlert = document.getElementById('pendingAlert');
+            const pendingCount = document.getElementById('pendingCount');
+            
+            if (pendingDraftsCount > 0) {
+                // Faire clignoter le bouton Normal
+                normalButton.classList.add('has-pending');
+                normalButton.innerHTML = `✅ Normal (Validation) <span class="pending-count">${pendingDraftsCount}</span>`;
+                
+                // Afficher l'alerte
+                pendingAlert.style.display = 'block';
+                pendingCount.textContent = pendingDraftsCount;
+            } else {
+                // Retirer le clignotement
+                normalButton.classList.remove('has-pending');
+                normalButton.innerHTML = '✅ Normal (Validation)';
+                
+                // Masquer l'alerte
+                pendingAlert.style.display = 'none';
+            }
+        }
+
+        // Afficher les devis en brouillon
+        function showDraftQuotes() {
+            alert(`Vous avez ${pendingDraftsCount} devis en brouillon à valider.\n\nFonctionnalité d'édition en cours de développement...`);
+        }
+
+        // Vérifier au chargement de la page
+        document.addEventListener('DOMContentLoaded', function() {
+            checkPendingDrafts();
+        });
 
         async function generateQuote() {
+            const isDraftMode = document.getElementById('draftMode').checked;
             console.log("🔄 Début generateQuote()");
             
             const generateBtn = document.getElementById('generateBtn');
             const promptInput = document.getElementById('mainInput');
             const prompt = promptInput?.value?.trim();
-            
+            // Alerte si on essaie de créer un draft alors qu'il y en a déjà
+            if (isDraftMode && pendingDraftsCount > 0) {
+                const proceed = confirm(`⚠️ Attention !\n\nVous avez déjà ${pendingDraftsCount} devis en brouillon en attente de validation.\n\nVoulez-vous vraiment créer un nouveau brouillon ?`);
+                if (!proceed) {
+                    return;
+                }
+            }
             if (!prompt) {
                 showError('Veuillez saisir une demande de devis');
                 return;

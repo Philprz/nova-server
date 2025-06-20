@@ -78,3 +78,43 @@ async def generate_quote(request: DevisPromptRequest):
             "message": f"Erreur système: {str(e)}",
             "error_details": "Erreur côté serveur"
         }
+@router.get("/list_draft_quotes")
+async def list_draft_quotes():
+    """
+    Liste tous les devis en mode brouillon
+    Utilisé pour alerter l'utilisateur et afficher les devis à valider
+    """
+    try:
+        logger.info("Récupération des devis en brouillon...")
+        
+        # Utiliser l'appel direct (pas MCP Connector qui a des soucis d'encodage)
+        from sap_mcp import sap_list_draft_quotes
+        
+        result = await sap_list_draft_quotes()
+        
+        if result and result.get("success"):
+            logger.info(f"✅ {result.get('count', 0)} devis en brouillon récupérés")
+            
+            return {
+                "success": True,
+                "count": result.get("count", 0),
+                "draft_quotes": result.get("draft_quotes", []),
+                "has_pending_quotes": result.get("count", 0) > 0
+            }
+        else:
+            logger.error(f"❌ Erreur récupération devis brouillons: {result.get('error', 'Erreur inconnue')}")
+            return {
+                "success": False,
+                "error": result.get("error", "Erreur lors de la récupération"),
+                "count": 0,
+                "has_pending_quotes": False
+            }
+            
+    except Exception as e:
+        logger.exception(f"Erreur endpoint list_draft_quotes: {str(e)}")
+        return {
+            "success": False,
+            "error": str(e),
+            "count": 0,
+            "has_pending_quotes": False
+        }
