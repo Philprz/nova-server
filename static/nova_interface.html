@@ -1814,11 +1814,31 @@ Exemples :
                 </div>
             `;
             
-            // Charger les clients au démarrage de l'interface avancée
+            // Charger les clients au démarrage de l'interface avancée avec vérification DOM
             setTimeout(() => {
-                loadRealClients();
-                loadRealProducts();
-            }, 100);    
+                // Vérifier que les éléments DOM existent avant de charger
+                const clientsContainer = document.getElementById('clientsContainer');
+                const productsContainer = document.getElementById('productsContainer');
+                
+                console.log('Vérification DOM:', { 
+                    clientsContainer: !!clientsContainer, 
+                    productsContainer: !!productsContainer 
+                });
+                
+                if (clientsContainer) {
+                    loadRealClients();
+                } else {
+                    console.error('❌ clientsContainer non trouvé - nouvel essai...');
+                    setTimeout(() => loadRealClients(), 500);
+                }
+                
+                if (productsContainer) {
+                    loadRealProducts();
+                } else {
+                    console.error('❌ productsContainer non trouvé - nouvel essai...');
+                    setTimeout(() => loadRealProducts(), 500);
+                }
+            }, 200); // Augmenté de 100ms à 200ms
         }
 
     function showNotification(message, type = 'success') {
