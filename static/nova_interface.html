@@ -1017,7 +1017,7 @@ Exemples :
                 console.error("❌ Erreur fatale:", error);
                 generateBtn.disabled = false;
                 processing.style.display = 'none';
-                showError(`Communication échouée: ${error.message}`);
+                showError(`Communication échouée: ${error.message}`, result);
             }
         }
         async function startProgressPolling(taskId) {
@@ -2654,8 +2654,20 @@ L'équipe commerciale</textarea>
             // Optionnel : mettre à jour l'aperçu
             updateAdvancedPreview();
         }
-        function showError(message) {
-            console.error("❌ Erreur:", message);
+        function showError(message, errorData = null) {
+            console.error("❌ Erreur:", message, errorData);
+            
+            // 🔍 NOUVELLE LOGIQUE : Vérifier s'il s'agit d'une erreur de doublons
+            if (errorData && errorData.duplicate_check && errorData.duplicate_check.duplicates_found) {
+                // Récupérer le prompt original depuis l'input
+                const originalPrompt = document.getElementById('mainInput')?.value || '';
+                
+                // Afficher l'interface de résolution des doublons au lieu de l'erreur standard
+                showDuplicatesResolutionModal(errorData.duplicate_check, originalPrompt);
+                return; // Sortir ici, ne pas afficher l'erreur standard
+            }
+            
+            // 🔄 LOGIQUE STANDARD pour les autres erreurs (inchangée)
             
             // Masquer indicateur de progression
             const processing = document.getElementById('processing');
@@ -2665,7 +2677,7 @@ L'équipe commerciale</textarea>
             const generateBtn = document.getElementById('generateBtn');
             if (generateBtn) generateBtn.disabled = false;
             
-            // Afficher message d'erreur
+            // Afficher message d'erreur standard
             const resultPanel = document.getElementById('resultPanel');
             if (resultPanel) {
                 resultPanel.style.display = 'block';
@@ -2693,7 +2705,277 @@ L'équipe commerciale</textarea>
             // Notification d'erreur
             showNotification(message, 'error');
         }
+        // Afficher l'interface de résolution des doublons
+        function showDuplicatesResolutionModal(duplicateInfo, originalPrompt) {
+            console.log("🔍 Affichage interface résolution doublons", duplicateInfo);
+            
+            const modal = document.createElement('div');
+            modal.id = 'duplicatesModal';
+            modal.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0,0,0,0.8);
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                z-index: 2000;
+            `;
+            
+            const draftQuotes = duplicateInfo.draft_quotes || [];
+            const recentQuotes = duplicateInfo.recent_quotes || [];
+            const warnings = duplicateInfo.warnings || [];
+            
+            modal.innerHTML = `
+                <div style="
+                    background: white;
+                    border-radius: 15px;
+                    max-width: 800px;
+                    width: 90%;
+                    max-height: 80vh;
+                    overflow-y: auto;
+                    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+                ">
+                    <!-- En-tête -->
+                    <div style="
+                        background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+                        color: white;
+                        padding: 20px 30px;
+                        border-radius: 15px 15px 0 0;
+                        text-align: center;
+                    ">
+                        <h2 style="margin: 0; font-size: 1.5em;">⚠️ Doublons Détectés</h2>
+                        <p style="margin: 10px 0 0 0; opacity: 0.9;">
+                            Des devis similaires existent déjà pour ce client
+                        </p>
+                    </div>
+                    
+                    <!-- Contenu -->
+                    <div style="padding: 30px;">
+                        <!-- Alertes -->
+                        <div style="
+                            background: #fff3cd;
+                            border: 1px solid #ffeaa7;
+                            border-radius: 8px;
+                            padding: 15px;
+                            margin-bottom: 20px;
+                        ">
+                            ${warnings.map(warning => `
+                                <div style="margin-bottom: 8px; color: #856404;">
+                                    ${warning}
+                                </div>
+                            `).join('')}
+                        </div>
+                        
+                        <!-- Devis brouillons -->
+                        ${draftQuotes.length > 0 ? `
+                            <div style="margin-bottom: 25px;">
+                                <h3 style="color: #2c3e50; margin-bottom: 15px;">📝 Devis en Brouillon</h3>
+                                <div style="
+                                    background: #f8f9fa;
+                                    border-radius: 8px;
+                                    padding: 15px;
+                                    max-height: 200px;
+                                    overflow-y: auto;
+                                ">
+                                    ${draftQuotes.map(quote => `
+                                        <div style="
+                                            background: white;
+                                            border-radius: 6px;
+                                            padding: 12px;
+                                            margin-bottom: 10px;
+                                            border-left: 4px solid #3498db;
+                                            cursor: pointer;
+                                            transition: all 0.2s;
+                                        " 
+                                        onclick="selectQuoteForConsolidation('${quote.doc_entry || quote.id}')"
+                                        onmouseover="this.style.backgroundColor='#e8f4f8'"
+                                        onmouseout="this.style.backgroundColor='white'">
+                                            <div style="font-weight: 600; color: #2c3e50;">
+                                                Devis #${quote.doc_num || quote.doc_entry || quote.id}
+                                            </div>
+                                            <div style="font-size: 0.9em; color: #7f8c8d; margin-top: 4px;">
+                                                ${quote.customer_name || quote.card_name || 'Client'} - ${quote.total_amount || quote.doc_total || 'N/A'}€
+                                            </div>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            </div>
+                        ` : ''}
+                        
+                        <!-- Devis récents -->
+                        ${recentQuotes.length > 0 ? `
+                            <div style="margin-bottom: 25px;">
+                                <h3 style="color: #2c3e50; margin-bottom: 15px;">🕒 Devis Récents</h3>
+                                <div style="
+                                    background: #f8f9fa;
+                                    border-radius: 8px;
+                                    padding: 15px;
+                                    max-height: 150px;
+                                    overflow-y: auto;
+                                ">
+                                    ${recentQuotes.map(quote => `
+                                        <div style="
+                                            background: white;
+                                            border-radius: 6px;
+                                            padding: 12px;
+                                            margin-bottom: 10px;
+                                            border-left: 4px solid #e67e22;
+                                        ">
+                                            <div style="font-weight: 600; color: #2c3e50;">
+                                                Devis #${quote.doc_num || quote.doc_entry || quote.id}
+                                            </div>
+                                            <div style="font-size: 0.9em; color: #7f8c8d; margin-top: 4px;">
+                                                ${quote.customer_name || quote.card_name || 'Client'} - ${quote.doc_date || 'Date inconnue'}
+                                            </div>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            </div>
+                        ` : ''}
+                        
+                        <!-- Actions -->
+                        <div style="text-align: center; margin-top: 30px;">
+                            <p style="color: #7f8c8d; margin-bottom: 20px;">
+                                Que souhaitez-vous faire ?
+                            </p>
+                            
+                            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px;">
+                                <!-- Créer nouveau -->
+                                <button onclick="resolveDuplicates('create_new', '${originalPrompt.replace(/'/g, "\\'")}')" style="
+                                    background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%);
+                                    color: white;
+                                    border: none;
+                                    padding: 15px 20px;
+                                    border-radius: 8px;
+                                    cursor: pointer;
+                                    font-weight: 600;
+                                    transition: all 0.2s;
+                                " 
+                                onmouseover="this.style.transform='scale(1.05)'"
+                                onmouseout="this.style.transform='scale(1)'">
+                                    ✅ Créer Nouveau<br>
+                                    <small style="opacity: 0.8;">Ignorer les doublons</small>
+                                </button>
+                                
+                                <!-- Consolidation -->
+                                <button onclick="resolveDuplicates('consolidate', '${originalPrompt.replace(/'/g, "\\'")}')" style="
+                                    background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+                                    color: white;
+                                    border: none;
+                                    padding: 15px 20px;
+                                    border-radius: 8px;
+                                    cursor: pointer;
+                                    font-weight: 600;
+                                    transition: all 0.2s;
+                                "
+                                onmouseover="this.style.transform='scale(1.05)'"
+                                onmouseout="this.style.transform='scale(1)'">
+                                    🔄 Consolider<br>
+                                    <small style="opacity: 0.8;">Avec brouillon existant</small>
+                                </button>
+                                
+                                <!-- Annuler -->
+                                <button onclick="resolveDuplicates('cancel', '${originalPrompt.replace(/'/g, "\\'")}')" style="
+                                    background: linear-gradient(135deg, #95a5a6 0%, #7f8c8d 100%);
+                                    color: white;
+                                    border: none;
+                                    padding: 15px 20px;
+                                    border-radius: 8px;
+                                    cursor: pointer;
+                                    font-weight: 600;
+                                    transition: all 0.2s;
+                                "
+                                onmouseover="this.style.transform='scale(1.05)'"
+                                onmouseout="this.style.transform='scale(1)'">
+                                    ❌ Annuler<br>
+                                    <small style="opacity: 0.8;">Abandonner l'opération</small>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            document.body.appendChild(modal);
+            
+            // Fermeture sur clic extérieur
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    closeDuplicatesModal();
+                }
+            });
+        }
 
+        // Variables globales pour la sélection
+        let selectedQuoteForConsolidation = null;
+
+        function selectQuoteForConsolidation(quoteId) {
+            selectedQuoteForConsolidation = quoteId;
+            
+            // Visuel de sélection
+            document.querySelectorAll('[onclick^="selectQuoteForConsolidation"]').forEach(el => {
+                el.style.backgroundColor = 'white';
+                el.style.borderLeftColor = '#3498db';
+            });
+            
+            event.target.closest('div').style.backgroundColor = '#e8f4f8';
+            event.target.closest('div').style.borderLeftColor = '#27ae60';
+            
+            showNotification(`Devis ${quoteId} sélectionné pour consolidation`, 'success');
+        }
+
+        function resolveDuplicates(action, originalPrompt) {
+            console.log(`🔧 Résolution doublons: ${action}`);
+            
+            if (action === 'consolidate' && !selectedQuoteForConsolidation) {
+                showNotification('Veuillez sélectionner un devis à consolider', 'error');
+                return;
+            }
+            
+            if (action === 'cancel') {
+                closeDuplicatesModal();
+                showNotification('Opération annulée', 'success');
+                return;
+            }
+            
+            // Fermer le modal et traiter l'action
+            closeDuplicatesModal();
+            
+            if (action === 'create_new') {
+                showNotification('Création forcée en cours...', 'success');
+                
+                // Relancer generateQuote() avec un flag spécial pour forcer la création
+                document.getElementById('mainInput').value = originalPrompt;
+                
+                // TODO: Appeler une version modifiée de generateQuote() qui ignore les doublons
+                setTimeout(() => {
+                    generateQuote(); // Pour l'instant, relance normal
+                }, 1000);
+                
+            } else if (action === 'consolidate') {
+                showNotification(`Consolidation avec devis ${selectedQuoteForConsolidation} en cours...`, 'success');
+                // TODO: Implémenter la logique de consolidation
+                setTimeout(() => {
+                    showNotification('Fonctionnalité de consolidation en développement', 'error');
+                }, 2000);
+            }
+        }
+
+        function closeDuplicatesModal() {
+            const modal = document.getElementById('duplicatesModal');
+            if (modal) {
+                modal.style.opacity = '0';
+                setTimeout(() => {
+                    if (document.body.contains(modal)) {
+                        document.body.removeChild(modal);
+                    }
+                }, 300);
+            }
+            selectedQuoteForConsolidation = null;
+        }
         function newQuote() {
             // Réinitialiser l'interface
             const resultPanel = document.getElementById('resultPanel');

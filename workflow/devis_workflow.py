@@ -196,14 +196,32 @@ class DevisWorkflow:
             if duplicate_check.get("duplicates_found"):
                 self._track_step_progress("check_duplicates", 80, f"⚠️ {len(duplicate_check.get('warnings', []))} alerte(s) détectée(s)")
                 
-                # En mode interactif, on pourrait s'arrêter ici pour demander confirmation
-                # Pour l'instant, on continue avec des warnings
-                logger.warning("Doublons potentiels détectés - Continuation du workflow")
+                # 🛑 ARRÊT OBLIGATOIRE SI DOUBLONS DÉTECTÉS
+                self._track_step_fail("check_duplicates", "Doublons détectés", f"{len(duplicate_check.get('warnings', []))} doublons trouvés")
+                
+                logger.error(f"🛑 Workflow arrêté : {len(duplicate_check.get('warnings', []))} doublons détectés pour ce client")
+                
+                # Retourner une réponse d'erreur SPÉCIALE avec les données de doublons
+                return {
+                    "success": False,
+                    "status": "error",
+                    "message": "Doublons détectés - Création annulée", 
+                    "error_type": "duplicates_detected",
+                    "error_details": {
+                        "duplicate_check": duplicate_check,
+                        "action_required": "Vérifiez les devis existants avant de créer un nouveau devis",
+                        "existing_drafts": len(duplicate_check.get("draft_quotes", [])),
+                        "recent_quotes": len(duplicate_check.get("recent_quotes", [])),
+                        "warnings": duplicate_check.get("warnings", [])
+                    },
+                    "workflow_steps": self.workflow_steps,
+                    "task_id": self.task_id
+                }
                 
             else:
                 self._track_step_progress("check_duplicates", 100, "✅ Aucun doublon détecté")
 
-            self._track_step_complete("check_duplicates", "Vérification terminée")
+            self._track_step_complete("check_duplicates", "Vérification terminée")  
             # ========== PHASE 3: TRAITEMENT DES PRODUITS ==========
             
             # Étape 3.1: Connexion catalogue

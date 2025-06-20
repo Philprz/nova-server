@@ -118,6 +118,49 @@ async def list_draft_quotes():
             "count": 0,
             "has_pending_quotes": False
         }
+@router.post("/resolve_duplicates")
+async def resolve_duplicates(request: dict):
+    """
+    Gère la résolution des doublons détectés
+    Actions possibles: 'consolidate', 'create_new', 'cancel'
+    """
+    try:
+        action = request.get("action")
+        client_name = request.get("client_name")
+        original_prompt = request.get("original_prompt")
+        selected_quote_id = request.get("selected_quote_id")  # Pour consolidation
+        
+        logger.info(f"Résolution doublons: action={action}, client={client_name}")
+        
+        if action == "create_new":
+            # Forcer la création d'un nouveau devis malgré les doublons
+            from workflow.devis_workflow import DevisWorkflow
+            
+            workflow = DevisWorkflow()
+            # Désactiver temporairement la vérification doublons
+            workflow.skip_duplicate_check = True
+            
+            result = await workflow.generate_devis(original_prompt)
+            return {"success": True, "action": "created", "result": result}
+            
+        elif action == "consolidate":
+            # Logique de consolidation avec devis existant
+            return {
+                "success": True, 
+                "action": "consolidated",
+                "message": f"Consolidation avec devis {selected_quote_id} en cours de développement"
+            }
+            
+        elif action == "cancel":
+            return {"success": True, "action": "cancelled", "message": "Opération annulée"}
+            
+        else:
+            return {"success": False, "error": "Action non reconnue"}
+            
+    except Exception as e:
+        logger.exception(f"Erreur résolution doublons: {str(e)}")
+        return {"success": False, "error": str(e)}
+
 @router.post("/validate_quote")
 async def validate_quote(request: dict):
     """
