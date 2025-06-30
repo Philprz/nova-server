@@ -257,77 +257,83 @@ class DevisWorkflow:
                 self._track_step_complete("get_products_info", f"{len(products_info)} produit(s) analysé(s)")
                 
                 # 📢 AVERTISSEMENT NON BLOQUANT - L'utilisateur décide AVEC les informations
-                self._track_step_complete("check_duplicates", "Doublons détectés - En attente de décision")
+                self._track_step_complete("check_duplicates", "Doublons détectés - Suite du traitement")
                 
                 # Récupérer le nom du client depuis le contexte
                 client_name = client_info.get("data", {}).get("Name", "Client")
                 
-                # 🔧 CONSTRUIRE MANUELLEMENT LA PRÉVISUALISATION DU DEVIS
-                quote_preview = {
-                    "client": {
-                        "name": client_name,
-                        "account_number": client_info.get("data", {}).get("AccountNumber", ""),
-                        "salesforce_id": client_info.get("data", {}).get("Id", ""),
-                        "phone": client_info.get("data", {}).get("Phone", ""),
-                        "email": client_info.get("data", {}).get("Email", ""),
-                        "city": client_info.get("data", {}).get("BillingCity", ""),
-                        "country": client_info.get("data", {}).get("BillingCountry", "")
-                    },
-                    "products": [],
-                    "total_amount": 0.0,
-                    "currency": "EUR"
-                }
-
-                # Traiter les produits pour la prévisualisation
-                total_amount = 0.0
-                for product in products_info:
-                    if isinstance(product, dict) and "error" not in product:
-                        # 🔧 EXTRACTION CORRIGÉE DES DONNÉES PRODUIT
-                        product_code = (product.get("code") or 
-                                    product.get("item_code") or 
-                                    product.get("ItemCode", ""))
-                        
-                        product_name = (product.get("name") or 
-                                    product.get("item_name") or 
-                                    product.get("ItemName", "Sans nom"))
-                        quantity = float(product.get("quantity", 1))
-                        unit_price = float(product.get("unit_price", 0))
-                        line_total = quantity * unit_price
-                        total_amount += line_total
-                        
-                        quote_preview["products"].append({
-                            "code": product.get("code", ""),
-                            "name": product.get("name", "Sans nom"),
-                            "quantity": quantity,
-                            "unit_price": unit_price,
-                            "line_total": line_total,
-                            "stock": product.get("stock", 0)
-                        })
-
-                quote_preview["total_amount"] = total_amount
-
-                # Retourner une réponse WARNING avec tous les détails nécessaires
-                warning_response = {
-                    "success": False,  # False pour arrêter le polling
-                    "status": "warning",  
-                    "task_id": self.task_id,
-                    "message": f"Devis existants détectés pour {client_name}", 
-                    "error_type": "duplicates_detected",
-                    "error_details": {
-                        "duplicate_check": duplicate_check,
-                        "client_name": client_name,
-                        "client_id": client_info.get("data", {}).get("Id"),
-                        "action_required": "Des devis existants ont été trouvés. Que souhaitez-vous faire ?",
-                        "quote_preview": quote_preview
+                # En mode brouillon, même avec des doublons, on continue le processus
+                if self.draft_mode:
+                    logger.info(f"⚠️ Doublons détectés en mode brouillon - Continuation du processus malgré tout")
+                    # Ne pas retourner ici, continuer à la section suivante
+                else:
+                    # En mode normal (non brouillon), on demande confirmation avant de continuer
+                    # 🔧 CONSTRUIRE MANUELLEMENT LA PRÉVISUALISATION DU DEVIS
+                    quote_preview = {
+                        "client": {
+                            "name": client_name,
+                            "account_number": client_info.get("data", {}).get("AccountNumber", ""),
+                            "salesforce_id": client_info.get("data", {}).get("Id", ""),
+                            "phone": client_info.get("data", {}).get("Phone", ""),
+                            "email": client_info.get("data", {}).get("Email", ""),
+                            "city": client_info.get("data", {}).get("BillingCity", ""),
+                            "country": client_info.get("data", {}).get("BillingCountry", "")
+                        },
+                        "products": [],
+                        "total_amount": 0.0,
+                        "currency": "EUR"
                     }
-                }
 
-                # 🔧 CRITIQUE : Marquer la tâche comme terminée AVANT de retourner
-                if self.current_task and self.task_id:
-                    progress_tracker.complete_task(self.task_id, warning_response)
+                    # Traiter les produits pour la prévisualisation
+                    total_amount = 0.0
+                    for product in products_info:
+                        if isinstance(product, dict) and "error" not in product:
+                            # 🔧 EXTRACTION CORRIGÉE DES DONNÉES PRODUIT
+                            product_code = (product.get("code") or 
+                                        product.get("item_code") or 
+                                        product.get("ItemCode", ""))
+                            
+                            product_name = (product.get("name") or 
+                                        product.get("item_name") or 
+                                        product.get("ItemName", "Sans nom"))
+                            quantity = float(product.get("quantity", 1))
+                            unit_price = float(product.get("unit_price", 0))
+                            line_total = quantity * unit_price
+                            total_amount += line_total
+                            
+                            quote_preview["products"].append({
+                                "code": product.get("code", ""),
+                                "name": product.get("name", "Sans nom"),
+                                "quantity": quantity,
+                                "unit_price": unit_price,
+                                "line_total": line_total,
+                                "stock": product.get("stock", 0)
+                            })
 
-                logger.info(f"🔧 RETOUR WARNING RESPONSE pour tâche {self.task_id}")
-                return warning_response
+                    quote_preview["total_amount"] = total_amount
+
+                    # Retourner une réponse WARNING avec tous les détails nécessaires
+                    warning_response = {
+                        "success": False,  # False pour arrêter le polling
+                        "status": "warning",  
+                        "task_id": self.task_id,
+                        "message": f"Devis existants détectés pour {client_name}", 
+                        "error_type": "duplicates_detected",
+                        "error_details": {
+                            "duplicate_check": duplicate_check,
+                            "client_name": client_name,
+                            "client_id": client_info.get("data", {}).get("Id"),
+                            "action_required": "Des devis existants ont été trouvés. Que souhaitez-vous faire ?",
+                            "quote_preview": quote_preview
+                        }
+                    }
+
+                    # 🔧 CRITIQUE : Marquer la tâche comme terminée AVANT de retourner
+                    if self.current_task and self.task_id:
+                        progress_tracker.complete_task(self.task_id, warning_response)
+
+                    logger.info(f"🔧 RETOUR WARNING RESPONSE pour tâche {self.task_id}")
+                    return warning_response
             else:
                 # Pas de doublons, continuer normalement
                 self._track_step_complete("check_duplicates", "Aucun doublon détecté")
@@ -546,8 +552,8 @@ class DevisWorkflow:
                 sap_result = await self.mcp_connector.call_sap_mcp("sap_get_product_details", {"item_code": product_code})
                 
                 if "error" not in sap_result and sap_result.get("ItemCode"):
-                    # Produit trouvé directement
-                    product_data = sap_result["data"]
+                    # Produit trouvé directement - CORRECTION: sap_result contient directement les données, pas de clé "data"
+                    product_data = sap_result
                     validated_products.append({
                         "found": True,
                         "data": product_data,
