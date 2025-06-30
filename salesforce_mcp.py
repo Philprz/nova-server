@@ -75,14 +75,27 @@ def log_warning(message: str, *args):
     log(message, "WARNING", *args)
 
 # === GESTION D'ERREURS CENTRALISÉE ===
-def handle_error(error: Exception, context: str = "") -> Dict[str, Any]:
-    """Gestion centralisée des erreurs"""
+def handle_error(error: Exception, context: str = "opération") -> Dict[str, Any]:
+    """Gestion centralisée des erreurs avec logging détaillé pour debug"""
     error_msg = str(error)
-    if context:
-        log(f"Erreur dans {context}: {error_msg}", "ERROR")
+    error_type = type(error).__name__
+    
+    # ⚠️ CORRECTION: Log plus détaillé pour diagnostic
+    if hasattr(error, 'content'):
+        log(f"Erreur {error_type} dans {context}: {error_msg}", "ERROR")
+        log(f"Détails Salesforce: {error.content}", "ERROR")
+    elif hasattr(error, 'response'):
+        log(f"Erreur {error_type} dans {context}: {error_msg}", "ERROR")
+        log(f"Réponse HTTP: {error.response}", "ERROR")
     else:
-        log(f"Erreur: {error_msg}", "ERROR")
-    return {"error": error_msg}
+        log(f"Erreur {error_type} dans {context}: {error_msg}", "ERROR")
+    
+    # Renvoyer une erreur détaillée pour debug
+    return {
+        "error": error_msg,
+        "error_type": error_type,
+        "context": context
+    }
 
 def handle_sf_object_error(sobject: str, error: Exception) -> Dict[str, Any]:
     """Gestion spécifique des erreurs d'objets Salesforce"""

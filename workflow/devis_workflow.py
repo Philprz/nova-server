@@ -1682,7 +1682,7 @@ class DevisWorkflow:
         try:
             # === RECHERCHE CLASSIQUE (code existant) ===
             query = f"SELECT Id, Name, AccountNumber, AnnualRevenue, LastActivityDate FROM Account WHERE Name LIKE '%{client_name}%' LIMIT 10"
-            sf_result = await self.mcp_connector.call_salesforce_mcp("query", {"query": query})
+            sf_result = await self.mcp_connector.call_salesforce_mcp("salesforce_query", {"query": query})
             
             # Client trouvé directement
             if sf_result.get("totalSize", 0) > 0 and sf_result.get("records"):
@@ -1696,7 +1696,7 @@ class DevisWorkflow:
             
             # Récupérer tous les clients pour la recherche floue
             all_clients_query = "SELECT Id, Name, AccountNumber, AnnualRevenue, LastActivityDate FROM Account LIMIT 1000"
-            all_clients_result = await self.mcp_connector.call_salesforce_mcp("query", {"query": all_clients_query})
+            all_clients_result = await self.mcp_connector.call_salesforce_mcp("salesforce_query", {"query": all_clients_query})
             
             available_clients = all_clients_result.get("records", []) if all_clients_result.get("totalSize", 0) > 0 else []
             
