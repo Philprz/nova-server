@@ -282,6 +282,14 @@ class DevisWorkflow:
                 total_amount = 0.0
                 for product in products_info:
                     if isinstance(product, dict) and "error" not in product:
+                        # 🔧 EXTRACTION CORRIGÉE DES DONNÉES PRODUIT
+                        product_code = (product.get("code") or 
+                                    product.get("item_code") or 
+                                    product.get("ItemCode", ""))
+                        
+                        product_name = (product.get("name") or 
+                                    product.get("item_name") or 
+                                    product.get("ItemName", "Sans nom"))
                         quantity = float(product.get("quantity", 1))
                         unit_price = float(product.get("unit_price", 0))
                         line_total = quantity * unit_price

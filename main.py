@@ -103,8 +103,8 @@ app.include_router(quote_details_router, tags=["Quote Details"])
 print("✅ Routes Devis chargées")
 app.include_router(progress_router, prefix="/progress", tags=["progress"])
 print("✅ Routes Progression chargées")
-app.include_router(routes_devis.router)
-app.include_router(routes_clients.router)
+app.include_router(devis_router, tags=["Devis Generated"])
+app.include_router(clients_router, prefix="/clients", tags=["Clients Generated"])
 app.include_router(routes_suggestions.router)   
 
 @app.get("/", tags=["Health"])
@@ -147,4 +147,4 @@ if __name__ == "__main__":
     print("🏥 Contrôle santé : http://localhost:8000/health")
     if os.path.exists("static"):
         print("🎮 Démo devis : http://localhost:8000/static/nova_interface.html")
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)

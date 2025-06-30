@@ -1,3 +1,11 @@
+*.log
+*.db
+logs/
+__pycache__/
+*.pyc
+alembic/versions/
+.env
+
 # Fichiers temporaires et cachés
 *~
 *.swp
@@ -8,7 +16,6 @@
 /dist/
 
 # Fichiers de configuration spécifiques à l'utilisateur
-.env
 .vscode/
 .idea/
 
