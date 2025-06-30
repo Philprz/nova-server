@@ -230,7 +230,7 @@ class DevisWorkflow:
                 self._track_step_start("get_products_info", "Récupération des informations produits...")
                 
                 validated_products = await self._validate_products_with_suggestions(extracted_info.get("products", []))
-    
+                product_info = []
                 # Vérifier s'il y a des produits nécessitant des suggestions
                 products_with_suggestions = [p for p in validated_products if not p.get("found") and p.get("suggestions")]
                     
@@ -249,7 +249,7 @@ class DevisWorkflow:
                             "step": "product_validation"
                         }
                     }
-                    
+                else:
                     # Tous les produits sont OK, continuer avec la génération classique
                     products_info = [p["data"] for p in validated_products if p.get("found")]
                 self.context["products_info"] = products_info
