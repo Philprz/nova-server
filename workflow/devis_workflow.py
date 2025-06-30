@@ -1494,30 +1494,30 @@ class DevisWorkflow:
                 "next_steps": "Veuillez contacter le support technique."
             }
         
-        # 🎯 CORRECTION CRITIQUE : Extraction intelligente du nom client
-        client_name = "Client non identifié"
-        
-        # 1. Essayer le nom enrichi (méthode _enrich_client_data)
-        if hasattr(self, 'enriched_client_name') and self.enriched_client_name:
-            client_name = self.enriched_client_name
-            logger.info(f"✅ Nom client depuis enrichissement: {client_name}")
-        
-        # 2. Essayer les données Salesforce
-        elif client_info.get("data", {}).get("Name"):
-            client_name = client_info["data"]["Name"]
-            logger.info(f"✅ Nom client depuis Salesforce: {client_name}")
-        
-        # 3. Essayer les données SAP (nettoyer le format "CODE - NOM")
-        elif sap_client and sap_client.get("data", {}).get("CardName"):
-            sap_name = sap_client["data"]["CardName"]
+        # 🎯 CORRECTION CRITIQUE : Extraction intelligente du nom client  
+        client_name = "Client extrait"
+
+        # 1. Priorité au contexte client_info (données Salesforce)
+        if self.context.get("client_info", {}).get("data", {}).get("Name"):
+            client_name = self.context["client_info"]["data"]["Name"]
+            logger.info(f"✅ Nom client depuis context Salesforce: {client_name}")
+
+        # 2. Sinon, essayer les données SAP dans le contexte
+        elif self.context.get("client_info", {}).get("data", {}).get("CardName"):
+            sap_name = self.context["client_info"]["data"]["CardName"]
             # Nettoyer le format "CSAFRAN8267 - SAFRAN" -> "SAFRAN"
             if " - " in sap_name:
                 client_name = sap_name.split(" - ", 1)[1].strip()
             else:
                 client_name = sap_name
-            logger.info(f"✅ Nom client depuis SAP (nettoyé): {client_name}")
+            logger.info(f"✅ Nom client depuis context SAP (nettoyé): {client_name}")
+
+        # 3. En dernier recours, utiliser l'extraction LLM originale
+        elif self.context.get("extracted_info", {}).get("client"):
+            client_name = self.context["extracted_info"]["client"]
+            logger.info(f"✅ Nom client depuis extraction LLM: {client_name}")
         
-        # 4. En dernier recours, utiliser l'extraction LLM
+        # 4. En dernier recours, utiliser l'extraction LLM originale
         elif extracted_info.get("client"):
             client_name = extracted_info["client"]
             logger.info(f"✅ Nom client depuis extraction LLM: {client_name}")
@@ -1528,6 +1528,9 @@ class DevisWorkflow:
             client_name = sap_card_name
             logger.info(f"✅ Nom client depuis SAP raw result: {client_name}")
         
+        # Journalisation du nom client final après toutes les conditions
+        logger.info(f"🎯 Nom client final pour interface: '{client_name}'")
+
         # Construction des données client pour l'interface
         client_data = client_info.get("data", {})
         client_response = {
