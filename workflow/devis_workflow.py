@@ -11,6 +11,8 @@ from typing import Dict, List, Any, Optional
 from services.llm_extractor import LLMExtractor
 from services.mcp_connector import MCPConnector
 from services.progress_tracker import progress_tracker, QuoteTask
+from services.suggestion_engine import SuggestionEngine
+from services.client_validator import ClientValidator
 
 # Configuration de l'encodage
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
@@ -41,7 +43,7 @@ except ImportError as e:
 class DevisWorkflow:
     """Coordinateur du workflow de devis entre Claude, Salesforce et SAP - VERSION AVEC VALIDATEUR CLIENT"""
     
-    def __init__(self, validation_enabled=True, draft_mode=False):
+    def __init__(self, validation_enabled: bool = True, draft_mode: bool = False):
             self.mcp_connector = MCPConnector()
             self.llm_extractor = LLMExtractor()
             self.client_validator = ClientValidator() if validation_enabled else None
@@ -55,7 +57,10 @@ class DevisWorkflow:
             
             # Ancien système de workflow_steps conservé pour compatibilité
             self.workflow_steps = []
-        
+            # 🧠 NOUVEAU : Initialiser le moteur de suggestions
+            self.suggestion_engine = SuggestionEngine()
+            self.client_suggestions = None
+            self.product_suggestions = []        
         # === NOUVELLE MÉTHODE POUR DÉMARRER LE TRACKING ===
         
     def _initialize_task_tracking(self, prompt: str) -> str:
@@ -155,6 +160,29 @@ class DevisWorkflow:
             self._track_step_start("search_client", "Recherche du client...")
             
             client_info = await self._validate_client(extracted_info.get("client"))
+    
+            # Gérer les suggestions client
+            if not client_info.get("found"):
+                if client_info.get("suggestions"):
+                    # Il y a des suggestions, retourner pour interaction utilisateur
+                    self._track_step_progress("verify_client_info", 50, "Suggestions client disponibles")
+                    return {
+                        "status": "suggestions_required",
+                        "type": "client_suggestions",
+                        "message": client_info.get("message", "Suggestions disponibles"),
+                        "suggestions": client_info["suggestions"],
+                        "auto_suggest": client_info.get("auto_suggest", False),
+                        "workflow_context": {
+                            "extracted_info": extracted_info,
+                            "task_id": self.task_id,
+                            "step": "client_validation"
+                        }
+                    }
+                else:
+                    # Aucune suggestion, erreur classique
+                    return self._build_error_response("Client non trouvé", 
+                                                    client_info.get("message", "Client introuvable"))
+            
             self.context["client_info"] = client_info
             
             self._track_step_progress("search_client", 70, "Consultation des bases de données")
@@ -201,7 +229,29 @@ class DevisWorkflow:
                 # 🔧 MODIFICATION : Récupérer les informations produits MÊME avec des doublons
                 self._track_step_start("get_products_info", "Récupération des informations produits...")
                 
-                products_info = await self._get_products_info(extracted_info.get("products", []))
+                validated_products = await self._validate_products_with_suggestions(extracted_info.get("products", []))
+    
+                # Vérifier s'il y a des produits nécessitant des suggestions
+                products_with_suggestions = [p for p in validated_products if not p.get("found") and p.get("suggestions")]
+                    
+                if products_with_suggestions:
+                    # Il y a des suggestions produits, retourner pour interaction utilisateur
+                    self._track_step_progress("get_products_info", 50, "Suggestions produits disponibles")
+                    return {
+                        "status": "suggestions_required",
+                        "type": "product_suggestions",
+                        "message": f"{len(products_with_suggestions)} produit(s) nécessitent votre attention",
+                        "products": validated_products,
+                        "workflow_context": {
+                            "extracted_info": extracted_info,
+                            "client_info": client_info,
+                            "task_id": self.task_id,
+                            "step": "product_validation"
+                        }
+                    }
+                    
+                    # Tous les produits sont OK, continuer avec la génération classique
+                    products_info = [p["data"] for p in validated_products if p.get("found")]
                 self.context["products_info"] = products_info
                 
                 self._track_step_complete("get_products_info", f"{len(products_info)} produit(s) analysé(s)")
@@ -468,6 +518,82 @@ class DevisWorkflow:
                 "client_created": False,
                 "error": f"Erreur système de validation: {str(e)}"
             }
+    async def _validate_products_with_suggestions(self, products: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Valide les produits avec suggestions intelligentes
+        """
+        logger.info(f"🔍 Validation de {len(products)} produit(s) avec suggestions")
+        
+        validated_products = []
+        self.product_suggestions = []
+        
+        for i, product in enumerate(products):
+            product_code = product.get("code", "")
+            quantity = product.get("quantity", 1)
+            
+            logger.info(f"🔍 Validation produit {i+1}: {product_code}")
+            
+            try:
+                # === RECHERCHE CLASSIQUE (code existant) ===
+                sap_result = await self.mcp_connector.call_sap_mcp("get_item", {"item_code": product_code})
+                
+                if sap_result.get("success") and sap_result.get("data"):
+                    # Produit trouvé directement
+                    product_data = sap_result["data"]
+                    validated_products.append({
+                        "found": True,
+                        "data": product_data,
+                        "quantity": quantity,
+                        "suggestions": None
+                    })
+                    self.product_suggestions.append(None)
+                    logger.info(f"✅ Produit trouvé directement: {product_code}")
+                    continue
+                
+                # === NOUVEAU : RECHERCHE INTELLIGENTE ===
+                logger.info(f"🧠 Produit '{product_code}' non trouvé, activation des suggestions...")
+                
+                # Récupérer tous les produits pour la recherche floue
+                all_products_result = await self.mcp_connector.call_sap_mcp("get_all_items", {"limit": 1000})
+                available_products = all_products_result.get("data", []) if all_products_result.get("success") else []
+                
+                # Générer les suggestions
+                product_suggestion = await self.suggestion_engine.suggest_product(product_code, available_products)
+                self.product_suggestions.append(product_suggestion)
+                
+                if product_suggestion.has_suggestions:
+                    primary_suggestion = product_suggestion.primary_suggestion
+                    logger.info(f"🎯 Suggestion produit: {primary_suggestion.suggested_value} (score: {primary_suggestion.score})")
+                    
+                    validated_products.append({
+                        "found": False,
+                        "original_code": product_code,
+                        "quantity": quantity,
+                        "suggestions": product_suggestion.to_dict(),
+                        "auto_suggest": (primary_suggestion.confidence.value == "high"),
+                        "message": product_suggestion.conversation_prompt
+                    })
+                else:
+                    # Aucune suggestion
+                    validated_products.append({
+                        "found": False,
+                        "original_code": product_code,
+                        "quantity": quantity,
+                        "suggestions": None,
+                        "message": f"Produit '{product_code}' non trouvé dans le catalogue"
+                    })
+                    
+            except Exception as e:
+                logger.exception(f"Erreur validation produit {product_code}: {str(e)}")
+                validated_products.append({
+                    "found": False,
+                    "original_code": product_code,
+                    "quantity": quantity,
+                    "error": str(e)
+                })
+                self.product_suggestions.append(None)
+        
+        return validated_products
     
     def _detect_country_from_name(self, client_name: str) -> str:
         """Détecte le pays probable à partir du nom du client"""
@@ -569,7 +695,62 @@ class DevisWorkflow:
                 "success": False,
                 "error": str(e)
             }
-    
+    async def apply_client_suggestion(self, suggestion_choice: Dict[str, Any], 
+                                    workflow_context: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Applique le choix de l'utilisateur pour une suggestion client
+        """
+        logger.info(f"🎯 Application suggestion client: {suggestion_choice}")
+        
+        choice_type = suggestion_choice.get("type")  # "use_suggestion", "create_new", "manual_entry"
+        
+        if choice_type == "use_suggestion":
+            # Utiliser la suggestion proposée
+            suggested_client = suggestion_choice.get("selected_client")
+            
+            # Reprendre le workflow avec le client suggéré
+            workflow_context["extracted_info"]["client"] = suggested_client["name"]
+            return await self.process_prompt(  # ✅ CORRECT
+                workflow_context["extracted_info"]["original_prompt"],
+                task_id=workflow_context["task_id"]
+            )
+        
+        elif choice_type == "create_new":
+            # Déclencher le processus de création client
+            return {
+                "status": "client_creation_required",
+                "message": "Processus de création client à implémenter",
+                "workflow_context": workflow_context
+            }
+        
+        else:
+            return self._build_error_response("Choix non supporté", f"Type de choix '{choice_type}' non reconnu")
+
+    async def apply_product_suggestions(self, product_choices: List[Dict[str, Any]], 
+                                    workflow_context: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Applique les choix de l'utilisateur pour les suggestions produits
+        """
+        logger.info(f"🎯 Application suggestions produits: {len(product_choices)} choix")
+        
+        # Reconstituer la liste des produits avec les choix utilisateur
+        final_products = []
+        for choice in product_choices:
+            if choice.get("type") == "use_suggestion":
+                suggested_product = choice.get("selected_product")
+                final_products.append({
+                    "code": suggested_product["code"],
+                    "quantity": choice.get("quantity", 1)
+                })
+            # Ajouter d'autres types de choix selon les besoins
+        
+        # Reprendre le workflow avec les produits corrigés
+        workflow_context["extracted_info"]["products"] = final_products
+        return await self.process_prompt(
+            workflow_context["extracted_info"]["original_prompt"],
+            task_id=workflow_context["task_id"]
+        )
+ 
     async def _create_sap_client_from_validation(self, client_data: Dict[str, Any], salesforce_client: Dict[str, Any]) -> Dict[str, Any]:
         """Crée un client dans SAP avec les données validées"""
         try:
@@ -1484,57 +1665,72 @@ class DevisWorkflow:
             "draft_mode": self.draft_mode
         }    
     
-    async def _validate_client(self, client_name: Optional[str]) -> Dict[str, Any]:
-        """Valide l'existence du client dans Salesforce - VERSION CORRIGÉE"""
-        if not client_name:
-            logger.warning("Aucun client spécifié")
-            return {"found": False, "error": "Aucun client spécifié"}
-
-        logger.info(f"Validation du client: {client_name}")
+    async def _validate_client(self, client_name: str) -> Dict[str, Any]:
+        """
+        Valide le client avec suggestions intelligentes
+        """
+        logger.info(f"🔍 Validation client avec suggestions: {client_name}")
         
         try:
-            detailed_query = f"""
-            SELECT Id, Name, AccountNumber, 
-                BillingStreet, BillingCity, BillingState, BillingPostalCode, BillingCountry,
-                ShippingStreet, ShippingCity, ShippingState, ShippingPostalCode, ShippingCountry,
-                Phone, Fax, Website, Industry, AnnualRevenue, NumberOfEmployees,
-                Description, Type, OwnerId, CreatedDate, LastModifiedDate
-            FROM Account 
-            WHERE Name LIKE '%{client_name}%' 
-            LIMIT 1
-            """
+            # === RECHERCHE CLASSIQUE (code existant) ===
+            query = f"SELECT Id, Name, AccountNumber, AnnualRevenue, LastActivityDate FROM Account WHERE Name LIKE '%{client_name}%' LIMIT 10"
+            sf_result = await self.mcp_connector.call_salesforce_mcp("query", {"query": query})
             
-            sf_result = await MCPConnector.call_salesforce_mcp("salesforce_query", {"query": detailed_query})
-            
-            # CORRECTION CRITIQUE: Vérification complète du retour MCP
-            if sf_result is None:
-                logger.error("sf_result est None")
-                return {"found": False, "error": "Réponse Salesforce vide"}
-            
-            if not isinstance(sf_result, dict):
-                logger.error(f"sf_result n'est pas un dict: {type(sf_result)}")
-                return {"found": False, "error": "Format de réponse Salesforce invalide"}
-            
-            if "error" in sf_result:
-                logger.error(f"Erreur requête Salesforce: {sf_result['error']}")
-                return {"found": False, "error": sf_result["error"]}
-            
+            # Client trouvé directement
             if sf_result.get("totalSize", 0) > 0 and sf_result.get("records"):
                 client_record = sf_result["records"][0]
-                client_name = client_record.get("Name", client_name)
-                
-                # Enrichir le contexte
-                self._enrich_client_data(client_name, client_record)
-                
-                logger.info(f"✅ Client trouvé: {client_name} (ID: {client_record.get('Id')})")
+                self._enrich_client_data(client_record.get("Name", client_name), client_record)
+                logger.info(f"✅ Client trouvé directement: {client_record.get('Name')}")
                 return {"found": True, "data": client_record}
+            
+            # === NOUVEAU : RECHERCHE INTELLIGENTE ===
+            logger.info("🧠 Client non trouvé, activation du moteur de suggestions...")
+            
+            # Récupérer tous les clients pour la recherche floue
+            all_clients_query = "SELECT Id, Name, AccountNumber, AnnualRevenue, LastActivityDate FROM Account LIMIT 1000"
+            all_clients_result = await self.mcp_connector.call_salesforce_mcp("query", {"query": all_clients_query})
+            
+            available_clients = all_clients_result.get("records", []) if all_clients_result.get("totalSize", 0) > 0 else []
+            
+            # Générer les suggestions
+            self.client_suggestions = await self.suggestion_engine.suggest_client(client_name, available_clients)
+            
+            if self.client_suggestions.has_suggestions:
+                primary_suggestion = self.client_suggestions.primary_suggestion
+                
+                # Si confiance élevée, proposer auto-correction
+                if primary_suggestion.confidence.value == "high":
+                    logger.info(f"🎯 Suggestion haute confiance: {primary_suggestion.suggested_value} (score: {primary_suggestion.score})")
+                    
+                    # Retourner avec suggestion pour que l'utilisateur puisse choisir
+                    return {
+                        "found": False, 
+                        "suggestions": self.client_suggestions.to_dict(),
+                        "auto_suggest": True,
+                        "message": f"Client '{client_name}' non trouvé. Je suggère '{primary_suggestion.suggested_value}' (similarité: {primary_suggestion.score}%)"
+                    }
+                else:
+                    # Confiance moyenne/faible, présenter les options
+                    logger.info(f"🤔 Multiple suggestions trouvées pour: {client_name}")
+                    return {
+                        "found": False,
+                        "suggestions": self.client_suggestions.to_dict(),
+                        "auto_suggest": False,
+                        "message": self.client_suggestions.conversation_prompt
+                    }
             else:
-                logger.info(f"❌ Client '{client_name}' non trouvé dans Salesforce")
-                return {"found": False, "error": f"Client '{client_name}' non trouvé dans Salesforce"}
+                # Aucune suggestion, proposer création
+                logger.info(f"❌ Aucune suggestion trouvée pour: {client_name}")
+                return {
+                    "found": False,
+                    "suggestions": None,
+                    "message": f"Client '{client_name}' non trouvé. Voulez-vous créer un nouveau client ?"
+                }
                 
         except Exception as e:
-            logger.exception(f"Erreur validation client: {str(e)}")
+            logger.exception(f"Erreur validation client avec suggestions: {str(e)}")
             return {"found": False, "error": str(e)}
+    
     async def _check_duplicate_quotes(self, client_info: Dict[str, Any], products: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
         Vérifie s'il existe déjà des devis similaires pour éviter les doublons

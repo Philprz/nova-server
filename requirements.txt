@@ -27,7 +27,7 @@ email-validator
 
 # Validation client enrichie
 fuzzywuzzy>=0.18.0
-python-Levenshtein>=0.12.0
+python-Levenshtein>=0.20.9
 requests-cache>=1.0.0
 
 # SUPPRIMÉ : aio-pika (RabbitMQ non requis pour le POC)
