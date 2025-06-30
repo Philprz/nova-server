@@ -5,7 +5,6 @@ from fastapi.staticfiles import StaticFiles
 from routes.routes_quote_details import router as quote_details_router
 from routes.routes_progress import router as progress_router
 from routes import routes_suggestions
-app.include_router(routes_suggestions.router)
 
 # Import seulement des routes qui existent réellement
 try:
@@ -104,6 +103,10 @@ app.include_router(quote_details_router, tags=["Quote Details"])
 print("✅ Routes Devis chargées")
 app.include_router(progress_router, prefix="/progress", tags=["progress"])
 print("✅ Routes Progression chargées")
+app.include_router(routes_devis.router)
+app.include_router(routes_clients.router)
+app.include_router(routes_suggestions.router)   
+
 @app.get("/", tags=["Health"])
 def root():
     """Point d'entrée principal - Vérification de santé"""
