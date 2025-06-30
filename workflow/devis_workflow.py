@@ -543,7 +543,7 @@ class DevisWorkflow:
             
             try:
                 # === RECHERCHE CLASSIQUE (code existant) ===
-                sap_result = await self.mcp_connector.call_sap_mcp("get_item", {"item_code": product_code})
+                sap_result = await self.mcp_connector.call_sap_mcp("sap_get_product_details", {"item_code": product_code})
                 
                 if sap_result.get("success") and sap_result.get("data"):
                     # Produit trouvé directement
