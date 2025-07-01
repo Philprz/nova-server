@@ -48,7 +48,15 @@ try:
     devis_available = True
 except ImportError:
     devis_available = False
-    print("⚠️ routes_devis non disponible")
+
+# Import de l'assistant intelligent
+try:
+    from routes.routes_intelligent_assistant import router as assistant_router_test
+    intelligent_assistant_available = True
+    print("✅ Assistant intelligent chargé avec succès")
+except ImportError as e:
+    intelligent_assistant_available = False
+    print(f"Assistant intelligent non disponible: {e}")
 
 try:
     from routes.routes_clients import router as clients_router
@@ -99,6 +107,12 @@ if products_available:
     app.include_router(products_router, prefix="/products", tags=["Produits"])
     print("✅ Routes Produits chargées")
 
+# Intégration de l'assistant intelligent
+if intelligent_assistant_available:
+    from routes.routes_intelligent_assistant import router as assistant_router
+    app.include_router(assistant_router, prefix="/api/assistant", tags=["Assistant Intelligent"])
+    print("✅ Assistant Intelligent intégré avec préfixe /api/assistant")
+
 app.include_router(quote_details_router, tags=["Quote Details"])
 print("✅ Routes Devis chargées")
 app.include_router(progress_router, prefix="/progress", tags=["progress"])
@@ -107,23 +121,28 @@ app.include_router(devis_router, tags=["Devis Generated"])
 app.include_router(clients_router, prefix="/clients", tags=["Clients Generated"])
 app.include_router(routes_suggestions.router)   
 
-@app.get("/", tags=["Health"])
+@app.get("/")
 def root():
-    """Point d'entrée principal - Vérification de santé"""
-    return {
-        "message": "NOVA Middleware opérationnel",
-        "version": "1.0.0",
-        "status": "running",
-        "modules": {
-            "claude": claude_available,
-            "salesforce": salesforce_available,
-            "sap": sap_available,
-            "devis": devis_available,
-            "clients": clients_available,
-            "sync": sync_available,
+    if intelligent_assistant_available:
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url="/api/assistant/interface")
+    else:
+        return {
+            "message": "NOVA Middleware actif",
+            "version": "1.0.0",
+            "status": "operational",
+            "services": {
+                "claude": claude_available,
+                "salesforce": salesforce_available,
+                "sap": sap_available,
+                "devis": devis_available,
+                "clients": clients_available,
+                "sync": sync_available,
+                "products": products_available,
+                "assistant": intelligent_assistant_available
+            }
         }
-    }
-    
+
 @app.get("/health", tags=["Health"])
 def health_check():
     """Contrôle de santé détaillé"""

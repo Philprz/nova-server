@@ -17,14 +17,14 @@ try:
     FUZZYWUZZY_AVAILABLE = True
 except ImportError:
     FUZZYWUZZY_AVAILABLE = False
-    print("⚠️ fuzzywuzzy non disponible - contrôle de doublons limité")
+    print("fuzzywuzzy non disponible - controle de doublons limite")
 
 try:
     from email_validator import validate_email, EmailNotValidError
     EMAIL_VALIDATOR_AVAILABLE = True
 except ImportError:
     EMAIL_VALIDATOR_AVAILABLE = False
-    print("⚠️ email-validator non disponible - validation email basique")
+    print("email-validator non disponible - validation email basique")
 
 # Configuration du cache pour les requêtes HTTP
 try:
@@ -32,7 +32,7 @@ try:
     HTTP_CACHE_AVAILABLE = True
 except ImportError:
     HTTP_CACHE_AVAILABLE = False
-    print("⚠️ requests-cache non disponible - les appels API ne seront pas mis en cache")
+    print("requests-cache non disponible - les appels API ne seront pas mis en cache")
 
 logger = logging.getLogger(__name__)
 # Constantes pour l'API INSEE
