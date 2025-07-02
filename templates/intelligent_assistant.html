@@ -734,10 +734,10 @@
                     sendQuickMessage('Créer un nouveau devis');
                     break;
                 case 'show_clients':
-                    sendQuickMessage('Voir tous les clients');
+                    loadClientsList();
                     break;
                 case 'show_products':
-                    sendQuickMessage('Voir tous les produits');
+                    loadProductsList();
                     break;
                 case 'help':
                     sendQuickMessage('Aide');
@@ -1147,6 +1147,113 @@
                     addMessage('nova', '❌ Erreur lors de la finalisation. Utilisez l\'interface classique.');
                 }
             }, 2000);
+        }
+        
+        // ===== NOUVELLES FONCTIONS POUR CHARGER LES LISTES =====
+        
+        // Charger la liste complète des clients
+        async function loadClientsList() {
+            addMessage('user', 'Voir tous les clients');
+            showTypingIndicator();
+            
+            try {
+                const response = await fetch('/api/assistant/clients/list');
+                const data = await response.json();
+                
+                hideTypingIndicator();
+                
+                if (data.success && data.clients && data.clients.length > 0) {
+                    let clientsMessage = data.message + '\n\n';
+                    
+                    // Afficher les 15 premiers clients avec détails
+                    data.clients.slice(0, 15).forEach((client, index) => {
+                        clientsMessage += `**${index + 1}. ${client.name}**\n`;
+                        if (client.type) clientsMessage += `   🏢 Type: ${client.type}\n`;
+                        if (client.industry) clientsMessage += `   🏭 Secteur: ${client.industry}\n`;
+                        if (client.phone) clientsMessage += `   📞 Tél: ${client.phone}\n`;
+                        if (client.website) clientsMessage += `   🌐 Site: ${client.website}\n`;
+                        clientsMessage += `\n`;
+                    });
+                    
+                    if (data.clients.length > 15) {
+                        clientsMessage += `... et ${data.clients.length - 15} autres clients.\n\n`;
+                    }
+                    
+                    clientsMessage += `💡 **Astuce**: Tapez le nom d'un client pour le rechercher spécifiquement.`;
+                    
+                    addMessage('nova', clientsMessage);
+                    
+                    // Ajouter des actions rapides
+                    const clientActions = [
+                        { label: '🔍 Rechercher client', action: 'search_client', type: 'primary' },
+                        { label: '➕ Nouveau client', action: 'new_client', type: 'secondary' },
+                        { label: '📋 Créer devis', action: 'start_workflow', type: 'info' }
+                    ];
+                    
+                    addMessage('nova', '🎯 **Actions disponibles :**', [], clientActions);
+                    
+                } else {
+                    addMessage('nova', data.message || '👥 Aucun client trouvé dans la base de données.');
+                }
+                
+            } catch (error) {
+                hideTypingIndicator();
+                addMessage('nova', '❌ Erreur lors du chargement des clients. Veuillez réessayer.');
+                console.error('Erreur chargement clients:', error);
+            }
+        }
+        
+        // Charger la liste complète des produits
+        async function loadProductsList() {
+            addMessage('user', 'Voir tous les produits');
+            showTypingIndicator();
+            
+            try {
+                const response = await fetch('/api/assistant/products/list');
+                const data = await response.json();
+                
+                hideTypingIndicator();
+                
+                if (data.success && data.products && data.products.length > 0) {
+                    let productsMessage = data.message + '\n\n';
+                    
+                    // Afficher les 15 premiers produits avec détails
+                    data.products.slice(0, 15).forEach((product, index) => {
+                        productsMessage += `**${index + 1}. ${product.name}**\n`;
+                        if (product.code) productsMessage += `   🔖 Code: ${product.code}\n`;
+                        if (product.description) productsMessage += `   📝 Description: ${product.description}\n`;
+                        if (product.price) productsMessage += `   💰 Prix: ${product.price} ${product.currency || 'EUR'}\n`;
+                        if (product.stock !== undefined) productsMessage += `   📦 Stock: ${product.stock}\n`;
+                        if (product.category) productsMessage += `   📂 Catégorie: ${product.category}\n`;
+                        productsMessage += `\n`;
+                    });
+                    
+                    if (data.products.length > 15) {
+                        productsMessage += `... et ${data.products.length - 15} autres produits.\n\n`;
+                    }
+                    
+                    productsMessage += `💡 **Astuce**: Tapez le nom ou la référence d'un produit pour le rechercher spécifiquement.`;
+                    
+                    addMessage('nova', productsMessage);
+                    
+                    // Ajouter des actions rapides
+                    const productActions = [
+                        { label: '🔍 Rechercher produit', action: 'search_product', type: 'primary' },
+                        { label: '➕ Nouveau produit', action: 'new_product', type: 'secondary' },
+                        { label: '📋 Créer devis', action: 'start_workflow', type: 'info' }
+                    ];
+                    
+                    addMessage('nova', '🎯 **Actions disponibles :**', [], productActions);
+                    
+                } else {
+                    addMessage('nova', data.message || '🛍️ Aucun produit trouvé dans le catalogue.');
+                }
+                
+            } catch (error) {
+                hideTypingIndicator();
+                addMessage('nova', '❌ Erreur lors du chargement des produits. Veuillez réessayer.');
+                console.error('Erreur chargement produits:', error);
+            }
         }
         
         // Exporter le devis en PDF

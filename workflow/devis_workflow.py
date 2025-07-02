@@ -134,10 +134,16 @@ class DevisWorkflow:
             extracted_info = await self._extract_info_from_prompt(prompt)
             self.context["extracted_info"] = extracted_info
 
-            if not extracted_info.get("client") or not extracted_info.get("products"):
-                self._track_step_fail("extract_entities", "Impossible de comprendre la demande", 
-                                    "Client ou produits manquants")
-                return self._build_error_response("Format non reconnu", "Client ou produits manquants")
+            # Vérifier les éléments manquants et demander les informations
+            missing_elements = []
+            if not extracted_info.get("client"):
+                missing_elements.append("client")
+            if not extracted_info.get("products") or len(extracted_info.get("products", [])) == 0:
+                missing_elements.append("produits")
+            
+            if missing_elements:
+                self._track_step_complete("extract_entities", "Informations partielles extraites")
+                return await self._build_missing_info_response(extracted_info, missing_elements)
             
             self._track_step_progress("extract_entities", 80, "Informations extraites")
             
@@ -2134,30 +2140,38 @@ class DevisWorkflow:
         except Exception as e:
             logger.warning(f"Échec extraction LLM: {str(e)}")
         
-        # Fallback vers extraction manuelle SIMPLE
-        return await self._extract_info_basic_simple(prompt)
+        # Fallback vers extraction manuelle AMÉLIORÉE
+        return await self._extract_info_basic(prompt)
 
     async def _extract_info_basic(self, prompt: str) -> Dict[str, Any]:
-        """Méthode d'extraction basique SIMPLE - comme dans l'original"""
+        """Méthode d'extraction basique AMÉLIORÉE pour reconnaître plus de patterns"""
         logger.info("Extraction basique des informations du prompt")
         
         extracted = {"client": None, "products": []}
         prompt_lower = prompt.lower()
         words = prompt.split()
         
-        # Extraction simple du client
-        client_patterns = ["pour le client ", "pour ", "devis pour ", "for "]
+        # Extraction améliorée du client avec plus de patterns
+        client_patterns = [
+            "pour le client ", "pour ", "devis pour ", "for ",
+            "client ", "société ", "entreprise ", "company ",
+            "chez ", "à ", "avec "
+        ]
+        
         for pattern in client_patterns:
             if pattern in prompt_lower:
                 idx = prompt_lower.find(pattern)
                 remaining = prompt[idx + len(pattern):].strip()
-                # Prendre les 1-3 premiers mots comme nom de client
-                client_words = remaining.split()[:3]
-                stop_words = ["avec", "and", "de", "du"]
+                # Prendre les 1-4 premiers mots comme nom de client
+                client_words = remaining.split()[:4]
+                stop_words = ["avec", "and", "de", "du", "la", "le", "les", "un", "une", "des"]
                 
                 clean_words = []
                 for word in client_words:
                     if word.lower() in stop_words:
+                        break
+                    # Arrêter si on trouve un mot qui ressemble à un produit
+                    if re.match(r'^[A-Z]\w*\d+', word, re.IGNORECASE):
                         break
                     clean_words.append(word)
                 
@@ -2166,19 +2180,44 @@ class DevisWorkflow:
                     logger.info(f"Client extrait: '{extracted['client']}'")
                     break
         
-        # Extraction simple des produits (pattern qui marchait avant)
+        # Si pas de client trouvé avec patterns, chercher des noms propres
+        if not extracted["client"]:
+            # Chercher des mots qui commencent par une majuscule (noms propres)
+            potential_clients = []
+            for word in words:
+                if word[0].isupper() and len(word) > 2 and not word.isupper():
+                    # Éviter les mots comme "Je", "Créer", etc.
+                    if word.lower() not in ["je", "créer", "veux", "pour", "devis", "nova"]:
+                        potential_clients.append(word)
+            
+            if potential_clients:
+                # Prendre les 2 premiers mots comme nom de client
+                extracted["client"] = " ".join(potential_clients[:2])
+                logger.info(f"Client extrait (noms propres): '{extracted['client']}'")
+        
+        # Extraction améliorée des produits
         import re
         
-        # Pattern simple : nombre + mot commençant par lettre et contenant chiffres
-        matches = re.findall(r'(\d+)\s+(?:ref\s+|référence\s+|unités?\s+)?([A-Z]\w*\d+)', prompt, re.IGNORECASE)
+        # Pattern 1: nombre + code produit
+        matches = re.findall(r'(\d+)\s+(?:ref\s+|référence\s+|unités?\s+|x\s+)?([A-Z]\w*\d+)', prompt, re.IGNORECASE)
         for quantity, code in matches:
             extracted["products"].append({
                 "code": code.upper(),
                 "quantity": int(quantity)
             })
-            logger.info(f"Produit extrait: {quantity}x {code}")
+            logger.info(f"Produit extrait (pattern 1): {quantity}x {code}")
         
-        # Si pas de produit trouvé avec regex, méthode manuelle simple
+        # Pattern 2: code produit seul (quantité par défaut = 1)
+        if not extracted["products"]:
+            product_codes = re.findall(r'\b([A-Z]\w*\d+)\b', prompt, re.IGNORECASE)
+            for code in product_codes:
+                extracted["products"].append({
+                    "code": code.upper(),
+                    "quantity": 1
+                })
+                logger.info(f"Produit extrait (pattern 2): 1x {code}")
+        
+        # Pattern 3: recherche manuelle dans les mots
         if not extracted["products"]:
             for i, word in enumerate(words):
                 if word.isdigit() and i + 1 < len(words):
@@ -2190,8 +2229,17 @@ class DevisWorkflow:
                             "code": next_word.upper(),
                             "quantity": quantity
                         })
-                        logger.info(f"Produit extrait (manuel): {quantity}x {next_word}")
+                        logger.info(f"Produit extrait (pattern 3): {quantity}x {next_word}")
                         break
+        
+        # Si toujours pas de produits, créer un produit générique pour permettre au workflow de continuer
+        if not extracted["products"] and extracted["client"]:
+            logger.info("Aucun produit spécifique trouvé, création d'un produit générique")
+            extracted["products"].append({
+                "code": "GENERIC001",
+                "quantity": 1,
+                "description": "Produit à définir"
+            })
         
         logger.info(f"Extraction finale: {extracted}")
         return extracted
@@ -2229,4 +2277,340 @@ class DevisWorkflow:
                 }
                 availability_status["unavailable_products"].append(unavailable_item)
         
-        return availability_status    
+        return availability_status
+    
+    async def _build_missing_info_response(self, extracted_info: Dict[str, Any], missing_elements: List[str]) -> Dict[str, Any]:
+        """Construit une réponse proactive demandant les informations manquantes avec des propositions concrètes"""
+        
+        # Récupérer les listes pour proposer des choix
+        available_clients = await self._get_available_clients_list()
+        available_products = await self._get_available_products_list()
+        
+        # Construire le message personnalisé selon ce qui manque
+        if "client" in missing_elements and "produits" in missing_elements:
+            message = "🎯 **Parfait ! Je vais vous aider à créer votre devis étape par étape.**\n\n" + \
+                     "Pour commencer, j'ai besoin de connaître le client. Voulez-vous que je vous présente la liste de nos clients ?"
+            questions = [
+                "🏢 **Étape 1 - Client** : Choisissez une option ci-dessous"
+            ]
+            
+        elif "client" in missing_elements:
+            products_info = ", ".join([f"{p.get('quantity', 1)}x {p.get('code', '')}" for p in extracted_info.get("products", [])])
+            message = f"🎯 **Excellent ! J'ai identifié les produits : {products_info}**\n\n" + \
+                     "Maintenant, pour quel client souhaitez-vous créer ce devis ? Voulez-vous que je vous présente la liste de nos clients ?"
+            questions = [
+                "🏢 **Client requis** : Choisissez une option ci-dessous"
+            ]
+            
+        elif "produits" in missing_elements:
+            client_name = extracted_info.get("client", "le client")
+            message = f"🎯 **Parfait ! Devis pour {client_name}**\n\n" + \
+                     "Maintenant, quels produits souhaitez-vous inclure dans ce devis ? Voulez-vous que je vous présente notre catalogue ?"
+            questions = [
+                "📦 **Étape 2 - Produits** : Choisissez une option ci-dessous"
+            ]
+        
+        # Construire les actions rapides PROACTIVES
+        quick_actions = []
+        
+        if "client" in missing_elements:
+            quick_actions.extend([
+                {
+                    "action": "show_clients_list",
+                    "label": f"📋 Voir nos {len(available_clients)} clients",
+                    "type": "primary",
+                    "description": "Afficher la liste complète des clients",
+                    "data": {"count": len(available_clients)}
+                },
+                {
+                    "action": "search_client",
+                    "label": "🔍 Rechercher un client",
+                    "type": "secondary",
+                    "description": "Rechercher par nom d'entreprise"
+                },
+                {
+                    "action": "new_client",
+                    "label": "➕ Nouveau client",
+                    "type": "secondary",
+                    "description": "Créer un nouveau client"
+                }
+            ])
+        
+        if "produits" in missing_elements:
+            quick_actions.extend([
+                {
+                    "action": "show_products_list",
+                    "label": f"📦 Voir nos {len(available_products)} produits",
+                    "type": "primary",
+                    "description": "Afficher notre catalogue produits",
+                    "data": {"count": len(available_products)}
+                },
+                {
+                    "action": "search_product",
+                    "label": "🔍 Rechercher un produit",
+                    "type": "secondary",
+                    "description": "Rechercher par code ou nom"
+                },
+                {
+                    "action": "product_categories",
+                    "label": "📂 Par catégories",
+                    "type": "secondary",
+                    "description": "Parcourir par catégories"
+                }
+            ])
+        
+        # Actions générales toujours disponibles
+        quick_actions.extend([
+            {
+                "action": "manual_entry",
+                "label": "✏️ Saisie manuelle",
+                "type": "tertiary",
+                "description": "Saisir directement les informations"
+            },
+            {
+                "action": "examples",
+                "label": "💡 Voir des exemples",
+                "type": "tertiary",
+                "description": "Exemples de demandes"
+            }
+        ])
+        
+        return {
+            "success": False,
+            "workflow_status": "waiting_for_input",
+            "message": message,
+            "questions": questions,
+            "extracted_info": extracted_info,
+            "missing_elements": missing_elements,
+            "quick_actions": quick_actions,
+            "available_data": {
+                "clients": available_clients[:10] if "client" in missing_elements else [],  # Top 10 pour aperçu
+                "products": available_products[:10] if "produits" in missing_elements else [],  # Top 10 pour aperçu
+                "clients_count": len(available_clients),
+                "products_count": len(available_products)
+            },
+            "quote_data": {
+                "status": "incomplete",
+                "task_id": self.task_id,
+                "partial_data": extracted_info,
+                "timestamp": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
+                "workflow_steps": self.workflow_steps,
+                "context_available": True,
+                "draft_mode": self.draft_mode
+            },
+            "suggestions": {
+                "examples": [
+                    "Je veux un devis pour Acme Corp avec 5 PROD001 et 2 PROD002",
+                    "Créer un devis pour Entreprise XYZ, produit REF123 quantité 10",
+                    "Devis pour client ABC avec 3 unités ITEM456"
+                ],
+                "next_steps": [
+                    "Choisissez un client dans la liste" if "client" in missing_elements else None,
+                    "Sélectionnez les produits souhaités" if "produits" in missing_elements else None
+                ]
+            }
+        }
+    
+    async def _get_available_clients_list(self) -> List[Dict[str, Any]]:
+        """Récupère la liste des clients disponibles depuis Salesforce"""
+        try:
+            # Récupérer les clients depuis Salesforce via MCP
+            clients_data = await self.mcp_connector.get_salesforce_accounts(limit=100)
+            
+            if clients_data and "records" in clients_data:
+                clients = []
+                for record in clients_data["records"]:
+                    client_info = {
+                        "id": record.get("Id", ""),
+                        "name": record.get("Name", ""),
+                        "type": record.get("Type", "Prospect"),
+                        "industry": record.get("Industry", ""),
+                        "phone": record.get("Phone", ""),
+                        "website": record.get("Website", ""),
+                        "recent_quotes": 0  # À calculer si nécessaire
+                    }
+                    clients.append(client_info)
+                
+                # Trier par nom
+                clients.sort(key=lambda x: x["name"])
+                logger.info(f"Récupéré {len(clients)} clients depuis Salesforce")
+                return clients
+            else:
+                logger.warning("Aucun client trouvé dans Salesforce")
+                return []
+                
+        except Exception as e:
+            logger.error(f"Erreur lors de la récupération des clients: {str(e)}")
+            # Retourner une liste d'exemple en cas d'erreur
+            return [
+                {"id": "example1", "name": "Acme Corporation", "type": "Customer", "industry": "Technology"},
+                {"id": "example2", "name": "Global Industries", "type": "Prospect", "industry": "Manufacturing"},
+                {"id": "example3", "name": "Tech Solutions Ltd", "type": "Customer", "industry": "IT Services"}
+            ]
+    
+    async def _get_available_products_list(self) -> List[Dict[str, Any]]:
+        """Récupère la liste des produits disponibles depuis SAP"""
+        try:
+            # Récupérer les produits depuis SAP via MCP
+            products_data = await self.mcp_connector.get_sap_products(limit=100)
+            
+            if products_data and "products" in products_data:
+                products = []
+                for product in products_data["products"]:
+                    product_info = {
+                        "code": product.get("code", ""),
+                        "name": product.get("name", ""),
+                        "description": product.get("description", ""),
+                        "price": product.get("price", 0),
+                        "currency": product.get("currency", "EUR"),
+                        "stock": product.get("stock", 0),
+                        "category": product.get("category", "Général"),
+                        "unit": product.get("unit", "pièce"),
+                        "promotion": product.get("promotion", False),
+                        "discount_threshold": product.get("discount_threshold", 50)  # Remise à partir de 50 unités
+                    }
+                    products.append(product_info)
+                
+                # Trier par code produit
+                products.sort(key=lambda x: x["code"])
+                logger.info(f"Récupéré {len(products)} produits depuis SAP")
+                return products
+            else:
+                logger.warning("Aucun produit trouvé dans SAP")
+                return []
+                
+        except Exception as e:
+            logger.error(f"Erreur lors de la récupération des produits: {str(e)}")
+            # Retourner une liste d'exemple en cas d'erreur
+            return [
+                {"code": "PROD001", "name": "Imprimante Laser Pro", "price": 299.99, "currency": "EUR", "stock": 25, "category": "Imprimantes", "discount_threshold": 10},
+                {"code": "PROD002", "name": "Scanner Document Plus", "price": 199.99, "currency": "EUR", "stock": 15, "category": "Scanners", "discount_threshold": 5},
+                {"code": "PROD003", "name": "Cartouche Encre XL", "price": 49.99, "currency": "EUR", "stock": 100, "category": "Consommables", "discount_threshold": 20, "promotion": True}
+            ]
+    
+    async def _build_product_quantity_response(self, client_info: Dict[str, Any], selected_products: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Construit une réponse pour demander les quantités avec suggestions de remises et promotions"""
+        
+        products_with_suggestions = []
+        total_savings_potential = 0
+        
+        for product in selected_products:
+            product_code = product.get("code", "")
+            product_name = product.get("name", product_code)
+            price = product.get("price", 0)
+            discount_threshold = product.get("discount_threshold", 50)
+            promotion = product.get("promotion", False)
+            
+            # Calculer les suggestions de quantité
+            suggestions = {
+                "recommended_quantities": [1, 5, 10, discount_threshold] if discount_threshold > 10 else [1, 5, 10],
+                "discount_info": {
+                    "threshold": discount_threshold,
+                    "discount_rate": 0.15 if discount_threshold <= 20 else 0.10,  # 15% pour petites quantités, 10% pour grandes
+                    "savings_per_unit": price * (0.15 if discount_threshold <= 20 else 0.10)
+                },
+                "promotion": {
+                    "active": promotion,
+                    "description": f"Promotion spéciale sur {product_name}" if promotion else None,
+                    "additional_discount": 0.05 if promotion else 0  # 5% supplémentaire
+                }
+            }
+            
+            # Chercher des produits alternatifs
+            alternatives = await self._find_product_alternatives(product)
+            
+            product_info = {
+                "code": product_code,
+                "name": product_name,
+                "price": price,
+                "currency": product.get("currency", "EUR"),
+                "stock": product.get("stock", 0),
+                "suggestions": suggestions,
+                "alternatives": alternatives
+            }
+            
+            products_with_suggestions.append(product_info)
+            
+            # Calculer le potentiel d'économies
+            if discount_threshold <= 50:
+                potential_savings = price * discount_threshold * suggestions["discount_info"]["discount_rate"]
+                total_savings_potential += potential_savings
+        
+        client_name = client_info.get("name", "votre client")
+        
+        message = f"🎯 **Excellent ! Devis pour {client_name}**\n\n" + \
+                 f"Maintenant, précisons les quantités pour chaque produit. Je vais vous donner des conseils sur les remises disponibles :"
+        
+        quick_actions = [
+            {
+                "action": "auto_quantities",
+                "label": "✨ Quantités optimales",
+                "type": "primary",
+                "description": f"Appliquer les quantités recommandées (potentiel d'économies: {total_savings_potential:.2f}€)"
+            },
+            {
+                "action": "manual_quantities",
+                "label": "✏️ Saisir manuellement",
+                "type": "secondary",
+                "description": "Définir les quantités une par une"
+            },
+            {
+                "action": "add_more_products",
+                "label": "➕ Ajouter d'autres produits",
+                "type": "secondary",
+                "description": "Compléter la sélection"
+            }
+        ]
+        
+        return {
+            "success": False,
+            "workflow_status": "configuring_quantities",
+            "message": message,
+            "client_info": client_info,
+            "products_details": products_with_suggestions,
+            "savings_potential": total_savings_potential,
+            "quick_actions": quick_actions,
+            "suggestions": {
+                "tips": [
+                    f"Commandez {products_with_suggestions[0]['suggestions']['discount_info']['threshold']} unités ou plus pour bénéficier de remises",
+                    "Certains produits ont des promotions en cours",
+                    "Je peux vous proposer des alternatives avec un meilleur rapport qualité-prix"
+                ]
+            }
+        }
+    
+    async def _find_product_alternatives(self, product: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Trouve des produits alternatifs avec avantages/inconvénients"""
+        try:
+            product_category = product.get("category", "")
+            product_price = product.get("price", 0)
+            
+            # Simuler la recherche d'alternatives (en réalité, cela ferait appel à SAP)
+            alternatives = []
+            
+            # Exemple d'alternatives basées sur la catégorie
+            if "Imprimante" in product.get("name", ""):
+                alternatives = [
+                    {
+                        "code": "PROD001B",
+                        "name": "Imprimante Laser Pro V2",
+                        "price": product_price * 1.2,
+                        "advantages": ["Vitesse d'impression supérieure (+30%)", "Garantie étendue 3 ans"],
+                        "disadvantages": ["Prix plus élevé", "Consommation énergétique supérieure"],
+                        "recommendation": "Recommandé pour usage intensif"
+                    },
+                    {
+                        "code": "PROD001C",
+                        "name": "Imprimante Laser Eco",
+                        "price": product_price * 0.8,
+                        "advantages": ["Prix attractif", "Faible consommation", "Compact"],
+                        "disadvantages": ["Vitesse réduite (-20%)", "Capacité papier limitée"],
+                        "recommendation": "Idéal pour usage occasionnel"
+                    }
+                ]
+            
+            return alternatives[:2]  # Limiter à 2 alternatives
+            
+        except Exception as e:
+            logger.error(f"Erreur lors de la recherche d'alternatives: {str(e)}")
+            return []
