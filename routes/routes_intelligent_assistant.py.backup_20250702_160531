@@ -808,12 +808,6 @@ async def get_clients_list():
     try:
         # Récupération des clients via MCP
         clients_data = await get_clients_data_async()
-        # Normaliser les clés pour l'interface
-        for client in clients_data.get('clients', []):
-            client['name'] = client.get('Name', client.get('name', ''))
-            client['type'] = client.get('Type', client.get('type', ''))
-            client['industry'] = client.get('Industry', client.get('industry', ''))
-            client['phone'] = client.get('Phone', client.get('phone', ''))
         clients = clients_data.get('clients', [])
         
         # Formatage pour affichage

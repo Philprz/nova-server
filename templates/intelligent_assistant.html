@@ -885,56 +885,92 @@
         
         // Démarrer le workflow de création de devis
         async function startNewQuoteWorkflow() {
-            const message = 'Créer un nouveau devis';
-            addMessage('user', message);
+            const lastMessage = window.lastUserMessage || 'Créer un nouveau devis';
+            addMessage('user', lastMessage);
             showTypingIndicator();
             
             try {
-                // Appeler directement le workflow de devis
                 const response = await fetch('/api/assistant/workflow/create_quote', {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json',
+                        'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({ message: message })
+                    body: JSON.stringify({
+                        message: lastMessage
+                    })
                 });
                 
                 const data = await response.json();
-                
                 hideTypingIndicator();
                 
                 if (data.success) {
-                    // Afficher le message principal
-                    addMessage('nova', data.message);
+                    // Sauvegarder les données du workflow
+                    window.currentWorkflowData = data;
                     
-                    // Afficher les avertissements s'il y en a
-                    if (data.warnings && data.warnings.length > 0) {
-                        const warningsMessage = '⚠️ **Avertissements :**\n' + data.warnings.map(w => `• ${w}`).join('\n');
-                        addMessage('nova', warningsMessage);
+                    // Afficher le message principal
+                    addMessage('nova', data.message || '✅ Workflow de création de devis lancé');
+                    
+                    // Gérer les différents types de workflow
+                    if (data.workflow_type === 'duplicate_detected' && data.duplicate_analysis) {
+                        // Gérer les doublons détectés
+                        setTimeout(() => showDuplicateQuotes(), 500);
+                    } else if (data.workflow_type === 'quote_preview' && data.quote_preview) {
+                        // Afficher l'aperçu du devis
+                        const preview = data.quote_preview;
+                        let previewMessage = '📋 **Aperçu du devis :**\n\n';
+                        
+                        if (preview.client) {
+                            const clientName = preview.client.Name || preview.client.name || 'Client non spécifié';
+                            previewMessage += `**Client :** ${clientName}\n`;
+                        }
+                        
+                        if (preview.products && preview.products.length > 0) {
+                            previewMessage += '\n**Produits :**\n';
+                            preview.products.forEach((product, idx) => {
+                                const code = product.item_code || product.code || '';
+                                const name = product.item_name || product.name || '';
+                                const qty = product.quantity || 0;
+                                const price = product.unit_price || 0;
+                                previewMessage += `${idx + 1}. ${code} - ${name} : ${qty} x ${price}€\n`;
+                            });
+                        }
+                        
+                        previewMessage += `\n**Total :** ${preview.total_amount || 0}€ HT`;
+                        addMessage('nova', previewMessage);
                     }
                     
-                    // Afficher les actions rapides du workflow
+                    // Afficher les actions rapides
                     if (data.quick_actions && data.quick_actions.length > 0) {
                         addMessage('nova', '🎯 **Actions disponibles :**', [], data.quick_actions);
                     }
                     
-                    // Stocker les données du workflow pour utilisation ultérieure
-                    window.currentWorkflowData = data.quote_data;
-                    
                 } else {
-                    addMessage('nova', data.message || '❌ Erreur lors de l\'analyse du devis.');
+                    // En cas d'erreur, proposer des options de récupération
+                    addMessage('nova', data.message || '❌ Erreur lors de la création du devis');
                     
                     // Afficher les actions de récupération
-                    if (data.quick_actions && data.quick_actions.length > 0) {
-                        addMessage('nova', '🔄 **Options de récupération :**', [], data.quick_actions);
-                    }
+                    const recoveryActions = [
+                        { label: '🔄 Réessayer', action: 'retry', type: 'primary' },
+                        { label: '📝 Saisie manuelle', action: 'manual_entry', type: 'secondary' },
+                        { label: '💼 Interface classique', action: 'open_classic', type: 'info' }
+                    ];
+                    
+                    addMessage('nova', '🔄 **Options de récupération :**', [], recoveryActions);
                 }
                 
             } catch (error) {
                 hideTypingIndicator();
-                addMessage('nova', '❌ Erreur de communication. Ouverture de l\'interface classique...');
-                window.open('/static/nova_interface.html?action=new_quote', '_blank');
                 console.error('Erreur workflow devis:', error);
+                
+                addMessage('nova', '❌ Erreur de communication avec le serveur.');
+                
+                // Actions de récupération
+                const errorActions = [
+                    { label: '🔄 Réessayer', action: 'retry', type: 'primary' },
+                    { label: '💼 Interface classique', action: 'open_classic', type: 'secondary' }
+                ];
+                
+                addMessage('nova', '🔧 **Alternatives disponibles :**', [], errorActions);
             }
         }
         
@@ -951,13 +987,14 @@
                 hideTypingIndicator();
                 
                 if (data.success && data.clients && data.clients.length > 0) {
-                    let clientsMessage = `🔍 **${data.clients.length} clients trouvés** (sur ${data.total_found} total):\n\n`;
+                    const total = data.count || data.total_found || data.clients.length;
+                    let clientsMessage = `🔍 **${data.clients.length} clients trouvés** (sur ${total} total):\n\n`;
                     
                     data.clients.slice(0, 10).forEach((client, index) => {
-                        clientsMessage += `**${index + 1}. ${client.Name || client.company_name || 'Client sans nom'}**\n`;
-                        if (client.Industry) clientsMessage += `   📊 Secteur: ${client.Industry}\n`;
-                        if (client.Phone) clientsMessage += `   📞 Tél: ${client.Phone}\n`;
-                        if (client.Email) clientsMessage += `   📧 Email: ${client.Email}\n`;
+                        clientsMessage += `**${index + 1}. ${client.name || client.company_name || 'Client sans nom'}**\n`;
+                        if (client.industry) clientsMessage += `   📊 Secteur: ${client.industry}\n`;
+                        if (client.phone) clientsMessage += `   📞 Tél: ${client.phone}\n`;
+                        if (client.email) clientsMessage += `   📧 Email: ${client.email}\n`;
                         clientsMessage += `\n`;
                     });
                     
@@ -992,13 +1029,14 @@
                 hideTypingIndicator();
                 
                 if (data.success && data.products && data.products.length > 0) {
-                    let productsMessage = `🛍️ **${data.products.length} produits trouvés** (sur ${data.total_found} total):\n\n`;
+                    const total = data.count || data.total_found || data.products.length;
+                    let productsMessage = `🛍️ **${data.products.length} produits trouvés** (sur ${total} total):\n\n`;
                     
                     data.products.slice(0, 10).forEach((product, index) => {
-                        productsMessage += `**${index + 1}. ${product.ItemName || product.name || 'Produit sans nom'}**\n`;
-                        if (product.ItemCode) productsMessage += `   🏷️ Réf: ${product.ItemCode}\n`;
-                        if (product.Price) productsMessage += `   💰 Prix: ${product.Price}€\n`;
-                        if (product.QuantityOnStock !== undefined) productsMessage += `   📦 Stock: ${product.QuantityOnStock}\n`;
+                        productsMessage += `**${index + 1}. ${product.item_name || product.display_text || 'Produit sans nom'}**\n`;
+                        if (product.item_code) productsMessage += `   🏷️ Réf: ${product.item_code}\n`;
+                        if (product.price_display) productsMessage += `   💰 Prix: ${product.price_display}\n`;
+                        if (product.availability_text) productsMessage += `   📦 Stock: ${product.availability_text}\n`;
                         productsMessage += `\n`;
                     });
                     
@@ -1165,25 +1203,15 @@
                 if (data.success && data.clients && data.clients.length > 0) {
                     let clientsMessage = data.message + '\n\n';
                     
-                    // Afficher les 15 premiers clients avec détails
-                    data.clients.slice(0, 15).forEach((client, index) => {
-                        clientsMessage += `**${index + 1}. ${client.name}**\n`;
-                        if (client.type) clientsMessage += `   🏢 Type: ${client.type}\n`;
-                        if (client.industry) clientsMessage += `   🏭 Secteur: ${client.industry}\n`;
-                        if (client.phone) clientsMessage += `   📞 Tél: ${client.phone}\n`;
-                        if (client.website) clientsMessage += `   🌐 Site: ${client.website}\n`;
-                        clientsMessage += `\n`;
+                    // Les clients sont déjà formatés en strings par l'API
+                    data.clients.forEach((clientString, index) => {
+                        clientsMessage += clientString + '\n\n';
                     });
-                    
-                    if (data.clients.length > 15) {
-                        clientsMessage += `... et ${data.clients.length - 15} autres clients.\n\n`;
-                    }
                     
                     clientsMessage += `💡 **Astuce**: Tapez le nom d'un client pour le rechercher spécifiquement.`;
                     
                     addMessage('nova', clientsMessage);
                     
-                    // Ajouter des actions rapides
                     const clientActions = [
                         { label: '🔍 Rechercher client', action: 'search_client', type: 'primary' },
                         { label: '➕ Nouveau client', action: 'new_client', type: 'secondary' },
@@ -1217,42 +1245,25 @@
                 if (data.success && data.products && data.products.length > 0) {
                     let productsMessage = data.message + '\n\n';
                     
-                    // Afficher les 15 premiers produits avec détails
-                    data.products.slice(0, 15).forEach((product, index) => {
-                        productsMessage += `**${index + 1}. ${product.name}**\n`;
-                        if (product.code) productsMessage += `   🔖 Code: ${product.code}\n`;
-                        if (product.description) productsMessage += `   📝 Description: ${product.description}\n`;
-                        if (product.price) productsMessage += `   💰 Prix: ${product.price} ${product.currency || 'EUR'}\n`;
-                        if (product.stock !== undefined) productsMessage += `   📦 Stock: ${product.stock}\n`;
-                        if (product.category) productsMessage += `   📂 Catégorie: ${product.category}\n`;
-                        productsMessage += `\n`;
+                    // Les produits sont des objets avec les bonnes propriétés
+                    data.products.forEach((product, index) => {
+                        productsMessage += `**${index + 1}. ${product.code} - ${product.name}**\n`;
+                        productsMessage += `   📦 Stock: ${product.stock} unités\n`;
+                        productsMessage += `   💰 Prix: ${product.price}€ HT\n`;
+                        productsMessage += `   📂 Catégorie: ${product.category}\n\n`;
                     });
-                    
-                    if (data.products.length > 15) {
-                        productsMessage += `... et ${data.products.length - 15} autres produits.\n\n`;
-                    }
                     
                     productsMessage += `💡 **Astuce**: Tapez le nom ou la référence d'un produit pour le rechercher spécifiquement.`;
                     
                     addMessage('nova', productsMessage);
-                    
-                    // Ajouter des actions rapides
-                    const productActions = [
-                        { label: '🔍 Rechercher produit', action: 'search_product', type: 'primary' },
-                        { label: '➕ Nouveau produit', action: 'new_product', type: 'secondary' },
-                        { label: '📋 Créer devis', action: 'start_workflow', type: 'info' }
-                    ];
-                    
-                    addMessage('nova', '🎯 **Actions disponibles :**', [], productActions);
-                    
                 } else {
-                    addMessage('nova', data.message || '🛍️ Aucun produit trouvé dans le catalogue.');
+                    addMessage('nova', '📦 Aucun produit trouvé dans le catalogue.');
                 }
                 
             } catch (error) {
                 hideTypingIndicator();
-                addMessage('nova', '❌ Erreur lors du chargement des produits. Veuillez réessayer.');
-                console.error('Erreur chargement produits:', error);
+                addMessage('nova', '❌ Erreur lors de la recherche de produits. Veuillez réessayer.');
+                console.error('Erreur recherche produits:', error);
             }
         }
         
