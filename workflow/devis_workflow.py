@@ -436,19 +436,6 @@ class DevisWorkflow:
                 progress_tracker.fail_task(self.task_id, str(e))
             
             return self._build_error_response("Erreur système", str(e))
-    async def _extract_info_from_prompt(self, prompt: str) -> Dict[str, Any]:
-        """Extraction des informations avec fallback robuste - VERSION ORIGINALE RESTAURÉE"""
-        try:
-            # Tenter extraction via LLM (méthode statique correcte)
-            extracted_info = await LLMExtractor.extract_quote_info(prompt)
-            if "error" not in extracted_info:
-                logger.info("Extraction LLM réussie")
-                return extracted_info
-        except Exception as e:
-            logger.warning(f"Échec extraction LLM: {str(e)}")
-        
-        # Fallback vers extraction manuelle SIMPLE
-        return await self._extract_info_basic_simple(prompt)
     
     def get_task_status(self, task_id: str = None) -> Optional[Dict[str, Any]]:
         """Récupère le statut détaillé d'une tâche"""

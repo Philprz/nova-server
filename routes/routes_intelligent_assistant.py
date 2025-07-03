@@ -704,11 +704,12 @@ async def start_quote_workflow(message_data: ChatMessage):
         
         # Exécuter le workflow complet
         result = await workflow.process_prompt(message)
-        
+        workflow_status = result.get('workflow_status', 'completed')
+
         # Analyser les résultats pour créer une réponse intelligente
         response = {
-            'success': True,
-            'workflow_status': 'completed',
+            'success': result.get('success', False),
+            'workflow_status': workflow_status,
             'message': '',
             'quote_data': result,
             'quick_actions': [],
@@ -768,12 +769,17 @@ async def start_quote_workflow(message_data: ChatMessage):
             ])
             
         else:
-            response['success'] = False
-            response['message'] = f"**Erreur lors de l'analyse**\n\n{result.get('error', 'Erreur inconnue')}"
-            response['quick_actions'] = [
-                {'action': 'retry', 'label': 'Réessayer', 'type': 'primary'},
-                {'action': 'manual_entry', 'label': 'Saisie manuelle', 'type': 'secondary'}
-            ]
+            if workflow_status in ["waiting_for_input", "configuring_quantities"]:
+                response['message'] = result.get('message', '')
+                response['quick_actions'] = result.get('quick_actions', [])
+                response['suggestions'] = result.get('suggestions', []) if isinstance(result.get('suggestions'), list) else result.get('suggestions', {}).get('examples', [])
+            else:
+                response['success'] = False
+                response['message'] = f"**Erreur lors de l'analyse**\n\n{result.get('error', 'Erreur inconnue')}"
+                response['quick_actions'] = [
+                    {'action': 'retry', 'label': 'Réessayer', 'type': 'primary'},
+                    {'action': 'manual_entry', 'label': 'Saisie manuelle', 'type': 'secondary'}
+                ]
         
         return response
         

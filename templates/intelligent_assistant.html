@@ -626,7 +626,7 @@
                 
                 const data = await response.json();
                 
-                if (data.success) {
+                if (data.success || data.workflow_status === 'waiting_for_input' || data.workflow_status === 'configuring_quantities') {
                     hideTypingIndicator();
                     addNovaMessage(data.response);
                 } else {
@@ -903,12 +903,13 @@
                 const data = await response.json();
                 hideTypingIndicator();
                 
-                if (data.success) {
+                if (data.success || data.workflow_status === 'waiting_for_input' || data.workflow_status === 'configuring_quantities') {
                     // Sauvegarder les données du workflow
                     window.currentWorkflowData = data;
-                    
-                    // Afficher le message principal
-                    addMessage('nova', data.message || '✅ Workflow de création de devis lancé');
+
+                    // Afficher le message principal avec suggestions
+                    const sugg = data.suggestions || [];
+                    addMessage('nova', data.message || '✅ Workflow de création de devis lancé', sugg);
                     
                     // Gérer les différents types de workflow
                     if (data.workflow_type === 'duplicate_detected' && data.duplicate_analysis) {
