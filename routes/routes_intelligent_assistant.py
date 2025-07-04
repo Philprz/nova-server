@@ -215,28 +215,36 @@ class ConversationManager:
         self.user_preferences = {}
     
     def analyze_intent(self, user_message: str) -> Dict[str, Any]:
-        """Analyse l'intention de l'utilisateur"""
+        """Analyse l'intention de l'utilisateur avec logique améliorée"""
         message_lower = user_message.lower()
         
-        # Patterns d'intention
+        # Patterns d'intention - avec priorité aux patterns spécifiques
         intent_patterns = {
-            'create_quote': ['devis', 'créer', 'nouveau', 'génération', 'quote'],
-            'find_client': ['client', 'chercher', 'trouver', 'recherche'],
-            'find_product': ['produit', 'référence', 'article', 'stock'],
+            'find_client': ['rechercher client', 'chercher client', 'trouver client', 'client chercher', 'client', 'chercher', 'trouver', 'recherche'],
+            'find_product': ['rechercher produit', 'chercher produit', 'trouver produit', 'produit chercher', 'produit', 'référence', 'article', 'stock'],
+            'create_quote': ['créer devis', 'nouveau devis', 'faire devis', 'génération devis', 'devis', 'créer', 'nouveau', 'génération', 'quote'],
             'help': ['aide', 'help', 'comment', 'expliquer'],
             'status': ['statut', 'état', 'progression', 'avancement'],
             'greeting': ['bonjour', 'salut', 'hello', 'bonsoir']
         }
         
-        detected_intents = []
+        # Détecter l'intention avec priorité aux patterns longs
+        detected_intent = None
+        max_match_length = 0
+        
         for intent, keywords in intent_patterns.items():
-            if any(keyword in message_lower for keyword in keywords):
-                detected_intents.append(intent)
+            for keyword in keywords:
+                if keyword in message_lower:
+                    # Priorité aux patterns plus longs (plus spécifiques)
+                    if len(keyword.split()) > max_match_length:
+                        max_match_length = len(keyword.split())
+                        detected_intent = intent
+                        break
         
         return {
-            'primary_intent': detected_intents[0] if detected_intents else 'unknown',
-            'all_intents': detected_intents,
-            'confidence': 0.8 if detected_intents else 0.2,
+            'primary_intent': detected_intent if detected_intent else 'unknown',
+            'all_intents': [detected_intent] if detected_intent else [],
+            'confidence': 0.8 if detected_intent else 0.2,
             'entities': self._extract_entities(user_message)
         }
     
@@ -485,163 +493,218 @@ def handle_quote_creation_intent(message: str, entities: Dict[str, Any]) -> Dict
         }
 
 def handle_client_search_intent(message: str, entities: Dict[str, Any]) -> Dict[str, Any]:
-    """Gère l'intention de recherche de client"""
+    """Gère l'intention de recherche de client avec recherche google-like"""
     
     client_names = entities.get('client_names', [])
     
     if not client_names:
         return {
-            'type': 'client_search',
-            'message': "🔍 **Recherche de client**\n\nPour quelle entreprise cherchez-vous ?\n\n💡 **Exemples :**\n• \"Chercher Edge Communications\"\n• \"Client Acme Corp\"\n• \"Entreprise Microsoft\"",
+            'type': 'client_search_prompt',
+            'message': "🔍 **Recherche Google-Like Client**\n\n**Tapez le nom du client à rechercher :**\n\n💡 **Exemples :**\n• \"Microsoft\"\n• \"Orange\"\n• \"Air France\"\n\nJe rechercherai automatiquement et proposerai des suggestions.",
             'suggestions': [
-                "Voir tous les clients",
-                "Créer un nouveau client"
-            ]
+                "Tous les clients",
+                "Créer nouveau client"
+            ],
+            'enable_search_mode': True
         }
     
-    # Rechercher le client avec suggestions intelligentes
+    # Recherche intelligente avec les vraies données
     try:
-        clients_data = get_clients_data()
-        if clients_data and 'clients' in clients_data:
-            available_clients = clients_data['clients']
-            
-            search_results = []
-            for client_name in client_names:
-                suggestion_result = suggestion_engine.suggest_client(
-                    client_name, available_clients
+        search_term = client_names[0]
+        logger.info(f"🔍 Recherche google-like pour client: '{search_term}'")
+        
+        # Appel HTTP interne à l'endpoint de recherche clients
+        import httpx
+        import asyncio
+        
+        async def search_real_clients():
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"http://localhost:8000/clients/search_clients_advanced",
+                    params={"q": search_term, "limit": 10}
                 )
-                search_results.append({
-                    'query': client_name,
-                    'result': suggestion_result.to_dict()
-                })
+                return response.json()
+        
+        # Exécuter la recherche
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        clients_data = loop.run_until_complete(search_real_clients())
+        loop.close()
+        
+        response = {
+            'type': 'client_search_results',
+            'message': f"🔍 **Résultats pour '{search_term}'**\n\n",
+            'suggestions': []
+        }
+        
+        if clients_data.get('success') and clients_data.get('clients'):
+            # Clients trouvés - affichage google-like
+            found_clients = clients_data['clients'][:5]  # Max 5 résultats
             
-            # Construire la réponse
-            response = {
-                'type': 'client_search_results',
-                'message': f"🔍 **Résultats pour '{client_names[0]}'**\n\n",
-                'search_results': search_results,
-                'suggestions': []
+            response['message'] += f"✅ **{len(found_clients)} résultat(s) trouvé(s) :**\n\n"
+            
+            for i, client in enumerate(found_clients, 1):
+                client_name = client.get('name', 'Client sans nom')
+                location = client.get('location_display', '')
+                industry = client.get('industry', '')
+                
+                response['message'] += f"**{i}. {client_name}**\n"
+                if location:
+                    response['message'] += f"   📍 {location}\n"
+                if industry:
+                    response['message'] += f"   🏭 {industry}\n"
+                response['message'] += f"   🆔 ID: {client.get('id', 'N/A')}\n\n"
+            
+            # Suggestions d'actions
+            response['suggestions'] = [
+                f"Utiliser {found_clients[0]['name']}",
+                "Affiner la recherche",
+                f"Créer '{search_term}'" if search_term.lower() not in [c['name'].lower() for c in found_clients] else "Nouveau client"
+            ]
+            
+            if len(clients_data['clients']) > 5:
+                response['message'] += f"... et {len(clients_data['clients']) - 5} autres résultats.\n\n"
+                response['suggestions'].append("Voir tous les résultats")
+                
+        else:
+            # Aucun client trouvé - proposer création
+            response['message'] += f"❌ **Aucun client trouvé pour '{search_term}'**\n\n"
+            response['message'] += "💡 **Que souhaitez-vous faire ?**\n\n"
+            response['message'] += f"1. 🆕 **Créer le client '{search_term}'**\n"
+            response['message'] += "2. 🔍 **Essayer une autre recherche**\n"
+            response['message'] += "3. 👥 **Voir tous les clients disponibles**\n"
+            
+            response['suggestions'] = [
+                f"Créer '{search_term}'",
+                "Nouvelle recherche", 
+                "Tous les clients"
+            ]
+            response['create_option'] = {
+                'client_name': search_term,
+                'action': 'create_client'
             }
-            
-            best_result = search_results[0]['result']
-            if best_result['has_suggestions']:
-                primary = best_result['primary_suggestion']
-                response['message'] += f"✅ **Trouvé :** {primary['suggested_value']}\n"
-                response['message'] += f"💡 {primary['explanation']}\n\n"
-                
-                # Ajouter les alternatives
-                if best_result['all_suggestions']:
-                    response['message'] += "🔄 **Autres options :**\n"
-                    for i, alt in enumerate(best_result['all_suggestions'][:3], 1):
-                        response['message'] += f"{i}. {alt['suggested_value']} (score: {alt['score']:.0%})\n"
-                
-                response['suggestions'] = [
-                    f"Utiliser {primary['suggested_value']}",
-                    "Voir toutes les options",
-                    "Créer un nouveau devis"
-                ]
-            else:
-                response['message'] += f"❌ **Client '{client_names[0]}' non trouvé**\n\n"
-                response['message'] += "💡 **Options disponibles :**\n"
-                response['message'] += f"1. Créer le client '{client_names[0]}'\n"
-                response['message'] += "2. Voir tous les clients\n"
-                response['message'] += "3. Essayer une autre recherche"
-                
-                response['suggestions'] = [
-                    f"Créer {client_names[0]}",
-                    "Voir tous les clients",
-                    "Nouvelle recherche"
-                ]
-            
-            return response
-            
+        
+        return response
+        
     except Exception as e:
-        logger.error(f"Erreur recherche client: {e}")
+        logger.error(f"Erreur recherche client google-like: {e}")
         return {
             'type': 'error',
-            'message': f"❌ **Erreur lors de la recherche**\n\n{str(e)}",
-            'suggestions': ["Réessayer", "Voir tous les clients"]
+            'message': f"❌ **Erreur lors de la recherche**\n\n{str(e)}\n\nVoulez-vous essayer une recherche manuelle ?",
+            'suggestions': [
+                "Nouvelle recherche",
+                "Tous les clients",
+                f"Créer '{client_names[0] if client_names else 'nouveau client'}'"
+            ]
         }
 
 def handle_product_search_intent(message: str, entities: Dict[str, Any]) -> Dict[str, Any]:
-    """Gère l'intention de recherche de produit"""
+    """Gère l'intention de recherche de produit avec recherche google-like"""
     
     product_refs = entities.get('product_refs', [])
     
     if not product_refs:
         return {
-            'type': 'product_search',
-            'message': "🔍 **Recherche de produit**\n\nQuelle référence cherchez-vous ?\n\n💡 **Exemples :**\n• \"Produit A00025\"\n• \"Référence B00150\"\n• \"Article C00300\"",
+            'type': 'product_search_prompt',
+            'message': "🔍 **Recherche Google-Like Produit**\n\n**Tapez la référence ou le nom du produit à rechercher :**\n\n💡 **Exemples :**\n• \"A00025\"\n• \"Connecteur USB\"\n• \"Cable HDMI\"\n\nJe rechercherai automatiquement et proposerai des suggestions.",
             'suggestions': [
-                "Voir tous les produits",
-                "Recherche par catégorie"
-            ]
+                "Tous les produits",
+                "Créer nouveau produit"
+            ],
+            'enable_search_mode': True
         }
     
-    # Rechercher le produit avec suggestions intelligentes
+    # Recherche intelligente avec les vraies données
     try:
-        products_data = get_products_data()
-        if products_data and 'products' in products_data:
-            available_products = products_data['products']
-            
-            search_results = []
-            for product_ref in product_refs:
-                suggestion_result = suggestion_engine.suggest_product(
-                    product_ref, available_products
+        search_term = product_refs[0]
+        logger.info(f"🔍 Recherche google-like pour produit: '{search_term}'")
+        
+        # Appel HTTP interne à l'endpoint de recherche produits
+        import httpx
+        import asyncio
+        
+        async def search_real_products():
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"http://localhost:8000/products/search_products_advanced",
+                    params={"q": search_term, "limit": 10}
                 )
-                search_results.append({
-                    'query': product_ref,
-                    'result': suggestion_result.to_dict()
-                })
+                return response.json()
+        
+        # Exécuter la recherche
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        products_data = loop.run_until_complete(search_real_products())
+        loop.close()
+        
+        response = {
+            'type': 'product_search_results',
+            'message': f"🔍 **Résultats pour '{search_term}'**\n\n",
+            'suggestions': []
+        }
+        
+        if products_data.get('success') and products_data.get('products'):
+            # Produits trouvés - affichage google-like
+            found_products = products_data['products'][:5]  # Max 5 résultats
             
-            # Construire la réponse
-            response = {
-                'type': 'product_search_results',
-                'message': f"🔍 **Résultats pour '{product_refs[0]}'**\n\n",
-                'search_results': search_results,
-                'suggestions': []
+            response['message'] += f"✅ **{len(found_products)} résultat(s) trouvé(s) :**\n\n"
+            
+            for i, product in enumerate(found_products, 1):
+                product_code = product.get('ItemCode', 'Sans référence')
+                product_name = product.get('ItemName', 'Sans nom')
+                product_price = product.get('UnitPrice', 0)
+                product_stock = product.get('StockQuantity', 0)
+                
+                response['message'] += f"**{i}. {product_code} - {product_name}**\n"
+                if product_price > 0:
+                    response['message'] += f"   💰 Prix: {product_price:.2f}€ HT\n"
+                response['message'] += f"   📦 Stock: {product_stock} unités\n"
+                response['message'] += f"   🆔 Code: {product_code}\n\n"
+            
+            # Suggestions d'actions
+            best_product = found_products[0]
+            response['suggestions'] = [
+                f"Utiliser {best_product['ItemCode']}",
+                "Affiner la recherche",
+                f"Créer '{search_term}'" if search_term.upper() not in [p['ItemCode'].upper() for p in found_products] else "Nouveau produit"
+            ]
+            
+            if len(products_data['products']) > 5:
+                response['message'] += f"... et {len(products_data['products']) - 5} autres résultats.\n\n"
+                response['suggestions'].append("Voir tous les résultats")
+                
+        else:
+            # Aucun produit trouvé - proposer création
+            response['message'] += f"❌ **Aucun produit trouvé pour '{search_term}'**\n\n"
+            response['message'] += "💡 **Que souhaitez-vous faire ?**\n\n"
+            response['message'] += f"1. 🆕 **Créer le produit '{search_term}'**\n"
+            response['message'] += "2. 🔍 **Essayer une autre recherche**\n"
+            response['message'] += "3. 📦 **Voir tous les produits disponibles**\n"
+            response['message'] += "4. 📞 **Contacter le support pour vérifier la référence**\n"
+            
+            response['suggestions'] = [
+                f"Créer '{search_term}'",
+                "Nouvelle recherche", 
+                "Tous les produits",
+                "Contacter support"
+            ]
+            response['create_option'] = {
+                'product_ref': search_term,
+                'action': 'create_product'
             }
-            
-            best_result = search_results[0]['result']
-            if best_result['has_suggestions']:
-                primary = best_result['primary_suggestion']
-                response['message'] += f"✅ **Trouvé :** {primary['suggested_value']}\n"
-                response['message'] += f"💡 {primary['explanation']}\n\n"
-                
-                # Informations produit si disponibles
-                if 'metadata' in primary and primary['metadata']:
-                    metadata = primary['metadata']
-                    if 'stock' in metadata:
-                        response['message'] += f"📊 **Stock :** {metadata['stock']} unités\n"
-                    if 'price' in metadata:
-                        response['message'] += f"💰 **Prix :** {metadata['price']}€\n"
-                
-                response['suggestions'] = [
-                    f"Ajouter {primary['suggested_value']} au devis",
-                    "Voir les détails complets",
-                    "Chercher des produits similaires"
-                ]
-            else:
-                response['message'] += f"❌ **Produit '{product_refs[0]}' non trouvé**\n\n"
-                response['message'] += "💡 **Suggestions :**\n"
-                response['message'] += "1. Vérifier la référence\n"
-                response['message'] += "2. Voir tous les produits\n"
-                response['message'] += "3. Recherche par catégorie"
-                
-                response['suggestions'] = [
-                    "Voir tous les produits",
-                    "Recherche par nom",
-                    "Aide sur les références"
-                ]
-            
-            return response
-            
+        
+        return response
+        
     except Exception as e:
-        logger.error(f"Erreur recherche produit: {e}")
+        logger.error(f"Erreur recherche produit google-like: {e}")
         return {
             'type': 'error',
-            'message': f"❌ **Erreur lors de la recherche**\n\n{str(e)}",
-            'suggestions': ["Réessayer", "Voir tous les produits"]
+            'message': f"❌ **Erreur lors de la recherche**\n\n{str(e)}\n\nVoulez-vous essayer une recherche manuelle ?",
+            'suggestions': [
+                "Nouvelle recherche",
+                "Tous les produits",
+                f"Créer '{product_refs[0] if product_refs else 'nouveau produit'}'"
+            ]
         }
 
 @router.get('/suggestions/{suggestion_type}')

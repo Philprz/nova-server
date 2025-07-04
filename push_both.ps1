@@ -36,6 +36,255 @@ if ($status) {
         $impacts = @()
         $allChangedFiles = $added + $modified + $deleted
         
+        # NOUVELLE FONCTIONNALITÉ : Analyse intelligente du contenu des modifications
+        function Analyze-CodeChanges {
+            param($files)
+            
+            $analysisResults = @{
+                'BugFixes' = @()
+                'NewFeatures' = @()
+                'Refactoring' = @()
+                'Configuration' = @()
+                'UI_UX' = @()
+                'Tests' = @()
+            }
+            
+            foreach ($file in $files) {
+                if (Test-Path $file) {
+                    # Obtenir le diff détaillé pour ce fichier
+                    $diffContent = git diff HEAD -- $file
+                    
+                    if ($diffContent) {
+                        # Analyser les lignes ajoutées (+) et supprimées (-)
+                        $addedLines = $diffContent | Where-Object { $_ -match '^\+[^+]' } | ForEach-Object { $_.Substring(1) }
+                        $removedLines = $diffContent | Where-Object { $_ -match '^-[^-]' } | ForEach-Object { $_.Substring(1) }
+                        
+                        # Détection de bug fixes
+                        $bugFixPatterns = @(
+                            'fix|bug|error|issue|problem|crash|exception|null|undefined',
+                            'try.*catch|exception|error.*handling',
+                            'validate|validation|check.*null|if.*null',
+                            'security|vulnerability|xss|sql.*injection|csrf'
+                        )
+                        
+                        foreach ($pattern in $bugFixPatterns) {
+                            if (($addedLines -join ' ') -match $pattern -or ($removedLines -join ' ') -match $pattern) {
+                                $analysisResults.BugFixes += @{
+                                    'File' = [System.IO.Path]::GetFileName($file)
+                                    'Type' = if ($pattern -match 'security') { 'Security Fix' } 
+                                            elseif ($pattern -match 'try.*catch') { 'Error Handling' }
+                                            elseif ($pattern -match 'validate') { 'Validation Fix' }
+                                            else { 'Bug Fix' }
+                                    'Details' = ($addedLines | Select-Object -First 2) -join '; '
+                                }
+                                break
+                            }
+                        }
+                        
+                        # Détection de nouvelles fonctionnalités
+                        $featurePatterns = @(
+                            'def |function |class |interface |async |await',
+                            'new.*|add.*|create.*|implement.*',
+                            'import.*|from.*import|require\(',
+                            'route|endpoint|api|service'
+                        )
+                        
+                        foreach ($pattern in $featurePatterns) {
+                            if (($addedLines -join ' ') -match $pattern) {
+                                $analysisResults.NewFeatures += @{
+                                    'File' = [System.IO.Path]::GetFileName($file)
+                                    'Type' = if ($pattern -match 'route|endpoint|api') { 'New API Endpoint' }
+                                            elseif ($pattern -match 'class |interface') { 'New Class/Interface' }
+                                            elseif ($pattern -match 'def |function') { 'New Function' }
+                                            elseif ($pattern -match 'import') { 'New Dependency' }
+                                            else { 'New Feature' }
+                                    'Details' = ($addedLines | Where-Object { $_ -match $pattern } | Select-Object -First 1)
+                                }
+                                break
+                            }
+                        }
+                        
+                        # Détection de refactoring
+                        if ($addedLines.Count -gt 0 -and $removedLines.Count -gt 0) {
+                            $refactoringPatterns = @(
+                                'rename|refactor|optimize|improve|clean',
+                                'move.*|extract.*|split.*'
+                            )
+                            
+                            foreach ($pattern in $refactoringPatterns) {
+                                if (($addedLines -join ' ') -match $pattern -or ($removedLines -join ' ') -match $pattern) {
+                                    $analysisResults.Refactoring += @{
+                                        'File' = [System.IO.Path]::GetFileName($file)
+                                        'Type' = 'Code Refactoring'
+                                        'Details' = "Refactored code structure"
+                                    }
+                                    break
+                                }
+                            }
+                        }
+                        
+                        # Détection de modifications de configuration
+                        if ($file -match '\.(json|yaml|yml|xml|ini|conf|config|env)$') {
+                            $analysisResults.Configuration += @{
+                                'File' = [System.IO.Path]::GetFileName($file)
+                                'Type' = 'Configuration Update'
+                                'Details' = if ($addedLines.Count -gt $removedLines.Count) { 'Added configuration' } 
+                                           elseif ($removedLines.Count -gt $addedLines.Count) { 'Removed configuration' }
+                                           else { 'Updated configuration' }
+                            }
+                        }
+                        
+                        # Détection de modifications UI/UX
+                        if ($file -match '\.(css|scss|html|js|jsx|ts|tsx)$') {
+                            $uiPatterns = @('style|css|color|font|layout|responsive|ui|ux|design')
+                            foreach ($pattern in $uiPatterns) {
+                                if (($addedLines -join ' ') -match $pattern) {
+                                    $analysisResults.UI_UX += @{
+                                        'File' = [System.IO.Path]::GetFileName($file)
+                                        'Type' = 'UI/UX Update'
+                                        'Details' = 'Interface improvements'
+                                    }
+                                    break
+                                }
+                            }
+                        }
+                        
+                        # Détection de modifications de tests
+                        if ($file -match '(test|spec)' -or ($addedLines -join ' ') -match 'test|assert|expect|should') {
+                            $analysisResults.Tests += @{
+                                'File' = [System.IO.Path]::GetFileName($file)
+                                'Type' = if ($addedLines.Count -gt $removedLines.Count) { 'Added Tests' } else { 'Updated Tests' }
+                                'Details' = 'Test coverage changes'
+                            }
+                        }
+                    }
+                }
+            }
+            
+            return $analysisResults
+        }
+
+        # Générer un message de commit intelligent basé sur l'analyse
+        function Generate-SmartCommitMessage {
+            param($analysis, $summary)
+            
+            $commitParts = @()
+            $commitType = "feat" # Par défaut
+            $scope = ""
+            
+            # Déterminer le scope basé sur les fichiers modifiés
+            $scopePatterns = @{
+                'api|routes|endpoints' = 'api'
+                'db|database|models|migration' = 'db'
+                'ui|frontend|templates|static' = 'ui'
+                'auth|login|security' = 'auth'
+                'config|settings|env' = 'config'
+                'test|spec' = 'test'
+                'doc|readme|guide' = 'docs'
+                'workflow|scripts' = 'ci'
+            }
+            
+            foreach ($pattern in $scopePatterns.Keys) {
+                if ($allChangedFiles -match $pattern) {
+                    $scope = $scopePatterns[$pattern]
+                    break
+                }
+            }
+            
+            # Prioriser les types de modifications
+            if ($analysis.BugFixes.Count -gt 0) {
+                $commitType = "fix"
+                $mainFix = $analysis.BugFixes[0]
+                $commitParts += "fix $($mainFix.Type.ToLower()) in $($mainFix.File)"
+            }
+            elseif ($analysis.NewFeatures.Count -gt 0) {
+                $commitType = "feat"
+                $mainFeature = $analysis.NewFeatures[0]
+                $commitParts += "add $($mainFeature.Type.ToLower()) in $($mainFeature.File)"
+            }
+            elseif ($analysis.Refactoring.Count -gt 0) {
+                $commitType = "refactor"
+                $commitParts += "refactor code structure in $($analysis.Refactoring.Count) file(s)"
+            }
+            elseif ($analysis.Configuration.Count -gt 0) {
+                $commitType = "config"
+                $configChange = $analysis.Configuration[0]
+                $commitParts += "$($configChange.Details.ToLower()) in $($configChange.File)"
+            }
+            elseif ($analysis.UI_UX.Count -gt 0) {
+                $commitType = "style"
+                $commitParts += "improve UI/UX in $($analysis.UI_UX.Count) file(s)"
+            }
+            elseif ($analysis.Tests.Count -gt 0) {
+                $commitType = "test"
+                $testChange = $analysis.Tests[0]
+                $commitParts += "$($testChange.Type.ToLower())"
+            }
+            
+            # Construire le message final
+            $mainMessage = if ($commitParts.Count -gt 0) { 
+                ($commitParts -join " ").Trim()
+            } else { 
+                ($summary[0] -replace "^[+*-] ", "").ToLower()
+            }
+            
+            # Appliquer le format Conventional Commits
+            $finalMessage = if ($scope) {
+                "$commitType($scope): $mainMessage"
+            } else {
+                "$commitType`: $mainMessage"
+            }
+            
+            return $finalMessage
+        }
+        
+        # Exécuter l'analyse intelligente
+        Write-Host "Analyse intelligente des modifications en cours..." -ForegroundColor "Cyan"
+        $codeAnalysis = Analyze-CodeChanges -files $allChangedFiles
+        
+        # Afficher un résumé de l'analyse dans la console
+        Write-Host ""
+        Write-Host "=== RÉSULTATS DE L'ANALYSE INTELLIGENTE ===" -ForegroundColor "Yellow"
+        
+        $totalAnalyzedItems = $codeAnalysis.BugFixes.Count + $codeAnalysis.NewFeatures.Count + $codeAnalysis.Refactoring.Count + $codeAnalysis.Configuration.Count + $codeAnalysis.UI_UX.Count + $codeAnalysis.Tests.Count
+        
+        if ($totalAnalyzedItems -gt 0) {
+            if ($codeAnalysis.BugFixes.Count -gt 0) {
+                Write-Host "Bug Fixes détectés: $($codeAnalysis.BugFixes.Count)" -ForegroundColor "Red"
+                foreach ($fix in $codeAnalysis.BugFixes | Select-Object -First 2) {
+                    Write-Host "   - $($fix.Type) dans $($fix.File)" -ForegroundColor "DarkRed"
+                }
+            }
+            
+            if ($codeAnalysis.NewFeatures.Count -gt 0) {
+                Write-Host "Nouvelles fonctionnalités: $($codeAnalysis.NewFeatures.Count)" -ForegroundColor "Green"
+                foreach ($feature in $codeAnalysis.NewFeatures | Select-Object -First 2) {
+                    Write-Host "   - $($feature.Type) dans $($feature.File)" -ForegroundColor "DarkGreen"
+                }
+            }
+            
+            if ($codeAnalysis.Refactoring.Count -gt 0) {
+                Write-Host "Refactoring détecté: $($codeAnalysis.Refactoring.Count) fichier(s)" -ForegroundColor "Blue"
+            }
+            
+            if ($codeAnalysis.Configuration.Count -gt 0) {
+                Write-Host "Modifications config: $($codeAnalysis.Configuration.Count) fichier(s)" -ForegroundColor "Magenta"
+            }
+            
+            if ($codeAnalysis.UI_UX.Count -gt 0) {
+                Write-Host "Améliorations UI/UX: $($codeAnalysis.UI_UX.Count) fichier(s)" -ForegroundColor "Cyan"
+            }
+            
+            if ($codeAnalysis.Tests.Count -gt 0) {
+                Write-Host "Modifications tests: $($codeAnalysis.Tests.Count) fichier(s)" -ForegroundColor "Yellow"
+            }
+        } else {
+            Write-Host "Aucune modification spécifique détectée - Changements généraux" -ForegroundColor "Gray"
+        }
+        
+        Write-Host "================================================" -ForegroundColor "Yellow"
+        Write-Host ""
+        
         # Catégoriser les impacts
         $frontendFiles = $allChangedFiles | Where-Object { $_ -match '\.(js|jsx|ts|tsx|css|scss|html)$' }
         $backendFiles = $allChangedFiles | Where-Object { $_ -match '\.(py|java|cs|go|rb|php)$' }
@@ -48,57 +297,55 @@ if ($status) {
         # Analyser les fichiers critiques
         $criticalChanges = @()
         if ($allChangedFiles | Where-Object { $_ -match '(\.env|secrets|credentials|password)' }) {
-            $criticalChanges += "⚠️ Fichiers sensibles modifiés (secrets/credentials)"
+            $criticalChanges += "Fichiers sensibles modifiés (secrets/credentials)"
         }
         if ($packageFiles.Count -gt 0) {
-            $criticalChanges += "📦 Dépendances modifiées - npm/pip install requis"
+            $criticalChanges += "Dépendances modifiées - npm/pip install requis"
         }
         if ($dbFiles.Count -gt 0) {
-            $criticalChanges += "🗄️ Modifications base de données - migration requise"
+            $criticalChanges += "Modifications base de données - migration requise"
         }
         
         # Construire l'analyse d'impact
         if ($frontendFiles.Count -gt 0) {
-            $impacts += "🎨 Frontend: $($frontendFiles.Count) fichier(s) - Impact UI/UX"
+            $impacts += "Frontend: $($frontendFiles.Count) fichier(s) - Impact UI/UX"
         }
         if ($backendFiles.Count -gt 0) {
-            $impacts += "⚙️ Backend: $($backendFiles.Count) fichier(s) - Impact API/Logique"
+            $impacts += "Backend: $($backendFiles.Count) fichier(s) - Impact API/Logique"
         }
         if ($configFiles.Count -gt 0) {
-            $impacts += "🔧 Configuration: $($configFiles.Count) fichier(s) - Redémarrage possible"
+            $impacts += "Configuration: $($configFiles.Count) fichier(s) - Redémarrage possible"
         }
         if ($testFiles.Count -gt 0) {
-            $impacts += "🧪 Tests: $($testFiles.Count) fichier(s) - Couverture modifiée"
+            $impacts += "Tests: $($testFiles.Count) fichier(s) - Couverture modifiée"
         }
         if ($docFiles.Count -gt 0) {
-            $impacts += "📄 Documentation: $($docFiles.Count) fichier(s)"
+            $impacts += "Documentation: $($docFiles.Count) fichier(s)"
         }
         
-        # Analyser les modules/composants affectés
-        $components = @()
-        foreach ($file in $allChangedFiles) {
-            if ($file -match "src[/\\]components[/\\]([^/\\]+)") {
-                $components += $matches[1]
-            } elseif ($file -match "modules[/\\]([^/\\]+)") {
-                $components += $matches[1]
-            } elseif ($file -match "features[/\\]([^/\\]+)") {
-                $components += $matches[1]
-            }
+        # Ajouter les résultats de l'analyse intelligente aux impacts
+        if ($codeAnalysis.BugFixes.Count -gt 0) {
+            $impacts += "Bug Fixes: $($codeAnalysis.BugFixes.Count) correction(s) identifiée(s)"
         }
-        $uniqueComponents = $components | Select-Object -Unique
-        
+        if ($codeAnalysis.NewFeatures.Count -gt 0) {
+            $impacts += "New Features: $($codeAnalysis.NewFeatures.Count) nouvelle(s) fonctionnalité(s)"
+        }
+        if ($codeAnalysis.Refactoring.Count -gt 0) {
+            $impacts += "Refactoring: $($codeAnalysis.Refactoring.Count) amélioration(s) de code"
+        }
+
         # Construire un résumé détaillé
         $summary = @()
         if ($added.Count -gt 0) {
-            $summary += "➕ Ajouté: " + ($added | Select-Object -First 3 | ForEach-Object { [System.IO.Path]::GetFileName($_) }) -join ", "
+            $summary += "Ajouté: " + ($added | Select-Object -First 3 | ForEach-Object { [System.IO.Path]::GetFileName($_) }) -join ", "
             if ($added.Count -gt 3) { $summary[-1] += " (+$($added.Count - 3) autres)" }
         }
         if ($modified.Count -gt 0) {
-            $summary += "📝 Modifié: " + ($modified | Select-Object -First 3 | ForEach-Object { [System.IO.Path]::GetFileName($_) }) -join ", "
+            $summary += "Modifié: " + ($modified | Select-Object -First 3 | ForEach-Object { [System.IO.Path]::GetFileName($_) }) -join ", "
             if ($modified.Count -gt 3) { $summary[-1] += " (+$($modified.Count - 3) autres)" }
         }
         if ($deleted.Count -gt 0) {
-            $summary += "🗑️ Supprimé: " + ($deleted | Select-Object -First 3 | ForEach-Object { [System.IO.Path]::GetFileName($_) }) -join ", "
+            $summary += "Supprimé: " + ($deleted | Select-Object -First 3 | ForEach-Object { [System.IO.Path]::GetFileName($_) }) -join ", "
             if ($deleted.Count -gt 3) { $summary[-1] += " (+$($deleted.Count - 3) autres)" }
         }
         
@@ -108,137 +355,79 @@ if ($status) {
             $filesChanged = $matches[1]
             $insertions = if ($matches[2]) { $matches[2] } else { "0" }
             $deletions = if ($matches[3]) { $matches[3] } else { "0" }
-            $summary += "📊 Total: $filesChanged fichier(s), +$insertions/-$deletions lignes"
+            $summary += "Total: $filesChanged fichier(s), +$insertions/-$deletions lignes"
         }
         
-        # Créer la suggestion de message
-        $suggestion = if ($summary.Count -gt 0) {
-            $summary[0] -replace "^[➕📝🗑️] ", ""
-        } else {
-            "Update POC NOVA"
+        # Créer la suggestion de message INTELLIGENTE
+        $suggestion = Generate-SmartCommitMessage -analysis $codeAnalysis -summary $summary
+        
+        # Créer un rapport détaillé de l'analyse intelligente
+        $intelligentAnalysisReport = @()
+        if ($codeAnalysis.BugFixes.Count -gt 0) {
+            $intelligentAnalysisReport += "CORRECTIONS DE BUGS DÉTECTÉES:"
+            foreach ($fix in $codeAnalysis.BugFixes) {
+                $intelligentAnalysisReport += "   • $($fix.Type) dans $($fix.File)"
+                if ($fix.Details) { $intelligentAnalysisReport += "     - $($fix.Details)" }
+            }
+            $intelligentAnalysisReport += ""
         }
         
-        # Créer la fenêtre de dialogue améliorée
-        Add-Type -AssemblyName System.Windows.Forms
-        Add-Type -AssemblyName System.Drawing
-        
-        $form = New-Object System.Windows.Forms.Form
-        $form.Text = "Message de commit - Analyse d'impact"
-        $form.Size = New-Object System.Drawing.Size(800, 650)
-        $form.StartPosition = "CenterScreen"
-        $form.Font = New-Object System.Drawing.Font("Consolas", 9)
-
-        # Label principal
-        $label = New-Object System.Windows.Forms.Label
-        $label.Location = New-Object System.Drawing.Point(10, 10)
-        $label.Size = New-Object System.Drawing.Size(760, 20)
-        $label.Text = "Message de commit :"
-
-        # TextBox pour le message
-        $textBox = New-Object System.Windows.Forms.TextBox
-        $textBox.Location = New-Object System.Drawing.Point(10, 35)
-        $textBox.Size = New-Object System.Drawing.Size(760, 25)
-        $textBox.Text = $suggestion
-        $textBox.Font = New-Object System.Drawing.Font("Consolas", 10)
-        $textBox.Select($suggestion.Length, 0)
-
-        # Label pour le résumé
-        $summaryLabel = New-Object System.Windows.Forms.Label
-        $summaryLabel.Location = New-Object System.Drawing.Point(10, 70)
-        $summaryLabel.Size = New-Object System.Drawing.Size(760, 20)
-        $summaryLabel.Text = "Résumé des changements :"
-        $summaryLabel.Font = New-Object System.Drawing.Font("Consolas", 9, [System.Drawing.FontStyle]::Bold)
-
-        # TextBox pour afficher le résumé détaillé
-        $summaryBox = New-Object System.Windows.Forms.TextBox
-        $summaryBox.Location = New-Object System.Drawing.Point(10, 95)
-        $summaryBox.Size = New-Object System.Drawing.Size(760, 100)
-        $summaryBox.Multiline = $true
-        $summaryBox.ScrollBars = "Vertical"
-        $summaryBox.ReadOnly = $true
-        $summaryBox.Text = ($summary -join "`r`n")
-        $summaryBox.Font = New-Object System.Drawing.Font("Consolas", 9)
-
-        # Label pour l'incidence
-        $impactLabel = New-Object System.Windows.Forms.Label
-        $impactLabel.Location = New-Object System.Drawing.Point(10, 205)
-        $impactLabel.Size = New-Object System.Drawing.Size(760, 20)
-        $impactLabel.Text = "Analyse d'incidence :"
-        $impactLabel.Font = New-Object System.Drawing.Font("Consolas", 9, [System.Drawing.FontStyle]::Bold)
-        $impactLabel.ForeColor = [System.Drawing.Color]::DarkBlue
-
-        # TextBox pour l'analyse d'impact
-        $impactBox = New-Object System.Windows.Forms.TextBox
-        $impactBox.Location = New-Object System.Drawing.Point(10, 230)
-        $impactBox.Size = New-Object System.Drawing.Size(760, 120)
-        $impactBox.Multiline = $true
-        $impactBox.ScrollBars = "Vertical"
-        $impactBox.ReadOnly = $true
-        
-        $impactText = ""
-        if ($criticalChanges.Count -gt 0) {
-            $impactText += "=== CHANGEMENTS CRITIQUES ===`r`n"
-            $impactText += ($criticalChanges -join "`r`n") + "`r`n`r`n"
-        }
-        if ($impacts.Count -gt 0) {
-            $impactText += "=== ZONES IMPACTÉES ===`r`n"
-            $impactText += ($impacts -join "`r`n") + "`r`n"
-        }
-        if ($uniqueComponents.Count -gt 0) {
-            $impactText += "`r`n=== COMPOSANTS/MODULES AFFECTÉS ===`r`n"
-            $impactText += "🔸 " + ($uniqueComponents -join "`r`n🔸 ")
+        if ($codeAnalysis.NewFeatures.Count -gt 0) {
+            $intelligentAnalysisReport += "NOUVELLES FONCTIONNALITÉS DÉTECTÉES:"
+            foreach ($feature in $codeAnalysis.NewFeatures) {
+                $intelligentAnalysisReport += "   • $($feature.Type) dans $($feature.File)"
+                if ($feature.Details) { $intelligentAnalysisReport += "     - $($feature.Details)" }
+            }
+            $intelligentAnalysisReport += ""
         }
         
-        $impactBox.Text = $impactText
-        $impactBox.Font = New-Object System.Drawing.Font("Consolas", 9)
-        if ($criticalChanges.Count -gt 0) {
-            $impactBox.ForeColor = [System.Drawing.Color]::DarkRed
+        if ($codeAnalysis.Refactoring.Count -gt 0) {
+            $intelligentAnalysisReport += "REFACTORING DÉTECTÉ:"
+            foreach ($refactor in $codeAnalysis.Refactoring) {
+                $intelligentAnalysisReport += "   • $($refactor.Type) dans $($refactor.File)"
+            }
+            $intelligentAnalysisReport += ""
         }
-
-        # Label pour les détails
-        $detailsLabel = New-Object System.Windows.Forms.Label
-        $detailsLabel.Location = New-Object System.Drawing.Point(10, 360)
-        $detailsLabel.Size = New-Object System.Drawing.Size(760, 20)
-        $detailsLabel.Text = "Détails techniques :"
-        $detailsLabel.Font = New-Object System.Drawing.Font("Consolas", 9, [System.Drawing.FontStyle]::Bold)
-
-        # TextBox pour les détails des changements
-        $detailsBox = New-Object System.Windows.Forms.TextBox
-        $detailsBox.Location = New-Object System.Drawing.Point(10, 385)
-        $detailsBox.Size = New-Object System.Drawing.Size(760, 120)
-        $detailsBox.Multiline = $true
-        $detailsBox.ScrollBars = "Both"
-        $detailsBox.ReadOnly = $true
-        $detailsBox.Text = $diffStats
-        $detailsBox.Font = New-Object System.Drawing.Font("Consolas", 8)
-
-        # Boutons
-        $okButton = New-Object System.Windows.Forms.Button
-        $okButton.Location = New-Object System.Drawing.Point(300, 530)
-        $okButton.Size = New-Object System.Drawing.Size(100, 30)
-        $okButton.Text = "OK"
-        $okButton.DialogResult = [System.Windows.Forms.DialogResult]::OK
-        $form.AcceptButton = $okButton
-
-        $cancelButton = New-Object System.Windows.Forms.Button
-        $cancelButton.Location = New-Object System.Drawing.Point(420, 530)
-        $cancelButton.Size = New-Object System.Drawing.Size(100, 30)
-        $cancelButton.Text = "Annuler"
-        $cancelButton.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
-
-        # Ajouter tous les contrôles
-        $form.Controls.AddRange(@($label, $textBox, $summaryLabel, $summaryBox, $impactLabel, $impactBox, $detailsLabel, $detailsBox, $okButton, $cancelButton))
-        $form.Topmost = $true
-
-        $result = $form.ShowDialog()
-
-        if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
-            $CommitMessage = $textBox.Text
-        } elseif ($result -eq [System.Windows.Forms.DialogResult]::Cancel) {
-            Write-Host "❌ Commit annulé par l'utilisateur" -ForegroundColor "Red"
-            exit
-        } else {
+        
+        if ($codeAnalysis.Configuration.Count -gt 0) {
+            $intelligentAnalysisReport += "MODIFICATIONS DE CONFIGURATION:"
+            foreach ($config in $codeAnalysis.Configuration) {
+                $intelligentAnalysisReport += "   • $($config.Details) dans $($config.File)"
+            }
+            $intelligentAnalysisReport += ""
+        }
+        
+        if ($codeAnalysis.UI_UX.Count -gt 0) {
+            $intelligentAnalysisReport += "AMÉLIORATIONS UI/UX:"
+            foreach ($ui in $codeAnalysis.UI_UX) {
+                $intelligentAnalysisReport += "   • $($ui.Type) dans $($ui.File)"
+            }
+            $intelligentAnalysisReport += ""
+        }
+        
+        if ($codeAnalysis.Tests.Count -gt 0) {
+            $intelligentAnalysisReport += "MODIFICATIONS DE TESTS:"
+            foreach ($test in $codeAnalysis.Tests) {
+                $intelligentAnalysisReport += "   • $($test.Type) dans $($test.File)"
+            }
+            $intelligentAnalysisReport += ""
+        }
+        
+        if ($intelligentAnalysisReport.Count -eq 0) {
+            $intelligentAnalysisReport += "Aucune modification spécifique détectée par l'analyse intelligente"
+            $intelligentAnalysisReport += "Les changements semblent être des modifications générales"
+        }
+        
+        # Demander confirmation avec le message suggéré
+        Write-Host "Message de commit suggéré par l'IA:" -ForegroundColor "Green"
+        Write-Host "$suggestion" -ForegroundColor "Yellow"
+        Write-Host ""
+        
+        $response = Read-Host "Utiliser ce message? (O/n)"
+        if ($response -eq "" -or $response -eq "O" -or $response -eq "o") {
             $CommitMessage = $suggestion
+        } else {
+            $CommitMessage = Read-Host "Entrez votre message de commit"
         }
     }
     
@@ -259,9 +448,9 @@ Write-Host ""
 Write-Host "Push vers repository principal (www-it-spirit-com)..." -ForegroundColor "Green"
 try {
     git push origin main
-    Write-Host "✅ Push réussi vers repository principal" -ForegroundColor "Green"
+    Write-Host "Push réussi vers repository principal" -ForegroundColor "Green"
 } catch {
-    Write-Host "❌ Erreur push repository principal: $_" -ForegroundColor "Red"
+    Write-Host "Erreur push repository principal: $_" -ForegroundColor "Red"
 }
 
 Write-Host ""
@@ -270,9 +459,9 @@ Write-Host ""
 Write-Host "Push vers repository personnel (Philprz)..." -ForegroundColor "Yellow"
 try {
     git push personal main  
-    Write-Host "✅ Push réussi vers repository personnel" -ForegroundColor "Green"
+    Write-Host "Push réussi vers repository personnel" -ForegroundColor "Green"
 } catch {
-    Write-Host "❌ Erreur push repository personnel: $_" -ForegroundColor "Red"
+    Write-Host "Erreur push repository personnel: $_" -ForegroundColor "Red"
 }
 
 Write-Host ""

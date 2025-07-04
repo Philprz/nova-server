@@ -8,10 +8,7 @@ from routes.routes_quote_details import router as quote_details_router
 from routes.routes_progress import router as progress_router
 from routes import routes_suggestions
 
-app.add_middleware(
-    TrustedHostMiddleware, 
-    allowed_hosts=["178.33.233.120", "localhost", "127.0.0.1"]
-)
+
 # Import seulement des routes qui existent réellement
 try:
     from routes.routes_sync import router as sync_router
@@ -77,7 +74,10 @@ app = FastAPI(
     description="Middleware d'intégration LLM - SAP - Salesforce",
     version="1.0.0"
 )
-
+app.add_middleware(
+    TrustedHostMiddleware, 
+    allowed_hosts=["178.33.233.120", "localhost", "127.0.0.1"]
+)
 # Monter le dossier static pour servir les fichiers statiques
 if os.path.exists("static"):
     app.mount("/static", StaticFiles(directory="static"), name="static")

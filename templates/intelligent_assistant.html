@@ -483,11 +483,11 @@
                 <button class="action-btn primary" onclick="startNewQuoteWorkflow()">
                     📝 Nouveau Devis
                 </button>
-                <button class="action-btn" onclick="openClientSearch()">
+                <button class="action-btn" onclick="sendQuickMessage('rechercher client')">
                     👥 Rechercher Client
                 </button>
-                <button class="action-btn" onclick="openProductSearch()">
-                    📦 Produits
+                <button class="action-btn" onclick="sendQuickMessage('rechercher produit')">
+                    📦 Rechercher Produits
                 </button>
                 <button class="action-btn" onclick="sendQuickMessage('Aide')">
                     ❓ Aide
@@ -733,11 +733,18 @@
                 case 'new_quote':
                     sendQuickMessage('Créer un nouveau devis');
                     break;
+                
                 case 'show_clients':
-                    loadClientsList();
+                    sendMessage('rechercher client');
                     break;
                 case 'show_products':
-                    loadProductsList();
+                    sendMessage('rechercher produit');
+                    break;
+                case 'new_client':
+                    sendMessage('créer nouveau client');
+                    break;
+                case 'new_product':
+                    sendMessage('créer nouveau produit');
                     break;
                 case 'help':
                     sendQuickMessage('Aide');
