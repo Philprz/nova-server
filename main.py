@@ -2,10 +2,16 @@
 import os
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from routes.routes_quote_details import router as quote_details_router
 from routes.routes_progress import router as progress_router
 from routes import routes_suggestions
 
+app.add_middleware(
+    TrustedHostMiddleware, 
+    allowed_hosts=["178.33.233.120", "localhost", "127.0.0.1"]
+)
 # Import seulement des routes qui existent réellement
 try:
     from routes.routes_sync import router as sync_router
