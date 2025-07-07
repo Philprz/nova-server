@@ -456,6 +456,16 @@ if ($LASTEXITCODE -eq 0) {
 
 Write-Host ""
 
+# REPOSITORY SECONDAIRE DÉSACTIVÉ - Repository 'nova-poc-commercial' n'existe pas
+# Si vous souhaitez réactiver le push vers un repository secondaire :
+# 1. Créez le repository 'nova-poc-commercial' sur GitHub
+# 2. Décommentez les lignes ci-dessous
+
+# Push vers repository secondaire (personnel) - DÉSACTIVÉ
+Write-Host "Repository secondaire désactivé (nova-poc-commercial n'existe pas)" -ForegroundColor "Yellow"
+Write-Host "Pour réactiver : créez le repository sur GitHub et décommentez les lignes dans ce script" -ForegroundColor "Gray"
+
+<#
 # Push vers repository secondaire (personnel)
 Write-Host "Push vers repository secondaire (nova-poc-commercial)..." -ForegroundColor "Blue"
 
@@ -485,6 +495,7 @@ if ($LASTEXITCODE -ne 0) {
         Write-Host "Le push vers le repository principal a réussi, mais pas vers le secondaire" -ForegroundColor "Yellow"
     }
 }
+#>
 
 Write-Host ""
 Write-Host "=== PUSH TERMINÉ ===" -ForegroundColor "Cyan"
