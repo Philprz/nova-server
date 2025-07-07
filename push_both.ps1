@@ -472,13 +472,13 @@ Write-Host "Push vers repository secondaire (nova-poc-commercial)..." -Foregroun
 # Ajouter le remote secondaire s'il n'existe pas
 $remotes = git remote
 if ($remotes -notcontains "secondary") {
-    git remote add secondary https://github.com/Symple44/nova-poc-commercial.git
+    git remote add secondary https://github.com/Symple44/NOVAPOC.git
     Write-Host "Remote secondaire ajouté" -ForegroundColor "Yellow"
 }
 
 # Vérifier d'abord si le repository existe
 Write-Host "Vérification de l'existence du repository secondaire..." -ForegroundColor "Yellow"
-$repoCheck = git ls-remote https://github.com/Symple44/nova-poc-commercial.git 2>&1
+$repoCheck = git ls-remote https://github.com/Symple44/NOVAPOC.git 2>&1
 if ($LASTEXITCODE -ne 0) {
     Write-Host "ATTENTION: Le repository secondaire 'nova-poc-commercial' n'existe pas sur GitHub" -ForegroundColor "Red"
     Write-Host "Erreur: $repoCheck" -ForegroundColor "Red"
