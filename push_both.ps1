@@ -465,7 +465,7 @@ if ($remotes -notcontains "secondary") {
 
 # Vérifier d'abord si le repository existe
 Write-Host "Vérification de l'existence du repository secondaire..." -ForegroundColor "Yellow"
-$repoCheck = git ls-remote https://github.com/www-it-spirit-com/NOVAPOC.git 2>&1
+$repoCheck = git ls-remote https://github.com/Philprz/nova-server.git 2>&1
 if ($LASTEXITCODE -ne 0) {
     Write-Host "ATTENTION: Le repository secondaire 'nova-poc-commercial' n'existe pas sur GitHub" -ForegroundColor "Red"
     Write-Host "Erreur: $repoCheck" -ForegroundColor "Red"
