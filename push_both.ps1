@@ -465,7 +465,7 @@ Write-Host ""
 Write-Host "Repository secondaire désactivé (nova-poc-commercial n'existe pas)" -ForegroundColor "Yellow"
 Write-Host "Pour réactiver : créez le repository sur GitHub et décommentez les lignes dans ce script" -ForegroundColor "Gray"
 
-<#
+
 # Push vers repository secondaire (personnel)
 Write-Host "Push vers repository secondaire (nova-poc-commercial)..." -ForegroundColor "Blue"
 
@@ -495,7 +495,7 @@ if ($LASTEXITCODE -ne 0) {
         Write-Host "Le push vers le repository principal a réussi, mais pas vers le secondaire" -ForegroundColor "Yellow"
     }
 }
-#>
+
 
 Write-Host ""
 Write-Host "=== PUSH TERMINÉ ===" -ForegroundColor "Cyan"
