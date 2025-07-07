@@ -341,9 +341,6 @@ conversation_manager = ConversationManager()
 async def chat_with_nova(message_data: ChatMessage):
     """
     🤖 Endpoint principal pour converser avec NOVA
-    
-    Analyse le message utilisateur et génère une réponse intelligente
-    avec des suggestions proactives.
     """
     try:
         user_message = message_data.message.strip()
@@ -354,7 +351,67 @@ async def chat_with_nova(message_data: ChatMessage):
         # Analyser l'intention
         intent_analysis = conversation_manager.analyze_intent(user_message)
         
-        # Générer la réponse selon l'intention
+        # ✅ NOUVELLE LOGIQUE - Détection automatique des devis
+        if detect_quote_request(user_message):
+            logger.info(f"🎯 Demande de devis détectée automatiquement: {user_message}")
+            
+            try:
+                # Lancer directement le workflow de création
+                from workflow.devis_workflow import DevisWorkflow
+                
+                # Mode production (pas draft) pour créer réellement le devis
+                workflow = DevisWorkflow(validation_enabled=True, draft_mode=False)
+                
+                # Exécuter le workflow avec le message complet
+                workflow_result = await workflow.process_prompt(user_message)
+                
+                if workflow_result.get('success'):
+                    response = {
+                        'type': 'quote_created',
+                        'message': f"✅ **Devis créé avec succès !**\n\n📋 **Référence :** {workflow_result.get('quote_id', 'N/A')}\n💰 **Montant :** {workflow_result.get('total_amount', 'N/A')}€\n🏢 **Client :** {workflow_result.get('client_name', 'N/A')}",
+                        'quote_data': workflow_result,
+                        'suggestions': ["Voir le devis", "Créer un nouveau devis", "Modifier ce devis"]
+                    }
+                else:
+                    # Si échec, proposer des alternatives
+                    error_msg = workflow_result.get('message', 'Erreur inconnue')
+                    response = {
+                        'type': 'quote_error',
+                        'message': f"❌ **Impossible de créer le devis**\n\n{error_msg}\n\n💡 **Que faire ?**\n• Vérifier les informations\n• Créer le client s'il n'existe pas\n• Utiliser l'interface classique",
+                        'suggestions': ["Interface classique", "Créer le client", "Réessayer"]
+                    }
+                
+                # Sauvegarder dans l'historique
+                conversation_manager.conversation_history.append({
+                    'timestamp': datetime.now().isoformat(),
+                    'user_message': user_message,
+                    'intent': intent_analysis,
+                    'nova_response': response
+                })
+                
+                return ChatResponse(
+                    success=True,
+                    response=response,
+                    intent=intent_analysis,
+                    conversation_id=len(conversation_manager.conversation_history)
+                )
+                    
+            except Exception as e:
+                logger.error(f"Erreur workflow automatique: {e}")
+                response = {
+                    'type': 'system_error',
+                    'message': f"⚠️ **Erreur système**\n\n{str(e)}\n\nUtilisez l'interface classique pour créer votre devis.",
+                    'suggestions': ["Interface classique", "Aide"]
+                }
+                
+                return ChatResponse(
+                    success=True,
+                    response=response,
+                    intent=intent_analysis,
+                    conversation_id=len(conversation_manager.conversation_history)
+                )
+        
+        # Générer la réponse selon l'intention (logique existante)
         response = generate_intelligent_response(user_message, intent_analysis)
         
         # Sauvegarder dans l'historique
@@ -962,3 +1019,24 @@ async def get_products_list():
             'error': str(e),
             'message': "❌ **Erreur lors de la récupération des produits**"
         }
+def detect_quote_request(message: str) -> bool:
+    """Détecte si un message est une demande de devis"""
+    message_lower = message.lower()
+    
+    # Mots-clés de déclenchement pour les devis
+    quote_triggers = [
+        'devis pour', 'créer un devis', 'faire un devis', 'je veux un devis',
+        'quote for', 'create quote', 'quotation for',
+        'commande pour', 'commander', 'acheter',
+        'prix pour', 'tarif pour'
+    ]
+    
+    # Vérifier si le message contient une demande de devis
+    has_trigger = any(trigger in message_lower for trigger in quote_triggers)
+    
+    # Vérifier qu'il y a aussi des éléments de contexte (client, produit, quantité)
+    has_context = any(keyword in message_lower for keyword in [
+        'avec', 'pour', 'de', 'ref', 'prod', 'article', 'quantité', 'unité', 'corp', 'company', 'client'
+    ])
+    
+    return has_trigger and has_context

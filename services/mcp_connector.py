@@ -13,7 +13,13 @@ logger = logging.getLogger("mcp_connector")
 
 class MCPConnector:
     """Connecteur pour les appels MCP (Model Context Protocol)"""
+    # === ALIAS D'INSTANCE (pour compatibilité workflow) ===
     
+    def __init__(self):
+        # Créer des références vers les méthodes statiques
+        self.get_salesforce_accounts = MCPConnector.get_salesforce_accounts
+        self.get_sap_products = MCPConnector.get_sap_products
+
     @staticmethod
     async def call_salesforce_mcp(action: str, params: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -407,6 +413,61 @@ class MCPConnector:
             "entity_type": entity_type,
             "limit": limit
         })
+    @staticmethod
+    async def get_salesforce_accounts(limit: int = 100) -> Dict[str, Any]:
+        """
+        Récupère les comptes Salesforce
+        
+        Args:
+            limit: Nombre maximum de comptes à récupérer
+            
+        Returns:
+            Dict avec les comptes trouvés
+        """
+        try:
+            query = f"""
+            SELECT Id, Name, AccountNumber, Type, Industry, AnnualRevenue, 
+                   Phone, Website, Description, CreatedDate
+            FROM Account 
+            ORDER BY Name
+            LIMIT {limit}
+            """
+            
+            return await MCPConnector.call_salesforce_mcp("salesforce_query", {
+                "query": query
+            })
+            
+        except Exception as e:
+            logger.error(f"Erreur get_salesforce_accounts: {str(e)}")
+            return {"error": str(e), "records": []}
+    
+    @staticmethod
+    async def get_sap_products(limit: int = 100) -> Dict[str, Any]:
+        """
+        Récupère les produits SAP
+        
+        Args:
+            limit: Nombre maximum de produits à récupérer
+            
+        Returns:
+            Dict avec les produits trouvés
+        """
+        try:
+            result = await MCPConnector.call_sap_mcp("sap_read", {
+                "endpoint": f"/Items?$orderby=ItemCode&$top={limit}",
+                "method": "GET"
+            })
+            
+            if "error" not in result:
+                # Reformater pour correspondre à l'attente du workflow
+                products = result.get("value", [])
+                return {"products": products, "success": True}
+            else:
+                return {"error": result["error"], "products": []}
+                
+        except Exception as e:
+            logger.error(f"Erreur get_sap_products: {str(e)}")
+            return {"error": str(e), "products": []}
     
     @staticmethod
     async def get_sap_product_details(item_code: str) -> Dict[str, Any]:
