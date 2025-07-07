@@ -459,7 +459,7 @@ Write-Host "Push vers repository secondaire (NOVAPOC)..." -ForegroundColor "Blue
 # Ajouter le remote secondaire s'il n'existe pas
 $remotes = git remote
 if ($remotes -notcontains "secondary") {
-    git remote add secondary https://github.com/www-it-spirit-com/NOVAPOC.git
+    git remote add secondary https://github.com/Philprz/nova-server.git
     Write-Host "Remote secondaire ajouté" -ForegroundColor "Yellow"
 }
 
