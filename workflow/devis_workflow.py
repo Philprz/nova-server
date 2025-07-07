@@ -132,8 +132,15 @@ class DevisWorkflow:
             self._track_step_start("extract_entities", "Identification des besoins...")
             
             extracted_info = await self._extract_info_from_prompt(prompt)
+            self.context["extracted_info"] = extracted_info
+
+            # 🔍 DEBUG : Log du type d'action
+            logger.info(f"🎯 TYPE D'ACTION REÇU: {extracted_info.get('action_type', 'AUCUN')}")
+            logger.info(f"📋 DONNÉES EXTRAITES: {extracted_info}")
+
             # 🆕 NOUVEAU : Router selon le type d'action détecté
             action_type = extracted_info.get("action_type", "DEVIS")
+            logger.info(f"🚀 ROUTAGE VERS: {action_type}")
 
             if action_type == "RECHERCHE_PRODUIT":
                 return await self._handle_product_search(extracted_info)
@@ -2305,40 +2312,47 @@ class DevisWorkflow:
     async def _get_available_clients_list(self) -> List[Dict[str, Any]]:
         """Récupère la liste des clients disponibles depuis Salesforce"""
         try:
-            # Récupérer les clients depuis Salesforce via MCP
-            clients_data = await self.mcp_connector.get_salesforce_accounts(limit=100)
-            
-            if clients_data and "records" in clients_data:
-                clients = []
-                for record in clients_data["records"]:
-                    client_info = {
-                        "id": record.get("Id", ""),
-                        "name": record.get("Name", ""),
-                        "type": record.get("Type", "Prospect"),
-                        "industry": record.get("Industry", ""),
-                        "phone": record.get("Phone", ""),
-                        "website": record.get("Website", ""),
-                        "recent_quotes": 0  # À calculer si nécessaire
-                    }
-                    clients.append(client_info)
-                
-                # Trier par nom
-                clients.sort(key=lambda x: x["name"])
-                logger.info(f"Récupéré {len(clients)} clients depuis Salesforce")
-                return clients
-            else:
-                logger.warning("Aucun client trouvé dans Salesforce")
-                return []
-                
-        except Exception as e:
-            logger.error(f"Erreur lors de la récupération des clients: {str(e)}")
-            # Retourner une liste d'exemple en cas d'erreur
-            return [
-                {"id": "example1", "name": "Acme Corporation", "type": "Customer", "industry": "Technology"},
-                {"id": "example2", "name": "Global Industries", "type": "Prospect", "industry": "Manufacturing"},
-                {"id": "example3", "name": "Tech Solutions Ltd", "type": "Customer", "industry": "IT Services"}
-            ]
-    
+            clients_data = asyncio.create_task(self.mcp_connector.get_salesforce_accounts(limit=100))
+            clients_data = await clients_data
+        except Exception as e:  # Catch specific exceptions if possible
+            logger.warning(f"Primary method failed, falling back: {str(e)}")
+            try:
+                # Fallback avec appel MCP direct
+                clients_data = await MCPConnector.call_salesforce_mcp("salesforce_query", {
+                    "query": "SELECT Id, Name, Type, Industry FROM Account LIMIT 100"
+                })
+
+                if clients_data and "records" in clients_data:
+                    clients = []
+                    for record in clients_data["records"]:
+                        client_info = {
+                            "id": record.get("Id", ""),
+                            "name": record.get("Name", ""),
+                            "type": record.get("Type", "Prospect"),
+                            "industry": record.get("Industry", ""),
+                            "phone": record.get("Phone", ""),
+                            "website": record.get("Website", ""),
+                            "recent_quotes": 0  # À calculer si nécessaire
+                        }
+                        clients.append(client_info)
+
+                    # Trier par nom
+                    clients.sort(key=lambda x: x["name"])
+                    logger.info(f"Récupéré {len(clients)} clients depuis Salesforce")
+                    return clients
+                else:
+                    logger.warning("Aucun client trouvé dans Salesforce")
+                    return []
+
+            except Exception as e:
+                logger.error(f"Erreur lors de la récupération des clients: {str(e)}")
+                # Retourner une liste d'exemple en cas d'erreur
+                return [
+                    {"id": "example1", "name": "Acme Corporation", "type": "Customer", "industry": "Technology"},
+                    {"id": "example2", "name": "Global Industries", "type": "Prospect", "industry": "Manufacturing"},
+                    {"id": "example3", "name": "Tech Solutions Ltd", "type": "Customer", "industry": "IT Services"}
+                ]
+
     async def _get_available_products_list(self) -> List[Dict[str, Any]]:
         """Récupère la liste des produits disponibles depuis SAP"""
         try:

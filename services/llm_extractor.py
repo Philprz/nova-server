@@ -109,6 +109,11 @@ class LLMExtractor:
                         json_str = content[start_idx:end_idx]
                         extracted_data = json.loads(json_str)
                         logger.info(f"Extraction réussie: {extracted_data}")
+                        # 🔍 DEBUG : Vérifier le type d'action détecté
+                        action_type = extracted_data.get("action_type", "NON_DÉTECTÉ")
+                        logger.info(f"🎯 TYPE D'ACTION DÉTECTÉ: {action_type}")
+                        if action_type == "RECHERCHE_PRODUIT":
+                            logger.info(f"🔍 CRITÈRES DE RECHERCHE: {extracted_data.get('search_criteria', {})}")
                         return extracted_data
                     else:
                         logger.error("Impossible de trouver du JSON dans la réponse")
