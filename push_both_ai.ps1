@@ -50,7 +50,7 @@ function Get-DeepCodeAnalysis {
                 }
                 
                 # Analyser le contenu ligne par ligne
-                $inHunk = $false
+    
                 $currentFunction = ""
                 $currentClass = ""
                 $hunkContext = @()
@@ -61,7 +61,7 @@ function Get-DeepCodeAnalysis {
                     # Détecter le contexte de la modification (fonction, classe, etc.)
                     if ($line -match '^@@.*@@\s*(.*)$') {
                         $hunkContext = $matches[1]
-                        $inHunk = $true
+                        
                         
                         # Extraire le nom de la fonction/méthode du contexte
                         if ($hunkContext -match '(def|function|func|method)\s+(\w+)') {
@@ -122,7 +122,7 @@ function Get-DeepCodeAnalysis {
 }
 
 # Fonction pour analyser le but d'une ligne de code
-function Analyze-LinePurpose {
+function test-LinePurpose {
     param($line, $file)
     
     $purpose = ""
@@ -189,7 +189,7 @@ function Analyze-LinePurpose {
 }
 
 # Fonction pour analyser l'intention des changements
-function Analyze-ChangeIntent {
+function test-ChangeIntent {
     param($Added, $Removed, $File)
     
     $intent = @{
@@ -265,7 +265,7 @@ function Analyze-ChangeIntent {
 }
 
 # Fonction pour analyser l'impact global
-function Analyze-GlobalImpact {
+function test-GlobalImpact {
     param($Changes)
     
     $impacts = @()
@@ -312,7 +312,7 @@ function Analyze-GlobalImpact {
 }
 
 # Fonction pour générer le raisonnement des changements
-function Generate-ChangeRationale {
+function new-ChangeRationale {
     param($Analysis)
     
     $rationale = @()
