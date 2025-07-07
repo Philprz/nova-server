@@ -145,3 +145,12 @@ docs/_build/
 *.bak
 *.backup
 venv/
+
+# Fichiers de configuration locale pour les scripts push
+.ai_commit_initialized
+.push_selector_initialized
+
+# Clés API (sécurité)
+*.apikey
+.env.local
+.env.*.local
