@@ -19,7 +19,6 @@ if ($status) {
     if ([string]::IsNullOrEmpty($CommitMessage)) {
         # Récupérer les informations détaillées sur les changements
         $changedFiles = git diff --name-status
-        $diffStats = git diff --stat --stat-width=80
         
         # Analyser les changements par type
         $added = @()
@@ -37,7 +36,7 @@ if ($status) {
         $allChangedFiles = $added + $modified + $deleted
         
         # NOUVELLE FONCTIONNALITÉ : Analyse intelligente du contenu des modifications
-        function Analyze-CodeChanges {
+        function Get-CodeChanges {
             param($files)
             
             $analysisResults = @{
@@ -165,7 +164,7 @@ if ($status) {
         }
 
         # Générer un message de commit intelligent basé sur l'analyse
-        function Generate-SmartCommitMessage {
+        function New-SmartCommitMessage {
             param($analysis, $summary)
             
             $commitParts = @()
@@ -240,7 +239,7 @@ if ($status) {
         
         # Exécuter l'analyse intelligente
         Write-Host "Analyse intelligente des modifications en cours..." -ForegroundColor "Cyan"
-        $codeAnalysis = Analyze-CodeChanges -files $allChangedFiles
+        $codeAnalysis = Get-CodeChanges -files $allChangedFiles
         
         # Afficher un résumé de l'analyse dans la console
         Write-Host ""
@@ -359,7 +358,7 @@ if ($status) {
         }
         
         # Créer la suggestion de message INTELLIGENTE
-        $suggestion = Generate-SmartCommitMessage -analysis $codeAnalysis -summary $summary
+        $suggestion = New-SmartCommitMessage -analysis $codeAnalysis -summary $summary
         
         # Créer un rapport détaillé de l'analyse intelligente
         $intelligentAnalysisReport = @()
@@ -450,22 +449,28 @@ try {
     git push origin main
     Write-Host "Push réussi vers repository principal" -ForegroundColor "Green"
 } catch {
-    Write-Host "Erreur push repository principal: $_" -ForegroundColor "Red"
+    Write-Host "Erreur lors du push vers repository principal: $($_.Exception.Message)" -ForegroundColor "Red"
+    exit 1
 }
 
 Write-Host ""
 
-# Push vers repository personnel
-Write-Host "Push vers repository personnel (Philprz)..." -ForegroundColor "Yellow"
+# Push vers repository secondaire (personnel)
+Write-Host "Push vers repository secondaire (nova-poc-commercial)..." -ForegroundColor "Blue"
 try {
-    git push personal main  
-    Write-Host "Push réussi vers repository personnel" -ForegroundColor "Green"
+    # Ajouter le remote secondaire s'il n'existe pas
+    $remotes = git remote
+    if ($remotes -notcontains "secondary") {
+        git remote add secondary https://github.com/Symple44/nova-poc-commercial.git
+        Write-Host "Remote secondaire ajouté" -ForegroundColor "Yellow"
+    }
+    
+    git push secondary main
+    Write-Host "Push réussi vers repository secondaire" -ForegroundColor "Blue"
 } catch {
-    Write-Host "Erreur push repository personnel: $_" -ForegroundColor "Red"
+    Write-Host "Erreur lors du push vers repository secondaire: $($_.Exception.Message)" -ForegroundColor "Red"
+    Write-Host "Le push vers le repository principal a réussi, mais pas vers le secondaire" -ForegroundColor "Yellow"
 }
 
 Write-Host ""
-Write-Host "=== PUSH TERMINÉ SUR LES DEUX REPOSITORIES ===" -ForegroundColor "Cyan"
-
-# Afficher le statut final
-git status --short
+Write-Host "=== PUSH TERMINÉ ===" -ForegroundColor "Cyan"
