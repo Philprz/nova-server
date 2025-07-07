@@ -132,8 +132,20 @@ class DevisWorkflow:
             self._track_step_start("extract_entities", "Identification des besoins...")
             
             extracted_info = await self._extract_info_from_prompt(prompt)
-            self.context["extracted_info"] = extracted_info
+            # 🆕 NOUVEAU : Router selon le type d'action détecté
+            action_type = extracted_info.get("action_type", "DEVIS")
 
+            if action_type == "RECHERCHE_PRODUIT":
+                return await self._handle_product_search(extracted_info)
+            elif action_type == "INFO_CLIENT":
+                return await self._handle_client_info(extracted_info)
+            elif action_type == "CONSULTATION_STOCK":
+                return await self._handle_stock_consultation(extracted_info)
+            elif action_type == "DEVIS":
+                # Continuer avec le workflow de devis existant
+                pass
+            else:
+                return await self._handle_other_request(extracted_info)
             # Vérifier les éléments manquants et demander les informations
             missing_elements = []
             if not extracted_info.get("client"):
@@ -1883,114 +1895,6 @@ class DevisWorkflow:
         except Exception as e:
             logger.warning(f"Erreur recherche produits similaires: {str(e)}")
             return []
-    async def _get_products_info(self, products: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Récupère les informations produits depuis SAP - VERSION CORRIGÉE POUR LES PRIX"""
-        if not products:
-            logger.warning("Aucun produit spécifié")
-            return []
-        
-        logger.info(f"Récupération des informations pour {len(products)} produits")
-        
-        enriched_products = []
-        
-        for product in products:
-            try:
-                # Appel MCP pour récupérer les détails du produit
-                product_details = await MCPConnector.call_sap_mcp("sap_get_product_details", {
-                    "item_code": product["code"]
-                })
-                
-                if "error" in product_details:
-                    logger.error(f"Erreur produit {product['code']}: {product_details['error']}")
-                    # Vérifier si malgré l'erreur, nous avons des informations utiles
-                    if product_details.get("ItemName") is not None:
-                        enriched_product = {
-                            "code": product["code"],
-                            "quantity": product["quantity"],
-                            "name": product_details.get("ItemName", "Unknown"),
-                            "unit_price": float(product_details.get("Price", 0.0)),
-                            "stock": product_details.get("stock", {}).get("total", 0),
-                            "details": product_details,
-                            "salesforce_id": await self._find_product_in_salesforce(product["code"])
-                        }
-                        enriched_products.append(enriched_product)
-                    else:
-                        enriched_products.append({
-                            "code": product["code"],
-                            "quantity": product["quantity"],
-                            "error": product_details["error"]
-                        })
-                    continue
-                
-                # CORRECTION PRINCIPALE: Récupérer le prix depuis la structure retournée par sap_mcp.py
-                unit_price = 0.0
-                
-                # 1. Le prix est maintenant dans la clé "Price" directement (enrichi par sap_mcp.py)
-                if "Price" in product_details:
-                    unit_price = float(product_details.get("Price", 0.0))
-                    logger.info(f"Prix trouvé via 'Price': {unit_price}")
-                
-                # 2. Si pas de prix direct, essayer dans price_details (nouveau format)
-                elif "price_details" in product_details and product_details["price_details"].get("price"):
-                    unit_price = float(product_details["price_details"]["price"])
-                    logger.info(f"Prix trouvé via 'price_details': {unit_price}")
-                
-                # 3. Fallback sur ItemPrices[0].Price (format SAP natif)
-                elif "ItemPrices" in product_details and len(product_details["ItemPrices"]) > 0:
-                    unit_price = float(product_details["ItemPrices"][0].get("Price", 0.0))
-                    logger.info(f"Prix trouvé via 'ItemPrices[0]': {unit_price}")
-                
-                # 4. Autres fallbacks
-                elif "LastPurchasePrice" in product_details:
-                    unit_price = float(product_details.get("LastPurchasePrice", 0.0))
-                    logger.info(f"Prix trouvé via 'LastPurchasePrice': {unit_price}")
-                
-                # Si toujours aucun prix trouvé, utiliser une valeur par défaut
-                if unit_price == 0.0:
-                    logger.warning(f"⚠️ Aucun prix trouvé pour {product['code']}, utilisation d'un prix par défaut")
-                    unit_price = 100.0  # Prix par défaut de 100€
-                    
-                # Enrichir le produit avec ID Salesforce
-                salesforce_id = await self._find_product_in_salesforce(product["code"])
-                
-                # Calculer le stock total depuis la nouvelle structure sap_mcp.py
-                total_stock = 0
-                if "stock" in product_details and isinstance(product_details["stock"], dict):
-                    # Nouvelle structure avec stock.total
-                    total_stock = float(product_details["stock"].get("total", 0))
-                    logger.info(f"Stock trouvé via 'stock.total': {total_stock}")
-                elif "QuantityOnStock" in product_details:
-                    # Structure SAP native
-                    total_stock = float(product_details.get("QuantityOnStock", 0))
-                    logger.info(f"Stock trouvé via 'QuantityOnStock': {total_stock}")
-                elif "OnHand" in product_details:
-                    # Fallback sur OnHand
-                    total_stock = float(product_details.get("OnHand", 0))
-                    logger.info(f"Stock trouvé via 'OnHand': {total_stock}")
-                
-                enriched_product = {
-                    "code": product["code"],
-                    "quantity": product["quantity"],
-                    "name": product_details.get("ItemName", "Unknown"),
-                    "unit_price": unit_price,
-                    "stock": total_stock,
-                    "line_total": product["quantity"] * unit_price,  # CORRECTION: Calculer le total de ligne
-                    "details": product_details,
-                    "salesforce_id": salesforce_id
-                }
-                
-                enriched_products.append(enriched_product)
-                logger.info(f"Produit enrichi: {product['code']} - Prix: {unit_price}€ - Stock: {total_stock}")
-                
-            except Exception as e:
-                logger.error(f"Erreur récupération produit {product['code']}: {str(e)}")
-                enriched_products.append({
-                    "code": product["code"],
-                    "quantity": product["quantity"],
-                    "error": str(e)
-                })
-        
-        return enriched_products    
         
     async def _get_products_info(self, products: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Récupère les informations produits depuis SAP - VERSION CORRIGÉE POUR LES PRIX"""
@@ -2601,3 +2505,148 @@ class DevisWorkflow:
         except Exception as e:
             logger.error(f"Erreur lors de la recherche d'alternatives: {str(e)}")
             return []
+    async def _handle_product_search(self, extracted_info: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Gère les demandes de recherche de produits par caractéristiques
+        """
+        logger.info("🔍 Traitement demande de recherche produit")
+        
+        search_criteria = extracted_info.get("search_criteria", {})
+        if not search_criteria:
+            return {
+                "success": False,
+                "message": "Critères de recherche non spécifiés",
+                "action_type": "RECHERCHE_PRODUIT",
+                "suggestion": "Exemple: 'Je cherche une imprimante laser recto-verso réseau 50 ppm'"
+            }
+        
+        # Utiliser le moteur de recherche
+        from services.product_search_engine import ProductSearchEngine
+        search_engine = ProductSearchEngine()
+        
+        results = await search_engine.search_products_by_characteristics(search_criteria)
+        
+        if results.get("success"):
+            return {
+                "success": True,
+                "action_type": "RECHERCHE_PRODUIT",
+                "message": f"🎯 {results['total_found']} produit(s) trouvé(s)",
+                "search_criteria": search_criteria,
+                "products": results["matched_products"],
+                "quick_actions": [
+                    {
+                        "action": "create_quote",
+                        "label": "📋 Créer un devis",
+                        "type": "primary",
+                        "description": "Créer un devis avec un de ces produits"
+                    },
+                    {
+                        "action": "refine_search",
+                        "label": "🔍 Affiner la recherche",
+                        "type": "secondary", 
+                        "description": "Préciser les critères"
+                    }
+                ]
+            }
+        else:
+            return {
+                "success": False,
+                "action_type": "RECHERCHE_PRODUIT",
+                "message": "❌ Aucun produit trouvé avec ces critères",
+                "error": results.get("error"),
+                "search_criteria": search_criteria,
+                "suggestions": [
+                    "Essayez des termes plus généraux",
+                    "Vérifiez l'orthographe des caractéristiques",
+                    "Contactez le support pour des produits spécifiques"
+                ]
+            }
+
+    async def _handle_client_info(self, extracted_info: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Gère les demandes d'information client
+        """
+        logger.info("👤 Traitement demande d'information client")
+        
+        client_name = extracted_info.get("client")
+        if not client_name:
+            return {
+                "success": False,
+                "action_type": "INFO_CLIENT",
+                "message": "Nom du client non spécifié",
+                "suggestion": "Exemple: 'Informations sur le client Edge Communications'"
+            }
+        
+        # Rechercher le client dans Salesforce
+        client_info = await self._validate_client(client_name)
+        
+        if client_info.get("found"):
+            client_data = client_info["data"]
+            return {
+                "success": True,
+                "action_type": "INFO_CLIENT",
+                "message": f"ℹ️ Informations pour {client_data.get('Name')}",
+                "client": {
+                    "name": client_data.get("Name"),
+                    "account_number": client_data.get("AccountNumber"),
+                    "phone": client_data.get("Phone"),
+                    "email": client_data.get("Email"),
+                    "address": f"{client_data.get('BillingStreet', '')} {client_data.get('BillingCity', '')}",
+                    "salesforce_id": client_data.get("Id")
+                },
+                "quick_actions": [
+                    {
+                        "action": "create_quote_for_client",
+                        "label": "📋 Créer un devis",
+                        "type": "primary",
+                        "description": f"Nouveau devis pour {client_data.get('Name')}"
+                    }
+                ]
+            }
+        else:
+            return {
+                "success": False,
+                "action_type": "INFO_CLIENT",
+                "message": f"❌ Client '{client_name}' non trouvé",
+                "suggestions": client_info.get("suggestions", []),
+                "quick_actions": [
+                    {
+                        "action": "create_client",
+                        "label": "➕ Créer ce client",
+                        "type": "secondary",
+                        "description": f"Ajouter '{client_name}' comme nouveau client"
+                    }
+                ]
+            }
+
+    async def _handle_stock_consultation(self, extracted_info: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Gère les demandes de consultation de stock
+        """
+        logger.info("📦 Traitement demande de consultation stock")
+        
+        # À implémenter selon vos besoins
+        return {
+            "success": True,
+            "action_type": "CONSULTATION_STOCK",
+            "message": "🚧 Fonction en cours de développement",
+            "suggestion": "Utilisez la recherche de produits pour voir les stocks"
+        }
+
+    async def _handle_other_request(self, extracted_info: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Gère les autres types de demandes
+        """
+        logger.info("❓ Traitement autre demande")
+        
+        return {
+            "success": False,
+            "action_type": "AUTRE",
+            "message": "🤔 Je n'ai pas compris votre demande",
+            "extracted_info": extracted_info,
+            "suggestions": [
+                "Générer un devis: 'faire un devis pour [client] avec [produits]'",
+                "Rechercher un produit: 'je cherche une imprimante laser recto-verso'",
+                "Consulter un client: 'informations sur le client [nom]'"
+            ]
+        }

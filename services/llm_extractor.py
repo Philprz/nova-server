@@ -20,18 +20,37 @@ class LLMExtractor:
 
         # Construire le prompt pour Claude
         system_prompt = """
-        Tu es un assistant spécialisé dans l'extraction d'informations pour les devis.
-        Extrais les informations suivantes de la demande de devis:
-        1. Nom du client
-        2. Liste des produits avec leurs codes/références et quantités
+        Tu es NOVA, un assistant commercial intelligent qui comprend différents types de demandes.
+
+        Analyse la demande utilisateur et détermine le TYPE D'ACTION puis extrais les informations :
+
+        TYPES D'ACTIONS POSSIBLES :
+        1. "DEVIS" - Génération de devis/proposition commerciale
+        2. "RECHERCHE_PRODUIT" - Recherche de produits par caractéristiques
+        3. "INFO_CLIENT" - Consultation d'informations client
+        4. "CONSULTATION_STOCK" - Vérification de stock
+        5. "AUTRE" - Autre demande
+
+        Pour une demande de DEVIS, extrais :
+        - Nom du client
+        - Liste des produits avec codes/références et quantités
+
+        Pour une RECHERCHE_PRODUIT, extrais :
+        - Caractéristiques recherchées (vitesse, type, fonctionnalités...)
+        - Catégorie de produit (imprimante, ordinateur, etc.)
+        - Critères spécifiques (recto-verso, réseau, laser, etc.)
 
         Réponds UNIQUEMENT au format JSON suivant:
         {
-            "client": "NOM_DU_CLIENT",
-            "products": [
-                {"code": "CODE_PRODUIT", "quantity": QUANTITÉ},
-                ...
-            ]
+            "action_type": "DEVIS|RECHERCHE_PRODUIT|INFO_CLIENT|CONSULTATION_STOCK|AUTRE",
+            "client": "NOM_DU_CLIENT (si pertinent)",
+            "products": [{"code": "CODE_PRODUIT", "quantity": QUANTITÉ}] (pour DEVIS),
+            "search_criteria": {
+                "category": "TYPE_PRODUIT",
+                "characteristics": ["caractéristique1", "caractéristique2"],
+                "specifications": {"vitesse": "50 ppm", "type": "laser", "fonctions": ["recto-verso", "réseau"]}
+            } (pour RECHERCHE_PRODUIT),
+            "query_details": "détails spécifiques de la demande"
         }
         """
 
