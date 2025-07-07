@@ -1,4 +1,8 @@
 # Script pour push sur les deux repositories NOVA POC
+# Repository principal: https://github.com/Philprz/nova-server
+# Repository secondaire: https://github.com/www-it-spirit-com/NOVAPOC
+# Repository principal: https://github.com/Philprz/nova-server
+# Repository secondaire: https://github.com/www-it-spirit-com/NOVAPOC
 # Usage: .\push_both.ps1 ["Message de commit"]
 # Si aucun message n'est fourni, le script demandera interactivement
 
@@ -443,8 +447,8 @@ if ($status) {
 
 Write-Host ""
 
-# Push vers repository principal (entreprise)
-Write-Host "Push vers repository principal (www-it-spirit-com)..." -ForegroundColor "Green"
+# Push vers repository principal (Philprz/nova-server)
+Write-Host "Push vers repository principal (Philprz/nova-server)..." -ForegroundColor "Green"
 $pushResult = git push origin main 2>&1
 if ($LASTEXITCODE -eq 0) {
     Write-Host "Push réussi vers repository principal" -ForegroundColor "Green"
@@ -454,22 +458,22 @@ if ($LASTEXITCODE -eq 0) {
     exit 1
 }
 
-Write-Host "Push vers repository secondaire (NOVAPOC)..." -ForegroundColor "Blue"
+Write-Host "Push vers repository secondaire (www-it-spirit-com/NOVAPOC)..." -ForegroundColor "Blue"
 
 # Ajouter le remote secondaire s'il n'existe pas
 $remotes = git remote
 if ($remotes -notcontains "secondary") {
-    git remote add secondary https://github.com/Philprz/nova-server.git
+    git remote add secondary https://github.com/www-it-spirit-com/NOVAPOC.git
     Write-Host "Remote secondaire ajouté" -ForegroundColor "Yellow"
 }
 
 # Vérifier d'abord si le repository existe
 Write-Host "Vérification de l'existence du repository secondaire..." -ForegroundColor "Yellow"
-$repoCheck = git ls-remote https://github.com/Philprz/nova-server.git 2>&1
+$repoCheck = git ls-remote https://github.com/www-it-spirit-com/NOVAPOC.git 2>&1
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "ATTENTION: Le repository secondaire 'nova-poc-commercial' n'existe pas sur GitHub" -ForegroundColor "Red"
+    Write-Host "ATTENTION: Le repository secondaire 'NOVAPOC' n'existe pas ou n'est pas accessible" -ForegroundColor "Red"
     Write-Host "Erreur: $repoCheck" -ForegroundColor "Red"
-    Write-Host "Veuillez créer le repository sur GitHub ou corriger l'URL" -ForegroundColor "Yellow"
+    Write-Host "Veuillez vérifier l'accès au repository ou corriger l'URL" -ForegroundColor "Yellow"
     Write-Host "Le push vers le repository principal a réussi" -ForegroundColor "Green"
 } else {
     # Le repository existe, procéder au push
