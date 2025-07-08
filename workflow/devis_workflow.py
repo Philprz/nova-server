@@ -219,7 +219,10 @@ class DevisWorkflow:
             # Gestion client non trouvé avec validation
             if not client_info.get("found") and self.validation_enabled:
                 self._track_step_progress("verify_client_info", 50, "Client non trouvé, création en cours...")
-                validation_result = await self._handle_client_not_found_with_validation(extracted_info.get("client"))
+                validation_result = await self._handle_client_not_found_with_validation(
+                    extracted_info.get("client"), 
+                    extracted_info  # ✅ Passer le contexte complet pour continuation
+                )
                 
                 if validation_result.get("client_created"):
                     client_info = validation_result["client_info"] 
@@ -467,7 +470,8 @@ class DevisWorkflow:
             return None
             
         return task.get_detailed_progress()
-    async def _handle_client_not_found_with_validation(self, client_name: str) -> Dict[str, Any]:
+    
+    async def _handle_client_not_found_with_validation(self, client_name: str, extracted_info: Dict = None) -> Dict[str, Any]:
         """Gère le cas où un client n'est pas trouvé en utilisant le validateur"""
         logger.info(f"🔍 Traitement client non trouvé avec validation: {client_name}")
         
@@ -477,8 +481,14 @@ class DevisWorkflow:
             return {
                 "client_created": False,
                 "error": "Nom de client manquant - impossible de procéder à la validation",
-                "suggestion": "Vérifiez que le prompt contient un nom de client valide"
+                "suggestion": "Vérifiez que le prompt contient un nom de client valide",
+                "workflow_context": {
+                    "task_id": self.task_id,
+                    "extracted_info": extracted_info,  # ✅ Conserver pour continuation
+                    "step": "client_suggestions"
+                }
             }
+                
         
         try:
             # Détecter le pays probable
@@ -495,7 +505,10 @@ class DevisWorkflow:
             }
             
             # Valider avec le validateur client
-            validation_result = await self.client_validator.validate_complete(client_data, country)
+            validation_result = await self._handle_client_not_found_with_validation(
+                extracted_info.get("client"), 
+                extracted_info  # ✅ Passer le contexte complet
+            )
             
             # CORRECTION 3: Accepter les warnings mais pas les erreurs critiques
             critical_errors = [err for err in validation_result.get("errors", []) 
@@ -544,6 +557,13 @@ class DevisWorkflow:
                 "client_created": False,
                 "error": f"Erreur système de validation: {str(e)}"
             }
+    async def _continue_workflow_after_client_selection(self, client_data, original_context):
+        """Continuation automatique après sélection client"""
+        self.context["client_info"] = {"data": client_data, "found": True}
+        products = original_context.get("extracted_info", {}).get("products", [])
+        return await self._get_products_info(products)
+
+
     async def _validate_products_with_suggestions(self, products: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         Valide les produits avec suggestions intelligentes
@@ -2672,3 +2692,88 @@ class DevisWorkflow:
                 "Consulter un client: 'informations sur le client [nom]'"
             ]
         }
+    async def handle_client_suggestions(self, choice: Dict, workflow_context: Dict) -> Dict:
+        """
+        🔧 GESTION COMPLÈTE DES SUGGESTIONS CLIENT
+        """
+        choice_type = choice.get("type")
+        
+        if choice_type == "use_suggestion":
+            # Client sélectionné depuis les suggestions
+            suggested_client = choice.get("client_data")
+            client_name = suggested_client.get("name") or suggested_client.get("Name")
+            
+            logger.info(f"✅ Client sélectionné: {client_name}")
+            
+            # 🔧 MISE À JOUR DU CONTEXTE ET CONTINUATION
+            self.context.update({
+                "client_info": {"data": suggested_client, "found": True},
+                "client_validated": True
+            })
+            
+            # Extraire les produits du contexte original
+            original_products = workflow_context.get("extracted_info", {}).get("products", [])
+            
+            # 🔧 CONTINUATION DIRECTE DU WORKFLOW
+            if original_products:
+                # Passer à l'étape suivante : récupération produits
+                return await self._get_products_info(original_products)
+            else:
+                # Demander les produits si manquants
+                return self._build_product_request_response(client_name)
+        
+        elif choice_type == "create_new":
+            # 🔧 DÉCLENCHER CRÉATION CLIENT PUIS CONTINUER
+            new_client_name = choice.get("client_name", "")
+            return await self._handle_new_client_creation(new_client_name, workflow_context)
+        
+        else:
+            return self._build_error_response("Choix non supporté", f"Type '{choice_type}' non reconnu")
+
+    async def _handle_new_client_creation(self, client_name: str, workflow_context: Dict) -> Dict:
+        """
+        🔧 CRÉATION CLIENT PUIS CONTINUATION WORKFLOW
+        """
+        # Validation et création du client
+        validation_result = await self.client_validator.validate_and_enrich_client(client_name)
+        
+        if validation_result.get("can_create"):
+            # Créer dans Salesforce puis SAP
+            sf_client = await self._create_salesforce_client(validation_result)
+            sap_client = await self._create_sap_client_from_validation(validation_result, sf_client)
+            
+            # Mettre à jour le contexte
+            self.context.update({
+                "client_info": {"data": sf_client, "found": True},
+                "client_validated": True
+            })
+            
+            # 🔧 CONTINUER AVEC LES PRODUITS
+            original_products = workflow_context.get("extracted_info", {}).get("products", [])
+            if original_products:
+                return await self._get_products_info(original_products)
+            else:
+                return self._build_product_request_response(sf_client.get("Name", client_name))
+        
+        else:
+            return self._build_error_response("Impossible de créer le client", validation_result.get("error", ""))
+    async def _continue_workflow_after_client_selection(self, client_data: Dict, original_context: Dict) -> Dict:
+        """
+        🔧 CONTINUATION AUTOMATIQUE DU WORKFLOW APRÈS SÉLECTION CLIENT
+        """
+        logger.info("🔄 Continuation du workflow avec client sélectionné")
+        
+        # Mettre à jour le contexte avec le client validé
+        self.context["client_info"] = {"data": client_data, "found": True}
+        self.context["client_validated"] = True
+        
+        # Récupérer les produits de la demande originale
+        original_products = original_context.get("extracted_info", {}).get("products", [])
+        
+        if original_products:
+            # Passer directement à la récupération des produits
+            self._track_step_start("get_products_info", "🔍 Récupération des informations produits")
+            return await self._get_products_info(original_products)
+        else:
+            # Si pas de produits, demander à l'utilisateur
+            return self._build_product_selection_interface(client_data.get("Name", ""))

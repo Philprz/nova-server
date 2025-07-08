@@ -7,7 +7,7 @@ capable de comprendre les demandes en langage naturel et proposer
 des solutions proactives.
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from typing import Dict, Any, List, Optional
@@ -1019,6 +1019,47 @@ async def get_products_list():
             'error': str(e),
             'message': "❌ **Erreur lors de la récupération des produits**"
         }
+@router.post("/choice")
+async def handle_user_choice(choice_data: Dict[str, Any]):
+    """
+    🔧 GESTION DES CHOIX UTILISATEUR DEPUIS L'INTERFACE
+    """
+    try:
+        choice_type = choice_data.get("type")
+        task_id = choice_data.get("task_id")
+        
+        if not task_id:
+            raise HTTPException(status_code=400, detail="task_id manquant")
+        
+        # Récupérer le contexte du workflow
+        workflow_context = await get_workflow_context(task_id)
+        
+        if choice_type == "client_choice":
+            # Choix client depuis les suggestions
+            workflow = DevisWorkflow(task_id=task_id)
+            result = await workflow.handle_client_suggestions(choice_data, workflow_context)
+            
+        elif choice_type == "product_choice":
+            # Choix produit depuis les alternatives
+            workflow = DevisWorkflow(task_id=task_id)
+            result = await workflow.apply_product_suggestions(choice_data.get("products", []), workflow_context)
+            
+        elif choice_type == "create_client":
+            # Déclenchement création client
+            workflow = DevisWorkflow(task_id=task_id)
+            result = await workflow._handle_new_client_creation(
+                choice_data.get("client_name", ""), 
+                workflow_context
+            )
+        
+        else:
+            raise HTTPException(status_code=400, detail=f"Type de choix '{choice_type}' non supporté")
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Erreur gestion choix utilisateur: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))        
 def detect_workflow_request(message: str) -> bool:
     """Détecte si un message nécessite le workflow (devis OU recherche produit)"""
     message_lower = message.lower()
@@ -1050,3 +1091,22 @@ def detect_workflow_request(message: str) -> bool:
     ])
     
     return (has_quote_trigger or has_search_trigger) and has_context
+@router.post("/assistant/continue_workflow")
+async def continue_workflow_with_choice(request: Request):
+    """Continuer workflow après choix utilisateur"""
+    
+    data = await request.json()
+    task_id = data.get("task_id")
+    choice_type = data.get("choice_type")
+    
+    # Récupérer contexte workflow
+    context = get_workflow_context(task_id)
+    workflow = DevisWorkflow(task_id=task_id)
+    
+    if choice_type == "client_selected":
+        client_data = data.get("client_data")
+        return await workflow.handle_client_selection_and_continue(client_data, context)
+    
+    elif choice_type == "product_selected":
+        product_choices = data.get("products")
+        return await workflow.apply_product_choices(product_choices, context)

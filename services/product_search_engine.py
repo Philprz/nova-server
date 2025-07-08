@@ -57,28 +57,50 @@ class ProductSearchEngine:
             return {"error": f"Erreur lors de la recherche: {str(e)}"}
     
     def _build_sap_search_query(self, category: str, characteristics: List[str], specifications: Dict[str, Any]) -> str:
-        """
-        Construit la requête de recherche SAP OData
-        """
-        conditions = []
+        """🔧 REQUÊTE SAP SIMPLIFIÉE - Éviter duplications et erreur 400"""
         
-        # Recherche par catégorie
-        if category:
-            conditions.append(f"contains(tolower(ItemName), '{category.lower()}')")
+        # Collecter termes uniques (éviter duplications)
+        search_terms = set()
         
-        # Recherche par caractéristiques
+        if category and category.strip():
+            search_terms.add(category.lower().strip())
+        
         for char in characteristics:
-            conditions.append(f"contains(tolower(ItemName), '{char.lower()}')")
+            if char and char.strip():
+                search_terms.add(char.lower().strip())
         
-        # Recherche par spécifications (dans la description ou nom)
-        for spec_key, spec_value in specifications.items():
-            if isinstance(spec_value, str):
-                conditions.append(f"contains(tolower(ItemName), '{spec_value.lower()}')")
+        for spec_value in specifications.values():
+            if isinstance(spec_value, str) and spec_value.strip():
+                search_terms.add(spec_value.lower().strip())
             elif isinstance(spec_value, list):
                 for value in spec_value:
-                    conditions.append(f"contains(tolower(ItemName), '{value.lower()}')")
+                    if value:
+                        search_terms.add(str(value).lower().strip())
         
-        return " and ".join(conditions) if conditions else "ItemCode ne ''"
+        # Limiter à 2-3 termes max pour éviter erreur 400
+        priority_terms = ['laser', 'imprimante', 'ordinateur']
+        final_terms = []
+        
+        for priority in priority_terms:
+            if priority in search_terms:
+                final_terms.append(priority)
+                search_terms.remove(priority)
+                if len(final_terms) >= 2:
+                    break
+        
+        # Ajouter 1 terme supplémentaire si possible
+        if len(final_terms) < 3 and search_terms:
+            final_terms.append(list(search_terms)[0])
+        
+        # Construire requête avec échappement
+        if final_terms:
+            conditions = []
+            for term in final_terms:
+                escaped_term = term.replace("'", "''")
+                conditions.append(f"contains(tolower(ItemName), '{escaped_term}')")
+            return " and ".join(conditions)
+        else:
+            return "ItemType eq 'itItems'"
     
     def _analyze_and_score_products(self, products: List[Dict], search_criteria: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
@@ -171,3 +193,28 @@ class ProductSearchEngine:
                         details["specifications_found"].append(f"{spec_key}: {value}")
         
         return details
+
+    def _build_sap_search_filter(self, criteria: Dict) -> str:
+        """
+        🔧 SIMPLIFICATION REQUÊTE SAP - éviter les filtres trop complexes
+        """
+        category = criteria.get("category", "").lower()
+        characteristics = criteria.get("characteristics", [])
+        
+        # ❌ AVANT : Filtres multiples qui échouent
+        # filter = "&".join([f"contains(tolower(ItemName), '{char}')" for char in characteristics])
+        
+        # ✅ APRÈS : Filtres simplifiés et prioritaires
+        if category:
+            # Utiliser seulement la catégorie principale
+            primary_filter = f"contains(tolower(ItemName), '{category}')"
+            
+            # Ajouter UN seul critère prioritaire
+            if characteristics:
+                main_char = characteristics[0]  # Premier critère seulement
+                primary_filter += f" and contains(tolower(ItemName), '{main_char}')"
+            
+            return primary_filter
+        
+        # Fallback : recherche générale
+        return "ItemCode ne ''"

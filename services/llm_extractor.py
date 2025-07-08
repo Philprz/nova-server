@@ -176,3 +176,45 @@ class LLMExtractor:
             logger.error(f"❌ ERREUR GÉNÉRALE lors de l'extraction: {str(e)}")
             logger.error(f"📋 TYPE D'ERREUR: {type(e).__name__}")
             return {"error": f"Erreur lors de l'extraction des informations: {str(e)}"}
+    def _handle_generic_product_codes(self, extracted_data):
+        """Transformer codes génériques en recherches"""
+        
+        if extracted_data.get("action_type") == "DEVIS":
+            products = extracted_data.get("products", [])
+            
+            for product in products:
+                if product.get("code", "").upper() in ["IMPRIMANTE", "PRINTER"]:
+                    # Changer le type d'action
+                    extracted_data["action_type"] = "RECHERCHE_PUIS_DEVIS"
+                    product["needs_search"] = True
+                    product["category"] = product["code"].lower()
+        
+        return extracted_data
+    def _extract_products_with_intelligence(self, extracted_data: Dict) -> List[Dict]:
+        """
+        🔧 GESTION INTELLIGENTE DES CODES PRODUITS GÉNÉRIQUES
+        """
+        products = extracted_data.get("products", [])
+        improved_products = []
+        
+        for product in products:
+            code = product.get("code", "")
+            quantity = product.get("quantity", 1)
+            
+            # 🔧 DÉTECTER LES CODES GÉNÉRIQUES
+            if code.upper() in ["IMPRIMANTE", "PRINTER", "ORDINATEUR", "COMPUTER"]:
+                # Transformer en demande de recherche
+                search_criteria = extracted_data.get("search_criteria", {})
+                
+                improved_products.append({
+                    "code": "RECHERCHE_REQUISE",
+                    "quantity": quantity,
+                    "search_needed": True,
+                    "category": code.lower(),
+                    "criteria": search_criteria
+                })
+            else:
+                # Code spécifique, garder tel quel
+                improved_products.append(product)
+        
+        return improved_products

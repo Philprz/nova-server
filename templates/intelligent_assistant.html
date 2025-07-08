@@ -579,6 +579,26 @@
         let conversationHistory = [];
         let isWaitingForResponse = false;
 
+        // Original form
+        const originalForm = document.createElement('form');
+        originalForm.id = 'original-form';
+        originalForm.innerHTML = `
+            <input type="text" placeholder="Entrez votre texte ici">
+            <button type="submit">Envoyer</button>
+            <button type="reset">Réinitialiser</button>
+        `;
+
+        // Duplicated form without buttons
+        const duplicatedForm = document.createElement('form');
+        duplicatedForm.id = 'duplicated-form';
+        duplicatedForm.innerHTML = `
+            <input type="text" placeholder="Entrez votre texte ici">
+        `;
+
+        // Append both forms to body or a container
+        document.body.appendChild(originalForm);
+        document.body.appendChild(duplicatedForm);
+
         // Initialisation
         document.addEventListener('DOMContentLoaded', function() {
             console.log('🚀 NOVA Assistant Intelligent initialisé');
@@ -589,16 +609,16 @@
         function sendMessage() {
             const input = document.getElementById('messageInput');
             const message = input.value.trim();
-            
+
             if (!message || isWaitingForResponse) return;
-            
+
             // Afficher le message utilisateur
             addMessage('user', message);
-            
+
             // Vider le champ de saisie
             input.value = '';
             adjustTextareaHeight(input);
-            
+
             // Envoyer à NOVA
             sendToNova(message);
         }
@@ -606,7 +626,7 @@
         // Envoi rapide de messages prédéfinis
         function sendQuickMessage(message) {
             if (isWaitingForResponse) return;
-            
+
             addMessage('user', message);
             sendToNova(message);
         }

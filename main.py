@@ -164,12 +164,60 @@ def health_check():
             "sync_module": "available" if sync_available else "unavailable"
         }
     }
+class ProductProcessor:
+    
+    def process_products(self, products_info: List[Dict]) -> List[Dict]:
+        """
+        🔧 TRAITEMENT ROBUSTE DES DONNÉES PRODUIT
+        """
+        processed_products = []
+        
+        for product in products_info:
+            if isinstance(product, dict) and "error" not in product:
+                # 🔧 EXTRACTION CORRIGÉE DES DONNÉES PRODUIT
+                product_code = (product.get("code") or
+                               product.get("item_code") or
+                               product.get("ItemCode", ""))
 
+                product_name = (product.get("name") or
+                               product.get("item_name") or
+                               product.get("ItemName", "Sans nom"))
+
+                quantity = float(product.get("quantity", 1))
+                unit_price = float(product.get("unit_price") or product.get("Price", 0))
+                line_total = quantity * unit_price
+                
+                # 🔧 GESTION DU STOCK
+                stock_available = product.get("stock", product.get("QuantityOnStock", 0))
+                is_available = quantity <= stock_available if stock_available > 0 else False
+
+                product_data = {
+                    "code": product_code,
+                    "name": product_name,
+                    "quantity": quantity,
+                    "unit_price": unit_price,
+                    "line_total": line_total,
+                    "stock_available": stock_available,
+                    "is_available": is_available,
+                    "status": "available" if is_available else "insufficient_stock"
+                }
+                
+                processed_products.append(product_data)
+            
+            else:
+                # Produit avec erreur, ajouter dans la liste pour traitement
+                processed_products.append({
+                    "error": True,
+                    "message": product.get("error", "Erreur inconnue"),
+                    "original_data": product
+                })
+        
+        return processed_products
 if __name__ == "__main__":
     import uvicorn
     print("🚀 Démarrage de NOVA Middleware...")
     print("📝 Documentation API : http://localhost:8000/docs")
     print("🏥 Contrôle santé : http://localhost:8000/health")
     if os.path.exists("static"):
-        print("🎮 Démo devis : http://localhost:8000/static/nova_interface.html")
+        print("🎮 Démo devis : http://178.33.233.120:8000/api/assistant/interface")
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)

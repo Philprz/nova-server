@@ -116,7 +116,7 @@ function Get-DeepCodeAnalysis {
     $detailedAnalysis.Impact = test-GlobalImpact -Changes $detailedAnalysis.Changes
     
     # Générer le raisonnement
-    $detailedAnalysis.Rationale = Generate-ChangeRationale -Analysis $detailedAnalysis
+    $detailedAnalysis.Rationale = new-ChangeRationale -Analysis $detailedAnalysis
     
     return $detailedAnalysis
 }
