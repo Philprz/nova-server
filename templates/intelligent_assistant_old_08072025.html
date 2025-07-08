@@ -62,7 +62,45 @@
             font-style: italic;
         }
 
+        .quick-actions {
+            padding: 20px;
+            flex: 1;
+        }
 
+        .quick-actions h3 {
+            margin-bottom: 15px;
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+
+        .action-btn {
+            display: block;
+            width: 100%;
+            padding: 12px 15px;
+            margin-bottom: 10px;
+            background: rgba(255,255,255,0.15);
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 8px;
+            color: white;
+            text-decoration: none;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            font-size: 0.9em;
+        }
+
+        .action-btn:hover {
+            background: rgba(255,255,255,0.2);
+            transform: translateY(-2px);
+        }
+
+        .action-btn.primary {
+            background: linear-gradient(135deg, #FD5202, #e74c3c);
+            border-color: #2980b9;
+        }
+
+        .action-btn.primary:hover {
+            background: linear-gradient(135deg, #2980b9, #1f5f8b);
+        }
 
         /* Zone de chat principale */
         .chat-container {
@@ -125,7 +163,7 @@
         }
 
         .message.user {
-            align-self: flex-start;
+            align-self: flex-end;
             flex-direction: row-reverse;
         }
 
@@ -201,7 +239,28 @@
             transform: translateY(-1px);
         }
 
+        .quick-actions-inline {
+            margin-top: 15px;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
 
+        .quick-action-btn {
+            background: linear-gradient(135deg, #3498db, #2980b9);
+            color: white;
+            padding: 8px 16px;
+            border: none;
+            border-radius: 20px;
+            font-size: 0.85em;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .quick-action-btn:hover {
+            background: linear-gradient(135deg, #2980b9, #1f5f8b);
+            transform: translateY(-1px);
+        }
 
         /* Zone de saisie */
         .input-container {
@@ -361,6 +420,9 @@
                 height: 70vh;
             }
             
+            .quick-actions {
+                display: none;
+            }
             
             .messages-container {
                 padding: 15px 20px;

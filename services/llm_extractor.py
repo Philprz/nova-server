@@ -3,7 +3,7 @@
 import os
 import json
 import httpx
-from typing import Dict, Any
+from typing import Dict, Any, List
 from dotenv import load_dotenv
 import logging
 load_dotenv()

@@ -7,7 +7,7 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from routes.routes_quote_details import router as quote_details_router
 from routes.routes_progress import router as progress_router
 from routes import routes_suggestions
-
+from typing import List, Dict
 
 # Import seulement des routes qui existent réellement
 try:
