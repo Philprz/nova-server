@@ -352,7 +352,7 @@ async def chat_with_nova(message_data: ChatMessage):
         intent_analysis = conversation_manager.analyze_intent(user_message)
         
         # ✅ NOUVELLE LOGIQUE - Détection automatique des devis
-        if detect_quote_request(user_message):
+        if detect_workflow_request(user_message):
             logger.info(f"🎯 Demande de devis détectée automatiquement: {user_message}")
             
             try:
@@ -1019,11 +1019,11 @@ async def get_products_list():
             'error': str(e),
             'message': "❌ **Erreur lors de la récupération des produits**"
         }
-def detect_quote_request(message: str) -> bool:
-    """Détecte si un message est une demande de devis"""
+def detect_workflow_request(message: str) -> bool:
+    """Détecte si un message nécessite le workflow (devis OU recherche produit)"""
     message_lower = message.lower()
     
-    # Mots-clés de déclenchement pour les devis
+    # Mots-clés pour les DEVIS
     quote_triggers = [
         'devis pour', 'créer un devis', 'faire un devis', 'je veux un devis',
         'quote for', 'create quote', 'quotation for',
@@ -1031,12 +1031,22 @@ def detect_quote_request(message: str) -> bool:
         'prix pour', 'tarif pour'
     ]
     
-    # Vérifier si le message contient une demande de devis
-    has_trigger = any(trigger in message_lower for trigger in quote_triggers)
+    # 🆕 NOUVEAUX : Mots-clés pour RECHERCHE PRODUIT
+    search_triggers = [
+        'je cherche', 'recherche', 'trouve', 'trouver',
+        'imprimante', 'ordinateur', 'scanner', 'écran',
+        'laser', 'jet d\'encre', 'recto-verso', 'réseau',
+        'ppm', 'caractéristiques', 'spécifications'
+    ]
     
-    # Vérifier qu'il y a aussi des éléments de contexte (client, produit, quantité)
+    # Vérifier si le message contient une demande
+    has_quote_trigger = any(trigger in message_lower for trigger in quote_triggers)
+    has_search_trigger = any(trigger in message_lower for trigger in search_triggers)
+    
+    # Vérifier qu'il y a du contexte
     has_context = any(keyword in message_lower for keyword in [
-        'avec', 'pour', 'de', 'ref', 'prod', 'article', 'quantité', 'unité', 'corp', 'company', 'client'
+        'avec', 'pour', 'de', 'ref', 'prod', 'article', 'quantité', 'unité', 
+        'corp', 'company', 'client', 'laser', 'réseau', 'ppm'
     ])
     
-    return has_trigger and has_context
+    return (has_quote_trigger or has_search_trigger) and has_context

@@ -2029,16 +2029,24 @@ class DevisWorkflow:
 
     async def _extract_info_from_prompt(self, prompt: str) -> Dict[str, Any]:
         """Extraction des informations avec fallback robuste - VERSION ORIGINALE RESTAURÉE"""
+        # 🚨 LOG POUR TRACER LE FLUX
+        logger.error(f"🔄 DÉBUT _extract_info_from_prompt AVEC: {prompt}")
         try:
             # Tenter extraction via LLM (méthode statique correcte)
+            logger.error(f"📞 APPEL extract_quote_info...")
             extracted_info = await LLMExtractor.extract_quote_info(prompt)
+            logger.error(f"📬 RETOUR extract_quote_info: {extracted_info}")
             if "error" not in extracted_info:
                 logger.info("Extraction LLM réussie")
                 return extracted_info
+            else:
+                logger.error(f"❌ ERREUR DANS extract_quote_info: {extracted_info.get('error')}")
         except Exception as e:
+            logger.error(f"💥 EXCEPTION dans extract_quote_info: {str(e)}")
             logger.warning(f"Échec extraction LLM: {str(e)}")
         
         # Fallback vers extraction manuelle AMÉLIORÉE
+        logger.error(f"⤵️ FALLBACK vers _extract_info_basic")
         return await self._extract_info_basic(prompt)
 
     async def _extract_info_basic(self, prompt: str) -> Dict[str, Any]:

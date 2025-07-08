@@ -16,6 +16,8 @@ class LLMExtractor:
     
     @staticmethod
     async def extract_quote_info(prompt: str) -> Dict[str, Any]:
+        # 🚨 LOG FORCÉ POUR TEST - NIVEAU ERROR pour s'assurer qu'il s'affiche
+        logger.error(f"🚨 FONCTION extract_quote_info APPELÉE AVEC: {prompt}")
         logger.info(f"Extraction d'informations de devis à partir de: {prompt}")
 
         # Construire le prompt pour Claude
@@ -77,51 +79,100 @@ class LLMExtractor:
                 ],
                 "temperature": 0.0  # Réponse déterministe pour extraction précise
             }
-
+            
+            # 🔍 DEBUG: Log de la requête envoyée à Claude
+            logger.info(f"🤖 PROMPT SYSTÈME ENVOYÉ: {system_prompt}")
+            logger.info(f"📝 MESSAGE UTILISATEUR: {user_message}")
+            
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.post(
                     "https://api.anthropic.com/v1/messages",
                     headers=headers,
                     json=payload
                 )
-
+                
+                # 🔍 DEBUG DÉTAILLÉ - Réponse brute de Claude
+                logger.info(f"📊 STATUS CODE: {response.status_code}")
+                logger.info(f"🤖 RÉPONSE BRUTE CLAUDE: {response.text}")
+                
+                # Vérifier le code de statut
                 if response.status_code != 200:
-                    error_detail = response.json()
-                    logger.error(f"Détail erreur API: {error_detail}")
-                    return {"error": f"Erreur API Claude: {error_detail}"}
+                    try:
+                        error_detail = response.json()
+                        logger.error(f"Détail erreur API: {error_detail}")
+                        return {"error": f"Erreur API Claude: {error_detail}"}
+                    except:
+                        logger.error(f"Erreur HTTP {response.status_code}: {response.text}")
+                        return {"error": f"Erreur HTTP {response.status_code}"}
 
-                result = response.json()
-
-                # Validation des données extraites
-                if "content" not in result:
-                    logger.error("Réponse API invalide: contenu manquant")
-                    return {"error": "Réponse API invalide: contenu manquant"}
-
-                content = result["content"][0]["text"]
-                                
-                # Extraire les données JSON de la réponse
+                # Parser la réponse JSON
                 try:
-                    # Trouver les délimiteurs JSON dans la réponse
-                    start_idx = content.find("{")
-                    end_idx = content.rfind("}") + 1
+                    response_data = response.json()
                     
-                    if start_idx >= 0 and end_idx > start_idx:
-                        json_str = content[start_idx:end_idx]
-                        extracted_data = json.loads(json_str)
-                        logger.info(f"Extraction réussie: {extracted_data}")
-                        # 🔍 DEBUG : Vérifier le type d'action détecté
-                        action_type = extracted_data.get("action_type", "NON_DÉTECTÉ")
-                        logger.info(f"🎯 TYPE D'ACTION DÉTECTÉ: {action_type}")
-                        if action_type == "RECHERCHE_PRODUIT":
-                            logger.info(f"🔍 CRITÈRES DE RECHERCHE: {extracted_data.get('search_criteria', {})}")
-                        return extracted_data
-                    else:
-                        logger.error("Impossible de trouver du JSON dans la réponse")
-                        return {"error": "Format de réponse invalide"}
-                except json.JSONDecodeError:
-                    logger.error("Erreur de décodage JSON")
-                    return {"error": "Erreur de décodage JSON"}
-
+                    # Validation des données de réponse
+                    if "content" not in response_data:
+                        logger.error("Réponse API invalide: contenu manquant")
+                        return {"error": "Réponse API invalide: contenu manquant"}
+                    
+                    if not response_data["content"] or len(response_data["content"]) == 0:
+                        logger.error("Réponse API invalide: contenu vide")
+                        return {"error": "Réponse API invalide: contenu vide"}
+                    
+                    # Extraire le contenu textuel de Claude
+                    claude_content = response_data["content"][0].get("text", "")
+                    logger.info(f"🎯 CONTENU CLAUDE EXTRAIT: {claude_content}")
+                    
+                    # Extraire les données JSON de la réponse Claude
+                    try:
+                        # Trouver les délimiteurs JSON dans la réponse
+                        start_idx = claude_content.find("{")
+                        end_idx = claude_content.rfind("}") + 1
+                        
+                        if start_idx >= 0 and end_idx > start_idx:
+                            json_str = claude_content[start_idx:end_idx]
+                            logger.info(f"🔧 JSON EXTRAIT: {json_str}")
+                            
+                            extracted_data = json.loads(json_str)
+                            logger.info(f"✅ EXTRACTION RÉUSSIE: {extracted_data}")
+                            
+                            # 🔍 DEBUG : Vérifier le type d'action détecté
+                            action_type = extracted_data.get("action_type", "NON_DÉTECTÉ")
+                            logger.info(f"🎯 TYPE D'ACTION DÉTECTÉ: {action_type}")
+                            
+                            if action_type == "RECHERCHE_PRODUIT":
+                                search_criteria = extracted_data.get('search_criteria', {})
+                                logger.info(f"🔍 CRITÈRES DE RECHERCHE: {search_criteria}")
+                            elif action_type == "DEVIS":
+                                client = extracted_data.get('client', 'Non spécifié')
+                                products = extracted_data.get('products', [])
+                                logger.info(f"📋 CLIENT DEVIS: {client}")
+                                logger.info(f"📦 PRODUITS DEVIS: {products}")
+                            
+                            return extracted_data
+                        else:
+                            logger.error("Impossible de trouver du JSON dans la réponse Claude")
+                            logger.error(f"📋 CONTENU BRUT SANS JSON: {claude_content}")
+                            return {"error": "Format de réponse invalide - pas de JSON trouvé"}
+                            
+                    except json.JSONDecodeError as json_error:
+                        logger.error(f"❌ ERREUR DE DÉCODAGE JSON: {json_error}")
+                        logger.error(f"📋 CONTENU NON-JSON: {claude_content}")
+                        return {"error": f"Erreur de décodage JSON: {json_error}"}
+                        
+                except json.JSONDecodeError as response_error:
+                    logger.error(f"❌ ERREUR PARSING RÉPONSE HTTP: {response_error}")
+                    logger.error(f"📋 RÉPONSE BRUTE: {response.text}")
+                    return {"error": f"Erreur parsing réponse HTTP: {response_error}"}
+                    
+        except httpx.TimeoutException:
+            logger.error("❌ TIMEOUT lors de l'appel à Claude API")
+            return {"error": "Timeout lors de l'appel à Claude API"}
+            
+        except httpx.ConnectError:
+            logger.error("❌ ERREUR DE CONNEXION à Claude API")
+            return {"error": "Erreur de connexion à Claude API"}
+            
         except Exception as e:
-            logger.error(f"Erreur lors de l'extraction des informations de devis: {e}")
-            return {"error": f"Erreur lors de l'extraction des informations de devis: {e}"}
+            logger.error(f"❌ ERREUR GÉNÉRALE lors de l'extraction: {str(e)}")
+            logger.error(f"📋 TYPE D'ERREUR: {type(e).__name__}")
+            return {"error": f"Erreur lors de l'extraction des informations: {str(e)}"}

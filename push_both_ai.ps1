@@ -82,7 +82,7 @@ function Get-DeepCodeAnalysis {
                             'Context' = if ($currentFunction) { "in function $currentFunction" } 
                                        elseif ($currentClass) { "in class $currentClass" }
                                        else { "at file level" }
-                            'Purpose' = Analyze-LinePurpose $addedLine $file
+                            'Purpose' = test-LinePurpose $addedLine $file
                         }
                         
                         $fileAnalysis.Changes += $change
@@ -97,7 +97,7 @@ function Get-DeepCodeAnalysis {
                             'Context' = if ($currentFunction) { "in function $currentFunction" } 
                                        elseif ($currentClass) { "in class $currentClass" }
                                        else { "at file level" }
-                            'Purpose' = Analyze-LinePurpose $removedLine $file
+                            'Purpose' = test-LinePurpose $removedLine $file
                         }
                         
                         $fileAnalysis.Changes += $change
@@ -105,7 +105,7 @@ function Get-DeepCodeAnalysis {
                 }
                 
                 # Analyser l'intention globale des changements
-                $fileAnalysis.Context = Analyze-ChangeIntent -Added $addedLines -Removed $removedLines -File $file
+                $fileAnalysis.Context = test-ChangeIntent -Added $addedLines -Removed $removedLines -File $file
                 
                 $detailedAnalysis.Changes += $fileAnalysis
             }
@@ -113,7 +113,7 @@ function Get-DeepCodeAnalysis {
     }
     
     # Analyser l'impact global
-    $detailedAnalysis.Impact = Analyze-GlobalImpact -Changes $detailedAnalysis.Changes
+    $detailedAnalysis.Impact = test-GlobalImpact -Changes $detailedAnalysis.Changes
     
     # Générer le raisonnement
     $detailedAnalysis.Rationale = Generate-ChangeRationale -Analysis $detailedAnalysis
