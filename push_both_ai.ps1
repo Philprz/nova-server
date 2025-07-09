@@ -494,10 +494,13 @@ function New-DetailedCommitMessage {
     
     # Déterminer le scope
     $scope = ""
-    if ($Analysis.Impact.Count -gt 0) {
+    if ($Analysis.Impact.Count -gt 0 -and $null -ne $Analysis.Impact[0].Area) {
         $scope = $Analysis.Impact[0].Area.ToLower() -replace '/', '-'
     }
-    
+    elseif ($Analysis.Impact.Count -gt 0) {
+        $scope = "default-scope"
+    }
+
     # Générer le titre
     $title = "$commitType$(if ($scope) { "($scope)" }): $($primaryChange.Context.Description)"
     

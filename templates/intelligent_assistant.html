@@ -3,8 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&family=League+Spartan:wght@700&display=swap" rel="stylesheet">
-    <title>NOVA - Assistant Intelligent</title>
+    <title>NOVA - Générateur de Devis Intelligent</title>
     <style>
         * {
             margin: 0;
@@ -13,1241 +12,615 @@
         }
 
         body {
-            font-family: 'Montserrat', -apple-system, BlinkMacSystemFont, sans-serif;
-            background: linear-gradient(135deg, #02B9FD 0%, #832DFE 100%);
-            height: 100vh;
-            display: flex;
-            overflow: hidden;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            position: relative;
+            overflow-x: hidden;
         }
 
-        /* Layout principal */
-        .app-container {
-            display: flex;
+        /* Formes organiques de fond - Style IT SPIRIT */
+        .background-shapes {
+            position: fixed;
+            top: 0;
+            left: 0;
             width: 100%;
-            height: 100vh;
-            background: white;
-            border-radius: 0;
-            overflow: hidden;
+            height: 100%;
+            pointer-events: none;
+            z-index: 1;
         }
 
-        /* Sidebar */
-        .sidebar {
+        .shape {
+            position: absolute;
+            border-radius: 50%;
+            opacity: 0.1;
+            animation: float 6s ease-in-out infinite;
+        }
+
+        .shape-1 {
             width: 300px;
-            background: linear-gradient(180deg, #02B9FD 0%, #832DFE 100%);
-            color: white;
+            height: 300px;
+            background: #02B9FD;
+            top: 10%;
+            left: -10%;
+            animation-delay: 0s;
+        }
+
+        .shape-2 {
+            width: 200px;
+            height: 200px;
+            background: #E220FB;
+            top: 60%;
+            right: -5%;
+            animation-delay: 2s;
+        }
+
+        .shape-3 {
+            width: 150px;
+            height: 150px;
+            background: #2DFE83;
+            bottom: 20%;
+            left: 20%;
+            animation-delay: 4s;
+        }
+
+        .shape-4 {
+            width: 250px;
+            height: 250px;
+            background: #832DFE;
+            top: 30%;
+            right: 30%;
+            animation-delay: 1s;
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translateY(0) scale(1); }
+            50% { transform: translateY(-20px) scale(1.05); }
+        }
+
+        /* Container principal */
+        .container {
+            position: relative;
+            z-index: 10;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 40px 20px;
+            min-height: 100vh;
             display: flex;
             flex-direction: column;
-            border-right: 1px solid #34495e;
+            justify-content: center;
         }
 
-        .sidebar-header {
-            padding: 20px;
+        /* Header avec logo IT SPIRIT */
+        .header {
             text-align: center;
-            border-bottom: 1px solid #34495e;
+            margin-bottom: 60px;
         }
 
         .logo {
-            font-size: 2em;
-            font-weight: bold;
-            margin-bottom: 5px;
+            display: inline-flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .logo-icon {
+            width: 60px;
+            height: 60px;
+            background: linear-gradient(135deg, #02B9FD, #832DFE);
+            border-radius: 50% 20% 50% 20%;
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 10px;
+            color: white;
+            font-size: 24px;
+            font-weight: bold;
+        }
+
+        .logo-text {
+            color: white;
+            font-size: 2.5rem;
+            font-weight: 300;
+            letter-spacing: 2px;
         }
 
         .tagline {
-            font-size: 0.9em;
-            opacity: 0.8;
-            font-style: italic;
+            color: rgba(255, 255, 255, 0.9);
+            font-size: 1.1rem;
+            font-weight: 300;
+            margin-top: 10px;
         }
 
-
-
-        /* Zone de chat principale */
-        .chat-container {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            background: #f8fafc;
+        /* Interface de saisie moderne */
+        .input-section {
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 30px;
+            padding: 40px;
+            margin-bottom: 40px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
         }
 
-        .chat-header {
-            background: white;
-            padding: 20px 30px;
-            border-bottom: 1px solid #e2e8f0;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-
-        .chat-title {
-            font-size: 1.5em;
-            font-weight: 600;
-            color: #2d3748;
-            margin-bottom: 5px;
-        }
-
-        .chat-subtitle {
-            color: #718096;
-            font-size: 0.9em;
-        }
-
-        .status-indicator {
-            display: inline-block;
-            width: 8px;
-            height: 8px;
-            background: #48bb78;
-            border-radius: 50%;
-            margin-right: 8px;
-            animation: pulse 2s infinite;
-        }
-
-        @keyframes pulse {
-            0% { opacity: 1; }
-            50% { opacity: 0.5; }
-            100% { opacity: 1; }
-        }
-
-        /* Zone des messages */
-        .messages-container {
-            flex: 1;
-            overflow-y: auto;
-            padding: 20px 30px;
-            display: flex;
-            flex-direction: column;
-            gap: 20px;
-        }
-
-        .message {
-            display: flex;
-            align-items: flex-start;
-            gap: 12px;
-            max-width: 80%;
-        }
-
-        .message.user {
-            align-self: flex-start;
-            flex-direction: row-reverse;
-        }
-
-        .message.nova {
-            align-self: flex-start;
-        }
-
-        .message-avatar {
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: bold;
-            font-size: 1.2em;
-            flex-shrink: 0;
-        }
-
-        .message.user .message-avatar {
-            background: linear-gradient(135deg, #667eea, #764ba2);
+        .input-title {
             color: white;
+            font-size: 1.4rem;
+            font-weight: 300;
+            text-align: center;
+            margin-bottom: 30px;
+            opacity: 0.9;
         }
 
-        .message.nova .message-avatar {
-            background: linear-gradient(135deg, #48bb78, #38a169);
-            color: white;
-        }
-
-        .message-content {
-            background: white;
-            padding: 15px 20px;
-            border-radius: 18px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        .input-container {
             position: relative;
         }
 
-        .message.user .message-content {
-            background: linear-gradient(135deg, #667eea, #764ba2);
-            color: white;
+        .main-input {
+            width: 100%;
+            min-height: 120px;
+            background: rgba(255, 255, 255, 0.95);
+            border: none;
+            border-radius: 20px;
+            padding: 25px 30px;
+            font-size: 1.1rem;
+            font-family: inherit;
+            resize: vertical;
+            outline: none;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            transition: all 0.3s ease;
+            line-height: 1.6;
         }
 
-        .message.nova .message-content {
+        .main-input:focus {
+            transform: translateY(-2px);
+            box-shadow: 0 15px 40px rgba(0, 0, 0, 0.15);
             background: white;
-            border: 1px solid #e2e8f0;
         }
 
-        .message-text {
-            line-height: 1.5;
-            white-space: pre-wrap;
+        .main-input::placeholder {
+            color: #64748b;
+            font-style: italic;
         }
 
-        .message-suggestions {
-            margin-top: 15px;
+        /* Indicateur de traitement */
+        .input-indicator {
+            position: absolute;
+            bottom: -10px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(255, 255, 255, 0.9);
+            border-radius: 20px;
+            padding: 8px 20px;
+            font-size: 0.9rem;
+            color: #475569;
+            opacity: 0;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(10px);
+        }
+
+        .input-indicator.show {
+            opacity: 1;
+            bottom: -5px;
+        }
+
+        /* Suggestions rapides */
+        .quick-suggestions {
+            margin-top: 30px;
+            text-align: center;
+        }
+
+        .suggestions-title {
+            color: rgba(255, 255, 255, 0.8);
+            font-size: 0.9rem;
+            margin-bottom: 15px;
+        }
+
+        .suggestion-tags {
             display: flex;
             flex-wrap: wrap;
-            gap: 8px;
-        }
-
-        .suggestion-chip {
-            background: rgba(72, 187, 120, 0.1);
-            color: #38a169;
-            padding: 6px 12px;
-            border-radius: 20px;
-            font-size: 0.85em;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            border: 1px solid rgba(72, 187, 120, 0.2);
-        }
-
-        .suggestion-chip:hover {
-            background: rgba(72, 187, 120, 0.2);
-            transform: translateY(-1px);
-        }
-
-
-
-        /* Zone de saisie */
-        .input-container {
-            background: white;
-            padding: 20px 30px;
-            border-top: 1px solid #e2e8f0;
-            box-shadow: 0 -2px 8px rgba(0,0,0,0.1);
-        }
-
-        .input-wrapper {
-            display: flex;
-            gap: 15px;
-            align-items: flex-end;
-        }
-
-        .input-field {
-            flex: 1;
-            min-height: 50px;
-            max-height: 120px;
-            padding: 15px 20px;
-            border: 2px solid #e2e8f0;
-            border-radius: 25px;
-            font-size: 1em;
-            font-family: inherit;
-            resize: none;
-            outline: none;
-            transition: all 0.3s ease;
-        }
-
-        .input-field:focus {
-            border-color: #667eea;
-            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-        }
-
-        .send-btn {
-            width: 50px;
-            height: 50px;
-            background: linear-gradient(135deg, #667eea, #764ba2);
-            border: none;
-            border-radius: 50%;
-            color: white;
-            font-size: 1.2em;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            display: flex;
-            align-items: center;
+            gap: 10px;
             justify-content: center;
         }
 
-        .send-btn:hover {
-            background: linear-gradient(135deg, #5a67d8, #6b46c1);
-            transform: scale(1.05);
+        .suggestion-tag {
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border: 1px solid rgba(255, 255, 255, 0.1);
         }
 
-        .send-btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-            transform: none;
+        .suggestion-tag:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: translateY(-2px);
         }
 
-        /* Indicateur de frappe */
-        .typing-indicator {
-            display: none;
-            align-items: center;
-            gap: 12px;
-            padding: 15px 20px;
-            background: white;
-            border-radius: 18px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-            margin-bottom: 20px;
-            align-self: flex-start;
-            max-width: 80%;
+        /* Zone de résultats */
+        .results-section {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 25px;
+            padding: 30px;
+            margin-top: 20px;
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1);
+            opacity: 0;
+            transform: translateY(20px);
+            transition: all 0.5s ease;
         }
 
-        .typing-dots {
-            display: flex;
-            gap: 4px;
+        .results-section.show {
+            opacity: 1;
+            transform: translateY(0);
         }
 
-        .typing-dot {
+        .processing-indicator {
+            text-align: center;
+            padding: 40px;
+            color: #64748b;
+        }
+
+        .processing-dots {
+            display: inline-flex;
+            gap: 8px;
+            margin-left: 10px;
+        }
+
+        .dot {
             width: 8px;
             height: 8px;
-            background: #cbd5e0;
+            background: #02B9FD;
             border-radius: 50%;
-            animation: typing 1.4s infinite ease-in-out;
+            animation: pulse 1.5s ease-in-out infinite;
         }
 
-        .typing-dot:nth-child(1) { animation-delay: -0.32s; }
-        .typing-dot:nth-child(2) { animation-delay: -0.16s; }
+        .dot:nth-child(2) { animation-delay: 0.2s; }
+        .dot:nth-child(3) { animation-delay: 0.4s; }
 
-        @keyframes typing {
-            0%, 80%, 100% { transform: scale(0.8); opacity: 0.5; }
-            40% { transform: scale(1); opacity: 1; }
+        @keyframes pulse {
+            0%, 100% { opacity: 0.3; transform: scale(1); }
+            50% { opacity: 1; transform: scale(1.2); }
         }
 
-        /* Messages d'accueil */
-        .welcome-message {
-            text-align: center;
-            padding: 40px 20px;
-            color: #718096;
+        /* Mode toggle */
+        .mode-toggle {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 100;
         }
 
-        .welcome-title {
-            font-size: 1.5em;
-            font-weight: 600;
-            margin-bottom: 10px;
-            color: #2d3748;
+        .toggle-switch {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: rgba(255, 255, 255, 0.2);
+            padding: 10px 15px;
+            border-radius: 25px;
+            backdrop-filter: blur(10px);
+            color: white;
+            font-size: 0.9rem;
         }
 
-        .welcome-examples {
-            margin-top: 30px;
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 15px;
-        }
-
-        .example-card {
-            background: white;
-            padding: 20px;
-            border-radius: 12px;
-            border: 1px solid #e2e8f0;
+        .switch {
+            width: 50px;
+            height: 25px;
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 15px;
+            position: relative;
             cursor: pointer;
             transition: all 0.3s ease;
         }
 
-        .example-card:hover {
-            border-color: #667eea;
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        .switch.active {
+            background: #02B9FD;
         }
 
-        .example-title {
-            font-weight: 600;
-            color: #2d3748;
-            margin-bottom: 8px;
+        .switch-handle {
+            width: 20px;
+            height: 20px;
+            background: white;
+            border-radius: 50%;
+            position: absolute;
+            top: 2.5px;
+            left: 2.5px;
+            transition: all 0.3s ease;
         }
 
-        .example-text {
-            color: #718096;
-            font-size: 0.9em;
+        .switch.active .switch-handle {
+            left: 27.5px;
         }
 
         /* Responsive */
         @media (max-width: 768px) {
-            .app-container {
+            .container {
+                padding: 20px 15px;
+            }
+
+            .input-section {
+                padding: 25px;
+                border-radius: 20px;
+            }
+
+            .main-input {
+                min-height: 100px;
+                padding: 20px;
+                font-size: 1rem;
+            }
+
+            .logo-text {
+                font-size: 2rem;
+            }
+
+            .suggestion-tags {
                 flex-direction: column;
+                align-items: center;
             }
-            
-            .sidebar {
-                width: 100%;
-                height: auto;
-                order: 2;
-            }
-            
-            .chat-container {
-                order: 1;
-                height: 70vh;
-            }
-            
-            
-            .messages-container {
-                padding: 15px 20px;
-            }
-            
-            .input-container {
-                padding: 15px 20px;
-            }
-        }
-
-        /* Animations d'entrée */
-        .message {
-            animation: slideIn 0.3s ease-out;
-        }
-
-        @keyframes slideIn {
-            from {
-                opacity: 0;
-                transform: translateY(20px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-
-        /* Scrollbar personnalisée */
-        .messages-container::-webkit-scrollbar {
-            width: 6px;
-        }
-
-        .messages-container::-webkit-scrollbar-track {
-            background: #f1f5f9;
-        }
-
-        .messages-container::-webkit-scrollbar-thumb {
-            background: #cbd5e0;
-            border-radius: 3px;
-        }
-
-        .messages-container::-webkit-scrollbar-thumb:hover {
-            background: #a0aec0;
         }
     </style>
 </head>
 <body>
-    <div class="app-container">
-        <!-- Sidebar -->
-        <div class="sidebar">
-            <div class="sidebar-header">
-                <div class="logo">
-                    🚀 NOVA
-                </div>
-                <div class="tagline">Assistant Intelligent</div>
+    <!-- Formes organiques de fond -->
+    <div class="background-shapes">
+        <div class="shape shape-1"></div>
+        <div class="shape shape-2"></div>
+        <div class="shape shape-3"></div>
+        <div class="shape shape-4"></div>
+    </div>
+
+    <!-- Toggle mode brouillon -->
+    <div class="mode-toggle">
+        <div class="toggle-switch">
+            <span>Mode brouillon</span>
+            <div class="switch" id="draftToggle" onclick="toggleDraftMode()">
+                <div class="switch-handle"></div>
             </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <div class="logo">
+                <div class="logo-icon">N</div>
+                <div class="logo-text">NOVA</div>
+            </div>
+            <div class="tagline">L'esprit humain au cœur de la technologie</div>
+        </div>
+
+        <!-- Interface de saisie -->
+        <div class="input-section">
+            <h2 class="input-title">Décrivez votre demande en langage naturel</h2>
             
-            <div class="quick-actions">
-                <h3>🚀 Actions Rapides</h3>
-                <button class="action-btn primary" onclick="startNewQuoteWorkflow()">
-                    📝 Nouveau Devis
-                </button>
-                <button class="action-btn" onclick="sendQuickMessage('rechercher client')">
-                    👥 Rechercher Client
-                </button>
-                <button class="action-btn" onclick="sendQuickMessage('rechercher produit')">
-                    📦 Rechercher Produits
-                </button>
-                <button class="action-btn" onclick="sendQuickMessage('Aide')">
-                    ❓ Aide
-                </button>
+            <div class="input-container">
+                <textarea 
+                    id="mainInput" 
+                    class="main-input" 
+                    placeholder="Exemple : Créer un devis pour 100 unités du produit A00001 pour le client Edge Communications..."
+                    oninput="handleInput()"
+                    onkeydown="handleKeyDown(event)"
+                ></textarea>
                 
-                <h3 style="margin-top: 30px;">📊 Raccourcis</h3>
-                <a href="/static/nova_interface.html" class="action-btn">
-                    🔧 Interface Classique
-                </a>
-                <a href="/static/sync_dashboard.html" class="action-btn">
-                    🔄 Synchronisation
-                </a>
-                <button class="action-btn" onclick="clearConversation()">
-                    🗑️ Effacer Discussion
-                </button>
+                <div id="inputIndicator" class="input-indicator">
+                    ⏎ Appuyez sur Entrée pour traiter votre demande
+                </div>
+            </div>
+
+            <!-- Suggestions rapides -->
+            <div class="quick-suggestions">
+                <div class="suggestions-title">Suggestions rapides :</div>
+                <div class="suggestion-tags">
+                    <div class="suggestion-tag" onclick="fillInput('Créer un devis pour Edge Communications avec 100 unités A00001')">
+                        📋 Devis client existant
+                    </div>
+                    <div class="suggestion-tag" onclick="fillInput('Nouveau client NOVA France SARL avec 50 produits A00001')">
+                        🆕 Nouveau client
+                    </div>
+                    <div class="suggestion-tag" onclick="fillInput('Vérifier le stock disponible pour le produit A00025')">
+                        📦 Vérifier stock
+                    </div>
+                    <div class="suggestion-tag" onclick="fillInput('Créer un devis multi-produits pour TechCorp')">
+                        🔄 Multi-produits
+                    </div>
+                </div>
             </div>
         </div>
 
-        <!-- Zone de chat principale -->
-        <div class="chat-container">
-            <div class="chat-header">
-                <div class="chat-title">
-                    <span class="status-indicator"></span>
-                    Conversation avec NOVA
+        <!-- Zone de résultats -->
+        <div id="resultsSection" class="results-section">
+            <div id="processingIndicator" class="processing-indicator">
+                <div style="font-size: 1.2rem; margin-bottom: 15px;">
+                    🤖 NOVA traite votre demande
                 </div>
-                <div class="chat-subtitle">
-                    Assistant intelligent pour la génération de devis
-                </div>
-            </div>
-
-            <div class="messages-container" id="messagesContainer">
-                <!-- Message d'accueil -->
-                <div class="welcome-message">
-                    <div class="welcome-title">👋 Bonjour ! Je suis NOVA</div>
-                    <p>Votre assistant intelligent pour la génération de devis.<br>
-                    Dites-moi simplement ce que vous voulez faire !</p>
-                    
-                    <div class="welcome-examples">
-                        <div class="example-card" onclick="sendQuickMessage('Créer un devis pour Edge Communications')">
-                            <div class="example-title">📝 Créer un devis</div>
-                            <div class="example-text">"Créer un devis pour Edge Communications"</div>
-                        </div>
-                        <div class="example-card" onclick="sendQuickMessage('Chercher le client Acme Corp')">
-                            <div class="example-title">🔍 Rechercher</div>
-                            <div class="example-text">"Chercher le client Acme Corp"</div>
-                        </div>
-                        <div class="example-card" onclick="sendQuickMessage('Produit A00025 disponible ?')">
-                            <div class="example-title">📦 Vérifier stock</div>
-                            <div class="example-text">"Produit A00025 disponible ?"</div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Indicateur de frappe -->
-                <div class="typing-indicator" id="typingIndicator">
-                    <div class="message-avatar">🤖</div>
-                    <div>
-                        NOVA réfléchit
-                        <div class="typing-dots">
-                            <div class="typing-dot"></div>
-                            <div class="typing-dot"></div>
-                            <div class="typing-dot"></div>
-                        </div>
+                <div>
+                    Analyse en cours
+                    <div class="processing-dots">
+                        <div class="dot"></div>
+                        <div class="dot"></div>
+                        <div class="dot"></div>
                     </div>
                 </div>
             </div>
-
-            <div class="input-container">
-                <div class="input-wrapper">
-                    <textarea 
-                        id="messageInput" 
-                        class="input-field" 
-                        placeholder="Tapez votre message... (Ex: 'Créer un devis pour Edge Communications')"
-                        rows="1"
-                        onkeydown="handleKeyDown(event)"
-                        oninput="adjustTextareaHeight(this)"
-                    ></textarea>
-                    <button id="sendBtn" class="send-btn" onclick="sendMessage()">
-                        ➤
-                    </button>
-                </div>
+            
+            <div id="resultsContent" style="display: none;">
+                <!-- Les résultats seront affichés ici -->
             </div>
         </div>
     </div>
 
     <script>
-        // Variables globales
-        let conversationHistory = [];
-        let isWaitingForResponse = false;
+        let isDraftMode = false;
+        let processingTimeout;
 
-        // Original form
-        const originalForm = document.createElement('form');
-        originalForm.id = 'original-form';
-        originalForm.innerHTML = `
-            <input type="text" placeholder="Entrez votre texte ici">
-            <button type="submit">Envoyer</button>
-            <button type="reset">Réinitialiser</button>
-        `;
-
-        // Duplicated form without buttons
-        const duplicatedForm = document.createElement('form');
-        duplicatedForm.id = 'duplicated-form';
-        duplicatedForm.innerHTML = `
-            <input type="text" placeholder="Entrez votre texte ici">
-        `;
-
-        // Append both forms to body or a container
-        document.body.appendChild(originalForm);
-        document.body.appendChild(duplicatedForm);
-
-        // Initialisation
-        document.addEventListener('DOMContentLoaded', function() {
-            console.log('🚀 NOVA Assistant Intelligent initialisé');
-            loadConversationHistory();
-        });
-
-        // Gestion de l'envoi de messages
-        function sendMessage() {
-            const input = document.getElementById('messageInput');
-            const message = input.value.trim();
-
-            if (!message || isWaitingForResponse) return;
-
-            // Afficher le message utilisateur
-            addMessage('user', message);
-
-            // Vider le champ de saisie
-            input.value = '';
-            adjustTextareaHeight(input);
-
-            // Envoyer à NOVA
-            sendToNova(message);
-        }
-
-        // Envoi rapide de messages prédéfinis
-        function sendQuickMessage(message) {
-            if (isWaitingForResponse) return;
-
-            addMessage('user', message);
-            sendToNova(message);
-        }
-
-        // Communication avec l'API NOVA
-        async function sendToNova(message) {
-            isWaitingForResponse = true;
-            showTypingIndicator();
+        function toggleDraftMode() {
+            const toggle = document.getElementById('draftToggle');
+            isDraftMode = !isDraftMode;
+            toggle.classList.toggle('active', isDraftMode);
             
-            try {
-                const response = await fetch('/api/assistant/chat', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ message: message })
-                });
-                
-                const data = await response.json();
-                
-                if (data.success || data.workflow_status === 'waiting_for_input' || data.workflow_status === 'configuring_quantities') {
-                    hideTypingIndicator();
-                    addNovaMessage(data.response);
-                } else {
-                    hideTypingIndicator();
-                    addMessage('nova', `❌ Erreur: ${data.error}`);
-                }
-                
-            } catch (error) {
-                console.error('Erreur communication NOVA:', error);
-                hideTypingIndicator();
-                addMessage('nova', '❌ Erreur de communication avec NOVA. Veuillez réessayer.');
-            }
-            
-            isWaitingForResponse = false;
-        }
-
-        // Ajouter un message à la conversation
-        function addMessage(sender, content, suggestions = [], quickActions = []) {
-            const container = document.getElementById('messagesContainer');
-            const welcomeMessage = container.querySelector('.welcome-message');
-            
-            // Masquer le message d'accueil après le premier message
-            if (welcomeMessage) {
-                welcomeMessage.style.display = 'none';
-            }
-            
-            const messageDiv = document.createElement('div');
-            messageDiv.className = `message ${sender}`;
-            
-            const avatar = document.createElement('div');
-            avatar.className = 'message-avatar';
-            avatar.textContent = sender === 'user' ? '👤' : '🤖';
-            
-            const messageContent = document.createElement('div');
-            messageContent.className = 'message-content';
-            
-            const messageText = document.createElement('div');
-            messageText.className = 'message-text';
-            messageText.textContent = content;
-            
-            messageContent.appendChild(messageText);
-            
-            // Ajouter les suggestions si présentes
-            if (suggestions && suggestions.length > 0) {
-                const suggestionsDiv = document.createElement('div');
-                suggestionsDiv.className = 'message-suggestions';
-                
-                suggestions.forEach(suggestion => {
-                    const chip = document.createElement('span');
-                    chip.className = 'suggestion-chip';
-                    chip.textContent = suggestion;
-                    chip.onclick = () => sendQuickMessage(suggestion);
-                    suggestionsDiv.appendChild(chip);
-                });
-                
-                messageContent.appendChild(suggestionsDiv);
-            }
-            
-            // Ajouter les actions rapides si présentes
-            if (quickActions && quickActions.length > 0) {
-                const actionsDiv = document.createElement('div');
-                actionsDiv.className = 'quick-actions-inline';
-                
-                quickActions.forEach(action => {
-                    const btn = document.createElement('button');
-                    btn.className = 'quick-action-btn';
-                    btn.textContent = action.label;
-                    btn.onclick = () => handleQuickAction(action.action);
-                    actionsDiv.appendChild(btn);
-                });
-                
-                messageContent.appendChild(actionsDiv);
-            }
-            
-            messageDiv.appendChild(avatar);
-            messageDiv.appendChild(messageContent);
-            
-            container.appendChild(messageDiv);
-            
-            // Scroll vers le bas
-            container.scrollTop = container.scrollHeight;
-            
-            // Sauvegarder dans l'historique
-            conversationHistory.push({
-                sender: sender,
-                content: content,
-                timestamp: new Date().toISOString(),
-                suggestions: suggestions,
-                quickActions: quickActions
-            });
-        }
-
-        // Ajouter une réponse NOVA avec formatage spécial
-        function addNovaMessage(response) {
-            const suggestions = response.suggestions || [];
-            const quickActions = response.quick_actions || [];
-            
-            addMessage('nova', response.message, suggestions, quickActions);
-        }
-
-        // Gestion des actions rapides
-        function handleQuickAction(action) {
-            switch(action) {
-                case 'new_quote':
-                    sendQuickMessage('Créer un nouveau devis');
-                    break;
-                
-                case 'show_clients':
-                    sendMessage('rechercher client');
-                    break;
-                case 'show_products':
-                    sendMessage('rechercher produit');
-                    break;
-                case 'new_client':
-                    sendMessage('créer nouveau client');
-                    break;
-                case 'new_product':
-                    sendMessage('créer nouveau produit');
-                    break;
-                case 'help':
-                    sendQuickMessage('Aide');
-                    break;
-                case 'confirm_quote':
-                    sendQuickMessage('Confirmer le devis');
-                    break;
-                case 'edit_quote':
-                    sendQuickMessage('Modifier le devis');
-                    break;
-                case 'search_more':
-                    sendQuickMessage('Rechercher plus d\'options');
-                    break;
-                // Nouvelles actions pour le workflow de devis
-                case 'start_workflow':
-                    startNewQuoteWorkflow();
-                    break;
-                case 'analyze_request':
-                    sendQuickMessage('Analyser ma demande de devis');
-                    break;
-                case 'specify_client':
-                    sendQuickMessage('Je veux spécifier le client pour le devis');
-                    break;
-                case 'choose_products':
-                    sendQuickMessage('Je veux choisir les produits pour le devis');
-                    break;
-                case 'open_classic':
-                    window.open('/static/nova_interface.html?action=new_quote', '_blank');
-                    addMessage('nova', '💼 Interface classique ouverte dans un nouvel onglet.');
-                    break;
-                // Nouvelles actions pour la gestion des doublons
-                case 'view_duplicates':
-                    showDuplicateQuotes();
-                    break;
-                case 'create_new':
-                    confirmCreateNewQuote();
-                    break;
-                case 'update_existing':
-                    showExistingQuotesToUpdate();
-                    break;
-                case 'create_quote':
-                    finalizeQuoteCreation();
-                    break;
-                case 'retry':
-                    startNewQuoteWorkflow();
-                    break;
-                case 'manual_entry':
-                    window.open('/static/nova_interface.html?action=manual_quote', '_blank');
-                    addMessage('nova', '📝 Interface de saisie manuelle ouverte.');
-                    break;
-                case 'export_pdf':
-                    exportQuoteToPDF();
-                    break;
-                case 'contact_support':
-                    addMessage('nova', '📞 **Support technique :**\n\nPour obtenir de l\'aide, contactez :\n• Email : support@nova.com\n• Téléphone : +33 1 23 45 67 89');
-                    break;
-                default:
-                    console.log('Action non reconnue:', action);
+            // Feedback visuel
+            const indicator = document.getElementById('inputIndicator');
+            if (isDraftMode) {
+                indicator.textContent = '📝 Mode brouillon activé - Entrée pour créer un draft';
+            } else {
+                indicator.textContent = '⏎ Appuyez sur Entrée pour traiter votre demande';
             }
         }
 
-        // Indicateur de frappe
-        function showTypingIndicator() {
-            document.getElementById('typingIndicator').style.display = 'flex';
-            const container = document.getElementById('messagesContainer');
-            container.scrollTop = container.scrollHeight;
+        function handleInput() {
+            const input = document.getElementById('mainInput');
+            const indicator = document.getElementById('inputIndicator');
+            
+            if (input.value.trim().length > 0) {
+                indicator.classList.add('show');
+            } else {
+                indicator.classList.remove('show');
+            }
         }
 
-        function hideTypingIndicator() {
-            document.getElementById('typingIndicator').style.display = 'none';
-        }
-
-        // Gestion du clavier
         function handleKeyDown(event) {
             if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault();
-                sendMessage();
+                processRequest();
             }
         }
 
-        // Ajustement automatique de la hauteur du textarea
-        function adjustTextareaHeight(textarea) {
-            textarea.style.height = 'auto';
-            textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
-        }
-
-        // Effacer la conversation
-        async function clearConversation() {
-            if (confirm('Êtes-vous sûr de vouloir effacer la conversation ?')) {
-                try {
-                    await fetch('/api/assistant/conversation/clear', { method: 'POST' });
-                    
-                    // Vider l'interface
-                    const container = document.getElementById('messagesContainer');
-                    container.innerHTML = `
-                        <div class="welcome-message">
-                            <div class="welcome-title">👋 Nouvelle conversation</div>
-                            <p>Comment puis-je vous aider aujourd'hui ?</p>
-                        </div>
-                        <div class="typing-indicator" id="typingIndicator">
-                            <div class="message-avatar">🤖</div>
-                            <div>
-                                NOVA réfléchit
-                                <div class="typing-dots">
-                                    <div class="typing-dot"></div>
-                                    <div class="typing-dot"></div>
-                                    <div class="typing-dot"></div>
-                                </div>
-                            </div>
-                        </div>
-                    `;
-                    
-                    conversationHistory = [];
-                    
-                } catch (error) {
-                    console.error('Erreur lors de l\'effacement:', error);
-                }
-            }
-        }
-
-        // Charger l'historique de conversation
-        async function loadConversationHistory() {
-            try {
-                const response = await fetch('/api/assistant/conversation/history');
-                const data = await response.json();
-                
-                if (data.success && data.history.length > 0) {
-                    // Masquer le message d'accueil
-                    const welcomeMessage = document.querySelector('.welcome-message');
-                    if (welcomeMessage) {
-                        welcomeMessage.style.display = 'none';
-                    }
-                    
-                    // Restaurer les messages
-                    data.history.forEach(msg => {
-                        addMessage(msg.sender, msg.content, msg.suggestions || [], msg.quickActions || []);
-                    });
-                }
-            } catch (error) {
-                console.error('Erreur chargement historique:', error);
-            }
-        }
-
-        // ===== NOUVELLES FONCTIONS POUR ACTIONS RAPIDES =====
-        
-        // Démarrer le workflow de création de devis
-        async function startNewQuoteWorkflow() {
-            const lastMessage = window.lastUserMessage || 'Créer un nouveau devis';
-            addMessage('user', lastMessage);
-            showTypingIndicator();
+        function fillInput(text) {
+            const input = document.getElementById('mainInput');
+            input.value = text;
+            input.focus();
+            handleInput();
             
-            try {
-                const response = await fetch('/api/assistant/workflow/create_quote', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        message: lastMessage
-                    })
-                });
-                
-                const data = await response.json();
-                hideTypingIndicator();
-                
-                if (data.success || data.workflow_status === 'waiting_for_input' || data.workflow_status === 'configuring_quantities') {
-                    // Sauvegarder les données du workflow
-                    window.currentWorkflowData = data;
-
-                    // Afficher le message principal avec suggestions
-                    const sugg = data.suggestions || [];
-                    addMessage('nova', data.message || '✅ Workflow de création de devis lancé', sugg);
-                    
-                    // Gérer les différents types de workflow
-                    if (data.workflow_type === 'duplicate_detected' && data.duplicate_analysis) {
-                        // Gérer les doublons détectés
-                        setTimeout(() => showDuplicateQuotes(), 500);
-                    } else if (data.workflow_type === 'quote_preview' && data.quote_preview) {
-                        // Afficher l'aperçu du devis
-                        const preview = data.quote_preview;
-                        let previewMessage = '📋 **Aperçu du devis :**\n\n';
-                        
-                        if (preview.client) {
-                            const clientName = preview.client.Name || preview.client.name || 'Client non spécifié';
-                            previewMessage += `**Client :** ${clientName}\n`;
-                        }
-                        
-                        if (preview.products && preview.products.length > 0) {
-                            previewMessage += '\n**Produits :**\n';
-                            preview.products.forEach((product, idx) => {
-                                const code = product.item_code || product.code || '';
-                                const name = product.item_name || product.name || '';
-                                const qty = product.quantity || 0;
-                                const price = product.unit_price || 0;
-                                previewMessage += `${idx + 1}. ${code} - ${name} : ${qty} x ${price}€\n`;
-                            });
-                        }
-                        
-                        previewMessage += `\n**Total :** ${preview.total_amount || 0}€ HT`;
-                        addMessage('nova', previewMessage);
-                    }
-                    
-                    // Afficher les actions rapides
-                    if (data.quick_actions && data.quick_actions.length > 0) {
-                        addMessage('nova', '🎯 **Actions disponibles :**', [], data.quick_actions);
-                    }
-                    
-                } else {
-                    // En cas d'erreur, proposer des options de récupération
-                    addMessage('nova', data.message || '❌ Erreur lors de la création du devis');
-                    
-                    // Afficher les actions de récupération
-                    const recoveryActions = [
-                        { label: '🔄 Réessayer', action: 'retry', type: 'primary' },
-                        { label: '📝 Saisie manuelle', action: 'manual_entry', type: 'secondary' },
-                        { label: '💼 Interface classique', action: 'open_classic', type: 'info' }
-                    ];
-                    
-                    addMessage('nova', '🔄 **Options de récupération :**', [], recoveryActions);
-                }
-                
-            } catch (error) {
-                hideTypingIndicator();
-                console.error('Erreur workflow devis:', error);
-                
-                addMessage('nova', '❌ Erreur de communication avec le serveur.');
-                
-                // Actions de récupération
-                const errorActions = [
-                    { label: '🔄 Réessayer', action: 'retry', type: 'primary' },
-                    { label: '💼 Interface classique', action: 'open_classic', type: 'secondary' }
-                ];
-                
-                addMessage('nova', '🔧 **Alternatives disponibles :**', [], errorActions);
-            }
-        }
-        
-        // Ouvrir la recherche de clients
-        async function openClientSearch() {
-            addMessage('user', 'Rechercher Client');
-            showTypingIndicator();
-            
-            try {
-                // Appeler l'API de recherche de clients
-                const response = await fetch('/clients/search_clients_advanced?q=&limit=20');
-                const data = await response.json();
-                
-                hideTypingIndicator();
-                
-                if (data.success && data.clients && data.clients.length > 0) {
-                    const total = data.count || data.total_found || data.clients.length;
-                    let clientsMessage = `🔍 **${data.clients.length} clients trouvés** (sur ${total} total):\n\n`;
-                    
-                    data.clients.slice(0, 10).forEach((client, index) => {
-                        clientsMessage += `**${index + 1}. ${client.name || client.company_name || 'Client sans nom'}**\n`;
-                        if (client.industry) clientsMessage += `   📊 Secteur: ${client.industry}\n`;
-                        if (client.phone) clientsMessage += `   📞 Tél: ${client.phone}\n`;
-                        if (client.email) clientsMessage += `   📧 Email: ${client.email}\n`;
-                        clientsMessage += `\n`;
-                    });
-                    
-                    if (data.clients.length > 10) {
-                        clientsMessage += `... et ${data.clients.length - 10} autres clients.\n\n`;
-                    }
-                    
-                    clientsMessage += `💡 **Astuce**: Tapez le nom d'un client pour le rechercher spécifiquement.`;
-                    
-                    addMessage('nova', clientsMessage);
-                } else {
-                    addMessage('nova', '📋 Aucun client trouvé. Voulez-vous créer un nouveau client ?');
-                }
-                
-            } catch (error) {
-                hideTypingIndicator();
-                addMessage('nova', '❌ Erreur lors de la recherche de clients. Veuillez réessayer.');
-                console.error('Erreur recherche clients:', error);
-            }
-        }
-        
-        // Ouvrir la recherche de produits
-        async function openProductSearch() {
-            addMessage('user', 'Rechercher Produits');
-            showTypingIndicator();
-            
-            try {
-                // Appeler l'API de recherche de produits
-                const response = await fetch('/products/search_products_advanced?limit=20');
-                const data = await response.json();
-                
-                hideTypingIndicator();
-                
-                if (data.success && data.products && data.products.length > 0) {
-                    const total = data.count || data.total_found || data.products.length;
-                    let productsMessage = `🛍️ **${data.products.length} produits trouvés** (sur ${total} total):\n\n`;
-                    
-                    data.products.slice(0, 10).forEach((product, index) => {
-                        productsMessage += `**${index + 1}. ${product.item_name || product.display_text || 'Produit sans nom'}**\n`;
-                        if (product.item_code) productsMessage += `   🏷️ Réf: ${product.item_code}\n`;
-                        if (product.price_display) productsMessage += `   💰 Prix: ${product.price_display}\n`;
-                        if (product.availability_text) productsMessage += `   📦 Stock: ${product.availability_text}\n`;
-                        productsMessage += `\n`;
-                    });
-                    
-                    if (data.products.length > 10) {
-                        productsMessage += `... et ${data.products.length - 10} autres produits.\n\n`;
-                    }
-                    
-                    productsMessage += `💡 **Astuce**: Tapez le nom ou la référence d'un produit pour le rechercher spécifiquement.`;
-                    
-                    addMessage('nova', productsMessage);
-                } else {
-                    addMessage('nova', '📦 Aucun produit trouvé dans le catalogue.');
-                }
-                
-            } catch (error) {
-                hideTypingIndicator();
-                addMessage('nova', '❌ Erreur lors de la recherche de produits. Veuillez réessayer.');
-                console.error('Erreur recherche produits:', error);
-            }
-        }
-        
-        // ===== FONCTIONS DE GESTION DES DOUBLONS ET ACTIONS AVANCÉES =====
-        
-        // Afficher les devis en doublon
-        function showDuplicateQuotes() {
-            if (!window.currentWorkflowData || !window.currentWorkflowData.duplicate_analysis) {
-                addMessage('nova', '❌ Aucune donnée de doublon disponible.');
-                return;
-            }
-            
-            const duplicates = window.currentWorkflowData.duplicate_analysis;
-            let message = '📋 **Devis existants détectés :**\n\n';
-            
-            // Devis récents
-            if (duplicates.recent_quotes && duplicates.recent_quotes.length > 0) {
-                message += '🕒 **Devis récents :**\n';
-                duplicates.recent_quotes.forEach((quote, index) => {
-                    message += `${index + 1}. Devis #${quote.doc_num} - ${quote.doc_total}€ (${new Date(quote.doc_date).toLocaleDateString()})\n`;
-                });
-                message += '\n';
-            }
-            
-            // Devis brouillons
-            if (duplicates.draft_quotes && duplicates.draft_quotes.length > 0) {
-                message += '📝 **Devis brouillons :**\n';
-                duplicates.draft_quotes.slice(0, 5).forEach((quote, index) => {
-                    message += `${index + 1}. Brouillon #${quote.doc_num} - ${quote.doc_total}€ (${new Date(quote.doc_date).toLocaleDateString()})\n`;
-                });
-                if (duplicates.draft_quotes.length > 5) {
-                    message += `... et ${duplicates.draft_quotes.length - 5} autres brouillons\n`;
-                }
-            }
-            
-            addMessage('nova', message);
-            
-            // Actions pour gérer les doublons
-            const duplicateActions = [
-                { label: '🆕 Créer nouveau', action: 'create_new', type: 'primary' },
-                { label: '✏️ Modifier existant', action: 'update_existing', type: 'secondary' },
-                { label: '💼 Interface complète', action: 'open_classic', type: 'info' }
-            ];
-            
-            addMessage('nova', '🎯 **Que souhaitez-vous faire ?**', [], duplicateActions);
-        }
-        
-        // Confirmer la création d'un nouveau devis
-        function confirmCreateNewQuote() {
-            addMessage('user', 'Créer un nouveau devis malgré les doublons');
-            addMessage('nova', '✅ **Création d\'un nouveau devis confirmée**\n\nLe nouveau devis sera créé en ignorant les doublons existants.');
-            
-            const confirmActions = [
-                { label: '🚀 Finaliser', action: 'create_quote', type: 'primary' },
-                { label: '⚙️ Paramètres', action: 'open_classic', type: 'secondary' }
-            ];
-            
-            addMessage('nova', '🎯 **Prêt à finaliser ?**', [], confirmActions);
-        }
-        
-        // Afficher les devis existants à modifier
-        function showExistingQuotesToUpdate() {
-            if (!window.currentWorkflowData || !window.currentWorkflowData.duplicate_analysis) {
-                addMessage('nova', '❌ Aucune donnée disponible.');
-                return;
-            }
-            
-            const duplicates = window.currentWorkflowData.duplicate_analysis;
-            let message = '✏️ **Devis modifiables :**\n\n';
-            
-            // Combiner brouillons et récents
-            const modifiableQuotes = [
-                ...(duplicates.draft_quotes || []),
-                ...(duplicates.recent_quotes || [])
-            ].slice(0, 5);
-            
-            if (modifiableQuotes.length > 0) {
-                modifiableQuotes.forEach((quote, index) => {
-                    const status = quote.comments && quote.comments.includes('BROUILLON') ? '📝 Brouillon' : '📋 Récent';
-                    message += `**${index + 1}. ${status} #${quote.doc_num}**\n`;
-                    message += `   💰 Montant: ${quote.doc_total}€\n`;
-                    message += `   📅 Date: ${new Date(quote.doc_date).toLocaleDateString()}\n\n`;
-                });
-                
-                message += '💡 **Astuce**: Utilisez l\'interface complète pour modifier un devis spécifique.';
-            } else {
-                message = '❌ Aucun devis modifiable trouvé.';
-            }
-            
-            addMessage('nova', message);
-            
-            const updateActions = [
-                { label: '💼 Interface complète', action: 'open_classic', type: 'primary' },
-                { label: '🆕 Créer nouveau', action: 'create_new', type: 'secondary' }
-            ];
-            
-            addMessage('nova', '🎯 **Actions disponibles :**', [], updateActions);
-        }
-        
-        // Finaliser la création du devis
-        function finalizeQuoteCreation() {
-            addMessage('user', 'Finaliser la création du devis');
-            addMessage('nova', '🚀 **Finalisation du devis en cours...**\n\nLe devis va être créé avec les informations analysées.');
-            
-            // Simuler la création (en réalité, cela appellerait l'API)
+            // Auto-traitement après un délai court
             setTimeout(() => {
-                if (window.currentWorkflowData && window.currentWorkflowData.quote_preview) {
-                    const preview = window.currentWorkflowData.quote_preview;
-                    const client = preview.client || {};
-                    const total = preview.total_amount || 0;
-                    
-                    let successMessage = '✅ **Devis créé avec succès !**\n\n';
-                    successMessage += `**Client :** ${client.name || 'Non spécifié'}\n`;
-                    successMessage += `**Montant :** ${total}€\n`;
-                    successMessage += `**Statut :** Brouillon\n\n`;
-                    successMessage += '📋 Le devis est maintenant disponible dans l\'interface classique.';
-                    
-                    addMessage('nova', successMessage);
-                    
-                    const finalActions = [
-                        { label: '👀 Voir le devis', action: 'open_classic', type: 'primary' },
-                        { label: '📄 Exporter PDF', action: 'export_pdf', type: 'secondary' },
-                        { label: '🆕 Nouveau devis', action: 'start_workflow', type: 'info' }
-                    ];
-                    
-                    addMessage('nova', '🎯 **Prochaines étapes :**', [], finalActions);
-                } else {
-                    addMessage('nova', '❌ Erreur lors de la finalisation. Utilisez l\'interface classique.');
-                }
-            }, 2000);
+                processRequest();
+            }, 800);
         }
-        
-        // ===== NOUVELLES FONCTIONS POUR CHARGER LES LISTES =====
-        
-        // Charger la liste complète des clients
-        async function loadClientsList() {
-            addMessage('user', 'Voir tous les clients');
-            showTypingIndicator();
+
+        function processRequest() {
+            const input = document.getElementById('mainInput');
+            const prompt = input.value.trim();
             
-            try {
-                const response = await fetch('/api/assistant/clients/list');
-                const data = await response.json();
-                
-                hideTypingIndicator();
-                
-                if (data.success && data.clients && data.clients.length > 0) {
-                    let clientsMessage = data.message + '\n\n';
-                    
-                    // Les clients sont déjà formatés en strings par l'API
-                    data.clients.forEach((clientString, index) => {
-                        clientsMessage += clientString + '\n\n';
-                    });
-                    
-                    clientsMessage += `💡 **Astuce**: Tapez le nom d'un client pour le rechercher spécifiquement.`;
-                    
-                    addMessage('nova', clientsMessage);
-                    
-                    const clientActions = [
-                        { label: '🔍 Rechercher client', action: 'search_client', type: 'primary' },
-                        { label: '➕ Nouveau client', action: 'new_client', type: 'secondary' },
-                        { label: '📋 Créer devis', action: 'start_workflow', type: 'info' }
-                    ];
-                    
-                    addMessage('nova', '🎯 **Actions disponibles :**', [], clientActions);
-                    
-                } else {
-                    addMessage('nova', data.message || '👥 Aucun client trouvé dans la base de données.');
-                }
-                
-            } catch (error) {
-                hideTypingIndicator();
-                addMessage('nova', '❌ Erreur lors du chargement des clients. Veuillez réessayer.');
-                console.error('Erreur chargement clients:', error);
+            if (!prompt) {
+                showNotification('Veuillez saisir une demande', 'warning');
+                return;
             }
-        }
-        
-        // Charger la liste complète des produits
-        async function loadProductsList() {
-            addMessage('user', 'Voir tous les produits');
-            showTypingIndicator();
+
+            // Masquer l'indicateur
+            document.getElementById('inputIndicator').classList.remove('show');
             
-            try {
-                const response = await fetch('/api/assistant/products/list');
-                const data = await response.json();
-                
-                hideTypingIndicator();
-                
-                if (data.success && data.products && data.products.length > 0) {
-                    let productsMessage = data.message + '\n\n';
-                    
-                    // Les produits sont des objets avec les bonnes propriétés
-                    data.products.forEach((product, index) => {
-                        productsMessage += `**${index + 1}. ${product.code} - ${product.name}**\n`;
-                        productsMessage += `   📦 Stock: ${product.stock} unités\n`;
-                        productsMessage += `   💰 Prix: ${product.price}€ HT\n`;
-                        productsMessage += `   📂 Catégorie: ${product.category}\n\n`;
-                    });
-                    
-                    productsMessage += `💡 **Astuce**: Tapez le nom ou la référence d'un produit pour le rechercher spécifiquement.`;
-                    
-                    addMessage('nova', productsMessage);
-                } else {
-                    addMessage('nova', '📦 Aucun produit trouvé dans le catalogue.');
-                }
-                
-            } catch (error) {
-                hideTypingIndicator();
-                addMessage('nova', '❌ Erreur lors de la recherche de produits. Veuillez réessayer.');
-                console.error('Erreur recherche produits:', error);
-            }
-        }
-        
-        // Exporter le devis en PDF
-        function exportQuoteToPDF() {
-            addMessage('user', 'Exporter le devis en PDF');
-            addMessage('nova', '📄 **Export PDF**\n\nFonctionnalité en cours de développement.\nUtilisez l\'interface classique pour exporter vos devis.');
+            // Afficher la zone de traitement
+            const resultsSection = document.getElementById('resultsSection');
+            const processingIndicator = document.getElementById('processingIndicator');
+            const resultsContent = document.getElementById('resultsContent');
             
-            const exportActions = [
-                { label: '💼 Interface classique', action: 'open_classic', type: 'primary' }
-            ];
+            resultsSection.classList.add('show');
+            processingIndicator.style.display = 'block';
+            resultsContent.style.display = 'none';
             
-            addMessage('nova', '🎯 **Alternative :**', [], exportActions);
+            // Simulation du traitement (à remplacer par l'appel API réel)
+            setTimeout(() => {
+                showResults({
+                    client: 'Edge Communications',
+                    product: 'A00001 - Produit Standard',
+                    quantity: 100,
+                    unitPrice: 40.00,
+                    total: 4000.00,
+                    stock: 150,
+                    status: isDraftMode ? 'Brouillon créé' : 'Devis généré'
+                });
+            }, 2500);
         }
-        
-        // Auto-focus sur le champ de saisie
-        document.getElementById('messageInput').focus();
+
+        function showResults(data) {
+            const processingIndicator = document.getElementById('processingIndicator');
+            const resultsContent = document.getElementById('resultsContent');
+            
+            processingIndicator.style.display = 'none';
+            resultsContent.style.display = 'block';
+            
+            resultsContent.innerHTML = `
+                <div style="text-align: center; margin-bottom: 25px;">
+                    <h3 style="color: #1f2937; margin-bottom: 10px;">
+                        ${isDraftMode ? '📝' : '✅'} ${data.status}
+                    </h3>
+                    <div style="color: #6b7280; font-size: 0.9rem;">
+                        ${new Date().toLocaleString('fr-FR')}
+                    </div>
+                </div>
+                
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 25px;">
+                    <div style="background: #f8fafc; padding: 20px; border-radius: 15px;">
+                        <h4 style="color: #374151; margin-bottom: 15px;">🏢 Client</h4>
+                        <div style="font-weight: 600; color: #1f2937;">${data.client}</div>
+                    </div>
+                    <div style="background: #f8fafc; padding: 20px; border-radius: 15px;">
+                        <h4 style="color: #374151; margin-bottom: 15px;">📦 Produit</h4>
+                        <div style="font-weight: 600; color: #1f2937;">${data.product}</div>
+                    </div>
+                </div>
+                
+                <div style="background: linear-gradient(135deg, #02B9FD, #832DFE); color: white; padding: 25px; border-radius: 15px; text-align: center;">
+                    <div style="font-size: 1.1rem; margin-bottom: 10px;">Quantité: ${data.quantity} unités</div>
+                    <div style="font-size: 1.5rem; font-weight: 600;">Total: ${data.total.toFixed(2)} € HT</div>
+                    <div style="margin-top: 10px; opacity: 0.9;">Stock disponible: ${data.stock} unités</div>
+                </div>
+                
+                <div style="text-align: center; margin-top: 25px;">
+                    <button onclick="newRequest()" style="
+                        background: rgba(102, 126, 234, 0.1);
+                        border: 1px solid #667eea;
+                        color: #667eea;
+                        padding: 12px 30px;
+                        border-radius: 25px;
+                        cursor: pointer;
+                        font-size: 1rem;
+                        transition: all 0.3s ease;
+                    " onmouseover="this.style.background='#667eea'; this.style.color='white';" 
+                       onmouseout="this.style.background='rgba(102, 126, 234, 0.1)'; this.style.color='#667eea';">
+                        ➕ Nouvelle demande
+                    </button>
+                </div>
+            `;
+        }
+
+        function newRequest() {
+            const input = document.getElementById('mainInput');
+            const resultsSection = document.getElementById('resultsSection');
+            
+            input.value = '';
+            input.focus();
+            resultsSection.classList.remove('show');
+            document.getElementById('inputIndicator').classList.remove('show');
+        }
+
+        function showNotification(message, type = 'info') {
+            const notification = document.createElement('div');
+            notification.style.cssText = `
+                position: fixed;
+                top: 20px;
+                left: 50%;
+                transform: translateX(-50%);
+                background: ${type === 'warning' ? '#FD5202' : '#02B9FD'};
+                color: white;
+                padding: 12px 20px;
+                border-radius: 25px;
+                z-index: 1000;
+                font-size: 0.9rem;
+                backdrop-filter: blur(10px);
+            `;
+            notification.textContent = message;
+            document.body.appendChild(notification);
+            
+            setTimeout(() => {
+                notification.remove();
+            }, 3000);
+        }
+
+        // Auto-focus sur le champ de saisie au chargement
+        document.addEventListener('DOMContentLoaded', function() {
+            document.getElementById('mainInput').focus();
+        });
     </script>
 </body>
 </html>
