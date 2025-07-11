@@ -718,7 +718,7 @@
                         ${errorMessage}
                     </div>
                     <div style="background: #fef3c7; color: #92400e; padding: 10px; border-radius: 8px; font-size: 0.9rem;">
-                        💡 Cliquez sur un client pour créer le devis avec ce client
+                        💡 Cliquez sur un client pour créer le devis avec ce client, ou créez un nouveau client
                     </div>
                 </div>
 
@@ -728,17 +728,236 @@
                 </div>
 
                 <div class="action-buttons">
-                    <button onclick="processRequest()" class="action-button primary">
+                    <button onclick="startClientCreation()" class="action-button primary" style="background: linear-gradient(135deg, #10b981, #059669);">
+                        ➕ Créer un nouveau client
+                    </button>
+                    <button onclick="processRequest()" class="action-button secondary">
                         🔄 Réessayer
                     </button>
                     <button onclick="newRequest()" class="action-button secondary">
                         ✏️ Modifier la demande
                     </button>
-                    <button onclick="openClassicInterface()" class="action-button secondary">
-                        💼 Interface classique
-                    </button>
-                </div>
-            `;
+                <button onclick="openClassicInterface()" class="action-button secondary">
+            💼 Interface classique
+        </button>
+        </div>
+        `;
+        }
+        
+        async function startClientCreation() {
+        // Extraire le nom de l'entreprise de la demande originale
+        const originalPrompt = document.getElementById('mainInput').value.trim();
+        const companyInfo = extractCompanyInfo(originalPrompt);
+        
+        if (!companyInfo.company_name) {
+        showNotification('Impossible d\'extraire le nom de l\'entreprise', 'warning');
+        return;
+        }
+        
+        showNotification('Recherche d\'informations sur l\'entreprise...', 'info');
+        
+        try {
+        const response = await fetch('/api/assistant/create_client/from_text', {
+        method: 'POST',
+        headers: {
+        'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+        text: originalPrompt
+        })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success && data.type === 'client_search_results') {
+        showClientCreationResults(data);
+        } else {
+        throw new Error(data.message || 'Erreur lors de la recherche d\'entreprise');
+        }
+        
+        } catch (error) {
+        console.error('Erreur création client:', error);
+        showNotification('❌ ' + error.message, 'error');
+        }
+        }
+        
+        function showClientCreationResults(data) {
+        const resultsContent = document.getElementById('resultsContent');
+        
+        const searchResults = data.search_results || [];
+        const recommended = data.recommended;
+        
+        let resultsHtml = '';
+        searchResults.forEach((company, index) => {
+        const isRecommended = recommended && company.siret === recommended.siret;
+        const borderColor = isRecommended ? '#10b981' : '#e5e7eb';
+        const bgColor = isRecommended ? '#f0fdf4' : '#f8fafc';
+        
+        resultsHtml += `
+        <div style="background: ${bgColor}; padding: 15px; border-radius: 10px; margin-bottom: 10px; border: 2px solid ${borderColor}; cursor: pointer;"
+        onclick="selectCompanyForCreation(${index})">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div>
+        <strong style="color: #1f2937;">${company.name}</strong>
+        ${isRecommended ? '<span style="background: #10b981; color: white; padding: 2px 6px; border-radius: 8px; font-size: 0.7rem; margin-left: 8px;">RECOMMANDÉ</span>' : ''}
+        <div style="color: #6b7280; font-size: 0.9rem;">SIRET: ${company.siret}</div>
+        <div style="color: #6b7280; font-size: 0.9rem;">📍 ${company.address.street}, ${company.address.city} ${company.address.postal_code}</div>
+        <div style="color: #6b7280; font-size: 0.9rem;">🏢 ${company.activity}</div>
+        <div style="color: #6b7280; font-size: 0.9rem;">📊 ${company.status} - Créé: ${company.creation_date}</div>
+        </div>
+        <div style="text-align: right;">
+        <div style="background: #02B9FD; color: white; padding: 4px 8px; border-radius: 12px; font-size: 0.8rem; margin-bottom: 5px;">
+        ${company.source}
+        </div>
+        <div style="color: #02B9FD; font-size: 0.9rem; font-weight: 600;">
+        👆 Cliquer pour créer
+        </div>
+        </div>
+        </div>
+        </div>
+        `;
+        });
+        
+        resultsContent.innerHTML = `
+        <div style="text-align: center; margin-bottom: 25px;">
+        <h3 style="color: #10b981; margin-bottom: 10px;">
+        🏢 Informations d'entreprise trouvées
+        </h3>
+        <div style="color: #6b7280; font-size: 0.9rem; margin-bottom: 15px;">
+        Entreprise recherchée: <strong>${data.company_name}</strong>
+        ${data.city ? ` à <strong>${data.city}</strong>` : ''}
+        </div>
+        <div style="background: #dcfce7; color: #166534; padding: 10px; border-radius: 8px; font-size: 0.9rem;">
+        💡 Sélectionnez l'entreprise correspondante pour créer le client
+        </div>
+        </div>
+        
+        <div style="margin-bottom: 20px;">
+        <h4 style="color: #374151; margin-bottom: 15px;">🔍 Résultats trouvés (${searchResults.length}) - Sources: ${data.sources.join(', ')}</h4>
+        ${resultsHtml}
+        </div>
+        
+        <div class="action-buttons">
+        <button onclick="showSimilarClients({similar_clients: [], error: 'Aucun client trouvé'})" class="action-button secondary">
+        ← Retour aux clients similaires
+        </button>
+        <button onclick="newRequest()" class="action-button secondary">
+        ✏️ Nouvelle demande
+        </button>
+        </div>
+        `;
+        
+        // Stocker les données pour la sélection
+        window.clientCreationData = data;
+        }
+        
+        async function selectCompanyForCreation(companyIndex) {
+        if (!window.clientCreationData || !window.clientCreationData.search_results[companyIndex]) {
+        showNotification('Erreur: données d\'entreprise non trouvées', 'error');
+        return;
+        }
+        
+        const selectedCompany = window.clientCreationData.search_results[companyIndex];
+        const contactInfo = {
+        contact_name: window.clientCreationData.contact_name,
+        email: '',
+        phone: ''
+        };
+        
+        showNotification('Création du client en cours...', 'info');
+        
+        try {
+        const response = await fetch('/api/assistant/create_client/confirm', {
+        method: 'POST',
+        headers: {
+        'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+        company_data: selectedCompany,
+        contact_info: contactInfo
+        })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+        showClientCreationSuccess(data);
+        } else {
+        throw new Error(data.message || 'Erreur lors de la création du client');
+        }
+        
+        } catch (error) {
+        console.error('Erreur création client:', error);
+        showNotification('❌ ' + error.message, 'error');
+        }
+        }
+        
+        function showClientCreationSuccess(data) {
+        const resultsContent = document.getElementById('resultsContent');
+        
+        resultsContent.innerHTML = `
+        <div style="text-align: center; margin-bottom: 25px;">
+        <h3 style="color: #10b981; margin-bottom: 10px;">
+        ✅ Client créé avec succès !
+        </h3>
+        <div style="color: #6b7280; font-size: 0.9rem; margin-bottom: 15px;">
+        ${data.message}
+        </div>
+        </div>
+        
+        <div style="background: #f0fdf4; padding: 20px; border-radius: 15px; margin-bottom: 20px; border: 2px solid #10b981;">
+        <h4 style="color: #166534; margin-bottom: 15px;">🏢 Informations du client</h4>
+        <div style="color: #374151;">
+        <div style="margin-bottom: 8px;"><strong>Nom:</strong> ${data.client_data.Name}</div>
+        <div style="margin-bottom: 8px;"><strong>ID Client:</strong> ${data.client_id}</div>
+        <div style="margin-bottom: 8px;"><strong>Adresse:</strong> ${data.client_data.BillingStreet}, ${data.client_data.BillingCity} ${data.client_data.BillingPostalCode}</div>
+        <div style="margin-bottom: 8px;"><strong>Secteur:</strong> ${data.client_data.Industry}</div>
+        <div style="margin-bottom: 8px;"><strong>SIRET:</strong> ${data.client_data.AccountNumber}</div>
+        </div>
+        </div>
+        
+        <div class="action-buttons">
+        <button onclick="retryWithNewClient('${data.client_data.Name}', '${data.client_id}')" class="action-button primary">
+        🎯 Créer le devis avec ce client
+        </button>
+        <button onclick="newRequest()" class="action-button secondary">
+        ➕ Nouvelle demande
+        </button>
+        </div>
+        `;
+        }
+        
+        function retryWithNewClient(clientName, clientId) {
+        // Récupérer la demande originale et remplacer le nom du client
+        const originalPrompt = document.getElementById('mainInput').value.trim();
+        const newPrompt = originalPrompt.replace(/pour\s+[^,\s]+/i, `pour ${clientName}`);
+        
+        // Mettre à jour le champ de saisie
+        document.getElementById('mainInput').value = newPrompt;
+        
+        // Relancer le traitement
+        showNotification(`Création du devis pour le nouveau client: ${clientName}`, 'success');
+        setTimeout(() => {
+        processRequest();
+        }, 1000);
+        }
+        
+        function extractCompanyInfo(text) {
+        // Fonction simple pour extraire le nom de l'entreprise
+        const patterns = {
+        company_name: /(?:pour|de|chez)\s+([A-Z][A-Za-z\s&\-\.]+?)(?:\s+(?:à|dans|sur|,)|\s*$)/,
+        city: /(?:à|dans|sur)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/
+        };
+        
+        const info = {};
+        for (const [key, pattern] of Object.entries(patterns)) {
+        const match = text.match(pattern);
+        if (match) {
+        info[key] = match[1].trim();
+        }
+        }
+        
+        return info;
         }
 
         function selectSimilarClient(clientName, clientId) {

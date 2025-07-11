@@ -700,6 +700,66 @@ class ClientValidator:
             "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC",
             "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY"
         ]
+
+    async def _search_company_insee(self, search_query: str) -> Dict[str, Any]:
+        """
+        Recherche d'entreprises via l'API INSEE
+
+        Args:
+            search_query: Terme de recherche (nom d'entreprise, SIREN, etc.)
+
+        Returns:
+            Dictionnaire contenant les résultats de la recherche ou vide en cas d'erreur
+        """
+        if not self.insee_consumer_key or not self.insee_consumer_secret:
+            logger.warning("Clés INSEE non configurées pour la recherche")
+            return {"error": "Configuration API INSEE manquante"}
+
+        access_token = await self._get_insee_token()
+        if not access_token:
+            logger.error("Impossible d'obtenir le token INSEE pour la recherche")
+            return {"error": "Impossible d'obtenir le token INSEE"}
+
+        try:
+            headers = {"Authorization": f"Bearer {access_token}"}
+            # Utiliser l'API de recherche INSEE
+            url = f"{INSEE_API_BASE_URL}/siret"
+            params = {
+                'q': search_query,
+                'nombre': 10,  # Limiter à 10 résultats
+                'masquerValeursNulles': 'true'  # Ne pas retourner les champs vides
+            }
+
+            logger.info(f"Recherche d'entreprise INSEE: {search_query}")
+
+            async with httpx.AsyncClient() as client:
+                response = await client.get(url, headers=headers, params=params, timeout=10.0)
+
+                if response.status_code == 200:
+                    data = response.json()
+                    if data.get("header", {}).get("statut") == 200:
+                        return {
+                            "success": True,
+                            "results": data.get("etablissements", []),
+                            "count": len(data.get("etablissements", [])),
+                            "query": search_query
+                        }
+                    else:
+                        error_message = data.get("header", {}).get("message", "Erreur inconnue de l'API INSEE")
+                        logger.error(f"Erreur API INSEE recherche: {error_message}")
+                        return {"error": error_message}
+                elif response.status_code == 404:
+                    return {"success": True, "results": [], "count": 0, "query": search_query}
+                else:
+                    logger.error(f"Erreur HTTP API INSEE recherche: {response.status_code}")
+                    return {"error": f"Erreur HTTP {response.status_code}"}
+
+        except httpx.TimeoutException:
+            logger.error("Timeout lors de la recherche INSEE")
+            return {"error": "Timeout API INSEE"}
+        except Exception as e:
+            logger.exception(f"Erreur inattendue lors de la recherche INSEE: {str(e)}")
+            return {"error": f"Erreur interne: {str(e)}"}
     
     def get_stats(self) -> Dict[str, Any]:
         """Retourne les statistiques de validation"""

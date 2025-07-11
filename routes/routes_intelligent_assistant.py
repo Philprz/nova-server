@@ -1027,39 +1027,325 @@ async def handle_user_choice(choice_data: Dict[str, Any]):
     try:
         choice_type = choice_data.get("type")
         task_id = choice_data.get("task_id")
-        
+
         if not task_id:
             raise HTTPException(status_code=400, detail="task_id manquant")
-        
+
         # Récupérer le contexte du workflow
         workflow_context = await get_workflow_context(task_id)
-        
+
         if choice_type == "client_choice":
             # Choix client depuis les suggestions
             workflow = DevisWorkflow(task_id=task_id)
             result = await workflow.handle_client_suggestions(choice_data, workflow_context)
-            
+
         elif choice_type == "product_choice":
             # Choix produit depuis les alternatives
             workflow = DevisWorkflow(task_id=task_id)
             result = await workflow.apply_product_suggestions(choice_data.get("products", []), workflow_context)
-            
+
         elif choice_type == "create_client":
             # Déclenchement création client
             workflow = DevisWorkflow(task_id=task_id)
             result = await workflow._handle_new_client_creation(
-                choice_data.get("client_name", ""), 
+                choice_data.get("client_name", ""),
                 workflow_context
             )
-        
+
         else:
             raise HTTPException(status_code=400, detail=f"Type de choix '{choice_type}' non supporté")
-        
+
         return result
-        
+
     except Exception as e:
         logger.error(f"Erreur gestion choix utilisateur: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))        
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/choice")
+async def handle_user_choice(choice_data: Dict[str, Any]):
+    """
+    🔧 GESTION DES CHOIX UTILISATEUR DEPUIS L'INTERFACE
+    """
+    try:
+        choice_type = choice_data.get("type")
+        task_id = choice_data.get("task_id")
+
+        if not task_id:
+            raise HTTPException(status_code=400, detail="task_id manquant")
+
+        # Récupérer le contexte du workflow
+        workflow_context = await get_workflow_context(task_id)
+
+        if choice_type == "client_choice":
+            # Choix client depuis les suggestions
+            workflow = DevisWorkflow(task_id=task_id)
+            result = await workflow.handle_client_suggestions(choice_data, workflow_context)
+
+        elif choice_type == "product_choice":
+            # Choix produit depuis les alternatives
+            workflow = DevisWorkflow(task_id=task_id)
+            result = await workflow.apply_product_suggestions(choice_data.get("products", []), workflow_context)
+
+        elif choice_type == "create_client":
+            # Déclenchement création client
+            workflow = DevisWorkflow(task_id=task_id)
+            result = await workflow._handle_new_client_creation(
+                choice_data.get("client_name", ""),
+                workflow_context
+            )
+
+        else:
+            raise HTTPException(status_code=400, detail=f"Type de choix '{choice_type}' non supporté")
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Erreur gestion choix utilisateur: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Import du workflow de création de client
+from workflow.client_creation_workflow import client_creation_workflow
+
+# Modèles pour la création de client
+class ClientSearchRequest(BaseModel):
+    company_name: Optional[str] = None
+    city: Optional[str] = None
+    siret: Optional[str] = None
+
+class ClientCreationRequest(BaseModel):
+    siret: str
+    additional_data: Optional[Dict[str, Any]] = {}
+
+@router.post('/client/search')
+async def search_companies(request: ClientSearchRequest):
+    """
+    🔍 Recherche d'entreprises par nom ou SIRET via INSEE/Pappers
+    """
+    try:
+        logger.info(f"🔍 Recherche entreprise: {request.company_name or request.siret}")
+
+        if request.siret:
+            # Validation directe par SIRET
+            result = await client_creation_workflow.validate_and_enrich_company(request.siret)
+            if result.get("success"):
+                return {
+                    "success": True,
+                    "companies": [result["company_data"]],
+                    "search_method": "siret_validation",
+                    "message": "Entreprise trouvée et validée"
+                }
+            else:
+                return {
+                    "success": False,
+                    "error": result.get("error"),
+                    "message": result.get("message")
+                }
+        else:
+            # Recherche par nom
+            result = await client_creation_workflow.search_company_by_name(
+                request.company_name,
+                request.city
+            )
+            return result
+
+    except Exception as e:
+        logger.error(f"Erreur recherche entreprise: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "message": "Erreur lors de la recherche"
+        }
+
+@router.post('/client/create')
+async def create_client(request: ClientCreationRequest):
+    """
+    🏢 Création d'un nouveau client dans Salesforce
+    """
+    try:
+        logger.info(f"🏢 Création client SIRET: {request.siret}")
+
+        # Valider et enrichir les données
+        validation_result = await client_creation_workflow.validate_and_enrich_company(request.siret)
+
+        if not validation_result.get("success"):
+            return {
+                "success": False,
+                "error": validation_result.get("error"),
+                "message": validation_result.get("message")
+            }
+
+        # Fusionner avec les données additionnelles
+        company_data = validation_result["company_data"]
+        company_data.update(request.additional_data)
+
+        # Créer le client
+        creation_result = await client_creation_workflow.create_client_in_salesforce(company_data)
+
+        return creation_result
+
+    except Exception as e:
+        logger.error(f"Erreur création client: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "message": "Erreur lors de la création du client"
+        }
+
+@router.post('/client/workflow')
+async def client_creation_workflow_endpoint(request: Dict[str, Any]):
+    """
+    🚀 Workflow complet de création de client
+    """
+    try:
+        logger.info("🚀 Démarrage workflow création client")
+
+        result = await client_creation_workflow.process_client_creation_request(request)
+        return result
+
+    except Exception as e:
+        logger.error(f"Erreur workflow création client: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "message": "Erreur dans le workflow de création"
+        }
+    """
+    🔧 GESTION DES CHOIX UTILISATEUR DEPUIS L'INTERFACE
+    """
+    try:
+        choice_type = choice_data.get("type")
+        task_id = choice_data.get("task_id")
+
+        if not task_id:
+            raise HTTPException(status_code=400, detail="task_id manquant")
+
+        # Récupérer le contexte du workflow
+        workflow_context = await get_workflow_context(task_id)
+
+        if choice_type == "client_choice":
+            # Choix client depuis les suggestions
+            workflow = DevisWorkflow(task_id=task_id)
+            result = await workflow.handle_client_suggestions(choice_data, workflow_context)
+
+        elif choice_type == "product_choice":
+            # Choix produit depuis les alternatives
+            workflow = DevisWorkflow(task_id=task_id)
+            result = await workflow.apply_product_suggestions(choice_data.get("products", []), workflow_context)
+
+        elif choice_type == "create_client":
+            # Déclenchement création client
+            workflow = DevisWorkflow(task_id=task_id)
+            result = await workflow._handle_new_client_creation(
+                choice_data.get("client_name", ""),
+                workflow_context
+            )
+
+        else:
+            raise HTTPException(status_code=400, detail=f"Type de choix '{choice_type}' non supporté")
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Erreur gestion choix utilisateur: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Modèles pour la création de client
+class ClientCreationRequest(BaseModel):
+    company_name: str
+    city: Optional[str] = None
+    contact_name: Optional[str] = None
+    contact_email: Optional[str] = None
+    contact_phone: Optional[str] = None
+
+class ClientCreationFromCompanyRequest(BaseModel):
+    company_data: Dict[str, Any]
+    contact_info: Optional[Dict[str, Any]] = None
+
+@router.post('/create_client/search')
+async def search_company_for_creation(request: ClientCreationRequest):
+    """
+    🔍 Recherche d'entreprise pour création de client
+    """
+    try:
+        from workflow.client_creation_workflow import ClientCreationWorkflow
+
+        workflow = ClientCreationWorkflow()
+
+        # Rechercher les informations de l'entreprise
+        search_results = await workflow.search_company_info(
+            request.company_name,
+            request.city
+        )
+
+        return {
+            'success': True,
+            'company_name': request.company_name,
+            'city': request.city,
+            'contact_name': request.contact_name,
+            'search_results': search_results['search_results'],
+            'recommended': search_results.get('recommended'),
+            'sources': search_results.get('sources', []),
+            'message': f"Trouvé {len(search_results['search_results'])} résultat(s) pour '{request.company_name}'"
+        }
+
+    except Exception as e:
+        logger.error(f"Erreur recherche entreprise: {e}")
+        return {
+            'success': False,
+            'error': str(e),
+            'message': f"Erreur lors de la recherche: {str(e)}"
+        }
+
+@router.post('/create_client/confirm')
+async def create_client_from_company(request: ClientCreationFromCompanyRequest):
+    """
+    ✅ Création de client à partir des données d'entreprise sélectionnées
+    """
+    try:
+        from workflow.client_creation_workflow import ClientCreationWorkflow
+
+        workflow = ClientCreationWorkflow()
+
+        # Créer le client
+        creation_result = await workflow.create_client_from_company_data(
+            request.company_data,
+            request.contact_info
+        )
+
+        return creation_result
+
+    except Exception as e:
+        logger.error(f"Erreur création client: {e}")
+        return {
+            'success': False,
+            'error': str(e),
+            'message': f"Erreur lors de la création: {str(e)}"
+        }
+
+@router.post('/create_client/from_text')
+async def create_client_from_text(request: Dict[str, str]):
+    """
+    📝 Création de client à partir d'une demande en texte libre
+    """
+    try:
+        from workflow.client_creation_workflow import ClientCreationWorkflow
+
+        workflow = ClientCreationWorkflow()
+
+        # Traiter la demande en langage naturel
+        result = await workflow.process_client_creation_request(
+            request.get('text', '')
+        )
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Erreur traitement demande création: {e}")
+        return {
+            'success': False,
+            'error': str(e),
+            'message': f"Erreur lors du traitement: {str(e)}"
+        }        
 def detect_workflow_request(message: str) -> bool:
     """Détecte si un message nécessite le workflow (devis OU recherche produit)"""
     message_lower = message.lower()
