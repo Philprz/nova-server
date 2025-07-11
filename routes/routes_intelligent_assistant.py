@@ -1094,19 +1094,117 @@ def detect_workflow_request(message: str) -> bool:
 @router.post("/assistant/continue_workflow")
 async def continue_workflow_with_choice(request: Request):
     """Continuer workflow après choix utilisateur"""
-    
+
     data = await request.json()
     task_id = data.get("task_id")
     choice_type = data.get("choice_type")
-    
+
     # Récupérer contexte workflow
     context = get_workflow_context(task_id)
     workflow = DevisWorkflow(task_id=task_id)
-    
+
     if choice_type == "client_selected":
         client_data = data.get("client_data")
         return await workflow.handle_client_selection_and_continue(client_data, context)
-    
+
     elif choice_type == "product_selected":
         product_choices = data.get("products")
         return await workflow.apply_product_choices(product_choices, context)
+
+# Modèle pour la compatibilité avec le frontend existant
+class GenerateQuoteRequest(BaseModel):
+    prompt: str
+    draft_mode: Optional[bool] = False
+
+class GenerateQuoteResponse(BaseModel):
+    status: Optional[str] = None
+    success: Optional[bool] = None
+    client: Optional[Dict[str, Any]] = None
+    products: Optional[List[Dict[str, Any]]] = None
+    total_amount: Optional[float] = None
+    quote_id: Optional[str] = None
+    stock_info: Optional[str] = None
+    error: Optional[str] = None
+    message: Optional[str] = None
+    similar_clients: Optional[List[Dict[str, Any]]] = None
+
+@router.post('/generate_quote', response_model=GenerateQuoteResponse)
+async def generate_quote_endpoint(request: GenerateQuoteRequest):
+    """
+    🎯 Endpoint de compatibilité pour le frontend existant
+    Transforme les demandes de devis en format compatible avec l'interface
+    """
+    try:
+        user_message = request.prompt.strip()
+
+        if not user_message:
+            return GenerateQuoteResponse(
+                success=False,
+                error="Message vide"
+            )
+
+        logger.info(f"🎯 Demande de devis via /generate_quote: {user_message}")
+
+        # Utiliser la logique existante du workflow
+        from workflow.devis_workflow import DevisWorkflow
+
+        # Mode draft ou production selon la demande
+        workflow = DevisWorkflow(
+            validation_enabled=True,
+            draft_mode=request.draft_mode
+        )
+
+        # Exécuter le workflow avec le message complet
+        workflow_result = await workflow.process_prompt(user_message)
+
+        if workflow_result.get('success'):
+            # Extraire les données pour le format frontend
+            client_data = workflow_result.get('client', {})
+            products_data = workflow_result.get('products', [])
+
+            # Formater les produits pour le frontend
+            formatted_products = []
+            for product in products_data:
+                formatted_products.append({
+                    'item_code': product.get('code', product.get('item_code', '')),
+                    'code': product.get('code', product.get('item_code', '')),
+                    'item_name': product.get('name', product.get('item_name', '')),
+                    'name': product.get('name', product.get('item_name', '')),
+                    'quantity': product.get('quantity', 1),
+                    'unit_price': product.get('price', product.get('unit_price', 0)),
+                    'line_total': product.get('line_total', product.get('quantity', 1) * product.get('price', product.get('unit_price', 0)))
+                })
+
+            return GenerateQuoteResponse(
+                status='success',
+                success=True,
+                client={
+                    'name': client_data.get('name', 'Client non spécifié'),
+                    'account_number': client_data.get('account_number', client_data.get('id', ''))
+                },
+                products=formatted_products,
+                total_amount=workflow_result.get('total_amount', 0),
+                quote_id=workflow_result.get('quote_id', 'N/A'),
+                stock_info=workflow_result.get('stock_info'),
+                similar_clients=workflow_result.get('similar_clients', [])
+            )
+        else:
+            # En cas d'échec, retourner les détails de l'erreur
+            error_message = workflow_result.get('message', 'Erreur lors de la génération du devis')
+
+            # Si des clients similaires ont été trouvés, les inclure dans la réponse
+            similar_clients = workflow_result.get('similar_clients', [])
+
+            return GenerateQuoteResponse(
+                success=False,
+                error=error_message,
+                message=error_message,
+                similar_clients=similar_clients
+            )
+
+    except Exception as e:
+        logger.error(f"Erreur dans generate_quote_endpoint: {e}")
+        return GenerateQuoteResponse(
+            success=False,
+            error=f"Erreur interne: {str(e)}"
+        )

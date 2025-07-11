@@ -1,11 +1,16 @@
 # main.py - VERSION MINIMALISTE AVEC MODULE LOADER
 import os
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from services.module_loader import ModuleLoader, ModuleConfig
+security = HTTPBasic()
 
+def get_current_user(credentials: HTTPBasicCredentials = Depends(security)):
+    if credentials.username != "admin" or credentials.password != "nova2025":
+        raise HTTPException(status_code=401)
+    return credentials.username
 # Configuration des modules optionnels
 MODULES_CONFIG = {
     'sync': ModuleConfig('routes.routes_sync', '/sync', ['Synchronisation']),

@@ -168,6 +168,16 @@
             display: block;
         }
 
+        .nova-presentation {
+            color: white;
+            font-size: 1.6rem;
+            font-weight: 400;
+            text-align: center;
+            margin: 20px 0 10px 0;
+            letter-spacing: 1px;
+            animation: fadeInScale 0.8s ease-out 0.5s backwards;
+        }
+
         .tagline {
             color: rgba(255, 255, 255, 0.9);
             font-size: 1.1rem;
@@ -456,6 +466,11 @@
             .logo-text {
                 font-size: 1.8rem;
             }
+
+            .nova-presentation {
+                font-size: 1.3rem;
+                margin: 15px 0 8px 0;
+            }
         }
 
             .action-buttons {
@@ -497,12 +512,10 @@
                 <!-- Alternative: Vous pouvez aussi utiliser une URL externe ou encoder l'image en base64 -->
                 <!-- Pour ajouter un lien vers le site IT Spirit, enveloppez la div dans une balise <a href="https://www.itspirit.fr" target="_blank"> -->
                 <div class="it-spirit-logo" onclick="window.open('https://www.itspirit.fr', '_blank')" title="Visiter le site IT Spirit">
-                    <img src="/static/logo_it_spirit.png" alt="IT Spirit" />
+                    <img src="/static/Logo.png" alt="IT Spirit" />
                 </div>
-
-                <!-- Logo NOVA -->
-                <img src="/static/logo.png" alt="Logo NOVA" style="height: 50px;" />
             </div>
+            <div class="nova-presentation">vous présente NOVA</div>
             <div class="tagline">L'esprit humain au cœur de la technologie</div>
         </div>
 
@@ -587,7 +600,7 @@
         async function processRequest() {
             const input = document.getElementById('mainInput');
             const prompt = input.value.trim();
-            
+
             if (!prompt) {
                 showNotification('Veuillez saisir une demande', 'warning');
                 return;
@@ -595,19 +608,19 @@
 
             // Masquer l'indicateur
             document.getElementById('inputIndicator').classList.remove('show');
-            
+
             // Afficher la zone de traitement
             const resultsSection = document.getElementById('resultsSection');
             const processingIndicator = document.getElementById('processingIndicator');
             const resultsContent = document.getElementById('resultsContent');
-            
+
             resultsSection.classList.add('show');
             processingIndicator.style.display = 'block';
             resultsContent.style.display = 'none';
-            
+
             try {
                 // Appel API réel
-                const response = await fetch('/generate_quote', {
+                const response = await fetch('/api/assistant/generate_quote', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -619,22 +632,27 @@
                 });
 
                 const data = await response.json();
-                
+
                 if (data.status === 'success' || data.success) {
                     // Sauvegarder les données du devis
                     currentQuoteData = data;
                     showResults(data);
                 } else {
-                    throw new Error(data.error || 'Erreur lors de la génération du devis');
+                    // Vérifier s'il y a des clients similaires à afficher
+                    if (data.similar_clients && data.similar_clients.length > 0) {
+                        showSimilarClients(data);
+                    } else {
+                        throw new Error(data.error || data.message || 'Erreur lors de la génération du devis');
+                    }
                 }
-                
+
             } catch (error) {
                 console.error('Erreur:', error);
-                
+
                 // Afficher l'erreur
                 processingIndicator.style.display = 'none';
                 resultsContent.style.display = 'block';
-                
+
                 resultsContent.innerHTML = `
                     <div style="text-align: center; color: #ef4444;">
                         <h3 style="margin-bottom: 15px;">❌ Erreur lors du traitement</h3>
@@ -649,9 +667,95 @@
                         </div>
                     </div>
                 `;
-                
+
                 showNotification('Erreur lors du traitement de la demande', 'error');
             }
+        }
+
+        function showSimilarClients(data) {
+            const processingIndicator = document.getElementById('processingIndicator');
+            const resultsContent = document.getElementById('resultsContent');
+
+            processingIndicator.style.display = 'none';
+            resultsContent.style.display = 'block';
+
+            const similarClients = data.similar_clients || [];
+            const errorMessage = data.error || data.message || 'Client non trouvé';
+
+            // Construire l'affichage des clients similaires
+            let clientsHtml = '';
+            similarClients.forEach((client, index) => {
+                const similarity = client.similarity ? `${(client.similarity * 100).toFixed(1)}%` : 'N/A';
+                clientsHtml += `
+                    <div style="background: #f8fafc; padding: 15px; border-radius: 10px; margin-bottom: 10px; border-left: 4px solid #02B9FD; cursor: pointer;"
+                         onclick="selectSimilarClient('${client.name}', '${client.account_number || client.id || ''}')">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <strong style="color: #1f2937;">${client.name}</strong>
+                                ${client.account_number ? `<div style="color: #6b7280; font-size: 0.9rem;">Compte: ${client.account_number}</div>` : ''}
+                                ${client.city ? `<div style="color: #6b7280; font-size: 0.9rem;">📍 ${client.city}${client.country ? ', ' + client.country : ''}</div>` : ''}
+                                ${client.industry ? `<div style="color: #6b7280; font-size: 0.9rem;">🏢 ${client.industry}</div>` : ''}
+                            </div>
+                            <div style="text-align: right;">
+                                <div style="background: #02B9FD; color: white; padding: 4px 8px; border-radius: 12px; font-size: 0.8rem; margin-bottom: 5px;">
+                                    ${similarity} similaire
+                                </div>
+                                <div style="color: #02B9FD; font-size: 0.9rem; font-weight: 600;">
+                                    👆 Cliquer pour sélectionner
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            resultsContent.innerHTML = `
+                <div style="text-align: center; margin-bottom: 25px;">
+                    <h3 style="color: #f59e0b; margin-bottom: 10px;">
+                        🔍 Clients similaires trouvés
+                    </h3>
+                    <div style="color: #6b7280; font-size: 0.9rem; margin-bottom: 15px;">
+                        ${errorMessage}
+                    </div>
+                    <div style="background: #fef3c7; color: #92400e; padding: 10px; border-radius: 8px; font-size: 0.9rem;">
+                        💡 Cliquez sur un client pour créer le devis avec ce client
+                    </div>
+                </div>
+
+                <div style="margin-bottom: 20px;">
+                    <h4 style="color: #374151; margin-bottom: 15px;">👥 Clients suggérés (${similarClients.length})</h4>
+                    ${clientsHtml}
+                </div>
+
+                <div class="action-buttons">
+                    <button onclick="processRequest()" class="action-button primary">
+                        🔄 Réessayer
+                    </button>
+                    <button onclick="newRequest()" class="action-button secondary">
+                        ✏️ Modifier la demande
+                    </button>
+                    <button onclick="openClassicInterface()" class="action-button secondary">
+                        💼 Interface classique
+                    </button>
+                </div>
+            `;
+        }
+
+        function selectSimilarClient(clientName, clientId) {
+            // Récupérer la demande originale
+            const originalPrompt = document.getElementById('mainInput').value.trim();
+
+            // Créer une nouvelle demande avec le client sélectionné
+            const newPrompt = originalPrompt.replace(/pour\s+[^,\s]+/i, `pour ${clientName}`);
+
+            // Mettre à jour le champ de saisie
+            document.getElementById('mainInput').value = newPrompt;
+
+            // Relancer le traitement
+            showNotification(`Client sélectionné: ${clientName}`, 'success');
+            setTimeout(() => {
+                processRequest();
+            }, 1000);
         }
 
         function showResults(data) {

@@ -44,24 +44,43 @@ class DevisWorkflow:
     """Coordinateur du workflow de devis entre Claude, Salesforce et SAP - VERSION AVEC VALIDATEUR CLIENT"""
     
     def __init__(self, validation_enabled: bool = True, draft_mode: bool = False):
-            self.mcp_connector = MCPConnector()
-            self.llm_extractor = LLMExtractor()
-            self.client_validator = ClientValidator() if validation_enabled else None
-            self.validation_enabled = validation_enabled
-            self.draft_mode = draft_mode
-            self.context = {}
-            
-            # NOUVEAU : Support du tracking de progression
-            self.current_task: Optional[QuoteTask] = None
-            self.task_id: Optional[str] = None
-            
-            # Ancien système de workflow_steps conservé pour compatibilité
-            self.workflow_steps = []
-            # 🧠 NOUVEAU : Initialiser le moteur de suggestions
-            self.suggestion_engine = SuggestionEngine()
-            self.client_suggestions = None
-            self.product_suggestions = []        
-        # === NOUVELLE MÉTHODE POUR DÉMARRER LE TRACKING ===
+        self.mcp_connector = MCPConnector()
+        self.llm_extractor = LLMExtractor()
+        self.client_validator = ClientValidator() if validation_enabled else None
+        self.validation_enabled = validation_enabled
+        self.draft_mode = draft_mode
+        self.context = {}
+
+        # NOUVEAU : Support du tracking de progression
+        self.current_task: Optional[QuoteTask] = None
+        self.task_id: Optional[str] = None
+
+        # Ancien système de workflow_steps conservé pour compatibilité
+        self.workflow_steps = []
+        # 🧠 NOUVEAU : Initialiser le moteur de suggestions
+        self.suggestion_engine = SuggestionEngine()
+        self.client_suggestions = None
+        self.product_suggestions = []
+
+        # 🆕 NOUVEAUX COMPOSANTS
+        from services.cache_manager import referential_cache
+        from workflow.validation_workflow import SequentialValidator
+
+        self.cache_manager = referential_cache
+        self.sequential_validator = SequentialValidator(self.mcp_connector, self.llm_extractor)
+
+        # Pré-charger le cache au démarrage
+        asyncio.create_task(self._initialize_cache())
+
+        logger.info("✅ Workflow initialisé avec cache et validation séquentielle")
+
+    async def _initialize_cache(self):
+        """Initialisation asynchrone du cache"""
+        try:
+            await self.cache_manager.preload_common_data(self.mcp_connector)
+            logger.info("🚀 Cache pré-chargé avec succès")
+        except Exception as e:
+            logger.warning(f"⚠️ Erreur pré-chargement cache: {str(e)}")
         
     def _initialize_task_tracking(self, prompt: str) -> str:
         """Initialise le tracking de progression pour cette génération"""
@@ -92,6 +111,272 @@ class DevisWorkflow:
         """Termine une étape en erreur"""
         if self.current_task:
             self.current_task.fail_step(step_id, error, message)
+
+    # 🔧 NOUVELLE MÉTHODE PRINCIPALE AVEC VALIDATION SÉQUENTIELLE
+    async def process_quote_request(self, user_prompt: str, draft_mode: bool = False) -> Dict[str, Any]:
+        """
+        MÉTHODE PRINCIPALE MODIFIÉE - Version avec validation séquentielle
+        """
+
+        try:
+            self.draft_mode = draft_mode
+
+            # Nettoyage préventif du cache
+            await self.cache_manager.cleanup_expired()
+
+            # PHASE 1: Extraction LLM (inchangée)
+            self._track_step_start("parse_prompt", "🔍 Analyse de votre demande")
+            extracted_info = await self._extract_info_from_prompt(user_prompt)
+
+            if not extracted_info:
+                return self._build_error_response("Extraction échouée", "Impossible d'analyser votre demande")
+
+            self._track_step_complete("parse_prompt", "✅ Demande analysée")
+
+            # PHASE 2: NOUVELLE VALIDATION SÉQUENTIELLE
+            self._track_step_start("sequential_validation", "🔍 Validation séquentielle en cours...")
+
+            validation_result = await self.sequential_validator.validate_quote_request(extracted_info)
+
+            if validation_result["status"] == "ready":
+                # ✅ TOUT EST VALIDÉ - CONTINUER LE WORKFLOW
+                self._track_step_complete("sequential_validation", "✅ Validation complète réussie")
+
+                # Mettre à jour le contexte avec les données validées
+                self.context["client_info"] = {"data": validation_result["data"]["client"], "found": True}
+                self.context["products_info"] = validation_result["data"]["products"]
+
+                # Continuer avec la génération du devis
+                return await self._continue_quote_generation(validation_result["data"])
+
+            elif validation_result["status"] == "user_input_required":
+                # 🔄 INTERACTION UTILISATEUR NÉCESSAIRE
+                self._track_step_progress("sequential_validation", 50, f"En attente: {validation_result['step']}")
+
+                return {
+                    "status": "user_interaction_required",
+                    "interaction_type": validation_result["step"],
+                    "message": validation_result["message"],
+                    "question": validation_result.get("question"),
+                    "options": validation_result.get("options", []),
+                    "input_type": validation_result.get("input_type", "text"),
+                    "context": validation_result.get("context", {}),
+                    "task_id": self.task_id,
+                    "next_step": "continue_validation"
+                }
+
+            else:
+                # ❌ ERREUR DE VALIDATION
+                self._track_step_fail("sequential_validation", "Erreur de validation", validation_result.get("message"))
+                return self._build_error_response("Erreur de validation", validation_result.get("message"))
+
+        except Exception as e:
+            logger.exception(f"Erreur workflow principal: {str(e)}")
+            return self._build_error_response("Erreur système", f"Erreur interne: {str(e)}")
+
+    # 🆕 NOUVELLE MÉTHODE POUR CONTINUER APRÈS INTERACTION
+    async def continue_after_user_input(self, user_input: Dict, context: Dict) -> Dict[str, Any]:
+        """
+        Continue le workflow après une interaction utilisateur
+        """
+
+        try:
+            interaction_type = context.get("interaction_type")
+
+            if interaction_type == "client_selection":
+                return await self._handle_client_selection(user_input, context)
+
+            elif interaction_type == "client_creation":
+                return await self._handle_client_creation(user_input, context)
+
+            elif interaction_type == "product_selection":
+                return await self._handle_product_selection(user_input, context)
+
+            elif interaction_type == "quantity_adjustment":
+                return await self._handle_quantity_adjustment(user_input, context)
+
+            else:
+                return self._build_error_response("Type d'interaction non reconnu", f"Type: {interaction_type}")
+
+        except Exception as e:
+            logger.exception(f"Erreur continuation workflow: {str(e)}")
+            return self._build_error_response("Erreur continuation", str(e))
+
+    # 🔧 HANDLERS POUR CHAQUE TYPE D'INTERACTION
+
+    async def _handle_client_selection(self, user_input: Dict, context: Dict) -> Dict[str, Any]:
+        """Gère la sélection de client par l'utilisateur"""
+
+        selected_option = user_input.get("selected_option")
+
+        if selected_option == "new_client":
+            # Demander la création du client
+            client_name = context.get("original_client_name")
+            return await self._initiate_client_creation(client_name)
+
+        else:
+            # Client existant sélectionné
+            selected_client_data = user_input.get("selected_data")
+
+            if selected_client_data:
+                # Mettre en cache et continuer
+                await self.cache_manager.cache_client(selected_client_data["Name"], selected_client_data)
+
+                self.context["client_info"] = {"data": selected_client_data, "found": True}
+
+                # Continuer avec la validation des produits
+                original_products = context.get("original_products", [])
+                return await self._continue_product_validation(original_products)
+
+        return self._build_error_response("Sélection client invalide", "Données client manquantes")
+
+    async def _handle_client_creation(self, user_input: Dict, context: Dict) -> Dict[str, Any]:
+        """Gère la création d'un nouveau client"""
+
+        if user_input.get("action") == "create_client":
+            # Lancer le processus de création avec validation SIRET
+            client_name = user_input.get("client_name") or context.get("client_name")
+
+            return {
+                "status": "client_creation_required",
+                "message": f"Création du client '{client_name}' en cours...",
+                "next_step": "gather_client_info",
+                "client_name": client_name
+            }
+
+        elif user_input.get("action") == "retry_client":
+            # Demander un nouveau nom de client
+            return {
+                "status": "user_interaction_required",
+                "interaction_type": "client_retry",
+                "message": "Veuillez saisir le nom correct du client :",
+                "input_type": "text",
+                "placeholder": "Nom de l'entreprise"
+            }
+
+    async def _handle_product_selection(self, user_input: Dict, context: Dict) -> Dict[str, Any]:
+        """Gère la sélection de produit par l'utilisateur"""
+
+        selected_product_data = user_input.get("selected_data")
+        current_context = context.get("validation_context", {})
+
+        if selected_product_data:
+            # Ajouter le produit sélectionné aux produits validés
+            validated_products = current_context.get("validated_products", [])
+            validated_products.append({
+                "product_data": selected_product_data,
+                "requested_quantity": user_input.get("quantity", 1),
+                "resolution_type": "user_selected"
+            })
+
+            # Vérifier s'il reste des produits à résoudre
+            unresolved_products = current_context.get("unresolved_products", [])
+
+            if len(unresolved_products) > 1:
+                # Il reste des produits à traiter
+                remaining_products = unresolved_products[1:]
+                return await self._continue_product_resolution(validated_products, remaining_products)
+            else:
+                # Tous les produits sont résolus - passer à la validation des quantités
+                return await self._continue_quantity_validation(validated_products)
+
+    async def _handle_quantity_adjustment(self, user_input: Dict, context: Dict) -> Dict[str, Any]:
+        """Gère l'ajustement des quantités"""
+
+        action = user_input.get("action")
+
+        if action == "proceed":
+            # Continuer avec les quantités disponibles
+            final_products = context.get("final_products", [])
+            return await self._continue_quote_generation({"products": final_products})
+
+        elif action == "modify":
+            # Permettre la modification des quantités
+            return {
+                "status": "user_interaction_required",
+                "interaction_type": "quantity_modification",
+                "message": "Modification des quantités :",
+                "products": context.get("final_products", []),
+                "input_type": "quantity_form"
+            }
+
+        elif action == "cancel":
+            return {
+                "status": "cancelled",
+                "message": "Demande de devis annulée par l'utilisateur"
+            }
+
+    # 🆕 MÉTHODE DE GÉNÉRATION FINALE OPTIMISÉE
+    async def _continue_quote_generation(self, validated_data: Dict) -> Dict[str, Any]:
+        """Continue la génération du devis avec les données validées"""
+
+        try:
+            # PHASE 3: Génération du devis avec données validées
+            self._track_step_start("generate_quote", "📄 Génération du devis...")
+
+            client_data = validated_data.get("client", self.context.get("client_info", {}).get("data"))
+            products_data = validated_data.get("products", self.context.get("products_info", []))
+
+            # Calculs finaux
+            total_amount = sum(p.get("LineTotal", 0) for p in products_data)
+
+            # Génération SAP
+            sap_quote = await self._create_sap_quote(client_data, products_data)
+
+            # Génération Salesforce (si SAP réussi)
+            if sap_quote.get("success"):
+                sf_opportunity = await self._create_salesforce_opportunity(client_data, products_data, sap_quote)
+
+                self._track_step_complete("generate_quote", f"✅ Devis généré - Total: {total_amount:.2f}€")
+
+                return {
+                    "status": "quote_generated",
+                    "quote_data": {
+                        "client": client_data,
+                        "products": products_data,
+                        "total_amount": total_amount,
+                        "sap_quote_number": sap_quote.get("quote_number"),
+                        "salesforce_opportunity_id": sf_opportunity.get("opportunity_id"),
+                        "cache_performance": await self.cache_manager.get_cache_stats()
+                    }
+                }
+            else:
+                self._track_step_fail("generate_quote", "Erreur SAP", sap_quote.get("error"))
+                return self._build_error_response("Erreur génération", sap_quote.get("error"))
+
+        except Exception as e:
+            logger.exception(f"Erreur génération finale: {str(e)}")
+            return self._build_error_response("Erreur génération", str(e))
+
+    # Méthodes auxiliaires pour la génération
+    async def _create_sap_quote(self, client_data: Dict, products_data: List[Dict]) -> Dict[str, Any]:
+        """Crée le devis dans SAP"""
+        try:
+            # Utiliser la méthode existante _create_quote_in_salesforce qui gère SAP et Salesforce
+            self.context["client_info"] = {"data": client_data, "found": True}
+            self.context["products_info"] = products_data
+
+            result = await self._create_quote_in_salesforce()
+            return {
+                "success": result.get("success", False),
+                "quote_number": result.get("sap_quote_number"),
+                "error": result.get("error")
+            }
+        except Exception as e:
+            logger.exception(f"Erreur création devis SAP: {str(e)}")
+            return {"success": False, "error": str(e)}
+
+    async def _create_salesforce_opportunity(self, client_data: Dict, products_data: List[Dict], sap_quote: Dict) -> Dict[str, Any]:
+        """Crée l'opportunité dans Salesforce"""
+        try:
+            # Cette méthode est déjà gérée dans _create_quote_in_salesforce
+            return {
+                "success": True,
+                "opportunity_id": sap_quote.get("salesforce_opportunity_id")
+            }
+        except Exception as e:
+            logger.exception(f"Erreur création opportunité Salesforce: {str(e)}")
+            return {"success": False, "error": str(e)}
 
     async def process_prompt(self, prompt: str, task_id: str = None, draft_mode: bool = False) -> Dict[str, Any]:
         """
@@ -2777,3 +3062,180 @@ class DevisWorkflow:
         else:
             # Si pas de produits, demander à l'utilisateur
             return self._build_product_selection_interface(client_data.get("Name", ""))
+
+    # 🆕 MÉTHODES AUXILIAIRES POUR LA VALIDATION SÉQUENTIELLE
+
+    async def _initiate_client_creation(self, client_name: str) -> Dict[str, Any]:
+        """Initie le processus de création d'un nouveau client"""
+        return {
+            "status": "user_interaction_required",
+            "interaction_type": "client_creation",
+            "message": f"Le client '{client_name}' n'existe pas. Voulez-vous le créer ?",
+            "question": "Créer un nouveau client ?",
+            "options": [
+                {"value": "create_client", "label": "Oui, créer le client"},
+                {"value": "retry_client", "label": "Non, saisir un autre nom"}
+            ],
+            "input_type": "choice",
+            "context": {"client_name": client_name}
+        }
+
+    async def _continue_product_validation(self, products: List[Dict]) -> Dict[str, Any]:
+        """Continue la validation avec les produits"""
+        try:
+            # Utiliser le validateur séquentiel pour valider les produits
+            extracted_info = {"products": products}
+            validation_result = await self.sequential_validator.validate_quote_request(extracted_info)
+
+            if validation_result["status"] == "ready":
+                return await self._continue_quote_generation(validation_result["data"])
+            else:
+                return validation_result
+
+        except Exception as e:
+            logger.exception(f"Erreur validation produits: {str(e)}")
+            return self._build_error_response("Erreur validation produits", str(e))
+
+    async def _continue_product_resolution(self, validated_products: List[Dict], remaining_products: List[Dict]) -> Dict[str, Any]:
+        """Continue la résolution des produits restants"""
+        try:
+            # Traiter le prochain produit non résolu
+            next_product = remaining_products[0]
+
+            return {
+                "status": "user_interaction_required",
+                "interaction_type": "product_selection",
+                "message": f"Sélectionnez le produit pour '{next_product.get('original_request', '')}'",
+                "question": "Quel produit souhaitez-vous ?",
+                "options": next_product.get("suggestions", []),
+                "input_type": "product_choice",
+                "context": {
+                    "validation_context": {
+                        "validated_products": validated_products,
+                        "unresolved_products": remaining_products
+                    }
+                }
+            }
+
+        except Exception as e:
+            logger.exception(f"Erreur résolution produits: {str(e)}")
+            return self._build_error_response("Erreur résolution produits", str(e))
+
+    async def _continue_quantity_validation(self, validated_products: List[Dict]) -> Dict[str, Any]:
+        """Continue avec la validation des quantités"""
+        try:
+            # Vérifier la disponibilité des stocks
+            final_products = []
+            stock_issues = []
+
+            for product in validated_products:
+                product_data = product.get("product_data", {})
+                requested_qty = product.get("requested_quantity", 1)
+                available_stock = product_data.get("Stock", 0)
+
+                if available_stock >= requested_qty:
+                    final_products.append({
+                        **product_data,
+                        "RequestedQuantity": requested_qty,
+                        "LineTotal": product_data.get("Price", 0) * requested_qty
+                    })
+                else:
+                    stock_issues.append({
+                        "product": product_data.get("Name", "Produit inconnu"),
+                        "requested": requested_qty,
+                        "available": available_stock
+                    })
+
+            if stock_issues:
+                return {
+                    "status": "user_interaction_required",
+                    "interaction_type": "quantity_adjustment",
+                    "message": "Problèmes de stock détectés",
+                    "question": "Comment souhaitez-vous procéder ?",
+                    "stock_issues": stock_issues,
+                    "options": [
+                        {"value": "proceed", "label": "Continuer avec les quantités disponibles"},
+                        {"value": "modify", "label": "Modifier les quantités"},
+                        {"value": "cancel", "label": "Annuler la demande"}
+                    ],
+                    "input_type": "choice",
+                    "context": {"final_products": final_products}
+                }
+            else:
+                # Pas de problème de stock, continuer
+                return await self._continue_quote_generation({"products": final_products})
+
+        except Exception as e:
+            logger.exception(f"Erreur validation quantités: {str(e)}")
+            return self._build_error_response("Erreur validation quantités", str(e))
+
+# 🔧 NOUVELLES ROUTES FASTAPI OPTIMISÉES
+from fastapi import APIRouter, HTTPException
+from datetime import datetime
+
+# Créer un routeur pour les nouvelles routes
+router_v2 = APIRouter()
+
+@router_v2.post("/generate_quote_v2")  # Nouvelle version optimisée
+async def generate_quote_optimized(request: dict):
+    """
+    Route optimisée avec validation séquentielle et cache
+    """
+
+    try:
+        user_prompt = request.get("prompt", "").strip()
+        draft_mode = request.get("draft_mode", False)
+
+        if not user_prompt:
+            raise HTTPException(status_code=400, detail="Prompt requis")
+
+        # Initialiser le workflow optimisé
+        workflow = DevisWorkflow(validation_enabled=True, draft_mode=draft_mode)
+
+        # Lancer le processus
+        result = await workflow.process_quote_request(user_prompt, draft_mode)
+
+        return {
+            "success": True,
+            "data": result,
+            "performance": {
+                "cache_stats": await workflow.cache_manager.get_cache_stats(),
+                "timestamp": datetime.now().isoformat()
+            }
+        }
+
+    except Exception as e:
+        logger.exception(f"Erreur route generate_quote_v2: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router_v2.post("/continue_quote")  # Route pour continuer après interaction
+async def continue_quote_after_interaction(request: dict):
+    """
+    Continue le workflow après une interaction utilisateur
+    """
+
+    try:
+        task_id = request.get("task_id")
+        user_input = request.get("user_input", {})
+        context = request.get("context", {})
+
+        if not task_id:
+            raise HTTPException(status_code=400, detail="task_id requis")
+
+        # Récupérer l'instance du workflow (en pratique, utiliser un cache/session)
+        workflow = DevisWorkflow()  # À adapter selon votre système de session
+        workflow.task_id = task_id
+
+        result = await workflow.continue_after_user_input(user_input, context)
+
+        return {
+            "success": True,
+            "data": result
+        }
+
+    except Exception as e:
+        logger.exception(f"Erreur continue_quote: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Export du routeur pour intégration dans main.py
+__all__ = ['DevisWorkflow', 'router_v2']

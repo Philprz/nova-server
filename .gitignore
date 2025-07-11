@@ -20,6 +20,7 @@ alembic/versions/
 .idea/
 
 # Fichiers de log
+/logs/
 *.log
 
 # Dépendances
