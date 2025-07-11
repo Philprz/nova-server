@@ -10,9 +10,6 @@ from services.module_loader import ModuleLoader, ModuleConfig
 MODULES_CONFIG = {
     'sync': ModuleConfig('routes.routes_sync', '/sync', ['Synchronisation']),
     'products': ModuleConfig('routes.routes_products', '/products', ['Produits']),
-    'claude': ModuleConfig('routes.routes_claude', tags=['Claude']),
-    'salesforce': ModuleConfig('routes.routes_salesforce', tags=['Salesforce']),
-    'sap': ModuleConfig('routes.routes_sap', tags=['SAP']),
     'devis': ModuleConfig('routes.routes_devis', tags=['Devis']),
     'assistant': ModuleConfig('routes.routes_intelligent_assistant', '/api/assistant', ['Assistant Intelligent']),
     'clients': ModuleConfig('routes.routes_clients', '/clients', ['Clients'])
