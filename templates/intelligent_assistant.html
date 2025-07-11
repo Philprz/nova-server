@@ -649,16 +649,34 @@
             } catch (error) {
                 console.error('Erreur:', error);
 
-                // Afficher l'erreur
+                // Afficher l'erreur avec le bouton de création de client
                 processingIndicator.style.display = 'none';
                 resultsContent.style.display = 'block';
 
+                const errorMessage = error.message || '';
+
+                // Extraire les informations des clients similaires du message d'erreur
+                const similarClientsData = extractSimilarClientsFromError(errorMessage);
+
+                // Toujours afficher l'interface des clients similaires avec le bouton de création
+                // même si aucun client similaire n'est extrait correctement
+                showSimilarClients({
+                    similar_clients: similarClientsData,
+                    error: errorMessage,
+                    message: errorMessage
+                });
+                return;
+
+                // Affichage d'erreur standard avec bouton de création de client
                 resultsContent.innerHTML = `
                     <div style="text-align: center; color: #ef4444;">
                         <h3 style="margin-bottom: 15px;">❌ Erreur lors du traitement</h3>
                         <p style="color: #6b7280; margin-bottom: 20px;">${error.message}</p>
                         <div class="action-buttons">
-                            <button onclick="processRequest()" class="action-button primary">
+                            <button onclick="startClientCreation()" class="action-button primary" style="background: linear-gradient(135deg, #10b981, #059669);">
+                                ➕ Créer un nouveau client
+                            </button>
+                            <button onclick="processRequest()" class="action-button secondary">
                                 🔄 Réessayer
                             </button>
                             <button onclick="newRequest()" class="action-button secondary">
@@ -722,10 +740,12 @@
                     </div>
                 </div>
 
+                ${similarClients.length > 0 ? `
                 <div style="margin-bottom: 20px;">
                     <h4 style="color: #374151; margin-bottom: 15px;">👥 Clients suggérés (${similarClients.length})</h4>
                     ${clientsHtml}
                 </div>
+                ` : ''}
 
                 <div class="action-buttons">
                     <button onclick="startClientCreation()" class="action-button primary" style="background: linear-gradient(135deg, #10b981, #059669);">
@@ -737,11 +757,61 @@
                     <button onclick="newRequest()" class="action-button secondary">
                         ✏️ Modifier la demande
                     </button>
-                <button onclick="openClassicInterface()" class="action-button secondary">
-            💼 Interface classique
-        </button>
-        </div>
-        `;
+                    <button onclick="openClassicInterface()" class="action-button secondary">
+                        💼 Interface classique
+                    </button>
+                </div>
+            `;
+        }
+
+        function extractSimilarClientsFromError(errorMessage) {
+            const clients = [];
+
+            // Nouveaux patterns plus complets
+            const patterns = [
+                // Format 1: "1. Nom Client (similarité: XX.X%)"
+                /(\d+)\.\s+([^(]+?)\s*\(similarité:\s*(\d+\.?\d*)%\)/g,
+                // Format 2: "- Nom Client (XX.X% de similarité)"
+                /-\s+([^(]+?)\s*\((\d+\.?\d*)%\s*de similarité\)/g,
+                // Format 3: "Client: Nom Client (XX.X%)"
+                /Client:\s*([^(]+?)\s*\((\d+\.?\d*)%\)/g,
+                // Format 4: "• Nom Client (XX.X%)"
+                /•\s+([^(]+?)\s*\((\d+\.?\d*)%\)/g,
+                // Format 5: "Nom Client (XX.X% de match)"
+                /([^(]+?)\s*\((\d+\.?\d*)%\s*de match\)/g
+            ];
+
+            for (const pattern of patterns) {
+                let match;
+                while ((match = pattern.exec(errorMessage)) !== null) {
+                    const name = match[2] || match[1];
+                    const similarity = match[3] || match[2];
+
+                    clients.push({
+                        name: name.trim(),
+                        similarity: parseFloat(similarity) / 100,
+                        account_number: extractClientInfo(errorMessage, name, 'account'),
+                        id: `similar_${clients.length + 1}`,
+                        city: extractClientInfo(errorMessage, name, 'city'),
+                        industry: extractClientInfo(errorMessage, name, 'industry')
+                    });
+                }
+            }
+
+            return clients.filter((client, index, self) =>
+                index === self.findIndex(c => c.name === client.name)
+            );
+        }
+
+        function extractClientInfo(errorMessage, clientName, infoType) {
+            const patterns = {
+                city: new RegExp(`${escapeRegExp(clientName)}[^.]*?(?:à|dans|ville de|localisé à)\\s+([A-Z][a-z]+(?:\\s+[A-Z][a-z]+)*)`, 'i'),
+                industry: new RegExp(`${escapeRegExp(clientName)}[^.]*?(?:secteur|activité|domaine)[^:]*?:?\\s+([^.]+)`, 'i'),
+                account: new RegExp(`${escapeRegExp(clientName)}[^.]*?(?:référence|numéro|compte)[^:]*?:?\\s+([A-Z0-9-]+)`, 'i')
+            };
+
+            const match = errorMessage.match(patterns[infoType]);
+            return match ? match[1].trim() : (infoType === 'city' ? 'Ville inconnue' : infoType === 'industry' ? 'Secteur inconnu' : 'N/A');
         }
         
         async function startClientCreation() {
@@ -942,6 +1012,206 @@
         }, 1000);
         }
         
+        function shouldShowSimilarClients(errorMessage) {
+            // Détection avancée des cas où afficher les clients similaires
+            const patterns = [
+                /clients? (les plus )?proches/i,
+                /similarit[ée]/i,
+                /Voulez-vous utiliser|souhaitiez-vous parler de/i,
+                /client existant|clients similaires/i,
+                /plusieurs clients correspondant|plusieurs possibilités/i,
+                /sélectionnez le bon client/i,
+                /lequel choisir\?/i,
+                /plusieurs correspondances/i
+            ];
+            return patterns.some(pattern => pattern.test(errorMessage));
+        }
+
+        function isClientRelatedError(errorMessage) {
+            // Détecte si l'erreur est liée à un problème de client
+            const patterns = [
+                /client (non trouvé|introuvable|inconnu)/i,
+                /aucun client.*trouvé/i,
+                /cr[ée]er.*client/i,
+                /nouveau client/i,
+                /client.*n'existe pas/i
+            ];
+            return patterns.some(pattern => pattern.test(errorMessage));
+        }
+
+        function extractClientNameFromError(errorMessage) {
+            // Tente d'extraire le nom du client de l'erreur
+            const match = errorMessage.match(/pour\s+([^,\n]+)|client\s+"?([^"\n]+)"?/i);
+            return match ? (match[1] || match[2]) : null;
+        }
+
+        function showErrorWithCreationOption(errorMessage, options = {}) {
+            const { showClientCreation = true } = options;
+            const resultsContent = document.getElementById('resultsContent');
+
+            resultsContent.innerHTML = `
+                <div style="text-align: center; margin-bottom: 25px;">
+                    <h3 style="color: #ef4444; margin-bottom: 15px;">❌ Erreur lors du traitement</h3>
+                    <p style="color: #6b7280; margin-bottom: 20px;">${errorMessage}</p>
+                    <div class="action-buttons">
+                        ${showClientCreation ? `
+                            <button onclick="startClientCreation()" class="action-button primary">
+                                ➕ Créer un nouveau client
+                            </button>
+                        ` : ''}
+                        <button onclick="processRequest()" class="action-button secondary">
+                            🔄 Réessayer
+                        </button>
+                        <button onclick="newRequest()" class="action-button secondary">
+                            ✏️ Modifier la demande
+                        </button>
+                        <button onclick="openClassicInterface()" class="action-button secondary">
+                            💼 Interface classique
+                        </button>
+                    </div>
+                </div>
+            `;
+
+            showNotification('Erreur lors du traitement de la demande', 'error');
+        }
+
+        function extractSimilarClientsFromError(errorMessage) {
+            const clients = [];
+
+            // Nouveaux patterns plus complets
+            const patterns = [
+                // Format 1: "1. Nom Client (similarité: XX.X%)"
+                /(\d+)\.\s+([^(]+?)\s*\(similarité:\s*(\d+\.?\d*)%\)/g,
+                // Format 2: "- Nom Client (XX.X% de similarité)"
+                /-\s+([^(]+?)\s*\((\d+\.?\d*)%\s*de similarité\)/g,
+                // Format 3: "Client: Nom Client (XX.X%)"
+                /Client:\s*([^(]+?)\s*\((\d+\.?\d*)%\)/g,
+                // Format 4: "• Nom Client (XX.X%)"
+                /•\s+([^(]+?)\s*\((\d+\.?\d*)%\)/g,
+                // Format 5: "Nom Client (XX.X% de match)"
+                /([^(]+?)\s*\((\d+\.?\d*)%\s*de match\)/g
+            ];
+
+            for (const pattern of patterns) {
+                let match;
+                while ((match = pattern.exec(errorMessage)) !== null) {
+                    const name = match[2] || match[1];
+                    const similarity = match[3] || match[2];
+
+                    clients.push({
+                        name: name.trim(),
+                        similarity: parseFloat(similarity) / 100,
+                        account_number: extractClientInfo(errorMessage, name, 'account'),
+                        id: `similar_${clients.length + 1}`,
+                        city: extractClientInfo(errorMessage, name, 'city'),
+                        industry: extractClientInfo(errorMessage, name, 'industry')
+                    });
+                }
+            }
+
+            return clients.filter((client, index, self) =>
+                index === self.findIndex(c => c.name === client.name)
+            );
+        }
+
+        function extractClientInfo(errorMessage, clientName, infoType) {
+            const patterns = {
+                city: new RegExp(`${escapeRegExp(clientName)}[^.]*?(?:à|dans|ville de|localisé à)\\s+([A-Z][a-z]+(?:\\s+[A-Z][a-z]+)*)`, 'i'),
+                industry: new RegExp(`${escapeRegExp(clientName)}[^.]*?(?:secteur|activité|domaine)[^:]*?:?\\s+([^.]+)`, 'i'),
+                account: new RegExp(`${escapeRegExp(clientName)}[^.]*?(?:référence|numéro|compte)[^:]*?:?\\s+([A-Z0-9-]+)`, 'i')
+            };
+
+            const match = errorMessage.match(patterns[infoType]);
+            return match ? match[1].trim() : (infoType === 'city' ? 'Ville inconnue' : infoType === 'industry' ? 'Secteur inconnu' : 'N/A');
+        }
+
+        function showSimilarClientsWithCreation(data) {
+            const resultsContent = document.getElementById('resultsContent');
+            const similarClients = data.similar_clients || [];
+            const errorMessage = data.error || data.message || 'Client non trouvé';
+
+            let clientsHtml = similarClients.map(client => `
+                <div class="similar-client-card" onclick="selectSimilarClient('${client.name}', '${client.account_number || client.id}')">
+                    <div class="client-info">
+                        <div class="client-name">${client.name}</div>
+                        ${client.account_number ? `<div class="client-account">${client.account_number}</div>` : ''}
+                        ${client.city ? `<div class="client-location">📍 ${client.city}</div>` : ''}
+                        ${client.industry ? `<div class="client-industry">🏢 ${client.industry}</div>` : ''}
+                    </div>
+                    <div class="client-similarity">
+                        <div class="similarity-badge">${(client.similarity * 100).toFixed(1)}%</div>
+                        <div class="select-hint">👆 Sélectionner</div>
+                    </div>
+                </div>
+            `).join('');
+
+            resultsContent.innerHTML = `
+                <div class="similar-clients-header">
+                    <h3>🔍 Clients similaires trouvés</h3>
+                    <div class="error-message">${errorMessage}</div>
+                    <div class="info-hint">
+                        💡 Sélectionnez un client existant ou créez-en un nouveau
+                    </div>
+                </div>
+
+                <div class="similar-clients-list">
+                    ${similarClients.length > 0 ? clientsHtml :
+                    '<div class="no-clients">Aucun client similaire trouvé</div>'}
+                </div>
+
+                <div class="action-buttons">
+                    <button onclick="startClientCreation()" class="action-button primary">
+                        ➕ Créer un nouveau client
+                    </button>
+                    <button onclick="processRequest()" class="action-button secondary">
+                        🔄 Réessayer
+                    </button>
+                    <button onclick="newRequest()" class="action-button secondary">
+                        ✏️ Modifier la demande
+                    </button>
+                </div>
+            `;
+        }
+
+        function showErrorWithCreationOption(errorMessage) {
+            const resultsContent = document.getElementById('resultsContent');
+
+            resultsContent.innerHTML = `
+                <div class="error-container">
+                    <h3>❌ Erreur lors du traitement</h3>
+                    <p>${errorMessage}</p>
+                    <div class="action-buttons">
+                        <button onclick="startClientCreation()" class="action-button primary">
+                            ➕ Créer un nouveau client
+                        </button>
+                        <button onclick="processRequest()" class="action-button secondary">
+                            🔄 Réessayer
+                        </button>
+                        <button onclick="newRequest()" class="action-button secondary">
+                            ✏️ Modifier la demande
+                        </button>
+                    </div>
+                </div>
+            `;
+
+            showNotification('Erreur lors du traitement de la demande', 'error');
+        }
+
+        function extractFromError(errorMessage, clientName, field) {
+            // Fonction pour extraire des informations supplémentaires comme la ville ou le secteur
+            const patterns = {
+                ville: new RegExp(`${escapeRegExp(clientName)}[^.]*?(?:à|dans|ville de)\\s+([A-Z][a-z]+(?:\\s+[A-Z][a-z]+)*)`, 'i'),
+                secteur: new RegExp(`${escapeRegExp(clientName)}[^.]*?(?:secteur|activité)[^:]*?:?\\s+([^.]+)`, 'i')
+            };
+
+            const match = errorMessage.match(patterns[field]);
+            return match ? match[1].trim() : 'Non spécifié';
+        }
+
+        function escapeRegExp(string) {
+            return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        }
+
         function extractCompanyInfo(text) {
         // Fonction simple pour extraire le nom de l'entreprise
         const patterns = {
