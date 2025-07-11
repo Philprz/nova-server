@@ -9,64 +9,26 @@ from routes.routes_progress import router as progress_router
 from routes import routes_suggestions
 from typing import List, Dict
 
-# Import seulement des routes qui existent réellement
-try:
-    from routes.routes_sync import router as sync_router
-    sync_available = True
-    print("✅ routes_sync chargées avec succès")
-except ImportError as e:
-    sync_available = False
-    print(f"⚠️ routes_sync non disponible: {e}")
+OPTIONAL_MODULES = {
+    'sync': 'routes.routes_sync',
+    'products': 'routes.routes_products',
+    'claude': 'routes.routes_claude',
+    'salesforce':'routes.routes_salesforce',
+    'sap':'routes.routes_sap',
+    'devis':'routes.routes_devis',
+    'assistant':'routes.routes_intelligent_assistant',
+    'clients':'routes.routes_clients'
+}
 
-try:
-    from routes.routes_products import router as products_router
-    products_available = True
-    print("✅ routes_products chargées avec succès")
-except ImportError as e:
-    products_available = False
-    print(f"⚠️ routes_products non disponible: {e}")
-try:
-    from routes.routes_claude import router as claude_router
-    claude_available = True
-except ImportError:
-    claude_available = False
-    print("⚠️ routes_claude non disponible")
+def load_optional_modules():
+    loaded = {}
+    for name, module_path in OPTIONAL_MODULES.items():
+        try:
+            loaded[name] = importlib.import_module(module_path)
+        except ImportError as e:
+            logger.warning(f"Module {name} non disponible: {e}")
+    return loaded
 
-try:
-    from routes.routes_salesforce import router as salesforce_router
-    salesforce_available = True
-except ImportError:
-    salesforce_available = False
-    print("⚠️ routes_salesforce non disponible")
-
-try:
-    from routes.routes_sap import router as sap_router
-    sap_available = True
-except ImportError:
-    sap_available = False
-    print("⚠️ routes_sap non disponible")
-
-try:
-    from routes.routes_devis import router as devis_router
-    devis_available = True
-except ImportError:
-    devis_available = False
-
-# Import de l'assistant intelligent
-try:
-    from routes.routes_intelligent_assistant import router as assistant_router_test
-    intelligent_assistant_available = True
-    print("✅ Assistant intelligent chargé avec succès")
-except ImportError as e:
-    intelligent_assistant_available = False
-    print(f"Assistant intelligent non disponible: {e}")
-
-try:
-    from routes.routes_clients import router as clients_router
-    clients_available = True
-except ImportError:
-    clients_available = False
-    print("⚠️ routes_clients non disponible")
         
 # Créer l'application FastAPI
 app = FastAPI(
