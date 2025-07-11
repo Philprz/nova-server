@@ -94,34 +94,78 @@
         /* Header avec logo IT SPIRIT */
         .header {
             text-align: center;
-            margin-bottom: 60px;
+            margin-bottom: 40px;
+        }
+
+        .logo-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 30px;
+            margin-bottom: 25px;
         }
 
         .logo {
             display: inline-flex;
             align-items: center;
             gap: 15px;
-            margin-bottom: 20px;
+            animation: fadeInScale 0.8s ease-out 0.3s backwards;
         }
 
         .logo-icon {
-            width: 60px;
-            height: 60px;
+            width: 50px;
+            height: 50px;
             background: linear-gradient(135deg, #02B9FD, #832DFE);
             border-radius: 50% 20% 50% 20%;
             display: flex;
             align-items: center;
             justify-content: center;
             color: white;
-            font-size: 24px;
+            font-size: 22px;
             font-weight: bold;
         }
 
         .logo-text {
             color: white;
-            font-size: 2.5rem;
+            font-size: 2.2rem;
             font-weight: 300;
             letter-spacing: 2px;
+        }
+
+        .it-spirit-logo {
+            width: 140px;
+            height: auto;
+            position: relative;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 15px 20px;
+            border-radius: 15px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s ease;
+            cursor: pointer;
+            animation: fadeInScale 0.8s ease-out;
+            /* Alternative sans fond blanc : commentez les 3 lignes background, padding, border-radius et décommentez la ligne suivante */
+            /* filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3)); */
+        }
+
+        @keyframes fadeInScale {
+            from {
+                opacity: 0;
+                transform: scale(0.8);
+            }
+            to {
+                opacity: 1;
+                transform: scale(1);
+            }
+        }
+
+        .it-spirit-logo:hover {
+            transform: scale(1.05);
+        }
+
+        .it-spirit-logo img {
+            width: 100%;
+            height: auto;
+            display: block;
         }
 
         .tagline {
@@ -137,7 +181,7 @@
             backdrop-filter: blur(20px);
             border: 1px solid rgba(255, 255, 255, 0.2);
             border-radius: 30px;
-            padding: 40px;
+            padding: 30px 40px;
             margin-bottom: 40px;
             box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
         }
@@ -147,7 +191,7 @@
             font-size: 1.4rem;
             font-weight: 300;
             text-align: center;
-            margin-bottom: 30px;
+            margin-bottom: 25px;
             opacity: 0.9;
         }
 
@@ -201,41 +245,6 @@
         .input-indicator.show {
             opacity: 1;
             bottom: -5px;
-        }
-
-        /* Suggestions rapides */
-        .quick-suggestions {
-            margin-top: 30px;
-            text-align: center;
-        }
-
-        .suggestions-title {
-            color: rgba(255, 255, 255, 0.8);
-            font-size: 0.9rem;
-            margin-bottom: 15px;
-        }
-
-        .suggestion-tags {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-            justify-content: center;
-        }
-
-        .suggestion-tag {
-            background: rgba(255, 255, 255, 0.2);
-            color: white;
-            padding: 8px 16px;
-            border-radius: 20px;
-            font-size: 0.9rem;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-        }
-
-        .suggestion-tag:hover {
-            background: rgba(255, 255, 255, 0.3);
-            transform: translateY(-2px);
         }
 
         /* Zone de résultats */
@@ -332,10 +341,105 @@
             left: 27.5px;
         }
 
+        /* Notifications */
+        .notification {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 12px 20px;
+            border-radius: 25px;
+            z-index: 1000;
+            font-size: 0.9rem;
+            backdrop-filter: blur(10px);
+            animation: slideIn 0.3s ease;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(-50%) translateY(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(-50%) translateY(0);
+            }
+        }
+
+        .notification.success {
+            background: #10b981;
+            color: white;
+        }
+
+        .notification.error {
+            background: #ef4444;
+            color: white;
+        }
+
+        .notification.warning {
+            background: #FD5202;
+            color: white;
+        }
+
+        .notification.info {
+            background: #02B9FD;
+            color: white;
+        }
+
+        /* Boutons d'action */
+        .action-buttons {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            margin-top: 25px;
+        }
+
+        .action-button {
+            padding: 12px 30px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 1rem;
+            transition: all 0.3s ease;
+            border: none;
+            font-weight: 500;
+        }
+
+        .action-button.primary {
+            background: #667eea;
+            color: white;
+        }
+
+        .action-button.primary:hover {
+            background: #5a67d8;
+            transform: translateY(-2px);
+        }
+
+        .action-button.secondary {
+            background: rgba(102, 126, 234, 0.1);
+            border: 1px solid #667eea;
+            color: #667eea;
+        }
+
+        .action-button.secondary:hover {
+            background: #667eea;
+            color: white;
+        }
+
         /* Responsive */
         @media (max-width: 768px) {
             .container {
                 padding: 20px 15px;
+            }
+
+            .logo-container {
+                flex-direction: column;
+                gap: 20px;
+            }
+
+            .it-spirit-logo {
+                width: 120px;
+                padding: 10px 15px;
+                box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
             }
 
             .input-section {
@@ -350,12 +454,16 @@
             }
 
             .logo-text {
-                font-size: 2rem;
+                font-size: 1.8rem;
+            }
+        }
+
+            .action-buttons {
+                flex-direction: column;
             }
 
-            .suggestion-tags {
-                flex-direction: column;
-                align-items: center;
+            .action-button {
+                width: 100%;
             }
         }
     </style>
@@ -382,9 +490,18 @@
     <div class="container">
         <!-- Header -->
         <div class="header">
-            <div class="logo">
-                <div class="logo-icon">N</div>
-                <div class="logo-text">NOVA</div>
+            <div class="logo-container">
+                <!-- Logo IT SPIRIT -->
+                <!-- Note: Placez le fichier logo_it_spirit.png dans le dossier static/ de votre projet -->
+                <!-- Formats acceptés: PNG, JPG, SVG | Taille recommandée: 300x150px minimum -->
+                <!-- Alternative: Vous pouvez aussi utiliser une URL externe ou encoder l'image en base64 -->
+                <!-- Pour ajouter un lien vers le site IT Spirit, enveloppez la div dans une balise <a href="https://www.itspirit.fr" target="_blank"> -->
+                <div class="it-spirit-logo" onclick="window.open('https://www.itspirit.fr', '_blank')" title="Visiter le site IT Spirit">
+                    <img src="/static/logo_it_spirit.png" alt="IT Spirit" />
+                </div>
+
+                <!-- Logo NOVA -->
+                <img src="/static/logo.png" alt="Logo NOVA" style="height: 50px;" />
             </div>
             <div class="tagline">L'esprit humain au cœur de la technologie</div>
         </div>
@@ -397,32 +514,13 @@
                 <textarea 
                     id="mainInput" 
                     class="main-input" 
-                    placeholder="Exemple : Créer un devis pour 100 unités du produit A00001 pour le client Edge Communications..."
+                    placeholder="Fais moi un devis de 4 imprimantes pour Philippe PEREZ"
                     oninput="handleInput()"
                     onkeydown="handleKeyDown(event)"
                 ></textarea>
                 
                 <div id="inputIndicator" class="input-indicator">
                     ⏎ Appuyez sur Entrée pour traiter votre demande
-                </div>
-            </div>
-
-            <!-- Suggestions rapides -->
-            <div class="quick-suggestions">
-                <div class="suggestions-title">Suggestions rapides :</div>
-                <div class="suggestion-tags">
-                    <div class="suggestion-tag" onclick="fillInput('Créer un devis pour Edge Communications avec 100 unités A00001')">
-                        📋 Devis client existant
-                    </div>
-                    <div class="suggestion-tag" onclick="fillInput('Nouveau client NOVA France SARL avec 50 produits A00001')">
-                        🆕 Nouveau client
-                    </div>
-                    <div class="suggestion-tag" onclick="fillInput('Vérifier le stock disponible pour le produit A00025')">
-                        📦 Vérifier stock
-                    </div>
-                    <div class="suggestion-tag" onclick="fillInput('Créer un devis multi-produits pour TechCorp')">
-                        🔄 Multi-produits
-                    </div>
                 </div>
             </div>
         </div>
@@ -452,6 +550,7 @@
     <script>
         let isDraftMode = false;
         let processingTimeout;
+        let currentQuoteData = null;
 
         function toggleDraftMode() {
             const toggle = document.getElementById('draftToggle');
@@ -485,19 +584,7 @@
             }
         }
 
-        function fillInput(text) {
-            const input = document.getElementById('mainInput');
-            input.value = text;
-            input.focus();
-            handleInput();
-            
-            // Auto-traitement après un délai court
-            setTimeout(() => {
-                processRequest();
-            }, 800);
-        }
-
-        function processRequest() {
+        async function processRequest() {
             const input = document.getElementById('mainInput');
             const prompt = input.value.trim();
             
@@ -518,18 +605,53 @@
             processingIndicator.style.display = 'block';
             resultsContent.style.display = 'none';
             
-            // Simulation du traitement (à remplacer par l'appel API réel)
-            setTimeout(() => {
-                showResults({
-                    client: 'Edge Communications',
-                    product: 'A00001 - Produit Standard',
-                    quantity: 100,
-                    unitPrice: 40.00,
-                    total: 4000.00,
-                    stock: 150,
-                    status: isDraftMode ? 'Brouillon créé' : 'Devis généré'
+            try {
+                // Appel API réel
+                const response = await fetch('/generate_quote', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        prompt: prompt,
+                        draft_mode: isDraftMode
+                    })
                 });
-            }, 2500);
+
+                const data = await response.json();
+                
+                if (data.status === 'success' || data.success) {
+                    // Sauvegarder les données du devis
+                    currentQuoteData = data;
+                    showResults(data);
+                } else {
+                    throw new Error(data.error || 'Erreur lors de la génération du devis');
+                }
+                
+            } catch (error) {
+                console.error('Erreur:', error);
+                
+                // Afficher l'erreur
+                processingIndicator.style.display = 'none';
+                resultsContent.style.display = 'block';
+                
+                resultsContent.innerHTML = `
+                    <div style="text-align: center; color: #ef4444;">
+                        <h3 style="margin-bottom: 15px;">❌ Erreur lors du traitement</h3>
+                        <p style="color: #6b7280; margin-bottom: 20px;">${error.message}</p>
+                        <div class="action-buttons">
+                            <button onclick="processRequest()" class="action-button primary">
+                                🔄 Réessayer
+                            </button>
+                            <button onclick="newRequest()" class="action-button secondary">
+                                ✏️ Modifier la demande
+                            </button>
+                        </div>
+                    </div>
+                `;
+                
+                showNotification('Erreur lors du traitement de la demande', 'error');
+            }
         }
 
         function showResults(data) {
@@ -539,82 +661,146 @@
             processingIndicator.style.display = 'none';
             resultsContent.style.display = 'block';
             
+            // Extraire les informations du devis
+            const client = data.client || {};
+            const products = data.products || [];
+            const totalAmount = data.total_amount || 0;
+            const quoteId = data.quote_id || 'N/A';
+            const status = isDraftMode ? 'Brouillon créé' : 'Devis généré';
+            
+            // Construire l'affichage des produits
+            let productsHtml = '';
+            products.forEach(product => {
+                productsHtml += `
+                    <div style="background: #f8fafc; padding: 15px; border-radius: 10px; margin-bottom: 10px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <strong>${product.item_code || product.code}</strong> - ${product.item_name || product.name}
+                                <div style="color: #6b7280; font-size: 0.9rem;">
+                                    ${product.quantity} x ${(product.unit_price || 0).toFixed(2)} €
+                                </div>
+                            </div>
+                            <div style="font-weight: 600;">
+                                ${(product.line_total || (product.quantity * product.unit_price) || 0).toFixed(2)} €
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+            
             resultsContent.innerHTML = `
                 <div style="text-align: center; margin-bottom: 25px;">
                     <h3 style="color: #1f2937; margin-bottom: 10px;">
-                        ${isDraftMode ? '📝' : '✅'} ${data.status}
+                        ${isDraftMode ? '📝' : '✅'} ${status}
                     </h3>
                     <div style="color: #6b7280; font-size: 0.9rem;">
-                        ${new Date().toLocaleString('fr-FR')}
+                        Référence : ${quoteId} | ${new Date().toLocaleString('fr-FR')}
                     </div>
                 </div>
                 
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 25px;">
-                    <div style="background: #f8fafc; padding: 20px; border-radius: 15px;">
-                        <h4 style="color: #374151; margin-bottom: 15px;">🏢 Client</h4>
-                        <div style="font-weight: 600; color: #1f2937;">${data.client}</div>
+                <div style="background: #f8fafc; padding: 20px; border-radius: 15px; margin-bottom: 20px;">
+                    <h4 style="color: #374151; margin-bottom: 15px;">🏢 Client</h4>
+                    <div style="font-weight: 600; color: #1f2937;">
+                        ${client.name || 'Client non spécifié'}
+                        ${client.account_number ? `<span style="color: #6b7280; font-weight: normal;"> (${client.account_number})</span>` : ''}
                     </div>
-                    <div style="background: #f8fafc; padding: 20px; border-radius: 15px;">
-                        <h4 style="color: #374151; margin-bottom: 15px;">📦 Produit</h4>
-                        <div style="font-weight: 600; color: #1f2937;">${data.product}</div>
-                    </div>
+                </div>
+                
+                <div style="margin-bottom: 20px;">
+                    <h4 style="color: #374151; margin-bottom: 15px;">📦 Produits</h4>
+                    ${productsHtml}
                 </div>
                 
                 <div style="background: linear-gradient(135deg, #02B9FD, #832DFE); color: white; padding: 25px; border-radius: 15px; text-align: center;">
-                    <div style="font-size: 1.1rem; margin-bottom: 10px;">Quantité: ${data.quantity} unités</div>
-                    <div style="font-size: 1.5rem; font-weight: 600;">Total: ${data.total.toFixed(2)} € HT</div>
-                    <div style="margin-top: 10px; opacity: 0.9;">Stock disponible: ${data.stock} unités</div>
+                    <div style="font-size: 1.5rem; font-weight: 600;">
+                        Total: ${totalAmount.toFixed(2)} € HT
+                    </div>
+                    ${data.stock_info ? `<div style="margin-top: 10px; opacity: 0.9;">Stock disponible: ${data.stock_info}</div>` : ''}
                 </div>
                 
-                <div style="text-align: center; margin-top: 25px;">
-                    <button onclick="newRequest()" style="
-                        background: rgba(102, 126, 234, 0.1);
-                        border: 1px solid #667eea;
-                        color: #667eea;
-                        padding: 12px 30px;
-                        border-radius: 25px;
-                        cursor: pointer;
-                        font-size: 1rem;
-                        transition: all 0.3s ease;
-                    " onmouseover="this.style.background='#667eea'; this.style.color='white';" 
-                       onmouseout="this.style.background='rgba(102, 126, 234, 0.1)'; this.style.color='#667eea';">
+                <div class="action-buttons">
+                    ${isDraftMode ? `
+                        <button onclick="confirmQuote()" class="action-button primary">
+                            ✅ Confirmer le devis
+                        </button>
+                    ` : ''}
+                    <button onclick="newRequest()" class="action-button secondary">
                         ➕ Nouvelle demande
+                    </button>
+                    <button onclick="openClassicInterface()" class="action-button secondary">
+                        💼 Interface classique
                     </button>
                 </div>
             `;
+        }
+
+        async function confirmQuote() {
+            if (!currentQuoteData) {
+                showNotification('Aucun devis à confirmer', 'warning');
+                return;
+            }
+
+            try {
+                showNotification('Confirmation du devis en cours...', 'info');
+                
+                // Appeler l'API pour confirmer le devis
+                const response = await fetch('/api/assistant/workflow/create_quote', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        action: 'confirm',
+                        quote_data: currentQuoteData,
+                        confirmed: true
+                    })
+                });
+
+                const result = await response.json();
+                
+                if (result.success) {
+                    showNotification('✅ Devis confirmé avec succès !', 'success');
+                    setTimeout(() => {
+                        newRequest();
+                    }, 2000);
+                } else {
+                    throw new Error(result.message || 'Erreur lors de la confirmation');
+                }
+                
+            } catch (error) {
+                console.error('Erreur confirmation:', error);
+                showNotification('❌ ' + error.message, 'error');
+            }
         }
 
         function newRequest() {
             const input = document.getElementById('mainInput');
             const resultsSection = document.getElementById('resultsSection');
             
+            // Réinitialiser
             input.value = '';
             input.focus();
             resultsSection.classList.remove('show');
             document.getElementById('inputIndicator').classList.remove('show');
+            currentQuoteData = null;
+        }
+
+        function openClassicInterface() {
+            window.open('/static/nova_interface.html', '_blank');
         }
 
         function showNotification(message, type = 'info') {
+            // Supprimer les notifications existantes
+            document.querySelectorAll('.notification').forEach(n => n.remove());
+            
             const notification = document.createElement('div');
-            notification.style.cssText = `
-                position: fixed;
-                top: 20px;
-                left: 50%;
-                transform: translateX(-50%);
-                background: ${type === 'warning' ? '#FD5202' : '#02B9FD'};
-                color: white;
-                padding: 12px 20px;
-                border-radius: 25px;
-                z-index: 1000;
-                font-size: 0.9rem;
-                backdrop-filter: blur(10px);
-            `;
+            notification.className = `notification ${type}`;
             notification.textContent = message;
             document.body.appendChild(notification);
             
             setTimeout(() => {
                 notification.remove();
-            }, 3000);
+            }, 4000);
         }
 
         // Auto-focus sur le champ de saisie au chargement
