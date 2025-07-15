@@ -1329,13 +1329,35 @@ async def create_client_from_text(request: Dict[str, str]):
     """
     try:
         from workflow.client_creation_workflow import ClientCreationWorkflow
+        from services.llm_extractor import LlmExtractor
 
         workflow = ClientCreationWorkflow()
-
-        # Traiter la demande en langage naturel
-        result = await workflow.process_client_creation_request(
-            request.get('text', '')
-        )
+        
+        # 🔧 CORRECTION: Extraire les informations structurées depuis le texte
+        user_text = request.get('text', '').strip()
+        
+        if not user_text:
+            return {
+                'success': False,
+                'error': 'Texte de demande requis',
+                'message': 'Veuillez fournir une description du client à créer'
+            }
+        
+        # Utiliser le LLM pour extraire les informations client
+        llm_extractor = LlmExtractor()
+        extracted_info = await llm_extractor.extract_client_info_from_text(user_text)
+        
+        if not extracted_info.get('success'):
+            return {
+                'success': False,
+                'error': 'Extraction impossible',
+                'message': 'Impossible d\'extraire les informations client du texte fourni',
+                'details': extracted_info.get('error', 'Erreur inconnue')
+            }
+        
+        # Traiter la demande avec les données structurées
+        client_data = extracted_info.get('client_data', {})
+        result = await workflow.process_client_creation_request(client_data)
 
         return result
 

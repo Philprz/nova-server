@@ -218,3 +218,65 @@ class LLMExtractor:
                 improved_products.append(product)
         
         return improved_products
+
+
+    async def extract_client_info_from_text(self, user_text: str) -> Dict[str, Any]:
+        """
+        🏢 Extrait les informations client depuis une demande en texte libre
+        """
+        try:
+            system_prompt = """
+            Tu es NOVA, un assistant spécialisé dans l'extraction d'informations client.
+            
+            Analyse le texte utilisateur et extrait UNIQUEMENT les informations client disponibles.
+            
+            INFORMATIONS À RECHERCHER :
+            - Nom de l'entreprise/société
+            - Nom de la personne de contact
+            - Ville/localisation  
+            - SIRET (si mentionné)
+            - Email de contact
+            - Téléphone de contact
+            - Adresse complète (si disponible)
+            
+            Réponds UNIQUEMENT au format JSON suivant:
+            {
+                "success": true/false,
+                "client_data": {
+                    "company_name": "NOM_ENTREPRISE",
+                    "contact_name": "NOM_CONTACT", 
+                    "city": "VILLE",
+                    "siret": "SIRET_SI_FOURNI",
+                    "email": "EMAIL_SI_FOURNI",
+                    "phone": "TELEPHONE_SI_FOURNI",
+                    "address": "ADRESSE_SI_FOURNIE"
+                },
+                "confidence": 0-100,
+                "missing_fields": ["champs_manquants"]
+            }
+            
+            Si aucune information client n'est détectable, success = false.
+            """
+            
+            user_message = f"Texte à analyser pour extraction client: {user_text}"
+            
+            # Appel Claude pour extraction
+            response = await self._call_claude_api(system_prompt, user_message)
+            
+            if response and response.get('status_code') == 200:
+                content = response.get('content', '')
+                extracted_json = self._extract_json_from_response(content)
+                
+                if extracted_json:
+                    logger.info(f"✅ Extraction client réussie: {extracted_json}")
+                    return extracted_json
+                else:
+                    logger.warning("⚠️ JSON non valide dans la réponse Claude")
+                    return {"success": False, "error": "Format de réponse invalide"}
+            else:
+                logger.error(f"❌ Erreur API Claude: {response}")
+                return {"success": False, "error": "Erreur communication LLM"}
+                
+        except Exception as e:
+            logger.error(f"❌ Erreur extraction client: {e}")
+            return {"success": False, "error": str(e)}

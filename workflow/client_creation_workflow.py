@@ -203,11 +203,27 @@ class ClientCreationWorkflow:
         Traite une demande complète de création de client
         """
         logger.info("🚀 Début du workflow de création de client")
-        
+        # 🔧 VALIDATION ROBUSTE DES DONNÉES D'ENTRÉE
+        if not isinstance(request_data, dict):
+            logger.error(f"❌ Type de données incorrect: {type(request_data)}")
+            return {
+                "success": False,
+                "error": "Format de données invalide",
+                "step": "validation_input",
+                "message": "Les données doivent être au format dictionnaire"
+            }  
+                  
         company_name = request_data.get("company_name", "").strip()
         city = request_data.get("city", "").strip()
         siret = request_data.get("siret", "").strip()
-        
+        # Validation des données minimales
+        if not company_name and not siret:
+            return {
+                "success": False,
+                "error": "Nom d'entreprise ou SIRET requis",
+                "step": "validation_input",
+                "message": "Veuillez fournir au minimum le nom de l'entreprise ou son SIRET"
+            }
         if not company_name and not siret:
             return {
                 "success": False,
