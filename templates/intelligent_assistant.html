@@ -482,6 +482,77 @@
                 width: 100%;
             }
         }
+
+        /* 🆕 Styles pour le formulaire de saisie manuelle */
+        .manual-form-container {
+            background: #f8fafc;
+            padding: 20px;
+            border-radius: 10px;
+            border: 1px solid #e5e7eb;
+            margin-top: 20px;
+        }
+
+        .manual-form-field {
+            margin-bottom: 15px;
+        }
+
+        .manual-form-label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: #374151;
+        }
+
+        .manual-form-input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.2s ease;
+        }
+
+        .manual-form-input:focus {
+            outline: none;
+            border-color: #10b981;
+            box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
+        }
+
+        .manual-form-input.error {
+            border-color: #ef4444;
+        }
+
+        .required-mark {
+            color: #ef4444;
+        }
+
+        .fallback-notice {
+            background: #fef3c7;
+            color: #92400e;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border-left: 4px solid #f59e0b;
+        }
+
+        .form-note {
+            margin-top: 15px;
+            padding: 10px;
+            background: #e0f2fe;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            color: #0369a1;
+            border-left: 3px solid #0284c7;
+        }
+
+            .action-buttons {
+                flex-direction: column;
+            }
+
+            .action-button {
+                width: 100%;
+            }
+        }
     </style>
 </head>
 <body>
@@ -839,11 +910,14 @@
         });
         
         const data = await response.json();
-        
+
         if (data.success && data.type === 'client_search_results') {
-        showClientCreationResults(data);
+            showClientCreationResults(data);
+        } else if (!data.success && data.type === 'manual_input_required') {
+            // 🆕 FALLBACK: Afficher le formulaire de saisie manuelle
+            showManualClientForm(data);
         } else {
-        throw new Error(data.message || 'Erreur lors de la recherche d\'entreprise');
+            throw new Error(data.message || 'Erreur lors de la recherche d\'entreprise');
         }
         
         } catch (error) {
@@ -926,6 +1000,150 @@
         if (!window.clientCreationData || !window.clientCreationData.search_results[companyIndex]) {
         showNotification('Erreur: données d\'entreprise non trouvées', 'error');
         return;
+        }
+
+        // 🆕 NOUVELLE FONCTION: Affichage du formulaire de saisie manuelle
+        function showManualClientForm(data) {
+            const resultsContent = document.getElementById('resultsContent');
+
+            const fieldsHtml = data.required_fields.map(field => {
+                const isRequired = field.required ? 'required' : '';
+                const requiredMark = field.required ? '<span class="required-mark">*</span>' : '';
+
+                return `
+                    <div class="manual-form-field">
+                        <label class="manual-form-label">
+                            ${field.label} ${requiredMark}
+                        </label>
+                        <input
+                            type="${field.type}"
+                            id="manual_${field.name}"
+                            name="${field.name}"
+                            value="${field.value || ''}"
+                            ${isRequired}
+                            class="manual-form-input"
+                            placeholder="Saisissez ${field.label.toLowerCase()}"
+                        />
+                    </div>
+                `;
+            }).join('');
+
+            resultsContent.innerHTML = `
+                <div class="manual-form-header">
+                    <h3 class="manual-form-title">
+                        ⚠️ Saisie manuelle requise
+                    </h3>
+                    <div class="fallback-notice">
+                        <strong>Raison:</strong> ${data.fallback_reason || 'Service de validation temporairement indisponible'}
+                    </div>
+                    <div class="manual-form-subtitle">
+                        Veuillez saisir manuellement les informations du client
+                    </div>
+                </div>
+
+                <form id="manualClientForm" class="manual-form-container">
+                    <h4 class="manual-form-section-title">📝 Informations client</h4>
+
+                    ${fieldsHtml}
+
+                    <div class="manual-form-actions">
+                        <button type="button" onclick="submitManualClient()" class="action-button primary">
+                            ✅ Créer le client
+                        </button>
+                        <button type="button" onclick="newRequest()" class="action-button secondary">
+                            ← Annuler
+                        </button>
+                    </div>
+                </form>
+
+                <div class="form-note">
+                    💡 <strong>Note:</strong> Seul le nom de l'entreprise est obligatoire. Les autres champs amélioreront la qualité des données client.
+                </div>
+            `;
+        }
+
+        // 🆕 NOUVELLE FONCTION: Soumission du formulaire manuel
+        async function submitManualClient() {
+            const form = document.getElementById('manualClientForm');
+            const formData = new FormData(form);
+
+            // Convertir FormData en objet
+            const clientData = {};
+            for (let [key, value] = formData.entries()) {
+                clientData[key] = value.trim();
+            }
+
+            // Validation côté client
+            if (!clientData.company_name) {
+                showNotification('❌ Le nom de l\'entreprise est obligatoire', 'error');
+                document.getElementById('manual_company_name').focus();
+                return;
+            }
+
+            showNotification('Création du client en cours...', 'info');
+
+            try {
+                const response = await fetch('/api/assistant/create_client/manual', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        client_data: clientData
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    showManualClientSuccess(data);
+                } else if (data.validation_errors) {
+                    // Afficher les erreurs de validation
+                    const errorMsg = data.validation_errors.join(', ');
+                    showNotification(`❌ Erreurs de validation: ${errorMsg}`, 'error');
+                } else {
+                    throw new Error(data.message || 'Erreur lors de la création du client');
+                }
+
+            } catch (error) {
+                console.error('Erreur création client manuelle:', error);
+                showNotification('❌ ' + error.message, 'error');
+            }
+        }
+
+        // 🆕 NOUVELLE FONCTION: Succès de création manuelle
+        function showManualClientSuccess(data) {
+            const resultsContent = document.getElementById('resultsContent');
+
+            resultsContent.innerHTML = `
+                <div style="text-align: center;">
+                    <div style="background: #dcfce7; color: #166534; padding: 20px; border-radius: 12px; margin-bottom: 20px;">
+                        <h3 style="margin-bottom: 15px;">✅ Client créé avec succès !</h3>
+                        <div style="font-size: 0.9rem; margin-bottom: 10px;">
+                            <strong>Entreprise:</strong> ${data.client_data.company_name}
+                        </div>
+                        ${data.client_data.contact_name ? `<div style="font-size: 0.9rem; margin-bottom: 10px;"><strong>Contact:</strong> ${data.client_data.contact_name}</div>` : ''}
+                        <div style="font-size: 0.9rem; margin-bottom: 10px;">
+                            <strong>ID Client:</strong> ${data.client_id}
+                        </div>
+                        ${data.account_number ? `<div style="font-size: 0.9rem; margin-bottom: 10px;"><strong>Numéro de compte:</strong> ${data.account_number}</div>` : ''}
+                        <div style="font-size: 0.8rem; color: #059669; margin-top: 15px; font-style: italic;">
+                            ${data.validation_note}
+                        </div>
+                    </div>
+
+                    <div class="action-buttons">
+                        <button onclick="processRequest()" class="action-button primary">
+                            📋 Créer un devis pour ce client
+                        </button>
+                        <button onclick="newRequest()" class="action-button secondary">
+                            ✏️ Nouvelle demande
+                        </button>
+                    </div>
+                </div>
+            `;
+
+            showNotification('✅ Client créé avec succès !', 'success');
         }
         
         const selectedCompany = window.clientCreationData.search_results[companyIndex];

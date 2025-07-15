@@ -1329,24 +1329,24 @@ async def create_client_from_text(request: Dict[str, str]):
     """
     try:
         from workflow.client_creation_workflow import ClientCreationWorkflow
-        from services.llm_extractor import LlmExtractor
+        from services.llm_extractor import LLMExtractor
 
         workflow = ClientCreationWorkflow()
-        
+
         # 🔧 CORRECTION: Extraire les informations structurées depuis le texte
         user_text = request.get('text', '').strip()
-        
+
         if not user_text:
             return {
                 'success': False,
                 'error': 'Texte de demande requis',
                 'message': 'Veuillez fournir une description du client à créer'
             }
-        
+
         # Utiliser le LLM pour extraire les informations client
-        llm_extractor = LlmExtractor()
+        llm_extractor = LLMExtractor()
         extracted_info = await llm_extractor.extract_client_info_from_text(user_text)
-        
+
         if not extracted_info.get('success'):
             return {
                 'success': False,
@@ -1354,20 +1354,156 @@ async def create_client_from_text(request: Dict[str, str]):
                 'message': 'Impossible d\'extraire les informations client du texte fourni',
                 'details': extracted_info.get('error', 'Erreur inconnue')
             }
-        
+
         # Traiter la demande avec les données structurées
         client_data = extracted_info.get('client_data', {})
         result = await workflow.process_client_creation_request(client_data)
+
+        # 🆕 FALLBACK: Si l'API Sirene échoue, proposer la saisie manuelle
+        if not result.get('success') and 'api' in result.get('error', '').lower():
+            logger.warning("🔄 API Sirene indisponible - Activation du fallback saisie manuelle")
+
+            # Retourner les données extraites pour saisie manuelle
+            return {
+                'success': False,
+                'type': 'manual_input_required',
+                'message': 'API de validation indisponible - Saisie manuelle requise',
+                'extracted_data': client_data,
+                'required_fields': [
+                    {'name': 'company_name', 'label': 'Nom de l\'entreprise', 'type': 'text', 'required': True, 'value': client_data.get('company_name', '')},
+                    {'name': 'contact_name', 'label': 'Nom du contact', 'type': 'text', 'required': False, 'value': client_data.get('contact_name', '')},
+                    {'name': 'email', 'label': 'Email', 'type': 'email', 'required': False, 'value': client_data.get('email', '')},
+                    {'name': 'phone', 'label': 'Téléphone', 'type': 'tel', 'required': False, 'value': client_data.get('phone', '')},
+                    {'name': 'address', 'label': 'Adresse', 'type': 'text', 'required': False, 'value': client_data.get('address', '')},
+                    {'name': 'city', 'label': 'Ville', 'type': 'text', 'required': False, 'value': client_data.get('city', '')},
+                    {'name': 'postal_code', 'label': 'Code postal', 'type': 'text', 'required': False, 'value': client_data.get('postal_code', '')},
+                    {'name': 'siret', 'label': 'SIRET (optionnel)', 'type': 'text', 'required': False, 'value': client_data.get('siret', '')}
+                ],
+                'fallback_reason': 'API de validation des entreprises temporairement indisponible'
+            }
 
         return result
 
     except Exception as e:
         logger.error(f"Erreur traitement demande création: {e}")
+
+        # 🆕 FALLBACK GÉNÉRAL: En cas d'erreur système, proposer aussi la saisie manuelle
+        if 'api' in str(e).lower() or 'timeout' in str(e).lower() or 'connection' in str(e).lower():
+            return {
+                'success': False,
+                'type': 'manual_input_required',
+                'message': 'Service de validation temporairement indisponible - Saisie manuelle requise',
+                'extracted_data': {},
+                'required_fields': [
+                    {'name': 'company_name', 'label': 'Nom de l\'entreprise', 'type': 'text', 'required': True, 'value': ''},
+                    {'name': 'contact_name', 'label': 'Nom du contact', 'type': 'text', 'required': False, 'value': ''},
+                    {'name': 'email', 'label': 'Email', 'type': 'email', 'required': False, 'value': ''},
+                    {'name': 'phone', 'label': 'Téléphone', 'type': 'tel', 'required': False, 'value': ''},
+                    {'name': 'address', 'label': 'Adresse', 'type': 'text', 'required': False, 'value': ''},
+                    {'name': 'city', 'label': 'Ville', 'type': 'text', 'required': False, 'value': ''},
+                    {'name': 'postal_code', 'label': 'Code postal', 'type': 'text', 'required': False, 'value': ''},
+                    {'name': 'siret', 'label': 'SIRET (optionnel)', 'type': 'text', 'required': False, 'value': ''}
+                ],
+                'fallback_reason': 'Erreur de connexion aux services de validation'
+            }
+
         return {
             'success': False,
             'error': str(e),
             'message': f"Erreur lors du traitement: {str(e)}"
-        }        
+        }
+
+@router.post('/create_client/manual')
+async def create_client_manual(request: Dict[str, Any]):
+    """
+    📝 Création de client avec saisie manuelle (fallback API Sirene)
+    """
+    try:
+        from workflow.client_creation_workflow import ClientCreationWorkflow
+
+        workflow = ClientCreationWorkflow()
+        client_data = request.get('client_data', {})
+
+        # Validation des champs obligatoires
+        if not client_data.get('company_name', '').strip():
+            return {
+                'success': False,
+                'error': 'Nom d\'entreprise requis',
+                'message': 'Le nom de l\'entreprise est obligatoire pour créer un client'
+            }
+
+        # Nettoyer et normaliser les données
+        normalized_data = {
+            'company_name': client_data.get('company_name', '').strip(),
+            'contact_name': client_data.get('contact_name', '').strip(),
+            'email': client_data.get('email', '').strip(),
+            'phone': client_data.get('phone', '').strip(),
+            'address': client_data.get('address', '').strip(),
+            'city': client_data.get('city', '').strip(),
+            'postal_code': client_data.get('postal_code', '').strip(),
+            'siret': client_data.get('siret', '').strip(),
+            'country': 'FR',  # Par défaut France
+            'source': 'manual_input',
+            'validation_bypassed': True  # Indique que la validation API a été contournée
+        }
+
+        # Validation basique locale (sans API externe)
+        validation_errors = []
+
+        # Validation email basique
+        if normalized_data['email']:
+            email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+            if not re.match(email_pattern, normalized_data['email']):
+                validation_errors.append("Format d'email invalide")
+
+        # Validation téléphone basique
+        if normalized_data['phone']:
+            phone_clean = re.sub(r'[^\d+]', '', normalized_data['phone'])
+            if len(phone_clean) < 8:
+                validation_errors.append("Numéro de téléphone trop court")
+
+        # Validation SIRET basique
+        if normalized_data['siret']:
+            siret_clean = re.sub(r'[^\d]', '', normalized_data['siret'])
+            if len(siret_clean) != 14:
+                validation_errors.append("Le SIRET doit contenir exactement 14 chiffres")
+
+        if validation_errors:
+            return {
+                'success': False,
+                'error': 'Données invalides',
+                'message': 'Veuillez corriger les erreurs suivantes',
+                'validation_errors': validation_errors
+            }
+
+        # Créer le client directement dans Salesforce (bypass de la recherche API)
+        creation_result = await workflow.create_client_in_salesforce(normalized_data)
+
+        if creation_result.get('success'):
+            return {
+                'success': True,
+                'type': 'client_created_manual',
+                'message': 'Client créé avec succès (saisie manuelle)',
+                'client_data': normalized_data,
+                'client_id': creation_result.get('client_id'),
+                'account_number': creation_result.get('account_number'),
+                'validation_note': 'Client créé sans validation API externe'
+            }
+        else:
+            return {
+                'success': False,
+                'error': creation_result.get('error', 'Erreur inconnue'),
+                'message': creation_result.get('message', 'Erreur lors de la création du client')
+            }
+
+    except Exception as e:
+        logger.error(f"Erreur création client manuelle: {e}")
+        return {
+            'success': False,
+            'error': str(e),
+            'message': f"Erreur lors de la création manuelle: {str(e)}"
+        }
+
 def detect_workflow_request(message: str) -> bool:
     """Détecte si un message nécessite le workflow (devis OU recherche produit)"""
     message_lower = message.lower()

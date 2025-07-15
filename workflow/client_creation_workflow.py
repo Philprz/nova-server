@@ -31,14 +31,15 @@ class ClientCreationWorkflow:
         Recherche d'entreprise par nom avec INSEE et Pappers
         """
         logger.info(f"🔍 Recherche d'entreprise: {company_name}")
-        
+
         results = {
             "success": False,
             "companies": [],
             "search_method": "multiple",
-            "message": ""
+            "message": "",
+            "api_error": False  # 🆕 Flag pour détecter les erreurs d'API
         }
-        
+
         try:
             # 1. Recherche via API Pappers si disponible
             pappers_results = await self._search_pappers(company_name, city)
@@ -46,7 +47,10 @@ class ClientCreationWorkflow:
                 results["companies"].extend(pappers_results["companies"])
                 results["search_method"] = "pappers"
                 logger.info(f"✅ Trouvé {len(pappers_results['companies'])} entreprises via Pappers")
-            
+            elif pappers_results.get("api_error"):
+                results["api_error"] = True
+                logger.warning("⚠️ Erreur API Pappers détectée")
+
             # 2. Si pas de résultats Pappers, essayer une recherche INSEE basique
             if not results["companies"]:
                 insee_results = await self._search_insee_basic(company_name)
@@ -54,17 +58,24 @@ class ClientCreationWorkflow:
                     results["companies"].extend(insee_results["companies"])
                     results["search_method"] = "insee"
                     logger.info(f"✅ Trouvé {len(insee_results['companies'])} entreprises via INSEE")
-            
+                elif insee_results.get("api_error"):
+                    results["api_error"] = True
+                    logger.warning("⚠️ Erreur API INSEE détectée")
+
             if results["companies"]:
                 results["success"] = True
                 results["message"] = f"Trouvé {len(results['companies'])} entreprise(s) correspondante(s)"
             else:
-                results["message"] = "Aucune entreprise trouvée avec ce nom"
-                
+                if results["api_error"]:
+                    results["message"] = "Services de validation temporairement indisponibles"
+                else:
+                    results["message"] = "Aucune entreprise trouvée avec ce nom"
+
         except Exception as e:
             logger.error(f"Erreur lors de la recherche d'entreprise: {e}")
+            results["api_error"] = True
             results["message"] = f"Erreur lors de la recherche: {str(e)}"
-            
+
         return results
     
     async def _search_pappers(self, company_name: str, city: str = None) -> Dict[str, Any]:
@@ -78,25 +89,45 @@ class ClientCreationWorkflow:
         # Pour le POC, on simule une recherche INSEE
         # En production, il faudrait utiliser l'API de recherche INSEE
         logger.info("🔍 Recherche INSEE basique (simulation POC)")
-        
-        # Simulation de résultats pour le POC
-        simulated_companies = [
-            {
-                "siret": "12345678901234",
-                "siren": "123456789",
-                "company_name": f"{company_name} (Simulation)",
-                "activity_code": "6201Z",
-                "activity_label": "Programmation informatique",
-                "address": "123 Rue de la Technologie",
-                "postal_code": "75001",
-                "city": "Paris",
-                "status": "Actif",
-                "creation_date": "2020-01-01",
-                "source": "insee_simulation"
+
+        try:
+            # 🆕 SIMULATION: Parfois l'API INSEE peut être indisponible
+            # En production, ceci serait un vrai appel API qui pourrait échouer
+            import random
+            if random.random() < 0.3:  # 30% de chance d'erreur pour tester le fallback
+                logger.warning("🚨 Simulation d'erreur API INSEE pour test du fallback")
+                return {
+                    "companies": [],
+                    "api_error": True,
+                    "error": "API INSEE temporairement indisponible (simulation)"
+                }
+
+            # Simulation de résultats pour le POC
+            simulated_companies = [
+                {
+                    "siret": "12345678901234",
+                    "siren": "123456789",
+                    "company_name": f"{company_name} (Simulation)",
+                    "activity_code": "6201Z",
+                    "activity_label": "Programmation informatique",
+                    "address": "123 Rue de la Technologie",
+                    "postal_code": "75001",
+                    "city": "Paris",
+                    "status": "Actif",
+                    "creation_date": "2020-01-01",
+                    "source": "insee_simulation"
+                }
+            ]
+
+            return {"companies": simulated_companies, "api_error": False}
+
+        except Exception as e:
+            logger.error(f"Erreur lors de la recherche INSEE: {e}")
+            return {
+                "companies": [],
+                "api_error": True,
+                "error": str(e)
             }
-        ]
-        
-        return {"companies": simulated_companies}
     
     async def validate_and_enrich_company(self, siret: str) -> Dict[str, Any]:
         """
@@ -274,12 +305,26 @@ class ClientCreationWorkflow:
                         "search_method": search_result["search_method"]
                     }
                 else:
-                    return {
-                        "success": False,
-                        "step": "no_companies_found",
-                        "message": search_result.get("message", "Aucune entreprise trouvée"),
-                        "suggestion": "Essayez avec un SIRET ou vérifiez l'orthographe"
-                    }
+                    # 🆕 DÉTECTION ERREUR API: Si erreur d'API, retourner un format spécial pour le fallback
+                    if search_result.get("api_error"):
+                        return {
+                            "success": False,
+                            "step": "api_unavailable",
+                            "error": "api_error",
+                            "message": search_result.get("message", "Services de validation temporairement indisponibles"),
+                            "fallback_required": True,
+                            "extracted_data": {
+                                "company_name": company_name,
+                                "city": city
+                            }
+                        }
+                    else:
+                        return {
+                            "success": False,
+                            "step": "no_companies_found",
+                            "message": search_result.get("message", "Aucune entreprise trouvée"),
+                            "suggestion": "Essayez avec un SIRET ou vérifiez l'orthographe"
+                        }
                     
         except Exception as e:
             logger.error(f"Erreur dans le workflow de création: {e}")
