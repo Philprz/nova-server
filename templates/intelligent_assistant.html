@@ -665,16 +665,21 @@
         function handleKeyDown(event) {
             if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault();
-                processRequest();
+                generateQuote();
             }
         }
 
-        async function processRequest() {
-            const input = document.getElementById('mainInput');
-            const prompt = input.value.trim();
+        // 🔧 CORRECTION JAVASCRIPT - Fonction generateQuote() optimisée
+        async function generateQuote() {
+            console.log("🚀 Début generateQuote() - Version corrigée");
 
+            const isDraftMode = document.getElementById('draftToggle')?.classList.contains('active') || false;
+            const promptInput = document.getElementById('mainInput');
+            const prompt = promptInput?.value?.trim();
+
+            // Validation de base
             if (!prompt) {
-                showNotification('Veuillez saisir une demande', 'warning');
+                showError('Veuillez saisir une demande de devis');
                 return;
             }
 
@@ -690,76 +695,239 @@
             processingIndicator.style.display = 'block';
             resultsContent.style.display = 'none';
 
+            console.log(`📝 Prompt: "${prompt}"`);
+            console.log(`📋 Draft mode: ${isDraftMode}`);
+
             try {
-                // Appel API réel
-                const response = await fetch('/api/assistant/generate_quote', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        prompt: prompt,
-                        draft_mode: isDraftMode
-                    })
-                });
+                // 🔧 CORRECTION 1: Essayer plusieurs endpoints dans l'ordre
+                const endpoints = [
+                    '/api/assistant/generate_quote',  // Endpoint préféré
+                    '/generate_quote',                // Endpoint unifié
+                    '/devis/generate_quote'           // Endpoint de secours
+                ];
 
-                const data = await response.json();
+                let lastError = null;
+                let response = null;
 
-                if (data.status === 'success' || data.success) {
-                    // Sauvegarder les données du devis
-                    currentQuoteData = data;
-                    showResults(data);
+                // Essayer chaque endpoint
+                for (const endpoint of endpoints) {
+                    try {
+                        console.log(`🔄 Tentative avec endpoint: ${endpoint}`);
+
+                        response = await fetch(endpoint, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Accept': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                prompt: prompt,
+                                draft_mode: isDraftMode
+                            })
+                        });
+
+                        console.log(`📡 Réponse ${endpoint}: ${response.status} ${response.statusText}`);
+
+                        // Si la réponse est OK, sortir de la boucle
+                        if (response.ok) {
+                            break;
+                        }
+
+                        lastError = `${endpoint}: ${response.status} ${response.statusText}`;
+
+                    } catch (error) {
+                        console.error(`❌ Erreur ${endpoint}:`, error);
+                        lastError = `${endpoint}: ${error.message}`;
+                        continue;
+                    }
+                }
+
+                // 🔧 CORRECTION 2: Gestion robuste des erreurs
+                if (!response || !response.ok) {
+                    throw new Error(`Tous les endpoints ont échoué. Dernière erreur: ${lastError}`);
+                }
+
+                // 🔧 CORRECTION 3: Parsing JSON sécurisé
+                let data;
+                try {
+                    const textResponse = await response.text();
+                    console.log(`📄 Réponse brute: ${textResponse}`);
+                    data = JSON.parse(textResponse);
+                } catch (parseError) {
+                    console.error('❌ Erreur parsing JSON:', parseError);
+                    throw new Error('Réponse serveur invalide');
+                }
+
+                console.log(`📊 Données parsées:`, data);
+
+                // 🔧 CORRECTION 4: Vérification robuste du succès
+                const isSuccess = data.success === true ||
+                                  data.status === 'success' ||
+                                  data.status === 'started' ||
+                                  (data.task_id && data.polling_url);
+
+                if (isSuccess) {
+                    console.log('✅ Génération réussie');
+
+                    // 🔧 CORRECTION 5: Gestion des différents types de réponses
+                    if (data.task_id && data.polling_url) {
+                        // Mode asynchrone avec polling
+                        console.log('🔄 Mode asynchrone détecté');
+                        await handleAsyncQuote(data.task_id, data.polling_url);
+                    } else {
+                        // Mode synchrone
+                        console.log('⚡ Mode synchrone détecté');
+                        showQuoteResult(data);
+                    }
                 } else {
-                    // Vérifier s'il y a des clients similaires à afficher
+                    // Gestion des erreurs avec clients similaires
                     if (data.similar_clients && data.similar_clients.length > 0) {
+                        console.log('🔍 Clients similaires trouvés');
                         showSimilarClients(data);
                     } else {
-                        throw new Error(data.error || data.message || 'Erreur lors de la génération du devis');
+                        const errorMsg = data.error || data.message || 'Erreur inconnue';
+                        throw new Error(errorMsg);
                     }
                 }
 
             } catch (error) {
-                console.error('Erreur:', error);
+                console.error('❌ Erreur générale:', error);
 
-                // Afficher l'erreur avec le bouton de création de client
+                // 🔧 CORRECTION 6: Affichage d'erreur amélioré
+                showError(`Erreur: ${error.message}`);
+
+                // Diagnostic automatique en cas d'erreur
+                console.log('🔍 Lancement du diagnostic automatique...');
+                await runAutoDiagnostic();
+
+            } finally {
+                // 🔧 CORRECTION 7: Nettoyage toujours exécuté
                 processingIndicator.style.display = 'none';
-                resultsContent.style.display = 'block';
-
-                const errorMessage = error.message || '';
-
-                // Extraire les informations des clients similaires du message d'erreur
-                const similarClientsData = extractSimilarClientsFromError(errorMessage);
-
-                // Toujours afficher l'interface des clients similaires avec le bouton de création
-                // même si aucun client similaire n'est extrait correctement
-                showSimilarClients({
-                    similar_clients: similarClientsData,
-                    error: errorMessage,
-                    message: errorMessage
-                });
-                return;
-
-                // Affichage d'erreur standard avec bouton de création de client
-                resultsContent.innerHTML = `
-                    <div style="text-align: center; color: #ef4444;">
-                        <h3 style="margin-bottom: 15px;">❌ Erreur lors du traitement</h3>
-                        <p style="color: #6b7280; margin-bottom: 20px;">${error.message}</p>
-                        <div class="action-buttons">
-                            <button onclick="startClientCreation()" class="action-button primary" style="background: linear-gradient(135deg, #10b981, #059669);">
-                                ➕ Créer un nouveau client
-                            </button>
-                            <button onclick="processRequest()" class="action-button secondary">
-                                🔄 Réessayer
-                            </button>
-                            <button onclick="newRequest()" class="action-button secondary">
-                                ✏️ Modifier la demande
-                            </button>
-                        </div>
-                    </div>
-                `;
-
-                showNotification('Erreur lors du traitement de la demande', 'error');
             }
+        }
+
+        // 🆕 NOUVELLE FONCTION: Gestion asynchrone
+        async function handleAsyncQuote(taskId, pollingUrl) {
+            console.log(`🔄 Démarrage polling pour task_id: ${taskId}`);
+
+            const maxPolls = 60; // 60 tentatives maximum
+            let pollCount = 0;
+
+            const pollInterval = setInterval(async () => {
+                try {
+                    pollCount++;
+                    console.log(`🔄 Poll ${pollCount}/${maxPolls}`);
+
+                    const response = await fetch(pollingUrl);
+                    const data = await response.json();
+
+                    if (data.status === 'completed') {
+                        clearInterval(pollInterval);
+                        console.log('✅ Génération terminée');
+                        showQuoteResult(data);
+                    } else if (data.status === 'failed') {
+                        clearInterval(pollInterval);
+                        throw new Error(data.error || 'Génération échouée');
+                    } else if (pollCount >= maxPolls) {
+                        clearInterval(pollInterval);
+                        throw new Error('Timeout: génération trop longue');
+                    }
+
+                } catch (error) {
+                    clearInterval(pollInterval);
+                    console.error('❌ Erreur polling:', error);
+                    showError(`Erreur polling: ${error.message}`);
+                }
+            }, 2000); // Poll toutes les 2 secondes
+        }
+
+        // 🆕 NOUVELLE FONCTION: Diagnostic automatique
+        async function runAutoDiagnostic() {
+            console.log('🔍 === DIAGNOSTIC AUTOMATIQUE ===');
+
+            // Test de connectivité de base
+            try {
+                const healthResponse = await fetch('/health');
+                const healthData = await healthResponse.json();
+                console.log('✅ Health check:', healthData);
+            } catch (error) {
+                console.log('❌ Health check échoué:', error.message);
+            }
+
+            // Test des endpoints
+            const endpoints = ['/api/assistant/generate_quote', '/generate_quote', '/devis/generate_quote'];
+
+            for (const endpoint of endpoints) {
+                try {
+                    const response = await fetch(endpoint, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ prompt: 'test diagnostic', draft_mode: false })
+                    });
+
+                    console.log(`🔍 ${endpoint}: ${response.status} ${response.statusText}`);
+                } catch (error) {
+                    console.log(`❌ ${endpoint}: ${error.message}`);
+                }
+            }
+
+            console.log('🔍 === FIN DIAGNOSTIC ===');
+        }
+
+        // 🔧 CORRECTION FONCTION: showError améliorée
+        function showError(message) {
+            console.error('❌ Erreur affichée:', message);
+
+            // Affichage dans l'interface
+            const errorDiv = document.getElementById('error-display') || (() => {
+                const div = document.createElement('div');
+                div.id = 'error-display';
+                div.style.cssText = `
+                    background: #f8d7da;
+                    color: #721c24;
+                    padding: 15px;
+                    border-radius: 6px;
+                    border: 1px solid #f5c6cb;
+                    margin: 20px 0;
+                    font-weight: bold;
+                    position: fixed;
+                    top: 20px;
+                    right: 20px;
+                    z-index: 1000;
+                    max-width: 400px;
+                `;
+                document.body.appendChild(div);
+                return div;
+            })();
+
+            errorDiv.innerHTML = `
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <span>❌</span>
+                    <span>${message}</span>
+                </div>
+                <div style="margin-top: 10px; font-size: 12px; opacity: 0.8;">
+                    Consultez la console (F12) pour plus de détails
+                </div>
+            `;
+
+            // Auto-hide après 10 secondes
+            setTimeout(() => {
+                if (errorDiv.parentNode) {
+                    errorDiv.parentNode.removeChild(errorDiv);
+                }
+            }, 10000);
+        }
+
+        // Fonction de compatibilité pour maintenir l'ancien nom
+        async function processRequest() {
+            return await generateQuote();
+        }
+
+        // Fonction pour afficher les résultats du devis
+        function showQuoteResult(data) {
+            // Sauvegarder les données du devis
+            currentQuoteData = data;
+            showResults(data);
         }
 
         function showSimilarClients(data) {
@@ -1615,9 +1783,25 @@
             }, 4000);
         }
 
-        // Auto-focus sur le champ de saisie au chargement
+        // 🔧 CORRECTION: Initialisation robuste
         document.addEventListener('DOMContentLoaded', function() {
-            document.getElementById('mainInput').focus();
+            console.log('🚀 Interface NOVA initialisée - Version corrigée');
+
+            // Vérifier que les éléments existent
+            const mainInput = document.getElementById('mainInput');
+
+            if (!mainInput) {
+                console.error('❌ Input mainInput non trouvé');
+                return;
+            }
+
+            // Auto-focus sur le champ de saisie
+            mainInput.focus();
+
+            console.log('✅ Événements JavaScript assignés');
+
+            // Test de connectivité initial
+            runAutoDiagnostic();
         });
     </script>
 </body>

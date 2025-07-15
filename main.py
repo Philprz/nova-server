@@ -1,6 +1,7 @@
 
 import os
 import logging
+import time
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 import asyncio
@@ -8,6 +9,7 @@ from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi.responses import HTMLResponse
 from services.module_loader import ModuleLoader, ModuleConfig
 security = HTTPBasic()
 # Configuration logging selon charte IT SPIRIT
@@ -294,11 +296,11 @@ def get_current_user(credentials: HTTPBasicCredentials = Depends(security)):
     if credentials.username != "admin" or credentials.password != "nova2025":
         raise HTTPException(status_code=401)
     return credentials.username
-# Configuration des modules optionnels
+# Configuration des modules avec préfixes distincts
 MODULES_CONFIG = {
     'sync': ModuleConfig('routes.routes_sync', '/sync', ['Synchronisation']),
     'products': ModuleConfig('routes.routes_products', '/products', ['Produits']),
-    'devis': ModuleConfig('routes.routes_devis', tags=['Devis']),
+    'devis': ModuleConfig('routes.routes_devis', '/devis', ['Devis']),  # ← CHANGÉ: préfixe /devis
     'assistant': ModuleConfig('routes.routes_intelligent_assistant', '/api/assistant', ['Assistant Intelligent']),
     'clients': ModuleConfig('routes.routes_clients', '/clients', ['Clients'])
 }
@@ -324,6 +326,107 @@ if os.path.exists("static"):
 loader = ModuleLoader()
 loader.load_modules(MODULES_CONFIG)
 loader.register_to_fastapi(app)
+
+# ✅ AJOUT : Route de compatibilité unifiée
+@app.post("/generate_quote")
+async def generate_quote_unified(request: dict):
+    """
+    🎯 Route unifiée pour éviter les conflits
+    Redirige vers le bon endpoint selon le contexte
+    """
+    try:
+        # Vérifier le format de la requête
+        prompt = request.get("prompt", "").strip()
+        draft_mode = request.get("draft_mode", False)
+
+        if not prompt:
+            return {"success": False, "error": "Prompt manquant"}
+
+        # Utiliser le service assistant comme endpoint principal
+        from routes.routes_intelligent_assistant import generate_quote_endpoint
+        from routes.routes_intelligent_assistant import GenerateQuoteRequest
+
+        # Créer la requête formatée
+        quote_request = GenerateQuoteRequest(
+            prompt=prompt,
+            draft_mode=draft_mode
+        )
+
+        # Exécuter la génération
+        result = await generate_quote_endpoint(quote_request)
+
+        # Convertir le résultat en dict pour la réponse
+        if hasattr(result, 'dict'):
+            return result.dict()
+        else:
+            return result
+
+    except Exception as e:
+        print(f"❌ Erreur route unifiée: {str(e)}")
+        return {
+            "success": False,
+            "error": f"Erreur serveur: {str(e)}"
+        }
+
+# ✅ AJOUT : Route de diagnostic
+@app.get("/diagnostic")
+async def diagnostic():
+    """
+    🔍 Endpoint de diagnostic pour tester la connectivité
+    """
+    try:
+        # Test des modules chargés
+        loaded_modules = loader.get_loaded_modules()
+
+        # Test des endpoints disponibles
+        endpoints = []
+        for route in app.routes:
+            if hasattr(route, 'methods') and hasattr(route, 'path'):
+                endpoints.append(f"{list(route.methods)[0]} {route.path}")
+
+        return {
+            "status": "OK",
+            "timestamp": str(datetime.now()),
+            "loaded_modules": loaded_modules,
+            "endpoints": endpoints,
+            "health": "Server running"
+        }
+
+    except Exception as e:
+        return {
+            "status": "ERROR",
+            "error": str(e)
+        }
+
+# ✅ AJOUT : Interface de diagnostic
+@app.get("/diagnostic/interface", response_class=HTMLResponse)
+async def diagnostic_interface():
+    """
+    🔍 Interface de diagnostic HTML
+    """
+    # Rediriger vers l'interface de diagnostic statique
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/static/diagnostic.html")
+
+# ✅ AJOUT : Middleware de logging des requêtes
+@app.middleware("http")
+async def log_requests(request, call_next):
+    """
+    📝 Middleware pour logger toutes les requêtes
+    """
+    start_time = time.time()
+
+    # Logger la requête entrante
+    print(f"🔄 {request.method} {request.url}")
+
+    # Traiter la requête
+    response = await call_next(request)
+
+    # Logger la réponse
+    process_time = time.time() - start_time
+    print(f"✅ {request.method} {request.url} - {response.status_code} - {process_time:.2f}s")
+
+    return response
 
 # Routes obligatoires (sans try/except car toujours présentes)
 from routes.routes_quote_details import router as quote_details_router

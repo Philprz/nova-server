@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NOVA - Diagnostic Interface</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .logo {
+            width: 80px;
+            height: 80px;
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            border-radius: 50%;
+            margin: 0 auto 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 24px;
+            font-weight: bold;
+        }
+        .diagnostic-section {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-left: 4px solid #667eea;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 6px;
+            margin: 10px 0;
+            font-weight: bold;
+        }
+        .status.success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .status.error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .status.warning { background: #fff3cd; color: #856404; border: 1px solid #ffeaa7; }
+        .status.info { background: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
+        
+        .test-button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: bold;
+            margin: 10px 5px;
+            transition: background 0.3s;
+        }
+        .test-button:hover {
+            background: #5a6fd8;
+        }
+        .test-button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        
+        .log-area {
+            background: #2d3748;
+            color: #e2e8f0;
+            padding: 15px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            max-height: 400px;
+            overflow-y: auto;
+            margin-top: 15px;
+        }
+        
+        .input-group {
+            margin-bottom: 20px;
+        }
+        .input-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #2d3748;
+        }
+        .input-group input, .input-group textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            font-size: 14px;
+            box-sizing: border-box;
+        }
+        .input-group textarea {
+            resize: vertical;
+            min-height: 80px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">N</div>
+            <h1>NOVA - Interface de Diagnostic</h1>
+            <p>Diagnostic des problèmes de communication avec l'API</p>
+        </div>
+
+        <div class="diagnostic-section">
+            <h3>🔍 Tests de Connectivité</h3>
+            <button class="test-button" onclick="testHealth()">Test Santé Serveur</button>
+            <button class="test-button" onclick="testEndpoints()">Test Endpoints</button>
+            <button class="test-button" onclick="testConsole()">Test Console JS</button>
+            <div id="connectivity-status"></div>
+        </div>
+
+        <div class="diagnostic-section">
+            <h3>📡 Test de Génération de Devis</h3>
+            <div class="input-group">
+                <label for="test-prompt">Prompt de test :</label>
+                <textarea id="test-prompt" placeholder="Entrez votre demande de test, par exemple : devis pour 3 imprimantes">devis pour 3 imprimantes</textarea>
+            </div>
+            <button class="test-button" onclick="testQuoteGeneration()">Test Génération</button>
+            <button class="test-button" onclick="testDifferentEndpoints()">Test Tous les Endpoints</button>
+            <div id="quote-test-status"></div>
+        </div>
+
+        <div class="diagnostic-section">
+            <h3>📊 Logs en Temps Réel</h3>
+            <button class="test-button" onclick="clearLogs()">Vider les Logs</button>
+            <div id="logs" class="log-area"></div>
+        </div>
+    </div>
+
+    <script>
+        let logArea = document.getElementById('logs');
+        
+        function log(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const logLine = `[${timestamp}] ${type.toUpperCase()}: ${message}\n`;
+            logArea.textContent += logLine;
+            logArea.scrollTop = logArea.scrollHeight;
+            console.log(logLine);
+        }
+
+        function clearLogs() {
+            logArea.textContent = '';
+            log('Logs vidés', 'info');
+        }
+
+        function showStatus(elementId, message, type) {
+            const element = document.getElementById(elementId);
+            element.innerHTML = `<div class="status ${type}">${message}</div>`;
+        }
+
+        async function testHealth() {
+            log('🔄 Test de santé du serveur...', 'info');
+            try {
+                const response = await fetch('/health');
+                const data = await response.json();
+                log(`✅ Serveur OK: ${JSON.stringify(data)}`, 'success');
+                showStatus('connectivity-status', '✅ Serveur accessible', 'success');
+            } catch (error) {
+                log(`❌ Erreur serveur: ${error.message}`, 'error');
+                showStatus('connectivity-status', '❌ Serveur inaccessible', 'error');
+            }
+        }
+
+        async function testEndpoints() {
+            log('🔄 Test des endpoints disponibles...', 'info');
+            
+            const endpoints = [
+                '/api/assistant/generate_quote',
+                '/generate_quote',
+                '/api/assistant/interface',
+                '/docs'
+            ];
+            
+            let results = [];
+            
+            for (const endpoint of endpoints) {
+                try {
+                    const response = await fetch(endpoint, {
+                        method: endpoint.includes('generate_quote') ? 'POST' : 'GET',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: endpoint.includes('generate_quote') ? JSON.stringify({
+                            prompt: 'test',
+                            draft_mode: false
+                        }) : undefined
+                    });
+                    
+                    log(`✅ ${endpoint}: ${response.status} ${response.statusText}`, 'success');
+                    results.push(`✅ ${endpoint}: ${response.status}`);
+                } catch (error) {
+                    log(`❌ ${endpoint}: ${error.message}`, 'error');
+                    results.push(`❌ ${endpoint}: ${error.message}`);
+                }
+            }
+            
+            showStatus('connectivity-status', results.join('<br>'), 'info');
+        }
+
+        async function testConsole() {
+            log('🔄 Test console JavaScript...', 'info');
+            
+            // Test des fonctions de base
+            log('📍 User Agent: ' + navigator.userAgent, 'info');
+            log('📍 URL actuelle: ' + window.location.href, 'info');
+            log('📍 Fetch supporté: ' + (typeof fetch !== 'undefined' ? 'Oui' : 'Non'), 'info');
+            
+            // Test des erreurs possibles
+            try {
+                const testPromise = new Promise((resolve) => {
+                    setTimeout(() => resolve('Test async OK'), 100);
+                });
+                const result = await testPromise;
+                log('✅ ' + result, 'success');
+            } catch (error) {
+                log('❌ Erreur async: ' + error.message, 'error');
+            }
+            
+            showStatus('connectivity-status', '✅ Console JavaScript fonctionnelle', 'success');
+        }
+
+        async function testQuoteGeneration() {
+            const prompt = document.getElementById('test-prompt').value.trim();
+            
+            if (!prompt) {
+                showStatus('quote-test-status', '❌ Veuillez entrer un prompt', 'error');
+                return;
+            }
+            
+            log(`🔄 Test génération avec prompt: "${prompt}"`, 'info');
+            
+            try {
+                const response = await fetch('/api/assistant/generate_quote', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        prompt: prompt,
+                        draft_mode: false
+                    })
+                });
+                
+                log(`📡 Réponse reçue: ${response.status} ${response.statusText}`, 'info');
+                
+                const data = await response.json();
+                log(`📊 Données reçues: ${JSON.stringify(data, null, 2)}`, 'info');
+                
+                if (data.success || data.status === 'success') {
+                    showStatus('quote-test-status', '✅ Génération réussie', 'success');
+                } else {
+                    showStatus('quote-test-status', `⚠️ Génération échouée: ${data.error || data.message}`, 'warning');
+                }
+            } catch (error) {
+                log(`❌ Erreur génération: ${error.message}`, 'error');
+                showStatus('quote-test-status', `❌ Erreur: ${error.message}`, 'error');
+            }
+        }
+
+        async function testDifferentEndpoints() {
+            const prompt = document.getElementById('test-prompt').value.trim() || 'test';
+            
+            log('🔄 Test de tous les endpoints de génération...', 'info');
+            
+            const endpoints = [
+                '/api/assistant/generate_quote',
+                '/generate_quote',
+                '/progress/generate_quote'
+            ];
+            
+            for (const endpoint of endpoints) {
+                try {
+                    log(`🔄 Test ${endpoint}...`, 'info');
+                    
+                    const response = await fetch(endpoint, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            prompt: prompt,
+                            draft_mode: false
+                        })
+                    });
+                    
+                    const data = await response.json();
+                    log(`✅ ${endpoint}: ${response.status} - ${JSON.stringify(data)}`, 'success');
+                    
+                } catch (error) {
+                    log(`❌ ${endpoint}: ${error.message}`, 'error');
+                }
+            }
+            
+            showStatus('quote-test-status', '✅ Tests terminés - voir les logs', 'info');
+        }
+
+        // Auto-initialisation
+        document.addEventListener('DOMContentLoaded', function() {
+            log('🚀 Interface de diagnostic NOVA initialisée', 'info');
+            testHealth();
+        });
+    </script>
+</body>
+</html>
