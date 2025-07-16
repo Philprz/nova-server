@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🔍 Agent de Recherche d'Entreprises - NOVA</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        /* Charte graphique IT SPIRIT */
+        .gradient-bg {
+            background: linear-gradient(135deg, #02B9FD 0%, #832DFE 50%, #E220FB 100%);
+        }
+        
+        .card-glass {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #02B9FD 0%, #832DFE 100%);
+            transition: all 0.3s ease;
+        }
+        
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(130, 45, 254, 0.3);
+        }
+        
+        .result-card {
+            transition: all 0.3s ease;
+            border-left: 4px solid #02B9FD;
+        }
+        
+        .result-card:hover {
+            transform: translateX(5px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+        }
+        
+        .loading {
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        
+        .fade-in {
+            animation: fadeIn 0.5s ease-in;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body class="min-h-screen gradient-bg text-white">
+    <!-- Header -->
+    <header class="p-6 border-b border-white/20">
+        <div class="container mx-auto">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-4">
+                    <i class="fas fa-search text-3xl text-white"></i>
+                    <div>
+                        <h1 class="text-3xl font-bold">Agent de Recherche d'Entreprises</h1>
+                        <p class="text-white/80">Recherche d'entreprises françaises via INSEE, Pappers et base locale</p>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <button id="clearCache" class="btn-primary px-4 py-2 rounded-lg flex items-center space-x-2">
+                        <i class="fas fa-trash"></i>
+                        <span>Vider Cache</span>
+                    </button>
+                    <button id="showStats" class="btn-primary px-4 py-2 rounded-lg flex items-center space-x-2">
+                        <i class="fas fa-chart-bar"></i>
+                        <span>Statistiques</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="container mx-auto p-6">
+        <!-- Search Section -->
+        <section class="mb-8">
+            <div class="card-glass rounded-2xl p-6">
+                <h2 class="text-xl font-semibold mb-4 flex items-center">
+                    <i class="fas fa-search mr-2"></i>
+                    Recherche d'Entreprise
+                </h2>
+                
+                <div class="space-y-4">
+                    <!-- Search Input -->
+                    <div class="relative">
+                        <input 
+                            type="text" 
+                            id="searchInput" 
+                            placeholder="Nom d'entreprise ou SIREN (ex: Total, 542051180)"
+                            class="w-full px-4 py-3 pl-12 rounded-lg bg-white/10 border border-white/20 text-white placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                        >
+                        <i class="fas fa-search absolute left-4 top-1/2 transform -translate-y-1/2 text-white/60"></i>
+                    </div>
+                    
+                    <!-- Search Options -->
+                    <div class="flex flex-wrap gap-4">
+                        <div class="flex items-center space-x-2">
+                            <input type="checkbox" id="exactMatch" class="rounded">
+                            <label for="exactMatch" class="text-sm">Correspondance exacte</label>
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            <input type="checkbox" id="includeInactive" class="rounded">
+                            <label for="includeInactive" class="text-sm">Inclure entreprises inactives</label>
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            <select id="maxResults" class="px-3 py-1 rounded bg-white/10 border border-white/20 text-white text-sm">
+                                <option value="5">5 résultats</option>
+                                <option value="10" selected>10 résultats</option>
+                                <option value="20">20 résultats</option>
+                                <option value="50">50 résultats</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <!-- Search Button -->
+                    <button 
+                        id="searchBtn" 
+                        class="btn-primary px-6 py-3 rounded-lg flex items-center space-x-2 font-semibold"
+                    >
+                        <i class="fas fa-search"></i>
+                        <span>Rechercher</span>
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Quick Actions -->
+        <section class="mb-8">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <button id="validateSiren" class="card-glass rounded-xl p-4 hover:bg-white/20 transition-colors">
+                    <div class="flex items-center space-x-3">
+                        <i class="fas fa-check-circle text-green-400 text-2xl"></i>
+                        <div>
+                            <h3 class="font-semibold">Valider SIREN</h3>
+                            <p class="text-sm text-white/70">Vérifier un numéro SIREN</p>
+                        </div>
+                    </div>
+                </button>
+                
+                <button id="bulkEnrich" class="card-glass rounded-xl p-4 hover:bg-white/20 transition-colors">
+                    <div class="flex items-center space-x-3">
+                        <i class="fas fa-magic text-purple-400 text-2xl"></i>
+                        <div>
+                            <h3 class="font-semibold">Enrichissement</h3>
+                            <p class="text-sm text-white/70">Enrichir données client</p>
+                        </div>
+                    </div>
+                </button>
+                
+                <button id="exportResults" class="card-glass rounded-xl p-4 hover:bg-white/20 transition-colors">
+                    <div class="flex items-center space-x-3">
+                        <i class="fas fa-download text-blue-400 text-2xl"></i>
+                        <div>
+                            <h3 class="font-semibold">Exporter</h3>
+                            <p class="text-sm text-white/70">Exporter les résultats</p>
+                        </div>
+                    </div>
+                </button>
+            </div>
+        </section>
+
+        <!-- Results Section -->
+        <section id="resultsSection" class="mb-8" style="display: none;">
+            <div class="card-glass rounded-2xl p-6">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-xl font-semibold flex items-center">
+                        <i class="fas fa-list mr-2"></i>
+                        Résultats de Recherche
+                    </h2>
+                    <div id="resultsCount" class="bg-white/20 px-3 py-1 rounded-full text-sm"></div>
+                </div>
+                
+                <div id="resultsContainer" class="space-y-4">
+                    <!-- Results will be populated here -->
+                </div>
+            </div>
+        </section>
+
+        <!-- Suggestions Section -->
+        <section id="suggestionsSection" class="mb-8" style="display: none;">
+            <div class="card-glass rounded-2xl p-6">
+                <h2 class="text-xl font-semibold mb-4 flex items-center">
+                    <i class="fas fa-lightbulb mr-2"></i>
+                    Suggestions
+                </h2>
+                
+                <div id="suggestionsContainer" class="flex flex-wrap gap-2">
+                    <!-- Suggestions will be populated here -->
+                </div>
+            </div>
+        </section>
+
+        <!-- Statistics Section -->
+        <section id="statisticsSection" class="mb-8" style="display: none;">
+            <div class="card-glass rounded-2xl p-6">
+                <h2 class="text-xl font-semibold mb-4 flex items-center">
+                    <i class="fas fa-chart-bar mr-2"></i>
+                    Statistiques du Cache
+                </h2>
+                
+                <div id="statisticsContainer" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <!-- Statistics will be populated here -->
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50" style="display: none;">
+        <div class="card-glass rounded-2xl p-8 text-center">
+            <i class="fas fa-spinner text-4xl loading mb-4"></i>
+            <p class="text-lg">Recherche en cours...</p>
+        </div>
+    </div>
+
+    <!-- Modals -->
+    <!-- SIREN Validation Modal -->
+    <div id="sirenModal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50" style="display: none;">
+        <div class="card-glass rounded-2xl p-6 max-w-md w-full mx-4">
+            <h3 class="text-xl font-semibold mb-4">Validation SIREN</h3>
+            <input 
+                type="text" 
+                id="sirenInput" 
+                placeholder="Entrez le numéro SIREN"
+                class="w-full px-4 py-3 rounded-lg bg-white/10 border border-white/20 text-white placeholder-white/60 mb-4"
+            >
+            <div class="flex justify-end space-x-3">
+                <button id="closeSirenModal" class="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors">
+                    Annuler
+                </button>
+                <button id="validateSirenBtn" class="btn-primary px-4 py-2 rounded-lg">
+                    Valider
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Enrichment Modal -->
+    <div id="enrichModal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50" style="display: none;">
+        <div class="card-glass rounded-2xl p-6 max-w-lg w-full mx-4">
+            <h3 class="text-xl font-semibold mb-4">Enrichissement Client</h3>
+            <textarea 
+                id="enrichInput" 
+                placeholder="Collez les données client (JSON)"
+                class="w-full px-4 py-3 rounded-lg bg-white/10 border border-white/20 text-white placeholder-white/60 mb-4 h-32"
+            ></textarea>
+            <div class="flex justify-end space-x-3">
+                <button id="closeEnrichModal" class="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors">
+                    Annuler
+                </button>
+                <button id="enrichBtn" class="btn-primary px-4 py-2 rounded-lg">
+                    Enrichir
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Configuration
+        const API_BASE = '';
+        let lastResults = [];
+
+        // DOM Elements
+        const searchInput = document.getElementById('searchInput');
+        const searchBtn = document.getElementById('searchBtn');
+        const loadingOverlay = document.getElementById('loadingOverlay');
+        const resultsSection = document.getElementById('resultsSection');
+        const resultsContainer = document.getElementById('resultsContainer');
+        const resultsCount = document.getElementById('resultsCount');
+        const suggestionsSection = document.getElementById('suggestionsSection');
+        const suggestionsContainer = document.getElementById('suggestionsContainer');
+        const statisticsSection = document.getElementById('statisticsSection');
+        const statisticsContainer = document.getElementById('statisticsContainer');
+
+        // Utility Functions
+        function showLoading() {
+            loadingOverlay.style.display = 'flex';
+        }
+
+        function hideLoading() {
+            loadingOverlay.style.display = 'none';
+        }
+
+        function showError(message) {
+            alert(message); // Replace with better notification system
+        }
+
+        function showSuccess(message) {
+            alert(message); // Replace with better notification system
+        }
+
+        // API Functions
+        async function searchCompanies(query, maxResults = 10) {
+            try {
+                showLoading();
+                
+                const response = await fetch(`${API_BASE}/companies/search/${encodeURIComponent(query)}?max_results=${maxResults}`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    lastResults = data.companies || [];
+                    displayResults(lastResults);
+                    
+                    if (lastResults.length === 0) {
+                        await getSuggestions(query);
+                    }
+                } else {
+                    showError(data.error || 'Erreur lors de la recherche');
+                }
+            } catch (error) {
+                showError('Erreur de connexion: ' + error.message);
+            } finally {
+                hideLoading();
+            }
+        }
+
+        async function validateSiren(siren) {
+            try {
+                showLoading();
+                
+                const response = await fetch(`${API_BASE}/companies/validate_siren`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({siren})
+                });
+                
+                const data = await response.json();
+                
+                if (data.valid) {
+                    showSuccess(`SIREN ${siren} est valide`);
+                    // Try to get company info
+                    const companyResponse = await fetch(`${API_BASE}/companies/siren/${siren}`);
+                    const companyData = await companyResponse.json();
+                    
+                    if (companyData.success) {
+                        displayResults([companyData.company]);
+                    }
+                } else {
+                    showError(`SIREN ${siren} est invalide`);
+                }
+            } catch (error) {
+                showError('Erreur de validation: ' + error.message);
+            } finally {
+                hideLoading();
+            }
+        }
+
+        async function getSuggestions(query) {
+            try {
+                const response = await fetch(`${API_BASE}/companies/suggestions/${encodeURIComponent(query)}`);
+                const data = await response.json();
+                
+                if (data.success && data.suggestions.length > 0) {
+                    displaySuggestions(data.suggestions);
+                }
+            } catch (error) {
+                console.error('Erreur suggestions:', error);
+            }
+        }
+
+        async function getCacheStats() {
+            try {
+                const response = await fetch(`${API_BASE}/companies/cache/stats`);
+                const data = await response.json();
+                displayStatistics(data);
+            } catch (error) {
+                showError('Erreur récupération statistiques: ' + error.message);
+            }
+        }
+
+        async function clearCache() {
+            try {
+                const response = await fetch(`${API_BASE}/companies/cache`, {method: 'DELETE'});
+                const data = await response.json();
+                
+                if (data.success) {
+                    showSuccess('Cache vidé avec succès');
+                    await getCacheStats();
+                } else {
+                    showError('Erreur lors du vidage du cache');
+                }
+            } catch (error) {
+                showError('Erreur: ' + error.message);
+            }
+        }
+
+        // Display Functions
+        function displayResults(companies) {
+            resultsContainer.innerHTML = '';
+            
+            if (companies.length === 0) {
+                resultsContainer.innerHTML = '<p class="text-center text-white/60">Aucune entreprise trouvée</p>';
+                resultsSection.style.display = 'block';
+                return;
+            }
+
+            resultsCount.textContent = `${companies.length} résultat${companies.length > 1 ? 's' : ''}`;
+            
+            companies.forEach(company => {
+                const resultCard = document.createElement('div');
+                resultCard.className = 'result-card bg-white/10 rounded-xl p-4 fade-in';
+                
+                const statusColor = company.etat_administratif === 'Actif' ? 'text-green-400' : 'text-red-400';
+                const sourceIcon = getSourceIcon(company.source);
+                
+                resultCard.innerHTML = `
+                    <div class="flex items-start justify-between">
+                        <div class="flex-1">
+                            <div class="flex items-center space-x-2 mb-2">
+                                <h3 class="text-lg font-semibold">${company.denomination}</h3>
+                                <span class="px-2 py-1 rounded-full text-xs bg-white/20">${sourceIcon} ${company.source}</span>
+                            </div>
+                            
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                                <div>
+                                    <span class="text-white/60">SIREN:</span>
+                                    <span class="font-mono">${company.siren || 'N/A'}</span>
+                                </div>
+                                <div>
+                                    <span class="text-white/60">Statut:</span>
+                                    <span class="${statusColor}">${company.etat_administratif || 'N/A'}</span>
+                                </div>
+                                <div>
+                                    <span class="text-white/60">Activité:</span>
+                                    <span>${company.activite_principale || 'N/A'}</span>
+                                </div>
+                                <div>
+                                    <span class="text-white/60">Forme juridique:</span>
+                                    <span>${company.forme_juridique || 'N/A'}</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="flex flex-col space-y-2 ml-4">
+                            <button onclick="enrichWithCompany('${company.siren}')" class="btn-primary px-3 py-1 rounded text-xs">
+                                <i class="fas fa-magic mr-1"></i>
+                                Enrichir
+                            </button>
+                            <button onclick="copyToClipboard('${company.siren}')" class="bg-white/10 px-3 py-1 rounded text-xs hover:bg-white/20">
+                                <i class="fas fa-copy mr-1"></i>
+                                Copier
+                            </button>
+                        </div>
+                    </div>
+                `;
+                
+                resultsContainer.appendChild(resultCard);
+            });
+            
+            resultsSection.style.display = 'block';
+        }
+
+        function displaySuggestions(suggestions) {
+            suggestionsContainer.innerHTML = '';
+            
+            suggestions.forEach(suggestion => {
+                const suggestionBtn = document.createElement('button');
+                suggestionBtn.className = 'bg-white/10 hover:bg-white/20 px-3 py-1 rounded-full text-sm transition-colors';
+                suggestionBtn.textContent = suggestion;
+                suggestionBtn.onclick = () => {
+                    searchInput.value = suggestion;
+                    searchCompanies(suggestion);
+                };
+                
+                suggestionsContainer.appendChild(suggestionBtn);
+            });
+            
+            suggestionsSection.style.display = 'block';
+        }
+
+        function displayStatistics(stats) {
+            statisticsContainer.innerHTML = `
+                <div class="bg-white/10 rounded-xl p-4 text-center">
+                    <i class="fas fa-database text-2xl text-blue-400 mb-2"></i>
+                    <h4 class="font-semibold">Total Entrées</h4>
+                    <p class="text-2xl font-bold">${stats.total_entries || 0}</p>
+                </div>
+                <div class="bg-white/10 rounded-xl p-4 text-center">
+                    <i class="fas fa-building text-2xl text-green-400 mb-2"></i>
+                    <h4 class="font-semibold">Entreprises Locales</h4>
+                    <p class="text-2xl font-bold">${stats.local_companies || 0}</p>
+                </div>
+                <div class="bg-white/10 rounded-xl p-4 text-center">
+                    <i class="fas fa-search text-2xl text-purple-400 mb-2"></i>
+                    <h4 class="font-semibold">Index Recherche</h4>
+                    <p class="text-2xl font-bold">${stats.search_index_size || 0}</p>
+                </div>
+            `;
+            
+            statisticsSection.style.display = 'block';
+        }
+
+        // Helper Functions
+        function getSourceIcon(source) {
+            switch(source) {
+                case 'insee': return '🏛️';
+                case 'pappers': return '📄';
+                case 'local': return '💾';
+                case 'pappers+insee': return '🔗';
+                default: return '❓';
+            }
+        }
+
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text).then(() => {
+                showSuccess('Copié dans le presse-papiers');
+            });
+        }
+
+        async function enrichWithCompany(siren) {
+            try {
+                showLoading();
+                
+                const response = await fetch(`${API_BASE}/companies/siren/${siren}`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    const enrichedData = {
+                        client_data: {
+                            company_name: data.company.denomination,
+                            siren: data.company.siren,
+                            industry: data.company.activite_principale,
+                            legal_form: data.company.forme_juridique,
+                            status: data.company.etat_administratif
+                        }
+                    };
+                    
+                    // Show enriched data
+                    const enrichModal = document.getElementById('enrichModal');
+                    document.getElementById('enrichInput').value = JSON.stringify(enrichedData, null, 2);
+                    enrichModal.style.display = 'flex';
+                }
+            } catch (error) {
+                showError('Erreur enrichissement: ' + error.message);
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // Event Listeners
+        searchBtn.addEventListener('click', () => {
+            const query = searchInput.value.trim();
+            if (query) {
+                const maxResults = parseInt(document.getElementById('maxResults').value);
+                searchCompanies(query, maxResults);
+            }
+        });
+
+        searchInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                searchBtn.click();
+            }
+        });
+
+        // Modal handlers
+        document.getElementById('validateSiren').addEventListener('click', () => {
+            document.getElementById('sirenModal').style.display = 'flex';
+        });
+
+        document.getElementById('closeSirenModal').addEventListener('click', () => {
+            document.getElementById('sirenModal').style.display = 'none';
+        });
+
+        document.getElementById('validateSirenBtn').addEventListener('click', () => {
+            const siren = document.getElementById('sirenInput').value.trim();
+            if (siren) {
+                validateSiren(siren);
+                document.getElementById('sirenModal').style.display = 'none';
+            }
+        });
+
+        document.getElementById('bulkEnrich').addEventListener('click', () => {
+            document.getElementById('enrichModal').style.display = 'flex';
+        });
+
+        document.getElementById('closeEnrichModal').addEventListener('click', () => {
+            document.getElementById('enrichModal').style.display = 'none';
+        });
+
+        document.getElementById('enrichBtn').addEventListener('click', async () => {
+            const inputData = document.getElementById('enrichInput').value.trim();
+            if (inputData) {
+                try {
+                    const clientData = JSON.parse(inputData);
+                    
+                    showLoading();
+                    const response = await fetch(`${API_BASE}/enrich_client_with_company_data`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify(clientData)
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        document.getElementById('enrichInput').value = JSON.stringify(data.enriched_data, null, 2);
+                        showSuccess('Données enrichies avec succès');
+                    } else {
+                        showError(data.error || 'Erreur enrichissement');
+                    }
+                } catch (error) {
+                    showError('Erreur: ' + error.message);
+                } finally {
+                    hideLoading();
+                }
+            }
+        });
+
+        // Other buttons
+        document.getElementById('clearCache').addEventListener('click', clearCache);
+        document.getElementById('showStats').addEventListener('click', getCacheStats);
+        
+        document.getElementById('exportResults').addEventListener('click', async () => {
+            if (lastResults.length === 0) {
+                showError('Aucun résultat à exporter');
+                return;
+            }
+            
+            try {
+                showLoading();
+                const response = await fetch(`${API_BASE}/companies/export`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        companies: lastResults,
+                        format: 'json'
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    showSuccess(`Résultats exportés dans ${data.filename}`);
+                } else {
+                    showError('Erreur lors de l\'export');
+                }
+            } catch (error) {
+                showError('Erreur: ' + error.message);
+            } finally {
+                hideLoading();
+            }
+        });
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            getCacheStats();
+        });
+    </script>
+</body>
+</html>

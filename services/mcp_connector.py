@@ -44,6 +44,7 @@ class MCPConnector:
     # === ALIAS D'INSTANCE (pour compatibilité workflow) ===
     
     def __init__(self):
+        self.cache_manager = RedisCacheManager()
         # Créer des références vers les méthodes statiques
         self.get_salesforce_accounts = MCPConnector.get_salesforce_accounts
         self.get_sap_products = MCPConnector.get_sap_products
@@ -63,9 +64,18 @@ class MCPConnector:
         return await MCPConnector._call_mcp("salesforce_mcp", action, params)
     
     @staticmethod
-    async def call_sap_mcp(action: str, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Appelle un outil MCP SAP"""
-        return await MCPConnector._call_mcp("sap_mcp", action, params)
+    async def call_sap_mcp(self, action: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        # Vérifier cache en premier
+        cache_key = self.cache_manager.generate_cache_key("sap", action=action, **params)
+        cached_result = await self.cache_manager.get_cached_data(cache_key)
+        
+        if cached_result:
+            return cached_result
+        
+        # Appel normal puis mise en cache
+        result = await self._call_mcp("sap_mcp", action, params)
+        await self.cache_manager.cache_data(cache_key, result)
+        return result
 
     @staticmethod
     async def call_mcp_server(server_name, action, params):

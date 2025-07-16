@@ -547,8 +547,9 @@ class ClientValidator:
         postal_code = client_data.get("billing_postal_code", "")
         
         if "france" in country and postal_code:
-            if not re.match(r'^\d{5}$', postal_code):
-                result["warnings"].append("Code postal incohérent avec le pays France")
+            validation = FormatValidator.validate_format(postal_code, 'postal_code', 'FR')
+            if not validation["valid"]:
+                result["warnings"].append(validation["error"])
         
         elif "united states" in country or "usa" in country and postal_code:
             if not re.match(r'^\d{5}(-\d{4})?$', postal_code):
@@ -561,95 +562,54 @@ class ClientValidator:
                 result["warnings"].append("Numéro de téléphone incohérent avec le pays France")
     
     # Méthodes utilitaires
-    
-    async def _validate_siret_insee(self, siret: str) -> Dict[str, Any]:
-            """Validation SIRET via API INSEE - VERSION CORRIGÉE."""
+    async def _call_insee_api(self, endpoint: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
+        """
+        Appel générique à l'API INSEE
+        
+        Args:
+            endpoint: Point d'accès API (ex: /siret/12345678901234)
+            params: Paramètres de requête
+        
+        Returns:
+            Résultat de l'appel API
+        """
+        access_token = await self._get_insee_token()
+        if not access_token:
+            return {"error": "Token INSEE indisponible"}
+        
+        headers = {"Authorization": f"Bearer {access_token}"}
+        url = f"{INSEE_API_BASE_URL}{endpoint}"
+        
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(url, headers=headers, params=params, timeout=10.0)
             
-            if not self.insee_consumer_key or not self.insee_consumer_secret:
-                logger.warning("Validation INSEE désactivée (clés manquantes).")
-                return {"valid": False, "error": "Configuration API INSEE manquante", "validation_method": "skipped"}
-
-            access_token = await self._get_insee_token()
-            if not access_token:
-                return {"valid": False, "error": "Impossible d'obtenir le token INSEE", "validation_method": "token_error"}
-
-            headers = {"Authorization": f"Bearer {access_token}"}
-            url = f"{INSEE_API_BASE_URL}/siret/{siret}"
-            
-            logger.info(f"Validation SIRET {siret} via API INSEE...")
-
-            try:
-                # CORRECTION: Appel HTTP sans le hook qui lève automatiquement les exceptions
-                # pour pouvoir gérer les 404 proprement
-                async with httpx.AsyncClient() as client:
-                    response = await client.get(url, headers=headers, timeout=10.0)
-                
-                # CORRECTION: Gestion manuelle des codes de statut
-                if response.status_code == 200:
-                    data = response.json()
-                    
-                    if data.get("header", {}).get("statut") == 200:
-                        etablissement = data.get("etablissement", {})
-                        unite_legale = etablissement.get("uniteLegale", {})
-                        adresse = etablissement.get("adresseEtablissement", {})
-                        
-                        # Construction d'une adresse lisible
-                        full_address_parts = [
-                            adresse.get("numeroVoieEtablissement"),
-                            adresse.get("typeVoieEtablissement"),
-                            adresse.get("libelleVoieEtablissement"),
-                            adresse.get("codePostalEtablissement"),
-                            adresse.get("libelleCommuneEtablissement")
-                        ]
-                        full_address = " ".join(filter(None, full_address_parts)).strip()
-
-                        result = {
-                            "valid": True,
-                            "data": {
-                                "siret": etablissement.get("siret"),
-                                "siren": etablissement.get("siren"),
-                                "nic": etablissement.get("nic"),
-                                "company_name": unite_legale.get("denominationUniteLegale") or \
-                                                f"{unite_legale.get('nomUniteLegale', '')} {unite_legale.get('prenom1UniteLegale', '')}".strip(),
-                                "creation_date": unite_legale.get("dateCreationUniteLegale"),
-                                "activity_code": etablissement.get("activitePrincipaleEtablissement"),
-                                "activity_label": "N/A", # L'API Siret ne fournit pas le libellé direct
-                                "address": full_address,
-                                "postal_code": adresse.get("codePostalEtablissement"),
-                                "city": adresse.get("libelleCommuneEtablissement"),
-                                "status": "Actif" if unite_legale.get("etatAdministratifUniteLegale") == "A" else "Inactif",
-                                "is_siege": etablissement.get("etablissementSiege"),
-                                "validation_method": "api_insee"
-                            }
-                        }
-                        return result
-                    else:
-                        error_message = data.get("header", {}).get("message", "Erreur inconnue de l'API INSEE")
-                        logger.error(f"Erreur API INSEE pour SIRET {siret}: {error_message}")
-                        return {"valid": False, "error": f"API INSEE: {error_message}", "validation_method": "api_insee"}
-                
-                elif response.status_code == 404:
-                    # CORRECTION: Gestion propre du 404 sans essayer de lire le contenu
-                    logger.warning(f"SIRET {siret} non trouvé via API INSEE (404).")
-                    return {"valid": False, "error": "SIRET non trouvé", "validation_method": "api_insee"}
-                
+            if response.status_code == 200:
+                data = response.json()
+                if data.get("header", {}).get("statut") == 200:
+                    return {"success": True, "data": data}
                 else:
-                    # CORRECTION: Autres codes d'erreur - essayer de lire le contenu si possible
-                    try:
-                        error_data = response.json()
-                        error_message = error_data.get("header", {}).get("message", f"Erreur HTTP {response.status_code}")
-                    except Exception:
-                        error_message = f"Erreur HTTP {response.status_code}"
-                    
-                    logger.error(f"Erreur API INSEE pour SIRET {siret}: {response.status_code} - {error_message}")
-                    return {"valid": False, "error": f"API INSEE: {error_message}", "validation_method": "api_insee"}
-
-            except httpx.TimeoutException:
-                logger.error(f"Timeout lors de la validation SIRET {siret} via API INSEE.")
-                return {"valid": False, "error": "Timeout API INSEE", "validation_method": "api_insee"}
-            except Exception as e:
-                logger.exception(f"Erreur inattendue validation SIRET {siret}: {str(e)}")
-                return {"valid": False, "error": f"Erreur interne: {str(e)}", "validation_method": "api_insee"}
+                    error_msg = data.get("header", {}).get("message", "Erreur API")
+                    return {"error": error_msg}
+            
+            elif response.status_code == 404:
+                return {"error": "Non trouvé", "status_code": 404}
+            
+            else:
+                return {"error": f"Erreur HTTP {response.status_code}"}
+        
+        except Exception as e:
+            logger.error(f"Erreur appel INSEE: {e}")
+            return {"error": str(e)}
+    async def _validate_siret_insee(self, siret: str) -> Dict[str, Any]:
+        """Validation SIRET simplifiée"""
+        result = await self._call_insee_api(f"/siret/{siret}")
+        
+        if result.get("success"):
+            # Traitement des données spécifique SIRET
+            return self._process_siret_data(result["data"])
+        else:
+            return {"valid": False, "error": result["error"]}
     
     async def _validate_address_france(self, client_data: Dict[str, Any]) -> Dict[str, Any]:
         """Validation adresse via API Adresse gouv.fr."""
@@ -754,65 +714,14 @@ class ClientValidator:
             "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY"
         ]
 
-    async def _search_company_insee(self, search_query: str) -> Dict[str, Any]:
-        """
-        Recherche d'entreprises via l'API INSEE
-
-        Args:
-            search_query: Terme de recherche (nom d'entreprise, SIREN, etc.)
-
-        Returns:
-            Dictionnaire contenant les résultats de la recherche ou vide en cas d'erreur
-        """
-        if not self.insee_consumer_key or not self.insee_consumer_secret:
-            logger.warning("Clés INSEE non configurées pour la recherche")
-            return {"error": "Configuration API INSEE manquante"}
-
-        access_token = await self._get_insee_token()
-        if not access_token:
-            logger.error("Impossible d'obtenir le token INSEE pour la recherche")
-            return {"error": "Impossible d'obtenir le token INSEE"}
-
-        try:
-            headers = {"Authorization": f"Bearer {access_token}"}
-            # Utiliser l'API de recherche INSEE
-            url = f"{INSEE_API_BASE_URL}/siret"
-            params = {
-                'q': search_query,
-                'nombre': 10,  # Limiter à 10 résultats
-                'masquerValeursNulles': 'true'  # Ne pas retourner les champs vides
-            }
-
-            logger.info(f"Recherche d'entreprise INSEE: {search_query}")
-
-            async with httpx.AsyncClient() as client:
-                response = await client.get(url, headers=headers, params=params, timeout=10.0)
-
-                if response.status_code == 200:
-                    data = response.json()
-                    if data.get("header", {}).get("statut") == 200:
-                        return {
-                            "success": True,
-                            "results": data.get("etablissements", []),
-                            "count": len(data.get("etablissements", [])),
-                            "query": search_query
-                        }
-                    else:
-                        error_message = data.get("header", {}).get("message", "Erreur inconnue de l'API INSEE")
-                        logger.error(f"Erreur API INSEE recherche: {error_message}")
-                        return {"error": error_message}
-                elif response.status_code == 404:
-                    return {"success": True, "results": [], "count": 0, "query": search_query}
-                else:
-                    logger.error(f"Erreur HTTP API INSEE recherche: {response.status_code}")
-                    return {"error": f"Erreur HTTP {response.status_code}"}
-
-        except httpx.TimeoutException:
-            logger.error("Timeout lors de la recherche INSEE")
-            return {"error": "Timeout API INSEE"}
-        except Exception as e:
-            logger.exception(f"Erreur inattendue lors de la recherche INSEE: {str(e)}")
-            return {"error": f"Erreur interne: {str(e)}"}
+    async def _search_company_insee(self, query: str) -> Dict[str, Any]:
+        """Recherche d'entreprise simplifiée"""
+        result = await self._call_insee_api("/siret", {"q": query, "nombre": 10})
+        
+        if result.get("success"):
+            return self._process_search_results(result["data"])
+        else:
+            return {"error": result["error"]}
     
     def get_stats(self) -> Dict[str, Any]:
         """Retourne les statistiques de validation"""
@@ -928,27 +837,79 @@ class ClientValidator:
             logger.error(f"Erreur recherche entreprises similaires: {e}")
             return []
 
-    # NOUVEAU : Décorateur pour l'enrichissement automatique
-    def with_company_enrichment(func):
-        """
-        Décorateur pour enrichir automatiquement les données client avec l'agent
-        """
-        async def wrapper(self, client_data: Dict[str, Any], *args, **kwargs):
-            # Enrichissement automatique
-            enriched_data = await self.enrich_with_company_agent(client_data)
-            
-            # Appel de la fonction originale avec les données enrichies
-            result = await func(self, enriched_data, *args, **kwargs)
-            
-            # Ajout des informations d'enrichissement au résultat
-            if isinstance(result, dict):
-                result['enrichment_applied'] = 'enriched_data' in enriched_data
-                result['enrichment_source'] = enriched_data.get('enriched_data', {}).get('source')
-            
-            return result
-        
-        return wrapper
+# NOUVEAU : Décorateur pour l'enrichissement automatique
+def with_company_enrichment(func):
+    """
+    Décorateur pour enrichir automatiquement les données client avec l'agent
+    """
+    async def wrapper(self, client_data: Dict[str, Any], *args, **kwargs):
+        # Enrichissement automatique
+        enriched_data = await self.enrich_with_company_agent(client_data)
 
+        # Appel de la fonction originale avec les données enrichies
+        result = await func(self, enriched_data, *args, **kwargs)
+
+        # Ajout des informations d'enrichissement au résultat
+        if isinstance(result, dict):
+            result['enrichment_applied'] = 'enriched_data' in enriched_data
+            result['enrichment_source'] = enriched_data.get('enriched_data', {}).get('source')
+
+        return result
+
+    return wrapper
+
+
+class FormatValidator:
+    """Validateur de formats réutilisable"""
+    
+    PATTERNS = {
+        'postal_code': {
+            'FR': r'^\d{5}$',
+            'US': r'^\d{5}(-\d{4})?$',
+            'UK': r'^[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2}$'
+        },
+        'phone': {
+            'FR': r'^(\+33|0033|0)[1-9]\d{8}$',
+            'US': r'^(\+1|001)?[2-9]\d{2}[2-9]\d{2}\d{4}$',
+            'UK': r'^(\+44|0044|0)[1-9]\d{8,9}$'
+        },
+        'business_id': {
+            'FR': r'^\d{14}$',  # SIRET
+            'US': r'^\d{9}$',   # EIN
+            'UK': r'^[A-Z0-9]{8}$'  # Company Number
+        }
+    }
+    
+    @classmethod
+    def validate_format(cls, value: str, format_type: str, 
+                       country: str) -> Dict[str, Any]:
+        """
+        Valide un format selon le pays
+        
+        Args:
+            value: Valeur à valider
+            format_type: Type de format (postal_code, phone, business_id)
+            country: Code pays
+        
+        Returns:
+            Résultat de validation
+        """
+        if not value:
+            return {"valid": False, "error": "Valeur vide"}
+        
+        pattern = cls.PATTERNS.get(format_type, {}).get(country)
+        if not pattern:
+            return {"valid": False, "error": f"Format non supporté pour {country}"}
+        
+        clean_value = re.sub(r'[\s\-\.\(\)]', '', value)
+        is_valid = bool(re.match(pattern, clean_value.upper()))
+        
+        return {
+            "valid": is_valid,
+            "cleaned_value": clean_value,
+            "pattern_used": pattern,
+            "error": None if is_valid else f"Format invalide pour {country}"
+        }
 # EXEMPLE D'UTILISATION du décorateur
 class EnhancedClientValidator(ClientValidator):
     """Validateur client avec enrichissement automatique"""

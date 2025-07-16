@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
 import json
+import redis
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +22,37 @@ class CacheEntry:
     
     def is_valid(self) -> bool:
         return not self.is_expired()
-
+class RedisCacheManager:
+    """Gestionnaire de cache Redis pour performances"""
+    
+    def __init__(self):
+        self.redis_client = redis.Redis(host='localhost', port=6379, db=0)
+        self.default_ttl = 3600  # 1 heure
+    
+    async def get_cached_data(self, key: str) -> Optional[Any]:
+        """Récupération données mises en cache"""
+        try:
+            cached = self.redis_client.get(key)
+            return json.loads(cached) if cached else None
+        except Exception:
+            return None
+    
+    async def cache_data(self, key: str, data: Any, ttl: int = None) -> bool:
+        """Mise en cache des données"""
+        try:
+            self.redis_client.setex(
+                key, 
+                ttl or self.default_ttl, 
+                json.dumps(data)
+            )
+            return True
+        except Exception:
+            return False
+    
+    def generate_cache_key(self, prefix: str, **kwargs) -> str:
+        """Génération clé de cache standardisée"""
+        params = "_".join(f"{k}_{v}" for k, v in sorted(kwargs.items()))
+        return f"{prefix}:{params}"
 class ReferentialCache:
     """Cache intelligent pour accélérer la validation client/produit"""
     

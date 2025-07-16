@@ -139,6 +139,37 @@ class DevisWorkflow:
         if self.current_task:
             self.current_task.fail_step(step_id, error, message)
 
+    def _build_error_response(self, error_title: str, error_message: str,
+                        context: Dict[str, Any] = None) -> Dict[str, Any]:
+        """
+        Construit une réponse d'erreur standardisée
+
+        Args:
+            error_title: Titre de l'erreur
+            error_message: Message détaillé
+            context: Contexte additionnel optionnel
+
+        Returns:
+            Dict avec structure d'erreur standardisée
+        """
+        from datetime import datetime
+
+        response = {
+            "success": False,
+            "error": error_message,
+            "message": error_message,
+            "timestamp": datetime.now().isoformat(),
+            "error_type": error_title.lower().replace(" ", "_")
+        }
+
+        if self.task_id:
+            response["task_id"] = self.task_id
+
+        if context:
+            response["context"] = context
+
+        return response
+
     # 🔧 NOUVELLE MÉTHODE PRINCIPALE AVEC VALIDATION SÉQUENTIELLE
     async def process_quote_request(self, user_prompt: str, draft_mode: bool = False) -> Dict[str, Any]:
         """
@@ -431,7 +462,7 @@ class DevisWorkflow:
             self._track_step_start("parse_prompt", "Analyse de votre demande...")
 
             try:
-                extracted_info = await self._extract_info_from_prompt(prompt)
+                extracted_info = await self._extract_info_unified(prompt, "standard")
 
                 if extracted_info and "client" in extracted_info:
                     self._track_step_complete("parse_prompt", "✅ Demande analysée")
@@ -527,7 +558,7 @@ class DevisWorkflow:
             self._track_step_complete("parse_prompt", "Demande analysée")
             self._track_step_start("extract_entities", "Identification des besoins...")
             
-            extracted_info = await self._extract_info_from_prompt(prompt)
+            extracted_info = await self._extract_info_unified(prompt, "standard")
             self.context["extracted_info"] = extracted_info
 
             # 🔍 DEBUG : Log du type d'action
@@ -2094,22 +2125,7 @@ class DevisWorkflow:
         self.context["client_info"]["data"]["Name"] = client_name
         self.context["client_info"]["data"].update(salesforce_data)
         
-        logger.info(f"✅ Client enrichi dans le contexte: {client_name}")    
-    def _build_error_response(self, error_title: str, error_message: str) -> Dict[str, Any]:
-        """Construit une réponse d'erreur standardisée"""
-        logger.error(f"Erreur workflow: {error_title} - {error_message}")
-        
-        return {
-            "status": "error",
-            "success": False,
-            "task_id": self.task_id,
-            "error_title": error_title,
-            "error_message": error_message,
-            "timestamp": datetime.now().isoformat(),
-            "workflow_steps": getattr(self, 'workflow_steps', []),
-            "context_available": bool(self.context),
-            "draft_mode": self.draft_mode
-        }    
+        logger.info(f"✅ Client enrichi dans le contexte: {client_name}")
     
     async def _validate_client(self, client_name: str) -> Dict[str, Any]:
         """
@@ -2443,22 +2459,56 @@ class DevisWorkflow:
                 })
         
         return enriched_products
-    def _build_error_response(self, error_title: str, error_message: str) -> Dict[str, Any]:
-        """Construit une réponse d'erreur standardisée"""
-        logger.error(f"Erreur workflow: {error_title} - {error_message}")
-        
-        return {
-            "status": "error",
-            "success": False,
-            "task_id": self.task_id,
-            "error_title": error_title,
-            "error_message": error_message,
-            "timestamp": datetime.now().isoformat(),
-            "workflow_steps": getattr(self, 'workflow_steps', []),
-            "context_available": bool(self.context),
-            "draft_mode": self.draft_mode
-        }
 
+    def _get_standard_system_prompt(self) -> str:
+        """Retourne le prompt système standard pour l'extraction"""
+        return """Tu es un assistant spécialisé dans l'extraction d'informations de devis.
+        Extrait les informations client, produits et quantités de la demande utilisateur.
+        Retourne un JSON structuré avec les champs: client_info, products, special_requirements."""
+
+    def _get_robust_system_prompt(self) -> str:
+        """Retourne le prompt système robuste avec fallbacks"""
+        return """Tu es un assistant expert en extraction d'informations de devis.
+        Extrait toutes les informations disponibles même si incomplètes.
+        Utilise des valeurs par défaut raisonnables pour les champs manquants.
+        Retourne un JSON structuré avec validation et suggestions."""
+
+    def _get_minimal_system_prompt(self) -> str:
+        """Retourne le prompt système minimal pour extraction rapide"""
+        return """Extrait rapidement: nom client, produits demandés, quantités.
+        Format JSON simple uniquement."""
+    async def _extract_info_unified(self, prompt: str, 
+                                extraction_mode: str = "standard") -> Dict[str, Any]:
+        """
+        Méthode d'extraction LLM unifiée
+        
+        Args:
+            prompt: Demande utilisateur
+            extraction_mode: Mode d'extraction (standard, robust, minimal)
+        
+        Returns:
+            Informations extraites
+        """
+        system_prompts = {
+            "standard": self._get_standard_system_prompt(),
+            "robust": self._get_robust_system_prompt(),
+            "minimal": self._get_minimal_system_prompt()
+        }
+        
+        system_prompt = system_prompts.get(extraction_mode, system_prompts["standard"])
+        
+        try:
+            # Logique d'extraction commune
+            result = await self.llm_extractor.extract_quote_info(prompt)
+            
+            # Post-traitement selon le mode
+            # Pour l'instant, on retourne le résultat tel quel
+            # Les modes "robust" et "minimal" peuvent être implémentés plus tard
+            return result
+
+        except Exception as e:
+            logger.error(f"Erreur extraction {extraction_mode}: {e}")
+            return {"error": str(e)}
     async def _extract_info_from_prompt(self, prompt: str) -> Dict[str, Any]:
         """
         Extraction des informations avec fallback robuste
