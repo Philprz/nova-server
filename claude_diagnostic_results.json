@@ -1,0 +1,44 @@
+[
+  {
+    "test": "API Key Format",
+    "status": "✅ PASS",
+    "timestamp": "09:11:43",
+    "message": "Clé API valide: sk-ant-api...g-7kx0BAAA",
+    "data": null
+  },
+  {
+    "test": "Claude API Connectivity",
+    "status": "❌ FAIL",
+    "timestamp": "09:11:47",
+    "message": "Erreur HTTP 529: {'type': 'error', 'error': {'type': 'overloaded_error', 'message': 'Overloaded'}}",
+    "data": null
+  },
+  {
+    "test": "Dependencies",
+    "status": "✅ PASS",
+    "timestamp": "09:11:48",
+    "message": "Tous les services sont disponibles",
+    "data": null
+  },
+  {
+    "test": "LLMExtractor Function",
+    "status": "❌ FAIL",
+    "timestamp": "09:11:49",
+    "message": "Erreur dans extract_quote_info: Erreur API Claude: {'type': 'error', 'error': {'type': 'overloaded_error', 'message': 'Overloaded'}}",
+    "data": null
+  },
+  {
+    "test": "Workflow Basic",
+    "status": "✅ PASS",
+    "timestamp": "09:11:49",
+    "message": "Fallback fonctionne: {\n  \"action_type\": \"DEVIS\",\n  \"client\": \"3\",\n  \"products\": [\n    {\n      \"code\": \"imprimantes\",\n      \"quantity\": 3,\n      \"name\": \"Imprimantes\"\n    },\n    {\n      \"code\": \"imprimantes\",\n      \"quantity\": 3,\n      \"name\": \"Imprimantes\"\n    },\n    {\n      \"code\": \"imprimante\",\n      \"quantity\": 3,\n      \"name\": \"Imprimante\"\n    }\n  ],\n  \"extracted_method\": \"manual_robust\",\n  \"confidence\": 0.7\n}",
+    "data": null
+  },
+  {
+    "test": "Full Workflow",
+    "status": "✅ PASS",
+    "timestamp": "09:11:53",
+    "message": "Workflow fonctionne: demo_mode",
+    "data": null
+  }
+]

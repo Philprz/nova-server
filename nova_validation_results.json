@@ -1,0 +1,90 @@
+[
+  {
+    "test": "Health Endpoint",
+    "status": "❌ FAIL",
+    "timestamp": "09:12:34",
+    "message": "Health check failed (status: 404)",
+    "data": null
+  },
+  {
+    "test": "Interface Loading",
+    "status": "❌ FAIL",
+    "timestamp": "09:12:34",
+    "message": "Missing elements: generateBtn",
+    "data": null
+  },
+  {
+    "test": "Endpoint /api/assistant/generate_quote",
+    "status": "✅ PASS",
+    "timestamp": "09:12:46",
+    "message": "Endpoint functional (status: 200)",
+    "data": {
+      "response_keys": [
+        "status",
+        "success",
+        "client",
+        "products",
+        "total_amount",
+        "quote_id",
+        "stock_info",
+        "error",
+        "message",
+        "similar_clients"
+      ]
+    }
+  },
+  {
+    "test": "Endpoint /generate_quote",
+    "status": "✅ PASS",
+    "timestamp": "09:12:56",
+    "message": "Endpoint functional (status: 200)",
+    "data": {
+      "response_keys": [
+        "status",
+        "success",
+        "client",
+        "products",
+        "total_amount",
+        "quote_id",
+        "stock_info",
+        "error",
+        "message",
+        "similar_clients"
+      ]
+    }
+  },
+  {
+    "test": "Endpoint /devis/generate_quote",
+    "status": "✅ PASS",
+    "timestamp": "09:13:02",
+    "message": "Endpoint functional (status: 200)",
+    "data": {
+      "response_keys": [
+        "status",
+        "message",
+        "error_details"
+      ]
+    }
+  },
+  {
+    "test": "Error Handling (Empty Prompt)",
+    "status": "✅ PASS",
+    "timestamp": "09:13:02",
+    "message": "Empty prompt correctly handled",
+    "data": null
+  },
+  {
+    "test": "Error Handling (Invalid Payload)",
+    "status": "✅ PASS",
+    "timestamp": "09:13:02",
+    "message": "Invalid payload correctly handled",
+    "data": null
+  },
+  {
+    "test": "Diagnostic Interface",
+    "status": "✅ PASS",
+    "timestamp": "09:13:02",
+    "message": "Diagnostic interface available and functional",
+    "data": null
+  }
+]
