@@ -737,9 +737,9 @@
             try {
                 // 🔧 CORRECTION 1: Essayer plusieurs endpoints dans l'ordre
                 const endpoints = [
-                    '/api/assistant/generate_quote',  // Endpoint préféré
-                    '/generate_quote',                // Endpoint unifié
-                    '/devis/generate_quote'           // Endpoint de secours
+                    '/api/assistant/chat',            // Endpoint existant
+                    '/api/assistant/workflow/create_quote', // Endpoint workflow
+                    '/generate_quote'                 // Endpoint de secours
                 ];
 
                 let lastError = null;
@@ -757,8 +757,7 @@
                                 'Accept': 'application/json'
                             },
                             body: JSON.stringify({
-                                prompt: prompt,
-                                draft_mode: isDraftMode
+                                message: prompt  // Le format attendu par /chat
                             })
                         });
 
@@ -895,7 +894,7 @@
             }
 
             // Test des endpoints
-            const endpoints = ['/api/assistant/generate_quote', '/generate_quote', '/devis/generate_quote'];
+            const endpoints = ['/api/assistant/chat', '/generate_quote', '/api/assistant/workflow/create_quote'];
 
             for (const endpoint of endpoints) {
                 try {

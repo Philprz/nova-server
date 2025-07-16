@@ -74,18 +74,14 @@ async def generate_quote_unified(request: dict):
         if not prompt:
             return {"success": False, "error": "Prompt manquant"}
 
-        # Utiliser le service assistant comme endpoint principal
-        from routes.routes_intelligent_assistant import generate_quote_endpoint
-        from routes.routes_intelligent_assistant import GenerateQuoteRequest
+        # Utiliser directement le service chat
+        from routes.routes_intelligent_assistant import ChatMessage, chat_with_nova
 
         # Créer la requête formatée
-        quote_request = GenerateQuoteRequest(
-            prompt=prompt,
-            draft_mode=draft_mode
-        )
+        message_data = ChatMessage(message=prompt)
 
         # Exécuter la génération
-        result = await generate_quote_endpoint(quote_request)
+        result = await chat_with_nova(message_data)
 
         # Convertir le résultat en dict pour la réponse
         if hasattr(result, 'dict'):
