@@ -610,6 +610,13 @@
             </div>
         </div>
 
+        <!-- 🆕 BOUTON DE TEST DEBUG -->
+        <div style="text-align: center; margin: 20px 0;">
+            <button onclick="testSimpleAPI()" style="background: #ff6b6b; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer;">
+                🧪 Test API Debug
+            </button>
+        </div>
+
         <!-- Zone de résultats -->
         <div id="resultsSection" class="results-section">
             <div id="processingIndicator" class="processing-indicator">
@@ -666,6 +673,35 @@
             if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault();
                 generateQuote();
+            }
+        }
+
+        // 🆕 FONCTION DE TEST SIMPLE
+        async function testSimpleAPI() {
+            console.log("🧪 Test simple de l'API");
+
+            try {
+                const response = await fetch('/api/assistant/generate_quote', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        prompt: 'test simple',
+                        draft_mode: false
+                    })
+                });
+
+                console.log("✅ Réponse reçue:", response.status);
+                const data = await response.json();
+                console.log("📊 Données:", data);
+
+                alert('Test réussi ! Voir la console pour les détails.');
+
+            } catch (error) {
+                console.error("❌ Erreur test simple:", error);
+                alert('Erreur: ' + error.message);
             }
         }
 
@@ -845,13 +881,17 @@
         async function runAutoDiagnostic() {
             console.log('🔍 === DIAGNOSTIC AUTOMATIQUE ===');
 
-            // Test de connectivité de base
+            // Test de connectivité de base - utiliser diagnostic au lieu de health
             try {
-                const healthResponse = await fetch('/health');
-                const healthData = await healthResponse.json();
-                console.log('✅ Health check:', healthData);
+                const healthResponse = await fetch('/diagnostic');
+                if (healthResponse.ok) {
+                    const healthData = await healthResponse.json();
+                    console.log('✅ Diagnostic check:', healthData);
+                } else {
+                    console.log('⚠️ Diagnostic check status:', healthResponse.status);
+                }
             } catch (error) {
-                console.log('❌ Health check échoué:', error.message);
+                console.log('❌ Diagnostic check échoué:', error.message);
             }
 
             // Test des endpoints

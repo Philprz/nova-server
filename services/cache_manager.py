@@ -5,7 +5,14 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
 import json
-import redis
+
+# Import optionnel de Redis
+try:
+    import redis
+    REDIS_AVAILABLE = True
+except ImportError:
+    REDIS_AVAILABLE = False
+    redis = None
 
 logger = logging.getLogger(__name__)
 
@@ -24,30 +31,53 @@ class CacheEntry:
         return not self.is_expired()
 class RedisCacheManager:
     """Gestionnaire de cache Redis pour performances"""
-    
+
     def __init__(self):
-        self.redis_client = redis.Redis(host='localhost', port=6379, db=0)
+        if REDIS_AVAILABLE:
+            try:
+                self.redis_client = redis.Redis(host='localhost', port=6379, db=0)
+                # Test de connexion
+                self.redis_client.ping()
+                self.redis_available = True
+            except Exception as e:
+                logger.warning(f"Redis non disponible, utilisation du cache mémoire: {e}")
+                self.redis_available = False
+                self.memory_cache = {}
+        else:
+            logger.warning("Module redis non installé, utilisation du cache mémoire")
+            self.redis_available = False
+            self.memory_cache = {}
+
         self.default_ttl = 3600  # 1 heure
     
     async def get_cached_data(self, key: str) -> Optional[Any]:
         """Récupération données mises en cache"""
-        try:
-            cached = self.redis_client.get(key)
-            return json.loads(cached) if cached else None
-        except Exception:
-            return None
-    
+        if self.redis_available:
+            try:
+                cached = self.redis_client.get(key)
+                return json.loads(cached) if cached else None
+            except Exception:
+                return None
+        else:
+            # Utiliser le cache mémoire
+            return self.memory_cache.get(key)
+
     async def cache_data(self, key: str, data: Any, ttl: int = None) -> bool:
         """Mise en cache des données"""
-        try:
-            self.redis_client.setex(
-                key, 
-                ttl or self.default_ttl, 
-                json.dumps(data)
-            )
+        if self.redis_available:
+            try:
+                self.redis_client.setex(
+                    key,
+                    ttl or self.default_ttl,
+                    json.dumps(data)
+                )
+                return True
+            except Exception:
+                return False
+        else:
+            # Utiliser le cache mémoire
+            self.memory_cache[key] = data
             return True
-        except Exception:
-            return False
     
     def generate_cache_key(self, prefix: str, **kwargs) -> str:
         """Génération clé de cache standardisée"""

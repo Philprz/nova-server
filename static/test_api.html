@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test NOVA API</title>
+</head>
+<body>
+    <h1>Test de l'API NOVA</h1>
+    <textarea id="prompt" placeholder="Entrez votre demande de devis">Fais moi un devis de 4 imprimantes pour Philippe PEREZ</textarea><br><br>
+    <button onclick="testAPI()">Tester l'API</button>
+    <div id="result"></div>
+
+    <script>
+        async function testAPI() {
+            const prompt = document.getElementById('prompt').value;
+            const resultDiv = document.getElementById('result');
+            
+            resultDiv.innerHTML = '<p>Test en cours...</p>';
+            
+            try {
+                console.log('🚀 Début du test API');
+                console.log('📝 Prompt:', prompt);
+                
+                const response = await fetch('/api/assistant/generate_quote', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        prompt: prompt,
+                        draft_mode: false
+                    })
+                });
+                
+                console.log('📡 Réponse status:', response.status);
+                console.log('📡 Réponse headers:', response.headers);
+                
+                const data = await response.json();
+                console.log('📊 Données reçues:', data);
+                
+                resultDiv.innerHTML = `
+                    <h3>Résultat:</h3>
+                    <pre>${JSON.stringify(data, null, 2)}</pre>
+                `;
+                
+            } catch (error) {
+                console.error('❌ Erreur:', error);
+                resultDiv.innerHTML = `<p style="color: red;">Erreur: ${error.message}</p>`;
+            }
+        }
+    </script>
+</body>
+</html>

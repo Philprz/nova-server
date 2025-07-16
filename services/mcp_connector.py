@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 from typing import Dict, Any, List
 import logging
+from services.cache_manager import RedisCacheManager
 
 logger = logging.getLogger("mcp_connector")
 
