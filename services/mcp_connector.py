@@ -11,6 +11,34 @@ import logging
 
 logger = logging.getLogger("mcp_connector")
 
+class MCPCache:
+    """Cache intelligent pour les appels MCP"""
+    
+    def __init__(self):
+        self.cache = {}
+        self.cache_ttl = {}
+        from datetime import datetime, timedelta
+        self.default_ttl = timedelta(minutes=5)
+    
+    def get(self, key: str):
+        """Récupère une valeur du cache si elle n'est pas expirée"""
+        if key in self.cache:
+            from datetime import datetime
+            if datetime.now() < self.cache_ttl.get(key, datetime.min):
+                return self.cache[key]
+            else:
+                # Nettoyer les entrées expirées
+                del self.cache[key]
+                del self.cache_ttl[key]
+        return None
+    
+    def set(self, key: str, value, ttl=None):
+        """Stocke une valeur dans le cache"""
+        from datetime import datetime
+        self.cache[key] = value
+        self.cache_ttl[key] = datetime.now() + (ttl or self.default_ttl)
+        
+mcp_cache = MCPCache()
 class MCPConnector:
     """Connecteur pour les appels MCP (Model Context Protocol)"""
     # === ALIAS D'INSTANCE (pour compatibilité workflow) ===
@@ -48,7 +76,15 @@ class MCPConnector:
     
     @staticmethod
     async def _call_mcp(server_name: str, action: str, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Méthode générique pour appeler un outil MCP via subprocess - VERSION AMÉLIORÉE"""
+        """Méthode générique pour appeler un outil MCP via subprocess - VERSION OPTIMISEE"""
+        # Cache pour les appels lecture seule
+        cache_key = f"{server_name}:{action}:{hash(str(params))}"
+        if action in ['sap_read', 'salesforce_query', 'sap_get_product_details']:
+            cached_result = mcp_cache.get(cache_key)
+            if cached_result:
+                logger.debug(f"Cache hit pour {cache_key}")
+                return cached_result
+        
         logger.info(f"Appel MCP: {server_name}.{action}")
         
         try:
@@ -127,6 +163,9 @@ class MCPConnector:
                             result = json.load(f)
                         
                         logger.info(f"Appel MCP réussi: {action}")
+                        if action in ['sap_read', 'salesforce_query', 'sap_get_product_details'] and "error" not in result:
+                            mcp_cache.set(cache_key, result)
+                    
                         return result
                     except json.JSONDecodeError as je:
                         logger.error(f"Erreur JSON dans le fichier de sortie: {je}")

@@ -30,161 +30,41 @@ import asyncio
 
 import httpx
 
-async def get_clients_data_async():
-    """Récupère les clients - utilise les données réelles de Salesforce"""
-    # Pour l'instant, utilisons des données réelles de Salesforce pour tester l'interface
-    return {
-        'clients': [
-            {
-                'id': '001gL000008IyXOQA0',
-                'name': 'Airbus Industries',
-                'city': 'BLAGNAC',
-                'country': 'France',
-                'state': '',
-                'phone': '',
-                'type': 'Customer',
-                'industry': 'Manufacturing',
-                'account_number': 'SFAIRBUSIN2943'
-            },
-            {
-                'id': '001gL000005OYCEQA4',
-                'name': 'Burlington Textiles Corp of America',
-                'city': 'Burlington',
-                'country': 'USA',
-                'state': 'NC',
-                'phone': '(336) 222-7000',
-                'type': 'Customer - Direct',
-                'industry': 'Apparel',
-                'account_number': 'CD656092'
-            },
-            {
-                'id': '001gL000008JW7eQAG',
-                'name': 'Alcatel',
-                'city': '',
-                'country': '',
-                'state': '',
-                'phone': '01-27-42-65-01',
-                'type': 'Customer',
-                'industry': '',
-                'account_number': 'C40000'
-            },
-            {
-                'id': '001gL000008JXuwQAG',
-                'name': 'Client interface Web',
-                'city': '',
-                'country': '',
-                'state': '',
-                'phone': '',
-                'type': 'Customer',
-                'industry': '',
-                'account_number': 'C99998'
-            },
-            {
-                'id': '001gL000008JXV9QAO',
-                'name': 'Airbus Industries',
-                'city': '',
-                'country': '',
-                'state': '',
-                'phone': '',
-                'type': 'Customer',
-                'industry': '',
-                'account_number': 'CAIRBUSIN1200'
-            }
-        ]
-    }
-
-async def get_products_data_async():
-    """Récupère les produits - utilise les données réelles de SAP"""
-    # Pour l'instant, utilisons des données réelles de SAP pour tester l'interface
-    return {
-        'products': [
-            {
-                'code': 'A00001',
-                'name': 'Imprimante IBM type Infoprint 1312',
-                'description': 'Imprimante professionnelle IBM',
-                'price': 400.0,
-                'currency': 'EUR',
-                'stock': 1130,
-                'category': 'Imprimantes'
-            },
-            {
-                'code': 'A00002',
-                'name': 'Imprimante IBM type Infoprint 1222',
-                'description': 'Imprimante professionnelle IBM',
-                'price': 400.0,
-                'currency': 'EUR',
-                'stock': 1123,
-                'category': 'Imprimantes'
-            },
-            {
-                'code': 'A00004',
-                'name': 'Imprimante HP type Color Laser Jet 5',
-                'description': 'Imprimante couleur HP professionnelle',
-                'price': 500.0,
-                'currency': 'EUR',
-                'stock': 1129,
-                'category': 'Imprimantes'
-            },
-            {
-                'code': 'C00001',
-                'name': 'Carte mère P4 Turbo',
-                'description': 'Carte mère haute performance',
-                'price': 400.0,
-                'currency': 'EUR',
-                'stock': 1511,
-                'category': 'Composants'
-            },
-            {
-                'code': 'C00003',
-                'name': 'Processeur Intel P4 2.4 GhZ',
-                'description': 'Processeur Intel haute performance',
-                'price': 130.0,
-                'currency': 'EUR',
-                'stock': 1167,
-                'category': 'Composants'
-            },
-            {
-                'code': 'C00004',
-                'name': 'Tour PC avec alimentation',
-                'description': 'Boîtier PC complet avec alimentation',
-                'price': 35.0,
-                'currency': 'EUR',
-                'stock': 1262,
-                'category': 'Boîtiers'
-            },
-            {
-                'code': 'B10000',
-                'name': 'Etiquettes pour imprimante',
-                'description': 'Etiquettes compatibles imprimantes',
-                'price': 1.0,
-                'currency': 'EUR',
-                'stock': 500,
-                'category': 'Consommables'
-            }
-        ]
-    }
-
-# Fonctions synchrones pour compatibilité (fallback simple)
-def get_clients_data():
-    """Version synchrone - retourne des données d'exemple"""
-    return {
-        'clients': [
-            {'name': 'Airbus Industries', 'type': 'Customer', 'industry': 'Manufacturing'},
-            {'name': 'Edge Communications', 'type': 'Customer', 'industry': 'Electronics'},
-            {'name': 'Burlington Textiles', 'type': 'Customer', 'industry': 'Apparel'}
-        ]
-    }
-
-def get_products_data():
-    """Version synchrone - retourne des données d'exemple"""
-    return {
-        'products': [
-            {'name': 'Imprimante HP LaserJet', 'code': 'HP001', 'price': 299.99},
-            {'name': 'Ordinateur Dell OptiPlex', 'code': 'DELL001', 'price': 899.99},
-            {'name': 'Écran Samsung 24"', 'code': 'SAM001', 'price': 199.99}
-        ]
-    }
-
+async def get_unified_data(data_type: str, limit: int = 20):
+    """Service unifié pour récupérer clients et produits"""
+    try:
+        if data_type == "clients":
+            # Appel direct au MCP
+            from services.mcp_connector import MCPConnector
+            sf_result = await MCPConnector.call_salesforce_mcp("salesforce_query", {
+                "query": f"SELECT Id, Name, Phone, BillingCity, BillingCountry, Type, Industry, AccountNumber FROM Account LIMIT {limit}"
+            })
+            
+            if "error" not in sf_result:
+                return {
+                    'clients': sf_result.get('records', []),
+                    'total': sf_result.get('totalSize', 0)
+                }
+                
+        elif data_type == "products":
+            # Appel direct au MCP
+            from services.mcp_connector import MCPConnector
+            sap_result = await MCPConnector.call_sap_mcp("sap_read", {
+                "endpoint": f"/Items?$top={limit}",
+                "method": "GET"
+            })
+            
+            if "error" not in sap_result:
+                return {
+                    'products': sap_result.get('value', []),
+                    'total': len(sap_result.get('value', []))
+                }
+                
+        return {'clients': [], 'products': [], 'total': 0}
+        
+    except Exception as e:
+        logger.error(f"Erreur get_unified_data: {e}")
+        return {'clients': [], 'products': [], 'total': 0}
 logger = logging.getLogger(__name__)
 
 # Modèles Pydantic
@@ -941,7 +821,7 @@ async def get_clients_list():
     """Endpoint pour récupérer la liste complète des clients"""
     try:
         # Récupération des clients via MCP
-        clients_data = await get_clients_data_async()
+        clients_data = await get_unified_data("clients")
         # Normaliser les clés pour l'interface
         for client in clients_data.get('clients', []):
             client['name'] = client.get('Name', client.get('name', ''))
@@ -994,7 +874,7 @@ async def get_products_list():
     """Récupère la liste complète des produits"""
     try:
         # Récupération des produits via MCP
-        products_data = await get_products_data_async()
+        products_data = await get_unified_data(products)
         products = products_data.get('products', [])
         
         # Formater les produits pour l'affichage
@@ -1069,47 +949,6 @@ async def handle_user_choice(choice_data: Dict[str, Any]):
         logger.error(f"Erreur gestion choix utilisateur: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/choice")
-async def handle_user_choice(choice_data: Dict[str, Any]):
-    """
-    🔧 GESTION DES CHOIX UTILISATEUR DEPUIS L'INTERFACE
-    """
-    try:
-        choice_type = choice_data.get("type")
-        task_id = choice_data.get("task_id")
-
-        if not task_id:
-            raise HTTPException(status_code=400, detail="task_id manquant")
-
-        # Récupérer le contexte du workflow
-        workflow_context = await get_workflow_context(task_id)
-
-        if choice_type == "client_choice":
-            # Choix client depuis les suggestions
-            workflow = DevisWorkflow(task_id=task_id, force_production=True)
-            result = await workflow.handle_client_suggestions(choice_data, workflow_context)
-
-        elif choice_type == "product_choice":
-            # Choix produit depuis les alternatives
-            workflow = DevisWorkflow(task_id=task_id, force_production=True)
-            result = await workflow.apply_product_suggestions(choice_data.get("products", []), workflow_context)
-
-        elif choice_type == "create_client":
-            # Déclenchement création client
-            workflow = DevisWorkflow(task_id=task_id, force_production=True)
-            result = await workflow._handle_new_client_creation(
-                choice_data.get("client_name", ""),
-                workflow_context
-            )
-
-        else:
-            raise HTTPException(status_code=400, detail=f"Type de choix '{choice_type}' non supporté")
-
-        return result
-
-    except Exception as e:
-        logger.error(f"Erreur gestion choix utilisateur: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 # Import du workflow de création de client
 from workflow.client_creation_workflow import client_creation_workflow

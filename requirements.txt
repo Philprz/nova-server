@@ -1,7 +1,7 @@
-# Requirements NOVA POC - VERSION NETTOYÉE
-# Suppression d'aio-pika suite à l'évaluation d'architecture
+# Requirements NOVA POC - VERSION AVEC AGENT RECHERCHE
+# Ajout des dépendances pour l'agent de recherche d'entreprises
 
-# Core FastAPI et serveur
+# Core FastAPI et serveur (existant)
 fastapi
 uvicorn[standard]
 python-dotenv
@@ -9,27 +9,33 @@ requests
 pydantic
 python-multipart
 
-# Intégrations systèmes
+# Intégrations systèmes (existant)
 simple-salesforce
 httpx
 
-# LLM et MCP
+# LLM et MCP (existant)
 mcp[cli]>=0.4.0
 
-# Base de données
+# Base de données (existant)
 SQLAlchemy>=1.4
 alembic>=1.8
 psycopg2-binary
 
-# Utilitaires
+# Utilitaires (existant)
 aiohttp
 email-validator
 
-# Validation client enrichie
+# Validation client enrichie (existant)
 fuzzywuzzy>=0.18.0
 python-Levenshtein>=0.20.9
 requests-cache>=1.0.0
 
-# SUPPRIMÉ : aio-pika (RabbitMQ non requis pour le POC)
-# Décision documentée le 2025-06-03 suite à évaluation d'architecture
-# RabbitMQ pourra être ajouté en version production si scaling requis
+# NOUVEAU : Dépendances pour l'agent de recherche d'entreprises
+unicodedata2>=14.0.0     # Normalisation des noms d'entreprises
+difflib                  # Comparaison de chaînes (inclus dans Python)
+csv                      # Traitement CSV (inclus dans Python)
+json                     # Traitement JSON (inclus dans Python)
+re                       # Expressions régulières (inclus dans Python)
+time                     # Gestion du temps (inclus dans Python)
+datetime                 # Gestion des dates (inclus dans Python)
+typing                   # Type hints (inclus dans Python)

@@ -10,7 +10,8 @@ from typing import Dict, Any, List
 from datetime import datetime, timedelta # Ajout de timedelta
 import os # Ajout de os
 import httpx # Ajout de httpx
-
+# NOUVEAU : Import du service de recherche d'entreprises
+from .company_search_service import company_search_service
 # Importer les dépendances avec gestion des erreurs
 try:
     from fuzzywuzzy import fuzz
@@ -120,7 +121,59 @@ class ClientValidator:
             logger.error(f"❌ Erreur inattendue lors de l'obtention du token INSEE: {str(e)}")
             self.insee_access_token = None
         return None
+    # NOUVEAU : Méthode d'enrichissement avec l'agent
+    async def enrich_with_company_agent(self, client_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        🔍 Enrichit les données client avec l'agent de recherche d'entreprises
+        
+        Args:
+            client_data: Données client à enrichir
+            
+        Returns:
+            Données enrichies avec informations officielles
+        """
+        try:
+            # Enrichissement via l'agent
+            enriched_data = await company_search_service.enrich_client_data(client_data)
+            
+            # Log de l'enrichissement
+            if 'enriched_data' in enriched_data:
+                logger.info(f"Client enrichi: {client_data.get('company_name')} -> SIREN: {enriched_data['enriched_data'].get('siren')}")
+            
+            return enriched_data
+            
+        except Exception as e:
+            logger.error(f"Erreur enrichissement agent: {e}")
+            return client_data
     
+    # NOUVEAU : Validation SIREN avec l'agent
+    async def validate_siren_with_agent(self, siren: str) -> Dict[str, Any]:
+        """
+        ✅ Valide un SIREN avec l'agent de recherche
+        
+        Args:
+            siren: Numéro SIREN à valider
+            
+        Returns:
+            Résultat de validation avec informations entreprise
+        """
+        try:
+            # Validation via l'agent
+            validation_result = await company_search_service.validate_siren(siren)
+            
+            if validation_result['valid']:
+                # Récupération des informations entreprise
+                company_info = await company_search_service.get_company_by_siren(siren)
+                
+                if company_info['success']:
+                    validation_result['company_info'] = company_info['company']
+                    validation_result['source'] = company_info['source']
+            
+            return validation_result
+            
+        except Exception as e:
+            logger.error(f"Erreur validation SIREN agent: {e}")
+            return {'valid': False, 'error': str(e)}    
     async def validate_complete(self, client_data: Dict[str, Any], country: str = "FR") -> Dict[str, Any]:
         """
         Validation complète d'un client selon le pays
@@ -796,7 +849,119 @@ class ClientValidator:
                 "token_valid": bool(self.insee_access_token and self.insee_token_expires_at > datetime.now())
             }
         }
+# MODIFICATION : Méthode de validation principale enrichie
+    async def validate_client_data_enriched(self, client_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        🔍 Validation client enrichie avec l'agent de recherche d'entreprises
+        
+        Workflow:
+        1. Validation des données de base
+        2. Enrichissement avec l'agent de recherche
+        3. Validation SIREN si disponible
+        4. Suggestions si entreprise non trouvée
+        
+        Args:
+            client_data: Données client à valider
+            
+        Returns:
+            Résultat de validation enrichi
+        """
+        try:
+            # 1. Validation de base existante
+            base_validation = await self.validate_client_data(client_data)
+            
+            # 2. Enrichissement avec l'agent
+            enriched_data = await self.enrich_with_company_agent(client_data)
+            
+            # 3. Validation SIREN si disponible
+            siren_validation = None
+            if enriched_data.get('enriched_data', {}).get('siren'):
+                siren = enriched_data['enriched_data']['siren']
+                siren_validation = await self.validate_siren_with_agent(siren)
+            
+            # 4. Suggestions si entreprise non trouvée
+            suggestions = []
+            if not enriched_data.get('enriched_data'):
+                company_name = client_data.get('company_name') or client_data.get('name')
+                if company_name:
+                    suggestions = await company_search_service.get_suggestions(company_name)
+            
+            # Résultat consolidé
+            return {
+                'base_validation': base_validation,
+                'enriched_data': enriched_data,
+                'siren_validation': siren_validation,
+                'suggestions': suggestions,
+                'enhanced_with_agent': True,
+                'validation_timestamp': datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            logger.error(f"Erreur validation enrichie: {e}")
+            # Fallback vers validation de base
+            return await self.validate_client_data(client_data)
+    
+    # NOUVEAU : Recherche d'entreprises similaires
+    async def find_similar_companies(self, company_name: str, max_results: int = 5) -> List[Dict[str, Any]]:
+        """
+        🔍 Trouve des entreprises similaires pour résolution de doublons
+        
+        Args:
+            company_name: Nom de l'entreprise à rechercher
+            max_results: Nombre maximum de résultats
+            
+        Returns:
+            Liste des entreprises similaires
+        """
+        try:
+            search_result = await company_search_service.search_company(
+                query=company_name,
+                max_results=max_results
+            )
+            
+            if search_result['success']:
+                return search_result['companies']
+            else:
+                return []
+                
+        except Exception as e:
+            logger.error(f"Erreur recherche entreprises similaires: {e}")
+            return []
 
+    # NOUVEAU : Décorateur pour l'enrichissement automatique
+    def with_company_enrichment(func):
+        """
+        Décorateur pour enrichir automatiquement les données client avec l'agent
+        """
+        async def wrapper(self, client_data: Dict[str, Any], *args, **kwargs):
+            # Enrichissement automatique
+            enriched_data = await self.enrich_with_company_agent(client_data)
+            
+            # Appel de la fonction originale avec les données enrichies
+            result = await func(self, enriched_data, *args, **kwargs)
+            
+            # Ajout des informations d'enrichissement au résultat
+            if isinstance(result, dict):
+                result['enrichment_applied'] = 'enriched_data' in enriched_data
+                result['enrichment_source'] = enriched_data.get('enriched_data', {}).get('source')
+            
+            return result
+        
+        return wrapper
+
+# EXEMPLE D'UTILISATION du décorateur
+class EnhancedClientValidator(ClientValidator):
+    """Validateur client avec enrichissement automatique"""
+    
+    @with_company_enrichment
+    async def validate_for_salesforce(self, client_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Validation enrichie pour Salesforce"""
+        return await self.validate_client_data(client_data)
+    
+    @with_company_enrichment
+    async def validate_for_sap(self, client_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Validation enrichie pour SAP"""
+        return await self.validate_client_data(client_data)
 # Fonction utilitaire pour usage direct
 async def validate_client_data(client_data: Dict[str, Any], country: str = "FR") -> Dict[str, Any]:
     """Fonction utilitaire pour valider des données client"""

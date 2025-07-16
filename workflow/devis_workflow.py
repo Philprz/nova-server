@@ -580,7 +580,8 @@ class DevisWorkflow:
             # Étape 2.1: Recherche client
             self._track_step_start("search_client", "Recherche du client...")
             
-            client_info = await self._validate_client(extracted_info.get("client"))
+            from services.unified_validator import unified_validator
+            client_info = await unified_validator.validate_client_complete(extracted_info.get("client"))
     
             # Gérer les suggestions client
             if not client_info.get("found"):
