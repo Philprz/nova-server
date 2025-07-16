@@ -360,7 +360,11 @@ async def chat_with_nova(message_data: ChatMessage):
                 from workflow.devis_workflow import DevisWorkflow
                 
                 # Mode production (pas draft) pour créer réellement le devis
-                workflow = DevisWorkflow(validation_enabled=True, draft_mode=False)
+                workflow = DevisWorkflow(
+                    validation_enabled=True,
+                    draft_mode=False,
+                    force_production=True  # 🔥 FORCER LE MODE PRODUCTION
+                )
                 
                 # Exécuter le workflow avec le message complet
                 workflow_result = await workflow.process_prompt(user_message)
@@ -507,7 +511,11 @@ def handle_quote_creation_intent(message: str, entities: Dict[str, Any]) -> Dict
         }
         
         # Utiliser le workflow existant pour analyser le message
-        workflow = DevisWorkflow(validation_enabled=True, draft_mode=False)
+        workflow = DevisWorkflow(
+            validation_enabled=True,
+            draft_mode=False,
+            force_production=True  # 🔥 FORCER LE MODE PRODUCTION
+        )
         
         # Le workflow peut analyser le message directement
         response['message'] += f"🔍 **Analyse de votre demande :**\n"
@@ -816,7 +824,7 @@ async def start_quote_workflow(message_data: ChatMessage):
         import json
         
         # Créer une instance du workflow
-        workflow = DevisWorkflow(validation_enabled=True, draft_mode=True)  # Mode draft pour éviter la création immédiate
+        workflow = DevisWorkflow(validation_enabled=True, draft_mode=True, force_production=True)  # Mode draft pour éviter la création immédiate
         
         # Analyser le message pour extraire les informations
         message = message_data.message
@@ -1036,17 +1044,17 @@ async def handle_user_choice(choice_data: Dict[str, Any]):
 
         if choice_type == "client_choice":
             # Choix client depuis les suggestions
-            workflow = DevisWorkflow(task_id=task_id)
+            workflow = DevisWorkflow(task_id=task_id, force_production=True)
             result = await workflow.handle_client_suggestions(choice_data, workflow_context)
 
         elif choice_type == "product_choice":
             # Choix produit depuis les alternatives
-            workflow = DevisWorkflow(task_id=task_id)
+            workflow = DevisWorkflow(task_id=task_id, force_production=True)
             result = await workflow.apply_product_suggestions(choice_data.get("products", []), workflow_context)
 
         elif choice_type == "create_client":
             # Déclenchement création client
-            workflow = DevisWorkflow(task_id=task_id)
+            workflow = DevisWorkflow(task_id=task_id, force_production=True)
             result = await workflow._handle_new_client_creation(
                 choice_data.get("client_name", ""),
                 workflow_context
@@ -1078,17 +1086,17 @@ async def handle_user_choice(choice_data: Dict[str, Any]):
 
         if choice_type == "client_choice":
             # Choix client depuis les suggestions
-            workflow = DevisWorkflow(task_id=task_id)
+            workflow = DevisWorkflow(task_id=task_id, force_production=True)
             result = await workflow.handle_client_suggestions(choice_data, workflow_context)
 
         elif choice_type == "product_choice":
             # Choix produit depuis les alternatives
-            workflow = DevisWorkflow(task_id=task_id)
+            workflow = DevisWorkflow(task_id=task_id, force_production=True)
             result = await workflow.apply_product_suggestions(choice_data.get("products", []), workflow_context)
 
         elif choice_type == "create_client":
             # Déclenchement création client
-            workflow = DevisWorkflow(task_id=task_id)
+            workflow = DevisWorkflow(task_id=task_id, force_production=True)
             result = await workflow._handle_new_client_creation(
                 choice_data.get("client_name", ""),
                 workflow_context
@@ -1224,17 +1232,17 @@ async def client_creation_workflow_endpoint(request: Dict[str, Any]):
 
         if choice_type == "client_choice":
             # Choix client depuis les suggestions
-            workflow = DevisWorkflow(task_id=task_id)
+            workflow = DevisWorkflow(task_id=task_id, force_production=True)
             result = await workflow.handle_client_suggestions(choice_data, workflow_context)
 
         elif choice_type == "product_choice":
             # Choix produit depuis les alternatives
-            workflow = DevisWorkflow(task_id=task_id)
+            workflow = DevisWorkflow(task_id=task_id, force_production=True)
             result = await workflow.apply_product_suggestions(choice_data.get("products", []), workflow_context)
 
         elif choice_type == "create_client":
             # Déclenchement création client
-            workflow = DevisWorkflow(task_id=task_id)
+            workflow = DevisWorkflow(task_id=task_id, force_production=True)
             result = await workflow._handle_new_client_creation(
                 choice_data.get("client_name", ""),
                 workflow_context
@@ -1545,7 +1553,7 @@ async def continue_workflow_with_choice(request: Request):
 
     # Récupérer contexte workflow
     context = get_workflow_context(task_id)
-    workflow = DevisWorkflow(task_id=task_id)
+    workflow = DevisWorkflow(task_id=task_id, force_production=True)
 
     if choice_type == "client_selected":
         client_data = data.get("client_data")
@@ -1559,6 +1567,7 @@ async def continue_workflow_with_choice(request: Request):
 class GenerateQuoteRequest(BaseModel):
     prompt: str
     draft_mode: Optional[bool] = False
+    force_production: Optional[bool] = False  # Nouveau paramètre pour forcer la production
 
 class GenerateQuoteResponse(BaseModel):
     status: Optional[str] = None
@@ -1595,7 +1604,8 @@ async def generate_quote_endpoint(request: GenerateQuoteRequest):
         # Mode draft ou production selon la demande
         workflow = DevisWorkflow(
             validation_enabled=True,
-            draft_mode=request.draft_mode
+            draft_mode=request.draft_mode,
+            force_production=request.force_production  # Utiliser le paramètre de la requête
         )
 
         # Exécuter le workflow avec le message complet

@@ -43,18 +43,41 @@ except ImportError as e:
 class DevisWorkflow:
     """Coordinateur du workflow de devis entre Claude, Salesforce et SAP - VERSION AVEC VALIDATEUR CLIENT"""
     
-    def __init__(self, validation_enabled: bool = True, draft_mode: bool = False):
+    def __init__(self, validation_enabled: bool = True, draft_mode: bool = False, force_production: bool = True, task_id: str = None):
+        """
+        Args:
+            validation_enabled: Active la validation des données
+            draft_mode: Mode brouillon (True) ou normal (False)
+            force_production: Force le mode production même si connexions échouent
+        task_id: ID de tâche existant pour récupérer une tâche en cours
+        """
         self.mcp_connector = MCPConnector()
         self.llm_extractor = LLMExtractor()
         self.client_validator = ClientValidator() if validation_enabled else None
         self.validation_enabled = validation_enabled
         self.draft_mode = draft_mode
+        self.force_production = force_production  # 🆕 NOUVEAU PARAMÈTRE
         self.context = {}
+
+        # Configuration mode production
+        if force_production:
+            logger.info("🔥 MODE PRODUCTION FORCÉ - Pas de fallback démo")
+            self.demo_mode = False
+        else:
+            self.demo_mode = True  # Mode démo par défaut
 
         # NOUVEAU : Support du tracking de progression
         self.current_task: Optional[QuoteTask] = None
-        self.task_id: Optional[str] = None
-
+        self.task_id: Optional[str] = task_id  # Utiliser le task_id fourni
+        
+        # Si un task_id est fourni, récupérer la tâche existante
+        if task_id:
+            self.current_task = progress_tracker.get_task(task_id)
+            if self.current_task:
+                logger.info(f"✅ Tâche récupérée: {task_id}")
+            else:
+                logger.warning(f"⚠️ Tâche {task_id} introuvable")
+        
         # Ancien système de workflow_steps conservé pour compatibilité
         self.workflow_steps = []
         # 🧠 NOUVEAU : Initialiser le moteur de suggestions
@@ -69,8 +92,12 @@ class DevisWorkflow:
         self.cache_manager = referential_cache
         self.sequential_validator = SequentialValidator(self.mcp_connector, self.llm_extractor)
 
-        # Pré-charger le cache au démarrage
-        asyncio.create_task(self._initialize_cache())
+        # Pré-charger le cache au démarrage (seulement si dans un contexte async)
+        try:
+            asyncio.create_task(self._initialize_cache())
+        except RuntimeError:
+            # Pas d'event loop actif, initialisation différée
+            logger.info("⏳ Initialisation du cache différée (pas d'event loop actif)")
 
         logger.info("✅ Workflow initialisé avec cache et validation séquentielle")
 
@@ -409,32 +436,11 @@ class DevisWorkflow:
                 if extracted_info and "client" in extracted_info:
                     self._track_step_complete("parse_prompt", "✅ Demande analysée")
 
-                    # Créer un résultat de démonstration
-                    demo_result = {
-                        "success": True,
-                        "status": "demo_mode",
-                        "client": {
-                            "name": extracted_info["client"],
-                            "account_number": "DEMO_001",
-                            "salesforce_id": "demo_sf_id"
-                        },
-                        "products": [
-                            {
-                                "code": product["code"],
-                                "name": product["name"],
-                                "quantity": product["quantity"],
-                                "unit_price": 299.99,
-                                "line_total": product["quantity"] * 299.99
-                            }
-                            for product in extracted_info["products"]
-                        ],
-                        "total_amount": sum(product["quantity"] * 299.99 for product in extracted_info["products"]),
-                        "quote_id": f"NOVA-DEMO-{self.task_id[-8:]}",
-                        "message": "Devis généré en mode démonstration",
-                        "extracted_method": extracted_info.get("extracted_method", "unknown")
-                    }
+                    # 🎯 FORCER LE MODE PRODUCTION - Utiliser le workflow complet
+                    logger.info("🚀 ACTIVATION MODE PRODUCTION - Workflow complet")
 
-                    return demo_result
+                    # Continuer avec le workflow production au lieu de retourner du démo
+                    return await self.process_prompt_original(prompt, task_id, draft_mode)
 
                 else:
                     raise ValueError("Extraction impossible")
@@ -474,7 +480,30 @@ class DevisWorkflow:
             if draft_mode:
                 self.draft_mode = draft_mode
                 logger.info("Mode DRAFT activé pour cette génération")
-            
+
+            # Test des connexions si mode production forcé
+            if self.force_production:
+                logger.info("🔍 Vérification connexions pour mode production...")
+
+                try:
+                    connections = await MCPConnector.test_connections()
+                    sf_connected = connections.get('salesforce', {}).get('connected', False)
+                    sap_connected = connections.get('sap', {}).get('connected', False)
+
+                    if not sf_connected and not sap_connected:
+                        raise ConnectionError("Aucune connexion système disponible")
+
+                    logger.info(f"✅ Connexions OK - SF: {sf_connected}, SAP: {sap_connected}")
+
+                except Exception as e:
+                    if self.force_production:
+                        # En mode production forcé, échouer plutôt que de basculer en démo
+                        return {
+                            "success": False,
+                            "error": f"Connexions système indisponibles: {e}",
+                            "message": "Impossible de traiter la demande - Systèmes non disponibles"
+                        }
+
             # Initialiser ou récupérer le tracking
             if task_id:
                 self.current_task = progress_tracker.get_task(task_id)
@@ -2085,38 +2114,51 @@ class DevisWorkflow:
         """
         Valide le client avec suggestions intelligentes
         """
-        logger.info(f"🔍 Validation client avec suggestions: {client_name}")
-        
+        logger.info(f"🔍 RECHERCHE CLIENT RÉEL: {client_name}")
+
         try:
             # === RECHERCHE CLASSIQUE (code existant) ===
             query = f"SELECT Id, Name, AccountNumber, AnnualRevenue, LastActivityDate FROM Account WHERE Name LIKE '%{client_name}%' LIMIT 10"
+            logger.debug(f"📝 Requête Salesforce: {query}")
+
             sf_result = await self.mcp_connector.call_salesforce_mcp("salesforce_query", {"query": query})
-            
+
+            logger.info(f"📊 RÉSULTAT SALESFORCE BRUT: {json.dumps(sf_result, indent=2, ensure_ascii=False)}")
+
             # Client trouvé directement
             if sf_result.get("totalSize", 0) > 0 and sf_result.get("records"):
                 client_record = sf_result["records"][0]
+                logger.debug(f"📋 ENREGISTREMENT CLIENT TROUVÉ: {json.dumps(client_record, indent=2)}")
+
                 self._enrich_client_data(client_record.get("Name", client_name), client_record)
-                logger.info(f"✅ Client trouvé directement: {client_record.get('Name')}")
+                logger.info(f"✅ Client trouvé directement: {client_record.get('Name')} (ID: {client_record.get('Id')})")
+                logger.debug(f"🔍 Détails client: AccountNumber={client_record.get('AccountNumber')}, Revenue={client_record.get('AnnualRevenue')}")
                 return {"found": True, "data": client_record}
             
             # === NOUVEAU : RECHERCHE INTELLIGENTE ===
             logger.info("🧠 Client non trouvé, activation du moteur de suggestions...")
-            
+
             # Récupérer tous les clients pour la recherche floue
             all_clients_query = "SELECT Id, Name, AccountNumber, AnnualRevenue, LastActivityDate FROM Account LIMIT 1000"
+            logger.debug(f"📝 Requête tous clients: {all_clients_query}")
+
             all_clients_result = await self.mcp_connector.call_salesforce_mcp("salesforce_query", {"query": all_clients_query})
-            
+            logger.debug(f"📊 RÉSULTAT TOUS CLIENTS: {json.dumps(all_clients_result, indent=2, ensure_ascii=False)}")
+
             available_clients = all_clients_result.get("records", []) if all_clients_result.get("totalSize", 0) > 0 else []
+            logger.info(f"🔍 {len(available_clients)} clients disponibles pour analyse")
             
             # Générer les suggestions
             self.client_suggestions = await self.suggestion_engine.suggest_client(client_name, available_clients)
-            
+            logger.debug(f"🔍 SUGGESTIONS GÉNÉRÉES: {json.dumps(self.client_suggestions.to_dict(), indent=2)}")
+
             if self.client_suggestions.has_suggestions:
                 primary_suggestion = self.client_suggestions.primary_suggestion
-                
+
                 # Si confiance élevée, proposer auto-correction
                 if primary_suggestion.confidence.value == "high":
                     logger.info(f"🎯 Suggestion haute confiance: {primary_suggestion.suggested_value} (score: {primary_suggestion.score})")
+                    logger.debug(f"🔍 Détails suggestion: {primary_suggestion.details}")
                     
                     # Retourner avec suggestion pour que l'utilisateur puisse choisir
                     return {
@@ -2295,17 +2337,19 @@ class DevisWorkflow:
         if not products:
             logger.warning("Aucun produit spécifié")
             return []
-        
-        logger.info(f"Récupération des informations pour {len(products)} produits")
-        
+
+        logger.info(f"🔍 RECHERCHE PRODUITS RÉELS: {products}")
+
         enriched_products = []
-        
+
         for product in products:
             try:
                 # Appel MCP pour récupérer les détails du produit
                 product_details = await MCPConnector.call_sap_mcp("sap_get_product_details", {
                     "item_code": product["code"]
                 })
+
+                logger.info(f"🏭 RÉSULTAT SAP: {product_details}")
                 
                 if "error" in product_details:
                     logger.error(f"Erreur produit {product['code']}: {product_details['error']}")

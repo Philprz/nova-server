@@ -35,8 +35,11 @@ class LLMExtractor:
 
         Pour une demande de DEVIS, extrais :
         - Nom du client
-        - Liste des produits avec codes/références et quantités
-
+        - Liste des produits avec codes/références, noms et quantités
+        Format JSON requis:
+        {
+            "products": [{"code": "CODE_PRODUIT", "name": "NOM_PRODUIT", "quantity": QUANTITÉ}]
+        }
         Pour une RECHERCHE_PRODUIT, extrais :
         - Caractéristiques recherchées (vitesse, type, fonctionnalités...)
         - Catégorie de produit (imprimante, ordinateur, etc.)
