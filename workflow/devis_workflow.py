@@ -2393,22 +2393,31 @@ class DevisWorkflow:
                 # CORRECTION PRINCIPALE: Récupérer le prix depuis la structure retournée par sap_mcp.py
                 unit_price = 0.0
                 
-                # 1. Le prix est maintenant dans la clé "Price" directement (enrichi par sap_mcp.py)
-                if "Price" in product_details:
+                # 1. Utiliser l'information PriceEngine si disponible
+                if (
+                    "price_details" in product_details
+                    and product_details["price_details"].get("price_engine")
+                ):
+                    pe = product_details["price_details"]["price_engine"]
+                    unit_price = float(pe.get("unit_price_after_discount", 0.0))
+                    logger.info(f"Prix trouvé via 'PriceEngine': {unit_price}")
+
+                # 2. Sinon, utiliser la clé "Price" directement (enrichi par sap_mcp.py)
+                elif "Price" in product_details:
                     unit_price = float(product_details.get("Price", 0.0))
                     logger.info(f"Prix trouvé via 'Price': {unit_price}")
                 
-                # 2. Si pas de prix direct, essayer dans price_details (nouveau format)
+                # 3. Si pas de prix direct, essayer dans price_details (nouveau format)
                 elif "price_details" in product_details and product_details["price_details"].get("price"):
                     unit_price = float(product_details["price_details"]["price"])
                     logger.info(f"Prix trouvé via 'price_details': {unit_price}")
                 
-                # 3. Fallback sur ItemPrices[0].Price (format SAP natif)
+                # 4. Fallback sur ItemPrices[0].Price (format SAP natif)
                 elif "ItemPrices" in product_details and len(product_details["ItemPrices"]) > 0:
                     unit_price = float(product_details["ItemPrices"][0].get("Price", 0.0))
                     logger.info(f"Prix trouvé via 'ItemPrices[0]': {unit_price}")
                 
-                # 4. Autres fallbacks
+                # 5. Autres fallbacks
                 elif "LastPurchasePrice" in product_details:
                     unit_price = float(product_details.get("LastPurchasePrice", 0.0))
                     logger.info(f"Prix trouvé via 'LastPurchasePrice': {unit_price}")
