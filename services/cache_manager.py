@@ -1,20 +1,21 @@
 # services/cache_manager.py
-import asyncio
+import os
+import json
 import logging
+import asyncio
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
-import json
 
-# Import optionnel de Redis
+logger = logging.getLogger(__name__)
+
+# 🔧 CORRECTION : Import Redis avec gestion d'erreur
 try:
     import redis
     REDIS_AVAILABLE = True
 except ImportError:
     REDIS_AVAILABLE = False
-    redis = None
-
-logger = logging.getLogger(__name__)
+    logger.warning("Redis non disponible - utilisation du cache mémoire uniquement")
 
 @dataclass
 class CacheEntry:
@@ -29,60 +30,160 @@ class CacheEntry:
     
     def is_valid(self) -> bool:
         return not self.is_expired()
-class RedisCacheManager:
-    """Gestionnaire de cache Redis pour performances"""
 
-    def __init__(self):
+class RedisCacheManager:
+    """Gestionnaire de cache Redis avec fallback mémoire"""
+    
+    def __init__(self, redis_url: str = "redis://localhost:6379", memory_fallback: bool = True):
+        self.redis_url = redis_url
+        self.memory_fallback = memory_fallback
+        self.redis_client = None
+        self.memory_cache = {}
+        self.memory_cache_ttl = {}
+        
+        # 🔧 CORRECTION : Initialisation Redis avec gestion d'erreur
         if REDIS_AVAILABLE:
             try:
-                self.redis_client = redis.Redis(host='localhost', port=6379, db=0)
+                self.redis_client = redis.Redis.from_url(redis_url, decode_responses=True)
                 # Test de connexion
                 self.redis_client.ping()
-                self.redis_available = True
+                logger.info("✅ Connexion Redis établie")
             except Exception as e:
-                logger.warning(f"Redis non disponible, utilisation du cache mémoire: {e}")
-                self.redis_available = False
-                self.memory_cache = {}
-        else:
-            logger.warning("Module redis non installé, utilisation du cache mémoire")
-            self.redis_available = False
-            self.memory_cache = {}
-
-        self.default_ttl = 3600  # 1 heure
+                logger.warning(f"❌ Connexion Redis échouée: {e}")
+                self.redis_client = None
+        
+        if not self.redis_client and memory_fallback:
+            logger.info("🔄 Utilisation du cache mémoire en fallback")
     
-    async def get_cached_data(self, key: str) -> Optional[Any]:
-        """Récupération données mises en cache"""
-        if self.redis_available:
+    async def get_cached_data(self, key: str) -> Optional[Dict[str, Any]]:
+        """Récupère des données depuis le cache"""
+        
+        # 🔧 CORRECTION : Essayer Redis en premier si disponible
+        if self.redis_client:
             try:
-                cached = self.redis_client.get(key)
-                return json.loads(cached) if cached else None
-            except Exception:
-                return None
-        else:
-            # Utiliser le cache mémoire
-            return self.memory_cache.get(key)
-
-    async def cache_data(self, key: str, data: Any, ttl: int = None) -> bool:
-        """Mise en cache des données"""
-        if self.redis_available:
+                cached_data = self.redis_client.get(key)
+                if cached_data:
+                    logger.debug(f"Cache Redis HIT: {key}")
+                    return json.loads(cached_data)
+            except Exception as e:
+                logger.warning(f"Erreur lecture Redis: {e}")
+        
+        # Fallback vers cache mémoire
+        if self.memory_fallback:
+            if key in self.memory_cache:
+                # Vérifier TTL
+                if key in self.memory_cache_ttl:
+                    if datetime.now() < self.memory_cache_ttl[key]:
+                        logger.debug(f"Cache mémoire HIT: {key}")
+                        return self.memory_cache[key]
+                    else:
+                        # Nettoyer l'entrée expirée
+                        del self.memory_cache[key]
+                        del self.memory_cache_ttl[key]
+        
+        return None
+    
+    async def cache_data(self, key: str, data: Dict[str, Any], ttl: int = 3600) -> bool:
+        """Met en cache des données"""
+        
+        # 🔧 CORRECTION : Essayer Redis en premier si disponible
+        if self.redis_client:
             try:
-                self.redis_client.setex(
-                    key,
-                    ttl or self.default_ttl,
-                    json.dumps(data)
-                )
+                self.redis_client.setex(key, ttl, json.dumps(data))
+                logger.debug(f"Cache Redis SET: {key}")
                 return True
-            except Exception:
-                return False
-        else:
-            # Utiliser le cache mémoire
+            except Exception as e:
+                logger.warning(f"Erreur écriture Redis: {e}")
+        
+        # Fallback vers cache mémoire
+        if self.memory_fallback:
             self.memory_cache[key] = data
+            self.memory_cache_ttl[key] = datetime.now() + timedelta(seconds=ttl)
+            logger.debug(f"Cache mémoire SET: {key}")
             return True
+        
+        return False
     
     def generate_cache_key(self, prefix: str, **kwargs) -> str:
-        """Génération clé de cache standardisée"""
-        params = "_".join(f"{k}_{v}" for k, v in sorted(kwargs.items()))
-        return f"{prefix}:{params}"
+        """Génère une clé de cache standardisée"""
+        key_parts = [prefix]
+        for k, v in sorted(kwargs.items()):
+            key_parts.append(f"{k}:{v}")
+        return ":".join(key_parts)
+    
+    def clear_cache(self, pattern: str = None):
+        """Nettoie le cache"""
+        
+        # 🔧 CORRECTION : Nettoyer Redis si disponible
+        if self.redis_client:
+            try:
+                if pattern:
+                    keys = self.redis_client.keys(pattern)
+                    if keys:
+                        self.redis_client.delete(*keys)
+                        logger.info(f"Cache Redis nettoyé: {len(keys)} clés supprimées")
+                else:
+                    self.redis_client.flushall()
+                    logger.info("Cache Redis complètement nettoyé")
+            except Exception as e:
+                logger.warning(f"Erreur nettoyage Redis: {e}")
+        
+        # Nettoyer cache mémoire
+        if self.memory_fallback:
+            if pattern:
+                keys_to_remove = [k for k in self.memory_cache.keys() if pattern in k]
+                for key in keys_to_remove:
+                    del self.memory_cache[key]
+                    self.memory_cache_ttl.pop(key, None)
+                logger.info(f"Cache mémoire nettoyé: {len(keys_to_remove)} clés supprimées")
+            else:
+                self.memory_cache.clear()
+                self.memory_cache_ttl.clear()
+                logger.info("Cache mémoire complètement nettoyé")
+    
+    # 🔧 CORRECTION : Méthode pour nettoyer les entrées expirées
+    def cleanup_expired_entries(self):
+        """Nettoie les entrées expirées du cache mémoire"""
+        if not self.memory_fallback:
+            return
+        
+        current_time = datetime.now()
+        expired_keys = []
+        
+        for key, expiry_time in self.memory_cache_ttl.items():
+            if current_time >= expiry_time:
+                expired_keys.append(key)
+        
+        for key in expired_keys:
+            self.memory_cache.pop(key, None)
+            self.memory_cache_ttl.pop(key, None)
+        
+        if expired_keys:
+            logger.debug(f"Nettoyage: {len(expired_keys)} entrées expirées supprimées")
+    
+    def get_cache_stats(self) -> Dict[str, Any]:
+        """Retourne les statistiques du cache"""
+        stats = {
+            "redis_available": self.redis_client is not None,
+            "memory_fallback": self.memory_fallback,
+            "memory_cache_size": len(self.memory_cache),
+            "memory_cache_keys": list(self.memory_cache.keys())
+        }
+        
+        if self.redis_client:
+            try:
+                info = self.redis_client.info()
+                stats["redis_info"] = {
+                    "used_memory": info.get("used_memory_human"),
+                    "connected_clients": info.get("connected_clients"),
+                    "keyspace_hits": info.get("keyspace_hits"),
+                    "keyspace_misses": info.get("keyspace_misses")
+                }
+            except Exception as e:
+                stats["redis_error"] = str(e)
+        
+        return stats
+
 class ReferentialCache:
     """Cache intelligent pour accélérer la validation client/produit"""
     

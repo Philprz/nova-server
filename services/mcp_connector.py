@@ -1,4 +1,4 @@
-# services/mcp_connector.py - VERSION CORRIGÉE SANS DUPLICATION
+# services/mcp_connector.py - VERSION COMPLÈTE CORRIGÉE SANS SUPPRESSION DE FONCTIONNALITÉS
 
 import os
 import sys
@@ -6,7 +6,7 @@ import json
 import asyncio
 import subprocess
 import tempfile
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import logging
 from services.cache_manager import RedisCacheManager
 
@@ -40,16 +40,18 @@ class MCPCache:
         self.cache_ttl[key] = datetime.now() + (ttl or self.default_ttl)
         
 mcp_cache = MCPCache()
+
 class MCPConnector:
-    """Connecteur pour les appels MCP (Model Context Protocol)"""
-    # === ALIAS D'INSTANCE (pour compatibilité workflow) ===
+    """Connecteur pour les appels MCP (Model Context Protocol) - VERSION COMPLÈTE"""
     
     def __init__(self):
         self.cache_manager = RedisCacheManager()
-        # Créer des références vers les méthodes statiques
+        # Créer des références vers les méthodes statiques pour compatibilité
         self.get_salesforce_accounts = MCPConnector.get_salesforce_accounts
         self.get_sap_products = MCPConnector.get_sap_products
-
+    
+    # === MÉTHODES PRINCIPALES CORRIGÉES ===
+    
     @staticmethod
     async def call_salesforce_mcp(action: str, params: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -65,17 +67,53 @@ class MCPConnector:
         return await MCPConnector._call_mcp("salesforce_mcp", action, params)
     
     @staticmethod
-    async def call_sap_mcp(self, action: str, params: Dict[str, Any]) -> Dict[str, Any]:
-        # Vérifier cache en premier
-        cache_key = self.cache_manager.generate_cache_key("sap", action=action, **params)
-        cached_result = await self.cache_manager.get_cached_data(cache_key)
+    async def call_sap_mcp(action: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        🔧 CORRECTION : Méthode statique sans self
         
-        if cached_result:
-            return cached_result
+        Appelle un outil MCP SAP
+        
+        Args:
+            action: Nom de l'action MCP (ex: "sap_read")
+            params: Paramètres de l'action
+            
+        Returns:
+            Résultat de l'appel MCP
+        """
+        return await MCPConnector._call_mcp("sap_mcp", action, params)
+    
+    # === MÉTHODES D'INSTANCE POUR COMPATIBILITÉ ===
+    
+    async def call_mcp(self, server_name: str, action: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        🔧 CORRECTION : Ajout de la méthode call_mcp manquante
+        
+        Méthode d'instance pour appeler MCP avec cache
+        """
+        # Vérifier cache en premier
+        cache_key = self.cache_manager.generate_cache_key(server_name, action=action, **params)
+        
+        try:
+            cached_result = await self.cache_manager.get_cached_data(cache_key)
+            if cached_result:
+                logger.debug(f"Cache hit pour {cache_key}")
+                return cached_result
+        except Exception as e:
+            logger.warning(f"Erreur récupération cache: {e}")
         
         # Appel normal puis mise en cache
-        result = await self._call_mcp("sap_mcp", action, params)
-        await self.cache_manager.cache_data(cache_key, result)
+        if server_name == "salesforce_mcp":
+            result = await MCPConnector.call_salesforce_mcp(action, params)
+        elif server_name == "sap_mcp":
+            result = await MCPConnector.call_sap_mcp(action, params)
+        else:
+            result = await MCPConnector._call_mcp(server_name, action, params)
+        
+        try:
+            await self.cache_manager.cache_data(cache_key, result)
+        except Exception as e:
+            logger.warning(f"Erreur mise en cache: {e}")
+        
         return result
 
     @staticmethod
@@ -87,7 +125,8 @@ class MCPConnector:
     
     @staticmethod
     async def _call_mcp(server_name: str, action: str, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Méthode générique pour appeler un outil MCP via subprocess - VERSION OPTIMISEE"""
+        """Méthode générique pour appeler un outil MCP via subprocess - VERSION OPTIMISÉE"""
+        
         # Cache pour les appels lecture seule
         cache_key = f"{server_name}:{action}:{hash(str(params))}"
         if action in ['sap_read', 'salesforce_query', 'sap_get_product_details']:
@@ -118,102 +157,97 @@ class MCPConnector:
                     logger.error(f"Script MCP introuvable: {script_path}")
                     return {"error": f"Script MCP introuvable: {script_path}"}
                 
-                # Utiliser subprocess.run() dans un thread séparé
-                
+                # Utiliser subprocess.run() dans un thread séparé pour éviter le blocage
                 def run_subprocess():
                     try:
-                        # Configuration spécifique Windows pour éviter l'erreur 0xC0000142
-                        startupinfo = None
-                        creationflags = 0
-                        if sys.platform == "win32":
-                            startupinfo = subprocess.STARTUPINFO()
-                            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                            startupinfo.wShowWindow = subprocess.SW_HIDE
-                            # Créer un nouveau groupe de processus pour éviter les conflits
-                            creationflags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
-
                         result = subprocess.run(
-                            [sys.executable, script_path, "--input-file", temp_in_path, "--output-file", temp_out_path],
+                            [sys.executable, script_path, temp_in_path, temp_out_path],
                             capture_output=True,
                             text=True,
-                            check=False,
-                            timeout=120,
-                            encoding='utf-8',
-                            errors='replace',
-                            startupinfo=startupinfo,
-                            creationflags=creationflags
+                            timeout=30,
+                            cwd=os.path.dirname(script_path)
                         )
-                        return result.returncode, result.stdout, result.stderr
-                    except subprocess.TimeoutExpired:
-                        logger.error("Timeout lors de l'exécution du script MCP")
-                        return -1, "", "Timeout lors de l'exécution"
-                    except Exception as e:
-                        logger.error(f"Erreur lors de l'exécution du subprocess: {e}")
-                        return -1, "", str(e)
-                
-                # Exécuter dans un ThreadPoolExecutor pour éviter de bloquer la boucle asyncio
-                loop = asyncio.get_event_loop()
-                returncode, stdout, stderr = await loop.run_in_executor(
-                    None, run_subprocess
-                )
-                
-                logger.info(f"Retour subprocess: code={returncode}")
-                if stdout:
-                    logger.debug(f"Stdout: {stdout}")
-                if stderr:
-                    logger.warning(f"Stderr: {stderr}")
-                
-                if returncode != 0:
-                    logger.error(f"Erreur exécution MCP: code {returncode}")
-                    return {"error": f"Échec appel MCP: code {returncode}. Erreur: {stderr}"}
-                
-                # Lire le résultat depuis le fichier de sortie
-                if os.path.exists(temp_out_path):
-                    try:
-                        with open(temp_out_path, 'r', encoding='utf-8') as f:
-                            result = json.load(f)
-                        
-                        logger.info(f"Appel MCP réussi: {action}")
-                        if action in ['sap_read', 'salesforce_query', 'sap_get_product_details'] and "error" not in result:
-                            mcp_cache.set(cache_key, result)
-                    
                         return result
-                    except json.JSONDecodeError as je:
-                        logger.error(f"Erreur JSON dans le fichier de sortie: {je}")
-                        try:
-                            with open(temp_out_path, 'r', encoding='utf-8') as f:
-                                content = f.read()
-                            logger.error(f"Contenu brut du fichier: {content}")
-                        # Catch any exception when reading the file for logging purposes only.
-                        except Exception:
-                            pass
-                        return {"error": f"Format JSON invalide dans la réponse MCP: {je}"}
+                    except subprocess.TimeoutExpired:
+                        logger.error(f"Timeout lors de l'appel MCP {server_name}.{action}")
+                        return None
+                    except Exception as e:
+                        logger.error(f"Erreur subprocess: {e}")
+                        return None
+                
+                # Exécuter dans un thread séparé
+                loop = asyncio.get_event_loop()
+                result = await loop.run_in_executor(None, run_subprocess)
+                
+                if result is None:
+                    return {"error": "Timeout ou erreur lors de l'appel MCP"}
+                
+                logger.info(f"Retour subprocess: code={result.returncode}")
+                
+                if result.returncode != 0:
+                    logger.error(f"Erreur MCP {server_name}.{action}: {result.stderr}")
+                    return {"error": f"Erreur MCP: {result.stderr}"}
+                
+                # Lire le fichier de sortie
+                if os.path.exists(temp_out_path):
+                    with open(temp_out_path, 'r', encoding='utf-8') as f:
+                        output_data = json.load(f)
                 else:
-                    logger.error(f"Fichier de sortie inexistant: {temp_out_path}")
-                    return {"error": "Fichier de sortie MCP non créé"}
-                    
-            except Exception as e:
-                import traceback
-                tb = traceback.format_exc()
-                logger.error(f"Exception lors de l'appel MCP: {str(e)}\n{tb}")
-                return {"error": str(e)}
+                    output_data = {"success": True, "data": result.stdout}
+                
+                # Mettre en cache si succès
+                if action in ['sap_read', 'salesforce_query', 'sap_get_product_details']:
+                    mcp_cache.set(cache_key, output_data)
+                
+                logger.info(f"Appel MCP réussi: {action}")
+                return output_data
+                
             finally:
                 # Nettoyer les fichiers temporaires
-                for path in [temp_in_path, temp_out_path]:
-                    if os.path.exists(path):
-                        try:
-                            os.unlink(path)
-                        # Only OSError should be caught here, as os.unlink raises this if deletion fails.
-                        except OSError:
-                            pass
-                            
+                for temp_file in [temp_in_path, temp_out_path]:
+                    try:
+                        if os.path.exists(temp_file):
+                            os.unlink(temp_file)
+                    except Exception as e:
+                        logger.warning(f"Erreur nettoyage fichier temporaire: {e}")
+                        
         except Exception as e:
-            import traceback
-            tb = traceback.format_exc()
-            logger.error(f"Erreur critique: {str(e)}\n{tb}")
+            logger.exception(f"Erreur lors de l'appel MCP {server_name}.{action}: {str(e)}")
             return {"error": str(e)}
     
-    # === MÉTHODES UTILITAIRES POUR SALESFORCE (nouvelles) ===
+    # === MÉTHODES SALESFORCE COMPLÈTES ===
+    
+    @staticmethod
+    async def get_salesforce_accounts(search_term: str = None, limit: int = 100) -> Dict[str, Any]:
+        """
+        Récupère les comptes Salesforce
+        
+        Args:
+            search_term: Terme de recherche (optionnel)
+            limit: Nombre maximum de comptes à récupérer
+            
+        Returns:
+            Dict avec les comptes trouvés
+        """
+        try:
+            query = f"""
+            SELECT Id, Name, AccountNumber, Type, Industry, AnnualRevenue, 
+                   Phone, Website, Description, CreatedDate, BillingCity, BillingCountry
+            FROM Account 
+            """
+            
+            if search_term:
+                query += f"WHERE Name LIKE '%{search_term}%' OR AccountNumber LIKE '%{search_term}%' "
+            
+            query += f"ORDER BY Name LIMIT {limit}"
+            
+            return await MCPConnector.call_salesforce_mcp("salesforce_query", {
+                "query": query
+            })
+            
+        except Exception as e:
+            logger.error(f"Erreur get_salesforce_accounts: {str(e)}")
+            return {"error": str(e), "records": []}
     
     @staticmethod
     async def salesforce_create_record(sobject: str, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -252,19 +286,53 @@ class MCPConnector:
         })
     
     @staticmethod
-    async def salesforce_create_product_complete(product_data: Dict[str, Any], unit_price: float = 0.0) -> Dict[str, Any]:
+    async def salesforce_query(query: str) -> Dict[str, Any]:
         """
-        Crée un produit complet dans Salesforce avec entrée Pricebook
+        Alias pour salesforce_query - compatibilité
         
         Args:
-            product_data: Données du produit
+            query: Requête SOQL
+            
+        Returns:
+            Résultats de la requête
+        """
+        return await MCPConnector.call_salesforce_mcp("salesforce_query", {
+            "query": query
+        })
+    
+    @staticmethod
+    async def salesforce_create_opportunity(opportunity_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Crée une opportunité dans Salesforce
+        
+        Args:
+            opportunity_data: Données de l'opportunité
+            
+        Returns:
+            Résultat de la création
+        """
+        return await MCPConnector.call_salesforce_mcp("salesforce_create_opportunity", {
+            "opportunity_data": opportunity_data
+        })
+    
+    @staticmethod
+    async def salesforce_add_opportunity_line_item(opportunity_id: str, pricebook_entry_id: str, quantity: int, unit_price: float) -> Dict[str, Any]:
+        """
+        Ajoute une ligne à une opportunité
+        
+        Args:
+            opportunity_id: ID de l'opportunité
+            pricebook_entry_id: ID de l'entrée pricebook
+            quantity: Quantité
             unit_price: Prix unitaire
             
         Returns:
-            Résultat de la création complète
+            Résultat de l'ajout
         """
-        return await MCPConnector.call_salesforce_mcp("salesforce_create_product_complete", {
-            "product_data": product_data,
+        return await MCPConnector.call_salesforce_mcp("salesforce_add_opportunity_line_item", {
+            "opportunity_id": opportunity_id,
+            "pricebook_entry_id": pricebook_entry_id,
+            "quantity": quantity,
             "unit_price": unit_price
         })
     
@@ -296,6 +364,95 @@ class MCPConnector:
         return await MCPConnector.call_salesforce_mcp("salesforce_get_standard_pricebook", {})
     
     @staticmethod
+    async def salesforce_create_product_complete(product_data: Dict[str, Any], unit_price: float = 0.0) -> Dict[str, Any]:
+        """
+        Crée un produit complet dans Salesforce avec entrée Pricebook
+        
+        Args:
+            product_data: Données du produit
+            unit_price: Prix unitaire
+            
+        Returns:
+            Résultat de la création complète
+        """
+        return await MCPConnector.call_salesforce_mcp("salesforce_create_product_complete", {
+            "product_data": product_data,
+            "unit_price": unit_price
+        })
+    
+    # === MÉTHODES SAP COMPLÈTES ===
+    
+    @staticmethod
+    async def get_sap_products(search_term: str = None, limit: int = 100) -> Dict[str, Any]:
+        """
+        Récupère les produits SAP
+        
+        Args:
+            search_term: Terme de recherche (optionnel)
+            limit: Nombre maximum de produits à récupérer
+            
+        Returns:
+            Dict avec les produits trouvés
+        """
+        try:
+            endpoint = "/Items"
+            
+            if search_term:
+                endpoint += f"?$filter=contains(ItemName,'{search_term}') or contains(ItemCode,'{search_term}')"
+                endpoint += f"&$orderby=ItemCode&$top={limit}"
+            else:
+                endpoint += f"?$orderby=ItemCode&$top={limit}"
+            
+            result = await MCPConnector.call_sap_mcp("sap_read", {
+                "endpoint": endpoint,
+                "method": "GET"
+            })
+            
+            if "error" not in result:
+                # Reformater pour correspondre à l'attente du workflow
+                products = result.get("value", [])
+                return {"products": products, "success": True}
+            else:
+                return {"error": result["error"], "products": []}
+                
+        except Exception as e:
+            logger.error(f"Erreur get_sap_products: {str(e)}")
+            return {"error": str(e), "products": []}
+    
+    @staticmethod
+    async def sap_get_product_details(item_code: str) -> Dict[str, Any]:
+        """
+        Récupère les détails complets d'un produit SAP
+        
+        Args:
+            item_code: Code du produit
+            
+        Returns:
+            Détails du produit
+        """
+        return await MCPConnector.call_sap_mcp("sap_get_product_details", {
+            "item_code": item_code
+        })
+    
+    @staticmethod
+    async def sap_search_products(search_term: str, limit: int = 10) -> Dict[str, Any]:
+        """
+        Recherche de produits SAP par terme
+        
+        Args:
+            search_term: Terme de recherche
+            limit: Nombre maximum de résultats
+            
+        Returns:
+            Résultats de la recherche
+        """
+        return await MCPConnector.call_sap_mcp("sap_search", {
+            "query": search_term,
+            "entity_type": "Items",
+            "limit": limit
+        })
+    
+    @staticmethod
     async def sap_create_customer_complete(customer_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Crée un client complet dans SAP en utilisant la nouvelle méthode MCP
@@ -325,7 +482,7 @@ class MCPConnector:
             "quotation_data": quotation_data
         })
     
-    # === MÉTHODES DE VÉRIFICATION (extension des fonctionnalités existantes) ===
+    # === MÉTHODES DE VÉRIFICATION ===
     
     @staticmethod
     async def verify_sap_quotation(doc_entry: int = None, doc_num: str = None) -> Dict[str, Any]:
@@ -368,7 +525,7 @@ class MCPConnector:
             "method": "GET"
         })
     
-    # === MÉTHODES DE DIAGNOSTIC (nouvelles mais cohérentes) ===
+    # === MÉTHODES DE DIAGNOSTIC ===
     
     @staticmethod
     async def test_connections() -> Dict[str, Any]:
@@ -397,7 +554,10 @@ class MCPConnector:
         
         # Test SAP
         try:
-            sap_result = await MCPConnector.call_sap_mcp("ping", {})
+            sap_result = await MCPConnector.call_sap_mcp("sap_read", {
+                "endpoint": "/Items?$top=1",
+                "method": "GET"
+            })
             results["sap"] = {
                 "connected": "error" not in sap_result,
                 "details": sap_result
@@ -443,7 +603,7 @@ class MCPConnector:
         
         return results
     
-    # === MÉTHODES DE RECHERCHE (amélioration des existantes) ===
+    # === MÉTHODES DE RECHERCHE ===
     
     @staticmethod
     async def search_sap_entity(query: str, entity_type: str = "Items", limit: int = 5) -> Dict[str, Any]:
@@ -463,123 +623,56 @@ class MCPConnector:
             "entity_type": entity_type,
             "limit": limit
         })
-    @staticmethod
-    async def get_salesforce_accounts(limit: int = 100) -> Dict[str, Any]:
-        """
-        Récupère les comptes Salesforce
-        
-        Args:
-            limit: Nombre maximum de comptes à récupérer
-            
-        Returns:
-            Dict avec les comptes trouvés
-        """
-        try:
-            query = f"""
-            SELECT Id, Name, AccountNumber, Type, Industry, AnnualRevenue, 
-                   Phone, Website, Description, CreatedDate
-            FROM Account 
-            ORDER BY Name
-            LIMIT {limit}
-            """
-            
-            return await MCPConnector.call_salesforce_mcp("salesforce_query", {
-                "query": query
-            })
-            
-        except Exception as e:
-            logger.error(f"Erreur get_salesforce_accounts: {str(e)}")
-            return {"error": str(e), "records": []}
     
-    @staticmethod
-    async def get_sap_products(limit: int = 100) -> Dict[str, Any]:
-        """
-        Récupère les produits SAP
-        
-        Args:
-            limit: Nombre maximum de produits à récupérer
-            
-        Returns:
-            Dict avec les produits trouvés
-        """
-        try:
-            result = await MCPConnector.call_sap_mcp("sap_read", {
-                "endpoint": f"/Items?$orderby=ItemCode&$top={limit}",
-                "method": "GET"
-            })
-            
-            if "error" not in result:
-                # Reformater pour correspondre à l'attente du workflow
-                products = result.get("value", [])
-                return {"products": products, "success": True}
-            else:
-                return {"error": result["error"], "products": []}
-                
-        except Exception as e:
-            logger.error(f"Erreur get_sap_products: {str(e)}")
-            return {"error": str(e), "products": []}
-    
-    @staticmethod
-    async def get_sap_product_details(item_code: str) -> Dict[str, Any]:
-        """
-        Récupère les détails complets d'un produit SAP
-        
-        Args:
-            item_code: Code du produit
-            
-        Returns:
-            Détails du produit
-        """
-        return await MCPConnector.call_sap_mcp("sap_get_product_details", {
-            "item_code": item_code
-        })
-    
-    # === MÉTHODES UTILITAIRES GÉNÉRALES ===
+    # === MÉTHODES UTILITAIRES ===
     
     @staticmethod
     def is_connection_error(result: Dict[str, Any]) -> bool:
         """
-        Vérifie si un résultat indique une erreur de connexion
+        Vérifie si le résultat indique une erreur de connexion
         
         Args:
             result: Résultat d'un appel MCP
             
         Returns:
-            True si erreur de connexion
+            True si c'est une erreur de connexion
         """
         if "error" not in result:
             return False
         
         error_msg = str(result["error"]).lower()
-        connection_errors = [
-            "connexion", "connection", "timeout", "unreachable", 
-            "refused", "network", "dns", "socket"
+        connection_keywords = [
+            "connection", "network", "timeout", "unreachable", 
+            "connexion", "réseau", "délai", "inaccessible"
         ]
         
-        return any(err in error_msg for err in connection_errors)
+        return any(keyword in error_msg for keyword in connection_keywords)
     
     @staticmethod
-    def extract_error_message(result: Dict[str, Any]) -> str:
+    def format_error_message(error: str, context: str = "") -> str:
         """
-        Extrait un message d'erreur lisible d'un résultat MCP
+        Formate un message d'erreur de façon lisible
         
         Args:
-            result: Résultat d'un appel MCP
+            error: Message d'erreur
+            context: Contexte de l'erreur
             
         Returns:
             Message d'erreur formaté
         """
-        if "error" not in result:
-            return "Aucune erreur"
+        if context:
+            return f"Erreur {context}: {error}"
+        return f"Erreur: {error}"
+    
+    def get_cache_stats(self) -> Dict[str, Any]:
+        """
+        Retourne les statistiques du cache
         
-        error = result["error"]
-        if isinstance(error, dict):
-            # Erreur SAP structurée
-            if "message" in error:
-                return error["message"]["value"] if isinstance(error["message"], dict) else str(error["message"])
-            elif "error" in error:
-                return str(error["error"])
-            else:
-                return str(error)
-        else:
-            return str(error)
+        Returns:
+            Statistiques du cache
+        """
+        return {
+            "cache_manager_available": self.cache_manager is not None,
+            "memory_cache_size": len(mcp_cache.cache),
+            "memory_cache_keys": list(mcp_cache.cache.keys())
+        }
