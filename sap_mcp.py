@@ -49,6 +49,9 @@ SAP_USER = os.getenv("SAP_USER")
 SAP_CLIENT_PASSWORD = os.getenv("SAP_CLIENT_PASSWORD")
 SAP_CLIENT = os.getenv("SAP_CLIENT")
 
+# Configuration PriceEngine
+PRICE_ENGINE_URL = os.getenv("PRICE_ENGINE_URL")
+
 # Validation de la configuration
 if not all([SAP_BASE_URL, SAP_USER, SAP_CLIENT_PASSWORD, SAP_CLIENT]):
     log("ERREUR: Configuration SAP incomplète dans .env", "ERROR")
@@ -215,6 +218,29 @@ async def call_sap(endpoint: str, method="GET", payload: Optional[Dict[str, Any]
         log(f"❌ Erreur lors de l'appel à {endpoint}: {str(e)}", "ERROR")
         log(f"Traceback: {traceback.format_exc()}", "DEBUG")
         return {"error": str(e)}
+
+# === PriceEngine Integration ===
+async def call_price_engine(item_code: str, quantity: float = 1.0) -> Optional[dict]:
+    """Interroge le WebService PriceEngine pour obtenir le prix et la remise."""
+    if not PRICE_ENGINE_URL:
+        log("PRICE_ENGINE_URL non configuré", "WARNING")
+        return None
+
+    payload = {"ItemCode": item_code, "Quantity": quantity}
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(PRICE_ENGINE_URL, json=payload)
+        if response.status_code == 200:
+            data = response.json()
+            price = float(data.get("Price", 0))
+            discount = float(data.get("Discount", 0))
+            return {"price": price, "discount": discount}
+        else:
+            log(f"Erreur PriceEngine {response.status_code}: {response.text}", "ERROR")
+            return None
+    except Exception as e:
+        log(f"Exception appel PriceEngine: {str(e)}", "ERROR")
+        return None
 
 # Outils MCP corrigés
 
@@ -494,6 +520,24 @@ async def sap_get_product_details(item_code: str) -> dict:
         price = 0.0
         if product.get("ItemPrices") and len(product["ItemPrices"]) > 0:
             price = float(product["ItemPrices"][0].get("Price", 0))
+
+        # Interroger PriceEngine pour un prix actualisé
+        pe_data = await call_price_engine(item_code)
+        if pe_data:
+            stock_qty = total_stock if total_stock > 0 else 1
+            pe_unit = pe_data["price"] / stock_qty
+            pe_unit_after = pe_unit * (1 - pe_data["discount"] / 100)
+            price = pe_unit_after
+            price_method = "PriceEngine"
+            price_engine_details = {
+                "price": pe_data["price"],
+                "discount": pe_data["discount"],
+                "unit_price_before_discount": pe_unit,
+                "unit_price_after_discount": pe_unit_after
+            }
+        else:
+            price_method = "ItemPrices"
+            price_engine_details = None
         
         # Récupérer les détails par entrepôt depuis ItemWarehouseInfoCollection
         warehouses = []
@@ -531,12 +575,16 @@ async def sap_get_product_details(item_code: str) -> dict:
             "Price": price,
             "price_details": {
                 "price": price,
-                "method_used": "ItemPrices",
-                "details": {"price_list": product.get("ItemPrices", [{}])[0].get("PriceList", "Standard") if product.get("ItemPrices") else "N/A"}
+                "method_used": price_method,
+                "details": {"price_list": product.get("ItemPrices", [{}])[0].get("PriceList", "Standard") if product.get("ItemPrices") else "N/A"},
+                "price_engine": price_engine_details
             }
         }
         
-        log(f"✅ Détails du produit {item_code} récupérés - Stock RÉEL: {total_stock}, Prix: {price}", "SUCCESS")
+        log(
+            f"✅ Détails du produit {item_code} récupérés - Stock RÉEL: {total_stock}, Prix: {price} via {price_method}",
+            "SUCCESS",
+        )
         return enriched_product
         
     except Exception as e:
