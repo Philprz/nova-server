@@ -1,11 +1,26 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-    <link rel="stylesheet" href="/static/it_spirit_styles.css">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NOVA - Générateur de Devis Intelligent</title>
+    <title>NOVA - Assistant Commercial Intelligent</title>
+    <link rel="stylesheet" href="/static/it_spirit_styles.css">
     <style>
+        /* 🎨 STYLES IT SPIRIT - Interface Élégante avec Chat */
+        :root {
+            --primary-blue: #02B9FD;
+            --primary-purple: #832DFE;
+            --primary-pink: #E220FB;
+            --gradient-main: linear-gradient(135deg, #02B9FD 0%, #832DFE 50%, #E220FB 100%);
+            --gradient-secondary: linear-gradient(45deg, #02B9FD, #832DFE);
+            --bg-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            --text-dark: #1f2937;
+            --text-light: #6b7280;
+            --success-green: #10b981;
+            --warning-orange: #f59e0b;
+            --error-red: #ef4444;
+        }
+
         * {
             margin: 0;
             padding: 0;
@@ -14,85 +29,132 @@
 
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: var(--bg-gradient);
             min-height: 100vh;
-            position: relative;
             overflow-x: hidden;
+            color: var(--text-dark);
         }
 
-        /* Formes organiques de fond - Style IT SPIRIT */
+        /* Formes organiques animées en arrière-plan */
         .background-shapes {
             position: fixed;
             top: 0;
             left: 0;
             width: 100%;
             height: 100%;
-            pointer-events: none;
-            z-index: 1;
+            z-index: -1;
+            overflow: hidden;
         }
 
         .shape {
             position: absolute;
             border-radius: 50%;
-            opacity: 0.1;
-            animation: float 6s ease-in-out infinite;
+            background: rgba(255, 255, 255, 0.1);
+            animation: float 20s infinite linear;
         }
 
         .shape-1 {
             width: 300px;
             height: 300px;
-            background: #02B9FD;
-            top: 10%;
-            left: -10%;
+            top: 20%;
+            left: 10%;
             animation-delay: 0s;
         }
 
         .shape-2 {
             width: 200px;
             height: 200px;
-            background: #E220FB;
             top: 60%;
-            right: -5%;
-            animation-delay: 2s;
+            right: 15%;
+            animation-delay: 5s;
         }
 
         .shape-3 {
             width: 150px;
             height: 150px;
-            background: #2DFE83;
             bottom: 20%;
             left: 20%;
-            animation-delay: 4s;
+            animation-delay: 10s;
         }
 
         .shape-4 {
-            width: 250px;
-            height: 250px;
-            background: #832DFE;
-            top: 30%;
+            width: 100px;
+            height: 100px;
+            top: 40%;
             right: 30%;
-            animation-delay: 1s;
+            animation-delay: 15s;
         }
 
         @keyframes float {
-            0%, 100% { transform: translateY(0) scale(1); }
-            50% { transform: translateY(-20px) scale(1.05); }
+            0%, 100% { transform: translateY(0px) rotate(0deg); }
+            33% { transform: translateY(-30px) rotate(120deg); }
+            66% { transform: translateY(20px) rotate(240deg); }
+        }
+
+        /* Toggle mode brouillon */
+        .mode-toggle {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1000;
+        }
+
+        .toggle-switch {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: rgba(255, 255, 255, 0.2);
+            backdrop-filter: blur(10px);
+            padding: 10px 15px;
+            border-radius: 25px;
+            color: white;
+            font-size: 0.9rem;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+
+        .switch {
+            width: 50px;
+            height: 25px;
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 25px;
+            position: relative;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .switch.active {
+            background: var(--success-green);
+        }
+
+        .switch-handle {
+            width: 21px;
+            height: 21px;
+            background: white;
+            border-radius: 50%;
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        }
+
+        .switch.active .switch-handle {
+            transform: translateX(25px);
         }
 
         /* Container principal */
         .container {
-            position: relative;
-            z-index: 10;
-            max-width: 900px;
+            max-width: 1000px;
             margin: 0 auto;
             padding: 40px 20px;
+            position: relative;
+            z-index: 1;
             min-height: 100vh;
             display: flex;
             flex-direction: column;
-            justify-content: center;
         }
 
-        /* Header avec logo IT SPIRIT */
+        /* Header avec logo - Design original */
         .header {
             text-align: center;
             margin-bottom: 40px;
@@ -106,33 +168,6 @@
             margin-bottom: 25px;
         }
 
-        .logo {
-            display: inline-flex;
-            align-items: center;
-            gap: 15px;
-            animation: fadeInScale 0.8s ease-out 0.3s backwards;
-        }
-
-        .logo-icon {
-            width: 50px;
-            height: 50px;
-            background: linear-gradient(135deg, #02B9FD, #832DFE);
-            border-radius: 50% 20% 50% 20%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-size: 22px;
-            font-weight: bold;
-        }
-
-        .logo-text {
-            color: white;
-            font-size: 2.2rem;
-            font-weight: 300;
-            letter-spacing: 2px;
-        }
-
         .it-spirit-logo {
             width: 140px;
             height: auto;
@@ -144,19 +179,6 @@
             transition: transform 0.3s ease;
             cursor: pointer;
             animation: fadeInScale 0.8s ease-out;
-            /* Alternative sans fond blanc : commentez les 3 lignes background, padding, border-radius et décommentez la ligne suivante */
-            /* filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3)); */
-        }
-
-        @keyframes fadeInScale {
-            from {
-                opacity: 0;
-                transform: scale(0.8);
-            }
-            to {
-                opacity: 1;
-                transform: scale(1);
-            }
         }
 
         .it-spirit-logo:hover {
@@ -183,21 +205,38 @@
             color: rgba(255, 255, 255, 0.9);
             font-size: 1.1rem;
             font-weight: 300;
-            margin-top: 10px;
+            text-align: center;
+            margin-bottom: 40px;
+            animation: fadeInScale 0.8s ease-out 0.7s backwards;
         }
 
-        /* Interface de saisie moderne */
-        .input-section {
+        @keyframes fadeInScale {
+            from {
+                opacity: 0;
+                transform: scale(0.8);
+            }
+            to {
+                opacity: 1;
+                transform: scale(1);
+            }
+        }
+
+        /* Zone de conversation avec design élégant */
+        .conversation-section {
             background: rgba(255, 255, 255, 0.15);
             backdrop-filter: blur(20px);
             border: 1px solid rgba(255, 255, 255, 0.2);
             border-radius: 30px;
-            padding: 30px 40px;
-            margin-bottom: 40px;
+            padding: 30px;
+            margin-bottom: 20px;
             box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 400px;
         }
 
-        .input-title {
+        .conversation-title {
             color: white;
             font-size: 1.4rem;
             font-weight: 300;
@@ -206,237 +245,298 @@
             opacity: 0.9;
         }
 
-        .input-container {
-            position: relative;
+        /* Messages de conversation */
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            margin-bottom: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            min-height: 250px;
+            max-height: 400px;
         }
 
-        .main-input {
-            width: 100%;
-            min-height: 120px;
+        .message {
+            display: flex;
+            gap: 12px;
+            max-width: 85%;
+            animation: slideIn 0.3s ease;
+        }
+
+        .message.user {
+            align-self: flex-end;
+            flex-direction: row-reverse;
+        }
+
+        .message.assistant {
+            align-self: flex-start;
+        }
+
+        .message-avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2rem;
+            flex-shrink: 0;
+        }
+
+        .message.user .message-avatar {
+            background: var(--gradient-main);
+            color: white;
+        }
+
+        .message.assistant .message-avatar {
+            background: rgba(255, 255, 255, 0.9);
+            color: var(--primary-blue);
+        }
+
+        .message-content {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 15px 18px;
+            border-radius: 18px;
+            line-height: 1.5;
+            word-wrap: break-word;
+        }
+
+        .message.user .message-content {
+            background: var(--gradient-main);
+            color: white;
+            border-bottom-right-radius: 6px;
+        }
+
+        .message.assistant .message-content {
+            border-bottom-left-radius: 6px;
+            border: 1px solid rgba(0, 0, 0, 0.1);
+        }
+
+        /* Suggestions dans les messages */
+        .message-suggestions {
+            margin-top: 10px;
+            padding: 10px;
+            background: rgba(2, 185, 253, 0.1);
+            border-radius: 8px;
+            border-left: 3px solid var(--primary-blue);
+        }
+
+        .suggestions-title {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--primary-blue);
+            margin-bottom: 8px;
+        }
+
+        .suggestions-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .suggestions-list li {
+            padding: 4px 0;
+            font-size: 0.9rem;
+            color: var(--text-dark);
+            cursor: pointer;
+            transition: color 0.2s ease;
+        }
+
+        .suggestions-list li:hover {
+            color: var(--primary-blue);
+            text-decoration: underline;
+        }
+
+        /* Message de bienvenue élégant */
+        .welcome-message {
+            text-align: center;
+            padding: 60px 20px;
+            color: rgba(255, 255, 255, 0.8);
+            animation: fadeInScale 1s ease-out;
+        }
+
+        .welcome-title {
+            font-size: 1.8rem;
+            font-weight: 300;
+            margin-bottom: 15px;
+            background: var(--gradient-main);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .welcome-subtitle {
+            font-size: 1.1rem;
+            opacity: 0.8;
+            line-height: 1.5;
+        }
+
+        /* Indicateur de frappe élégant */
+        .typing-indicator {
+            display: flex;
+            gap: 12px;
+            max-width: 85%;
+            align-self: flex-start;
+            opacity: 0;
+            transform: translateY(10px);
+            transition: all 0.3s ease;
+        }
+
+        .typing-indicator.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .typing-indicator .message-avatar {
+            background: rgba(255, 255, 255, 0.9);
+            color: var(--primary-blue);
+        }
+
+        .typing-content {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 15px 18px;
+            border-radius: 18px;
+            border-bottom-left-radius: 6px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            border: 1px solid rgba(0, 0, 0, 0.1);
+        }
+
+        .typing-dots {
+            display: flex;
+            gap: 4px;
+        }
+
+        .typing-dot {
+            width: 8px;
+            height: 8px;
+            background: var(--primary-blue);
+            border-radius: 50%;
+            animation: typingPulse 1.4s infinite ease-in-out;
+        }
+
+        .typing-dot:nth-child(1) { animation-delay: -0.32s; }
+        .typing-dot:nth-child(2) { animation-delay: -0.16s; }
+        .typing-dot:nth-child(3) { animation-delay: 0s; }
+
+        @keyframes typingPulse {
+            0%, 80%, 100% {
+                transform: scale(0.8);
+                opacity: 0.5;
+            }
+            40% {
+                transform: scale(1);
+                opacity: 1;
+            }
+        }
+
+        /* Zone de saisie élégante */
+        .input-container {
+            display: flex;
+            gap: 15px;
+            align-items: flex-end;
+        }
+
+        .chat-input {
+            flex: 1;
             background: rgba(255, 255, 255, 0.95);
             border: none;
             border-radius: 20px;
-            padding: 25px 30px;
+            padding: 15px 20px;
             font-size: 1.1rem;
             font-family: inherit;
-            resize: vertical;
+            resize: none;
             outline: none;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            max-height: 120px;
+            min-height: 50px;
+            overflow-y: auto;
             transition: all 0.3s ease;
             line-height: 1.6;
         }
 
-        .main-input:focus {
+        .chat-input:focus {
             transform: translateY(-2px);
             box-shadow: 0 15px 40px rgba(0, 0, 0, 0.15);
             background: white;
         }
 
-        .main-input::placeholder {
+        .chat-input::placeholder {
             color: #64748b;
             font-style: italic;
         }
 
-        /* Indicateur de traitement */
-        .input-indicator {
-            position: absolute;
-            bottom: -10px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: rgba(255, 255, 255, 0.9);
-            border-radius: 20px;
-            padding: 8px 20px;
-            font-size: 0.9rem;
-            color: #475569;
-            opacity: 0;
-            transition: all 0.3s ease;
-            backdrop-filter: blur(10px);
-        }
-
-        .input-indicator.show {
-            opacity: 1;
-            bottom: -5px;
-        }
-
-        /* Zone de résultats */
-        .results-section {
-            background: rgba(255, 255, 255, 0.95);
-            border-radius: 25px;
-            padding: 30px;
-            margin-top: 20px;
-            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1);
-            opacity: 0;
-            transform: translateY(20px);
-            transition: all 0.5s ease;
-        }
-
-        .results-section.show {
-            opacity: 1;
-            transform: translateY(0);
-        }
-
-        .processing-indicator {
-            text-align: center;
-            padding: 40px;
-            color: #64748b;
-        }
-
-        .processing-dots {
-            display: inline-flex;
-            gap: 8px;
-            margin-left: 10px;
-        }
-
-        .dot {
-            width: 8px;
-            height: 8px;
-            background: #02B9FD;
-            border-radius: 50%;
-            animation: pulse 1.5s ease-in-out infinite;
-        }
-
-        .dot:nth-child(2) { animation-delay: 0.2s; }
-        .dot:nth-child(3) { animation-delay: 0.4s; }
-
-        @keyframes pulse {
-            0%, 100% { opacity: 0.3; transform: scale(1); }
-            50% { opacity: 1; transform: scale(1.2); }
-        }
-
-        /* Mode toggle */
-        .mode-toggle {
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            z-index: 100;
-        }
-
-        .toggle-switch {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            background: rgba(255, 255, 255, 0.2);
-            padding: 10px 15px;
-            border-radius: 25px;
-            backdrop-filter: blur(10px);
-            color: white;
-            font-size: 0.9rem;
-        }
-
-        .switch {
+        .send-button {
             width: 50px;
-            height: 25px;
-            background: rgba(255, 255, 255, 0.3);
-            border-radius: 15px;
-            position: relative;
+            height: 50px;
+            background: var(--gradient-main);
+            border: none;
+            border-radius: 50%;
+            color: white;
+            font-size: 1.2rem;
             cursor: pointer;
             transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
         }
 
-        .switch.active {
-            background: #02B9FD;
+        .send-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
         }
 
-        .switch-handle {
-            width: 20px;
-            height: 20px;
-            background: white;
-            border-radius: 50%;
-            position: absolute;
-            top: 2.5px;
-            left: 2.5px;
-            transition: all 0.3s ease;
+        .send-button:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
         }
 
-        .switch.active .switch-handle {
-            left: 27.5px;
+        .send-button.sending {
+            animation: pulse 1s infinite;
         }
 
-        /* Notifications */
-        .notification {
-            position: fixed;
-            top: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            padding: 12px 20px;
-            border-radius: 25px;
-            z-index: 1000;
-            font-size: 0.9rem;
-            backdrop-filter: blur(10px);
-            animation: slideIn 0.3s ease;
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
         }
 
+        /* Scrollbar personnalisée */
+        .chat-messages::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .chat-messages::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 3px;
+        }
+
+        .chat-messages::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 3px;
+        }
+
+        .chat-messages::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.5);
+        }
+
+        /* Animations */
         @keyframes slideIn {
             from {
                 opacity: 0;
-                transform: translateX(-50%) translateY(-20px);
+                transform: translateY(20px);
             }
             to {
                 opacity: 1;
-                transform: translateX(-50%) translateY(0);
+                transform: translateY(0);
             }
         }
 
-        .notification.success {
-            background: #10b981;
-            color: white;
-        }
-
-        .notification.error {
-            background: #ef4444;
-            color: white;
-        }
-
-        .notification.warning {
-            background: #FD5202;
-            color: white;
-        }
-
-        .notification.info {
-            background: #02B9FD;
-            color: white;
-        }
-
-        /* Boutons d'action */
-        .action-buttons {
-            display: flex;
-            gap: 15px;
-            justify-content: center;
-            margin-top: 25px;
-        }
-
-        .action-button {
-            padding: 12px 30px;
-            border-radius: 25px;
-            cursor: pointer;
-            font-size: 1rem;
-            transition: all 0.3s ease;
-            border: none;
-            font-weight: 500;
-        }
-
-        .action-button.primary {
-            background: #667eea;
-            color: white;
-        }
-
-        .action-button.primary:hover {
-            background: #5a67d8;
-            transform: translateY(-2px);
-        }
-
-        .action-button.secondary {
-            background: rgba(102, 126, 234, 0.1);
-            border: 1px solid #667eea;
-            color: #667eea;
-        }
-
-        .action-button.secondary:hover {
-            background: #667eea;
-            color: white;
-        }
-
-        /* Responsive */
+        /* Responsive Design */
         @media (max-width: 768px) {
             .container {
                 padding: 20px 15px;
@@ -453,104 +553,59 @@
                 box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
             }
 
-            .input-section {
-                padding: 25px;
-                border-radius: 20px;
-            }
-
-            .main-input {
-                min-height: 100px;
-                padding: 20px;
-                font-size: 1rem;
-            }
-
-            .logo-text {
-                font-size: 1.8rem;
-            }
-
             .nova-presentation {
                 font-size: 1.3rem;
                 margin: 15px 0 8px 0;
             }
-        }
 
-            .action-buttons {
-                flex-direction: column;
+            .tagline {
+                font-size: 1rem;
+                margin-bottom: 30px;
             }
 
-            .action-button {
-                width: 100%;
-            }
-        }
-
-        /* 🆕 Styles pour le formulaire de saisie manuelle */
-        .manual-form-container {
-            background: #f8fafc;
-            padding: 20px;
-            border-radius: 10px;
-            border: 1px solid #e5e7eb;
-            margin-top: 20px;
-        }
-
-        .manual-form-field {
-            margin-bottom: 15px;
-        }
-
-        .manual-form-label {
-            display: block;
-            margin-bottom: 5px;
-            font-weight: 600;
-            color: #374151;
-        }
-
-        .manual-form-input {
-            width: 100%;
-            padding: 10px;
-            border: 1px solid #d1d5db;
-            border-radius: 6px;
-            font-size: 14px;
-            transition: border-color 0.2s ease;
-        }
-
-        .manual-form-input:focus {
-            outline: none;
-            border-color: #10b981;
-            box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
-        }
-
-        .manual-form-input.error {
-            border-color: #ef4444;
-        }
-
-        .required-mark {
-            color: #ef4444;
-        }
-
-        .fallback-notice {
-            background: #fef3c7;
-            color: #92400e;
-            padding: 15px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            border-left: 4px solid #f59e0b;
-        }
-
-        .form-note {
-            margin-top: 15px;
-            padding: 10px;
-            background: #e0f2fe;
-            border-radius: 6px;
-            font-size: 0.85rem;
-            color: #0369a1;
-            border-left: 3px solid #0284c7;
-        }
-
-            .action-buttons {
-                flex-direction: column;
+            .conversation-section {
+                padding: 20px;
+                border-radius: 20px;
+                min-height: 300px;
             }
 
-            .action-button {
-                width: 100%;
+            .conversation-title {
+                font-size: 1.2rem;
+            }
+
+            .chat-messages {
+                min-height: 200px;
+                max-height: 300px;
+            }
+
+            .message {
+                max-width: 95%;
+            }
+
+            .chat-input {
+                font-size: 1rem;
+                padding: 12px 16px;
+            }
+
+            .send-button {
+                width: 45px;
+                height: 45px;
+            }
+
+            .mode-toggle {
+                position: relative;
+                top: auto;
+                right: auto;
+                margin-bottom: 20px;
+                text-align: center;
+            }
+
+            .welcome-title {
+                font-size: 1.5rem;
+            }
+
+            .welcome-subtitle {
+                font-size: 1rem;
             }
         }
     </style>
@@ -575,14 +630,9 @@
     </div>
 
     <div class="container">
-        <!-- Header -->
+        <!-- Header avec logo IT Spirit - Design original -->
         <div class="header">
             <div class="logo-container">
-                <!-- Logo IT SPIRIT -->
-                <!-- Note: Placez le fichier logo_it_spirit.png dans le dossier static/ de votre projet -->
-                <!-- Formats acceptés: PNG, JPG, SVG | Taille recommandée: 300x150px minimum -->
-                <!-- Alternative: Vous pouvez aussi utiliser une URL externe ou encoder l'image en base64 -->
-                <!-- Pour ajouter un lien vers le site IT Spirit, enveloppez la div dans une balise <a href="https://www.itspirit.fr" target="_blank"> -->
                 <div class="it-spirit-logo" onclick="window.open('https://www.it-spirit.fr', '_blank')" title="Visiter le site IT Spirit">
                     <img src="/static/Logo.png" alt="IT Spirit" />
                 </div>
@@ -591,1256 +641,315 @@
             <div class="tagline">L'esprit humain au cœur de la technologie</div>
         </div>
 
-        <!-- Interface de saisie -->
-        <div class="input-section">
-            <h2 class="input-title">Décrivez votre demande en langage naturel</h2>
+        <!-- Zone de conversation élégante -->
+        <div class="conversation-section">
+            <h2 class="conversation-title">Conversation avec votre assistant intelligent</h2>
             
-            <div class="input-container">
-                <textarea 
-                    id="mainInput" 
-                    class="main-input" 
-                    placeholder="Fais moi un devis de 4 imprimantes 40 ppm pour Edge Communication"
-                    oninput="handleInput()"
-                    onkeydown="handleKeyDown(event)"
-                ></textarea>
-                
-                <div id="inputIndicator" class="input-indicator">
-                    ⏎ Appuyez sur Entrée pour traiter votre demande
-                </div>
-            </div>
-        </div>
-
-        <!-- 🆕 BOUTON DE TEST DEBUG -->
-        <div style="text-align: center; margin: 20px 0;">
-            <button onclick="testSimpleAPI()" style="background: #ff6b6b; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer;">
-                🧪 Test API Debug
-            </button>
-        </div>
-
-        <!-- Zone de résultats -->
-        <div id="resultsSection" class="results-section">
-            <div id="processingIndicator" class="processing-indicator">
-                <div style="font-size: 1.2rem; margin-bottom: 15px;">
-                    🤖 NOVA traite votre demande
-                </div>
-                <div>
-                    Analyse en cours
-                    <div class="processing-dots">
-                        <div class="dot"></div>
-                        <div class="dot"></div>
-                        <div class="dot"></div>
+            <!-- Messages de conversation -->
+            <div class="chat-messages" id="chatMessages">
+                <div class="welcome-message">
+                    <div class="welcome-title">👋 Bonjour ! Je suis NOVA</div>
+                    <div class="welcome-subtitle">
+                        Votre assistant commercial intelligent.<br>
+                        Demandez-moi de créer un devis ou posez-moi vos questions !
                     </div>
                 </div>
             </div>
-            
-            <div id="resultsContent" style="display: none;">
-                <!-- Les résultats seront affichés ici -->
+
+            <!-- Indicateur de frappe -->
+            <div class="typing-indicator" id="typingIndicator">
+                <div class="message-avatar">🤖</div>
+                <div class="typing-content">
+                    <span>NOVA réfléchit</span>
+                    <div class="typing-dots">
+                        <div class="typing-dot"></div>
+                        <div class="typing-dot"></div>
+                        <div class="typing-dot"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Zone de saisie -->
+            <div class="input-container">
+                <textarea 
+                    id="chatInput" 
+                    class="chat-input" 
+                    placeholder="Exemple : Créer un devis pour 10 imprimantes A00025 pour le client Edge Communications..."
+                    rows="1"
+                    data-auto-resize
+                ></textarea>
+                <button id="sendButton" class="send-button" onclick="sendMessage()">
+                    ➤
+                </button>
             </div>
         </div>
     </div>
 
     <script>
+        // 🔧 JAVASCRIPT CHAT CONVERSATIONNEL ÉLÉGANT
+        
         let isDraftMode = false;
-        let processingTimeout;
-        let currentQuoteData = null;
+        let isProcessing = false;
+        let conversationHistory = [];
 
+        // Configuration auto-resize du textarea
+        function setupAutoResize() {
+            const textarea = document.getElementById('chatInput');
+            if (!textarea) return;
+
+            textarea.addEventListener('input', function() {
+                this.style.height = 'auto';
+                this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+                
+                // Activer/désactiver le bouton d'envoi
+                const sendButton = document.getElementById('sendButton');
+                if (sendButton) {
+                    sendButton.disabled = !this.value.trim();
+                }
+            });
+
+            // Gestion de la touche Entrée
+            textarea.addEventListener('keydown', function(event) {
+                if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault();
+                    sendMessage();
+                }
+            });
+        }
+
+        // Toggle mode brouillon
         function toggleDraftMode() {
             const toggle = document.getElementById('draftToggle');
             isDraftMode = !isDraftMode;
             toggle.classList.toggle('active', isDraftMode);
             
-            // Feedback visuel
-            const indicator = document.getElementById('inputIndicator');
-            if (isDraftMode) {
-                indicator.textContent = '📝 Mode brouillon activé - Entrée pour créer un draft';
-            } else {
-                indicator.textContent = '⏎ Appuyez sur Entrée pour traiter votre demande';
-            }
+            addSystemMessage(isDraftMode ? 
+                '📝 Mode brouillon activé - Vos devis seront créés en tant que brouillons' : 
+                '📋 Mode production activé - Vos devis seront créés définitivement'
+            );
         }
 
-        function handleInput() {
-            const input = document.getElementById('mainInput');
-            const indicator = document.getElementById('inputIndicator');
+        // Ajouter un message système
+        function addSystemMessage(content) {
+            const messagesContainer = document.getElementById('chatMessages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message assistant';
             
-            if (input.value.trim().length > 0) {
-                indicator.classList.add('show');
-            } else {
-                indicator.classList.remove('show');
+            messageDiv.innerHTML = `
+                <div class="message-avatar">ℹ️</div>
+                <div class="message-content" style="background: rgba(16, 185, 129, 0.1); border-left: 3px solid #10b981;">
+                    ${content}
+                </div>
+            `;
+            
+            messagesContainer.appendChild(messageDiv);
+            scrollToBottom();
+            
+            // Masquer le message de bienvenue s'il existe
+            hideWelcomeMessage();
+        }
+
+        // Ajouter un message utilisateur
+        function addUserMessage(content) {
+            const messagesContainer = document.getElementById('chatMessages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message user';
+            
+            messageDiv.innerHTML = `
+                <div class="message-avatar">👤</div>
+                <div class="message-content">${content}</div>
+            `;
+            
+            messagesContainer.appendChild(messageDiv);
+            scrollToBottom();
+            
+            // Masquer le message de bienvenue
+            hideWelcomeMessage();
+            
+            // Ajouter à l'historique
+            conversationHistory.push({
+                role: 'user',
+                content: content,
+                timestamp: new Date()
+            });
+        }
+
+        // Ajouter un message assistant
+        function addAssistantMessage(data) {
+            const messagesContainer = document.getElementById('chatMessages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message assistant';
+            
+            let suggestionsHtml = '';
+            if (data.response?.suggestions && data.response.suggestions.length > 0) {
+                suggestionsHtml = `
+                    <div class="message-suggestions">
+                        <div class="suggestions-title">💡 Suggestions :</div>
+                        <ul class="suggestions-list">
+                            ${data.response.suggestions.map(suggestion => 
+                                `<li onclick="selectSuggestion('${suggestion.replace(/'/g, "\\'")}')">${suggestion}</li>`
+                            ).join('')}
+                        </ul>
+                    </div>
+                `;
+            }
+            
+            messageDiv.innerHTML = `
+                <div class="message-avatar">🤖</div>
+                <div class="message-content">
+                    ${data.response?.message || "Réponse reçue"}
+                    ${suggestionsHtml}
+                </div>
+            `;
+            
+            messagesContainer.appendChild(messageDiv);
+            scrollToBottom();
+            
+            // Ajouter à l'historique
+            conversationHistory.push({
+                role: 'assistant',
+                content: data.response?.message || "Réponse reçue",
+                timestamp: new Date(),
+                data: data
+            });
+        }
+
+        // Masquer le message de bienvenue
+        function hideWelcomeMessage() {
+            const welcomeMsg = document.querySelector('.welcome-message');
+            if (welcomeMsg) {
+                welcomeMsg.style.display = 'none';
             }
         }
 
-        function handleKeyDown(event) {
-            if (event.key === 'Enter' && !event.shiftKey) {
-                event.preventDefault();
-                generateQuote();
+        // Sélectionner une suggestion
+        function selectSuggestion(suggestion) {
+            const input = document.getElementById('chatInput');
+            input.value = suggestion;
+            input.style.height = 'auto';
+            input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+            input.focus();
+            
+            // Activer le bouton d'envoi
+            const sendButton = document.getElementById('sendButton');
+            if (sendButton) {
+                sendButton.disabled = false;
             }
         }
 
-        // 🆕 FONCTION DE TEST SIMPLE
-        async function testSimpleAPI() {
-            console.log("🧪 Test simple de l'API");
+        // Afficher l'indicateur de frappe
+        function showTypingIndicator() {
+            const indicator = document.getElementById('typingIndicator');
+            indicator.classList.add('show');
+            scrollToBottom();
+        }
 
+        // Masquer l'indicateur de frappe
+        function hideTypingIndicator() {
+            const indicator = document.getElementById('typingIndicator');
+            indicator.classList.remove('show');
+        }
+
+        // Faire défiler vers le bas
+        function scrollToBottom() {
+            const messagesContainer = document.getElementById('chatMessages');
+            setTimeout(() => {
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }, 100);
+        }
+
+        // Envoyer un message
+        async function sendMessage() {
+            if (isProcessing) return;
+            
+            const input = document.getElementById('chatInput');
+            const sendButton = document.getElementById('sendButton');
+            const message = input.value.trim();
+            
+            if (!message) return;
+            
+            // Ajouter le message utilisateur
+            addUserMessage(message);
+            
+            // Vider et réinitialiser l'input
+            input.value = '';
+            input.style.height = 'auto';
+            sendButton.disabled = true;
+            
+            // État de traitement
+            isProcessing = true;
+            sendButton.classList.add('sending');
+            showTypingIndicator();
+            
             try {
-                const response = await fetch('/api/assistant/generate_quote', {
+                // Envoyer à l'API
+                const response = await fetch('/api/assistant/chat', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                         'Accept': 'application/json'
                     },
                     body: JSON.stringify({
-                        prompt: 'test simple',
-                        draft_mode: false
+                        message: message,
+                        draft_mode: isDraftMode,
+                        conversation_history: conversationHistory.slice(-10) // Derniers 10 messages pour le contexte
                     })
                 });
-
-                console.log("✅ Réponse reçue:", response.status);
-                const data = await response.json();
-                console.log("📊 Données:", data);
-
-                alert('Test réussi ! Voir la console pour les détails.');
-
-            } catch (error) {
-                console.error("❌ Erreur test simple:", error);
-                alert('Erreur: ' + error.message);
-            }
-        }
-
-        // 🔧 CORRECTION JAVASCRIPT - Fonction generateQuote() optimisée
-        async function generateQuote() {
-            console.log("🚀 Début generateQuote() - Version corrigée");
-
-            const isDraftMode = document.getElementById('draftToggle')?.classList.contains('active') || false;
-            const promptInput = document.getElementById('mainInput');
-            const prompt = promptInput?.value?.trim();
-
-            // Validation de base
-            if (!prompt) {
-                showError('Veuillez saisir une demande de devis');
-                return;
-            }
-
-            // Masquer l'indicateur
-            document.getElementById('inputIndicator').classList.remove('show');
-
-            // Afficher la zone de traitement
-            const resultsSection = document.getElementById('resultsSection');
-            const processingIndicator = document.getElementById('processingIndicator');
-            const resultsContent = document.getElementById('resultsContent');
-
-            resultsSection.classList.add('show');
-            processingIndicator.style.display = 'block';
-            resultsContent.style.display = 'none';
-
-            console.log(`📝 Prompt: "${prompt}"`);
-            console.log(`📋 Draft mode: ${isDraftMode}`);
-
-            try {
-                // 🔧 CORRECTION 1: Essayer plusieurs endpoints dans l'ordre
-                const endpoints = [
-                    '/api/assistant/chat',            // Endpoint existant
-                    '/api/assistant/workflow/create_quote', // Endpoint workflow
-                    '/generate_quote'                 // Endpoint de secours
-                ];
-
-                let lastError = null;
-                let response = null;
-
-                // Essayer chaque endpoint
-                for (const endpoint of endpoints) {
-                    try {
-                        console.log(`🔄 Tentative avec endpoint: ${endpoint}`);
-
-                        response = await fetch(endpoint, {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json',
-                                'Accept': 'application/json'
-                            },
-                            body: JSON.stringify({
-                                message: prompt  // Le format attendu par /chat
-                            })
-                        });
-
-                        console.log(`📡 Réponse ${endpoint}: ${response.status} ${response.statusText}`);
-
-                        // Si la réponse est OK, sortir de la boucle
-                        if (response.ok) {
-                            break;
-                        }
-
-                        lastError = `${endpoint}: ${response.status} ${response.statusText}`;
-
-                    } catch (error) {
-                        console.error(`❌ Erreur ${endpoint}:`, error);
-                        lastError = `${endpoint}: ${error.message}`;
-                        continue;
-                    }
-                }
-
-                // 🔧 CORRECTION 2: Gestion robuste des erreurs
-                if (!response || !response.ok) {
-                    throw new Error(`Tous les endpoints ont échoué. Dernière erreur: ${lastError}`);
-                }
-
-                // 🔧 CORRECTION 3: Parsing JSON sécurisé
-                let data;
-                try {
-                    const textResponse = await response.text();
-                    console.log(`📄 Réponse brute: ${textResponse}`);
-                    data = JSON.parse(textResponse);
-                } catch (parseError) {
-                    console.error('❌ Erreur parsing JSON:', parseError);
-                    throw new Error('Réponse serveur invalide');
-                }
-
-                console.log(`📊 Données parsées:`, data);
-
-                // 🔧 CORRECTION 4: Vérification robuste du succès
-                const isSuccess = data.success === true ||
-                                  data.status === 'success' ||
-                                  data.status === 'started' ||
-                                  (data.task_id && data.polling_url);
-
-                if (isSuccess) {
-                    console.log('✅ Génération réussie');
-
-                    // 🔧 CORRECTION 5: Gestion des différents types de réponses
-                    if (data.task_id && data.polling_url) {
-                        // Mode asynchrone avec polling
-                        console.log('🔄 Mode asynchrone détecté');
-                        await handleAsyncQuote(data.task_id, data.polling_url);
-                    } else {
-                        // Mode synchrone
-                        console.log('⚡ Mode synchrone détecté');
-                        showQuoteResult(data);
-                    }
-                } else {
-                    // Gestion des erreurs avec clients similaires
-                    if (data.similar_clients && data.similar_clients.length > 0) {
-                        console.log('🔍 Clients similaires trouvés');
-                        showSimilarClients(data);
-                    } else {
-                        const errorMsg = data.error || data.message || 'Erreur inconnue';
-                        throw new Error(errorMsg);
-                    }
-                }
-
-            } catch (error) {
-                console.error('❌ Erreur générale:', error);
-
-                // 🔧 CORRECTION 6: Affichage d'erreur amélioré
-                showError(`Erreur: ${error.message}`);
-
-                // Diagnostic automatique en cas d'erreur
-                console.log('🔍 Lancement du diagnostic automatique...');
-                await runAutoDiagnostic();
-
-            } finally {
-                // 🔧 CORRECTION 7: Nettoyage toujours exécuté
-                processingIndicator.style.display = 'none';
-            }
-        }
-
-        // 🆕 NOUVELLE FONCTION: Gestion asynchrone
-        async function handleAsyncQuote(taskId, pollingUrl) {
-            console.log(`🔄 Démarrage polling pour task_id: ${taskId}`);
-
-            const maxPolls = 60; // 60 tentatives maximum
-            let pollCount = 0;
-
-            const pollInterval = setInterval(async () => {
-                try {
-                    pollCount++;
-                    console.log(`🔄 Poll ${pollCount}/${maxPolls}`);
-
-                    const response = await fetch(pollingUrl);
-                    const data = await response.json();
-
-                    if (data.status === 'completed') {
-                        clearInterval(pollInterval);
-                        console.log('✅ Génération terminée');
-                        showQuoteResult(data);
-                    } else if (data.status === 'failed') {
-                        clearInterval(pollInterval);
-                        throw new Error(data.error || 'Génération échouée');
-                    } else if (pollCount >= maxPolls) {
-                        clearInterval(pollInterval);
-                        throw new Error('Timeout: génération trop longue');
-                    }
-
-                } catch (error) {
-                    clearInterval(pollInterval);
-                    console.error('❌ Erreur polling:', error);
-                    showError(`Erreur polling: ${error.message}`);
-                }
-            }, 2000); // Poll toutes les 2 secondes
-        }
-
-        // 🆕 NOUVELLE FONCTION: Diagnostic automatique
-        async function runAutoDiagnostic() {
-            console.log('🔍 === DIAGNOSTIC AUTOMATIQUE ===');
-
-            // Test de connectivité de base - utiliser diagnostic au lieu de health
-            try {
-                const healthResponse = await fetch('/diagnostic');
-                if (healthResponse.ok) {
-                    const healthData = await healthResponse.json();
-                    console.log('✅ Diagnostic check:', healthData);
-                } else {
-                    console.log('⚠️ Diagnostic check status:', healthResponse.status);
-                }
-            } catch (error) {
-                console.log('❌ Diagnostic check échoué:', error.message);
-            }
-
-            // Test des endpoints
-            const endpoints = ['/api/assistant/chat', '/generate_quote', '/api/assistant/workflow/create_quote'];
-
-            for (const endpoint of endpoints) {
-                try {
-                    const response = await fetch(endpoint, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ prompt: 'test diagnostic', draft_mode: false })
-                    });
-
-                    console.log(`🔍 ${endpoint}: ${response.status} ${response.statusText}`);
-                } catch (error) {
-                    console.log(`❌ ${endpoint}: ${error.message}`);
-                }
-            }
-
-            console.log('🔍 === FIN DIAGNOSTIC ===');
-        }
-
-        // 🔧 CORRECTION FONCTION: showError améliorée
-        function showError(message) {
-            console.error('❌ Erreur affichée:', message);
-
-            // Affichage dans l'interface
-            const errorDiv = document.getElementById('error-display') || (() => {
-                const div = document.createElement('div');
-                div.id = 'error-display';
-                div.style.cssText = `
-                    background: #f8d7da;
-                    color: #721c24;
-                    padding: 15px;
-                    border-radius: 6px;
-                    border: 1px solid #f5c6cb;
-                    margin: 20px 0;
-                    font-weight: bold;
-                    position: fixed;
-                    top: 20px;
-                    right: 20px;
-                    z-index: 1000;
-                    max-width: 400px;
-                `;
-                document.body.appendChild(div);
-                return div;
-            })();
-
-            errorDiv.innerHTML = `
-                <div style="display: flex; align-items: center; gap: 10px;">
-                    <span>❌</span>
-                    <span>${message}</span>
-                </div>
-                <div style="margin-top: 10px; font-size: 12px; opacity: 0.8;">
-                    Consultez la console (F12) pour plus de détails
-                </div>
-            `;
-
-            // Auto-hide après 10 secondes
-            setTimeout(() => {
-                if (errorDiv.parentNode) {
-                    errorDiv.parentNode.removeChild(errorDiv);
-                }
-            }, 10000);
-        }
-
-        // Fonction de compatibilité pour maintenir l'ancien nom
-        async function processRequest() {
-            return await generateQuote();
-        }
-
-        // Fonction pour afficher les résultats du devis
-        function showQuoteResult(data) {
-            // Sauvegarder les données du devis
-            currentQuoteData = data;
-            showResults(data);
-        }
-
-        function showSimilarClients(data) {
-            const processingIndicator = document.getElementById('processingIndicator');
-            const resultsContent = document.getElementById('resultsContent');
-
-            processingIndicator.style.display = 'none';
-            resultsContent.style.display = 'block';
-
-            const similarClients = data.similar_clients || [];
-            const errorMessage = data.error || data.message || 'Client non trouvé';
-
-            // Construire l'affichage des clients similaires
-            let clientsHtml = '';
-            similarClients.forEach((client, index) => {
-                const similarity = client.similarity ? `${(client.similarity * 100).toFixed(1)}%` : 'N/A';
-                clientsHtml += `
-                    <div style="background: #f8fafc; padding: 15px; border-radius: 10px; margin-bottom: 10px; border-left: 4px solid #02B9FD; cursor: pointer;"
-                         onclick="selectSimilarClient('${client.name}', '${client.account_number || client.id || ''}')">
-                        <div style="display: flex; justify-content: space-between; align-items: center;">
-                            <div>
-                                <strong style="color: #1f2937;">${client.name}</strong>
-                                ${client.account_number ? `<div style="color: #6b7280; font-size: 0.9rem;">Compte: ${client.account_number}</div>` : ''}
-                                ${client.city ? `<div style="color: #6b7280; font-size: 0.9rem;">📍 ${client.city}${client.country ? ', ' + client.country : ''}</div>` : ''}
-                                ${client.industry ? `<div style="color: #6b7280; font-size: 0.9rem;">🏢 ${client.industry}</div>` : ''}
-                            </div>
-                            <div style="text-align: right;">
-                                <div style="background: #02B9FD; color: white; padding: 4px 8px; border-radius: 12px; font-size: 0.8rem; margin-bottom: 5px;">
-                                    ${similarity} similaire
-                                </div>
-                                <div style="color: #02B9FD; font-size: 0.9rem; font-weight: 600;">
-                                    👆 Cliquer pour sélectionner
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                `;
-            });
-
-            resultsContent.innerHTML = `
-                <div style="text-align: center; margin-bottom: 25px;">
-                    <h3 style="color: #f59e0b; margin-bottom: 10px;">
-                        🔍 Clients similaires trouvés
-                    </h3>
-                    <div style="color: #6b7280; font-size: 0.9rem; margin-bottom: 15px;">
-                        ${errorMessage}
-                    </div>
-                    <div style="background: #fef3c7; color: #92400e; padding: 10px; border-radius: 8px; font-size: 0.9rem;">
-                        💡 Cliquez sur un client pour créer le devis avec ce client, ou créez un nouveau client
-                    </div>
-                </div>
-
-                ${similarClients.length > 0 ? `
-                <div style="margin-bottom: 20px;">
-                    <h4 style="color: #374151; margin-bottom: 15px;">👥 Clients suggérés (${similarClients.length})</h4>
-                    ${clientsHtml}
-                </div>
-                ` : ''}
-
-                <div class="action-buttons">
-                    <button onclick="startClientCreation()" class="action-button primary" style="background: linear-gradient(135deg, #10b981, #059669);">
-                        ➕ Créer un nouveau client
-                    </button>
-                    <button onclick="processRequest()" class="action-button secondary">
-                        🔄 Réessayer
-                    </button>
-                    <button onclick="newRequest()" class="action-button secondary">
-                        ✏️ Modifier la demande
-                    </button>
-                    <button onclick="openClassicInterface()" class="action-button secondary">
-                        💼 Interface classique
-                    </button>
-                </div>
-            `;
-        }
-
-        function extractSimilarClientsFromError(errorMessage) {
-            const clients = [];
-
-            // Nouveaux patterns plus complets
-            const patterns = [
-                // Format 1: "1. Nom Client (similarité: XX.X%)"
-                /(\d+)\.\s+([^(]+?)\s*\(similarité:\s*(\d+\.?\d*)%\)/g,
-                // Format 2: "- Nom Client (XX.X% de similarité)"
-                /-\s+([^(]+?)\s*\((\d+\.?\d*)%\s*de similarité\)/g,
-                // Format 3: "Client: Nom Client (XX.X%)"
-                /Client:\s*([^(]+?)\s*\((\d+\.?\d*)%\)/g,
-                // Format 4: "• Nom Client (XX.X%)"
-                /•\s+([^(]+?)\s*\((\d+\.?\d*)%\)/g,
-                // Format 5: "Nom Client (XX.X% de match)"
-                /([^(]+?)\s*\((\d+\.?\d*)%\s*de match\)/g
-            ];
-
-            for (const pattern of patterns) {
-                let match;
-                while ((match = pattern.exec(errorMessage)) !== null) {
-                    const name = match[2] || match[1];
-                    const similarity = match[3] || match[2];
-
-                    clients.push({
-                        name: name.trim(),
-                        similarity: parseFloat(similarity) / 100,
-                        account_number: extractClientInfo(errorMessage, name, 'account'),
-                        id: `similar_${clients.length + 1}`,
-                        city: extractClientInfo(errorMessage, name, 'city'),
-                        industry: extractClientInfo(errorMessage, name, 'industry')
-                    });
-                }
-            }
-
-            return clients.filter((client, index, self) =>
-                index === self.findIndex(c => c.name === client.name)
-            );
-        }
-
-        function extractClientInfo(errorMessage, clientName, infoType) {
-            const patterns = {
-                city: new RegExp(`${escapeRegExp(clientName)}[^.]*?(?:à|dans|ville de|localisé à)\\s+([A-Z][a-z]+(?:\\s+[A-Z][a-z]+)*)`, 'i'),
-                industry: new RegExp(`${escapeRegExp(clientName)}[^.]*?(?:secteur|activité|domaine)[^:]*?:?\\s+([^.]+)`, 'i'),
-                account: new RegExp(`${escapeRegExp(clientName)}[^.]*?(?:référence|numéro|compte)[^:]*?:?\\s+([A-Z0-9-]+)`, 'i')
-            };
-
-            const match = errorMessage.match(patterns[infoType]);
-            return match ? match[1].trim() : (infoType === 'city' ? 'Ville inconnue' : infoType === 'industry' ? 'Secteur inconnu' : 'N/A');
-        }
-        
-        async function startClientCreation() {
-        // Extraire le nom de l'entreprise de la demande originale
-        const originalPrompt = document.getElementById('mainInput').value.trim();
-        const companyInfo = extractCompanyInfo(originalPrompt);
-        
-        if (!companyInfo.company_name) {
-        showNotification('Impossible d\'extraire le nom de l\'entreprise', 'warning');
-        return;
-        }
-        
-        showNotification('Recherche d\'informations sur l\'entreprise...', 'info');
-        
-        try {
-        const response = await fetch('/api/assistant/create_client/from_text', {
-        method: 'POST',
-        headers: {
-        'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-        text: originalPrompt
-        })
-        });
-        
-        const data = await response.json();
-
-        if (data.success && data.type === 'client_search_results') {
-            showClientCreationResults(data);
-        } else if (!data.success && data.type === 'manual_input_required') {
-            // 🆕 FALLBACK: Afficher le formulaire de saisie manuelle
-            showManualClientForm(data);
-        } else {
-            throw new Error(data.message || 'Erreur lors de la recherche d\'entreprise');
-        }
-        
-        } catch (error) {
-        console.error('Erreur création client:', error);
-        showNotification('❌ ' + error.message, 'error');
-        }
-        }
-        
-        function showClientCreationResults(data) {
-        const resultsContent = document.getElementById('resultsContent');
-        
-        const searchResults = data.search_results || [];
-        const recommended = data.recommended;
-        
-        let resultsHtml = '';
-        searchResults.forEach((company, index) => {
-        const isRecommended = recommended && company.siret === recommended.siret;
-        const borderColor = isRecommended ? '#10b981' : '#e5e7eb';
-        const bgColor = isRecommended ? '#f0fdf4' : '#f8fafc';
-        
-        resultsHtml += `
-        <div style="background: ${bgColor}; padding: 15px; border-radius: 10px; margin-bottom: 10px; border: 2px solid ${borderColor}; cursor: pointer;"
-        onclick="selectCompanyForCreation(${index})">
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-        <div>
-        <strong style="color: #1f2937;">${company.name}</strong>
-        ${isRecommended ? '<span style="background: #10b981; color: white; padding: 2px 6px; border-radius: 8px; font-size: 0.7rem; margin-left: 8px;">RECOMMANDÉ</span>' : ''}
-        <div style="color: #6b7280; font-size: 0.9rem;">SIRET: ${company.siret}</div>
-        <div style="color: #6b7280; font-size: 0.9rem;">📍 ${company.address.street}, ${company.address.city} ${company.address.postal_code}</div>
-        <div style="color: #6b7280; font-size: 0.9rem;">🏢 ${company.activity}</div>
-        <div style="color: #6b7280; font-size: 0.9rem;">📊 ${company.status} - Créé: ${company.creation_date}</div>
-        </div>
-        <div style="text-align: right;">
-        <div style="background: #02B9FD; color: white; padding: 4px 8px; border-radius: 12px; font-size: 0.8rem; margin-bottom: 5px;">
-        ${company.source}
-        </div>
-        <div style="color: #02B9FD; font-size: 0.9rem; font-weight: 600;">
-        👆 Cliquer pour créer
-        </div>
-        </div>
-        </div>
-        </div>
-        `;
-        });
-        
-        resultsContent.innerHTML = `
-        <div style="text-align: center; margin-bottom: 25px;">
-        <h3 style="color: #10b981; margin-bottom: 10px;">
-        🏢 Informations d'entreprise trouvées
-        </h3>
-        <div style="color: #6b7280; font-size: 0.9rem; margin-bottom: 15px;">
-        Entreprise recherchée: <strong>${data.company_name}</strong>
-        ${data.city ? ` à <strong>${data.city}</strong>` : ''}
-        </div>
-        <div style="background: #dcfce7; color: #166534; padding: 10px; border-radius: 8px; font-size: 0.9rem;">
-        💡 Sélectionnez l'entreprise correspondante pour créer le client
-        </div>
-        </div>
-        
-        <div style="margin-bottom: 20px;">
-        <h4 style="color: #374151; margin-bottom: 15px;">🔍 Résultats trouvés (${searchResults.length}) - Sources: ${data.sources.join(', ')}</h4>
-        ${resultsHtml}
-        </div>
-        
-        <div class="action-buttons">
-        <button onclick="showSimilarClients({similar_clients: [], error: 'Aucun client trouvé'})" class="action-button secondary">
-        ← Retour aux clients similaires
-        </button>
-        <button onclick="newRequest()" class="action-button secondary">
-        ✏️ Nouvelle demande
-        </button>
-        </div>
-        `;
-        
-        // Stocker les données pour la sélection
-        window.clientCreationData = data;
-        }
-        
-        async function selectCompanyForCreation(companyIndex) {
-        if (!window.clientCreationData || !window.clientCreationData.search_results[companyIndex]) {
-        showNotification('Erreur: données d\'entreprise non trouvées', 'error');
-        return;
-        }
-
-        // 🆕 NOUVELLE FONCTION: Affichage du formulaire de saisie manuelle
-        function showManualClientForm(data) {
-            const resultsContent = document.getElementById('resultsContent');
-
-            const fieldsHtml = data.required_fields.map(field => {
-                const isRequired = field.required ? 'required' : '';
-                const requiredMark = field.required ? '<span class="required-mark">*</span>' : '';
-
-                return `
-                    <div class="manual-form-field">
-                        <label class="manual-form-label">
-                            ${field.label} ${requiredMark}
-                        </label>
-                        <input
-                            type="${field.type}"
-                            id="manual_${field.name}"
-                            name="${field.name}"
-                            value="${field.value || ''}"
-                            ${isRequired}
-                            class="manual-form-input"
-                            placeholder="Saisissez ${field.label.toLowerCase()}"
-                        />
-                    </div>
-                `;
-            }).join('');
-
-            resultsContent.innerHTML = `
-                <div class="manual-form-header">
-                    <h3 class="manual-form-title">
-                        ⚠️ Saisie manuelle requise
-                    </h3>
-                    <div class="fallback-notice">
-                        <strong>Raison:</strong> ${data.fallback_reason || 'Service de validation temporairement indisponible'}
-                    </div>
-                    <div class="manual-form-subtitle">
-                        Veuillez saisir manuellement les informations du client
-                    </div>
-                </div>
-
-                <form id="manualClientForm" class="manual-form-container">
-                    <h4 class="manual-form-section-title">📝 Informations client</h4>
-
-                    ${fieldsHtml}
-
-                    <div class="manual-form-actions">
-                        <button type="button" onclick="submitManualClient()" class="action-button primary">
-                            ✅ Créer le client
-                        </button>
-                        <button type="button" onclick="newRequest()" class="action-button secondary">
-                            ← Annuler
-                        </button>
-                    </div>
-                </form>
-
-                <div class="form-note">
-                    💡 <strong>Note:</strong> Seul le nom de l'entreprise est obligatoire. Les autres champs amélioreront la qualité des données client.
-                </div>
-            `;
-        }
-
-        // 🆕 NOUVELLE FONCTION: Soumission du formulaire manuel
-        async function submitManualClient() {
-            const form = document.getElementById('manualClientForm');
-            const formData = new FormData(form);
-
-            // Convertir FormData en objet
-            const clientData = {};
-            for (let [key, value] = formData.entries()) {
-                clientData[key] = value.trim();
-            }
-
-            // Validation côté client
-            if (!clientData.company_name) {
-                showNotification('❌ Le nom de l\'entreprise est obligatoire', 'error');
-                document.getElementById('manual_company_name').focus();
-                return;
-            }
-
-            showNotification('Création du client en cours...', 'info');
-
-            try {
-                const response = await fetch('/api/assistant/create_client/manual', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        client_data: clientData
-                    })
-                });
-
-                const data = await response.json();
-
-                if (data.success) {
-                    showManualClientSuccess(data);
-                } else if (data.validation_errors) {
-                    // Afficher les erreurs de validation
-                    const errorMsg = data.validation_errors.join(', ');
-                    showNotification(`❌ Erreurs de validation: ${errorMsg}`, 'error');
-                } else {
-                    throw new Error(data.message || 'Erreur lors de la création du client');
-                }
-
-            } catch (error) {
-                console.error('Erreur création client manuelle:', error);
-                showNotification('❌ ' + error.message, 'error');
-            }
-        }
-
-        // 🆕 NOUVELLE FONCTION: Succès de création manuelle
-        function showManualClientSuccess(data) {
-            const resultsContent = document.getElementById('resultsContent');
-
-            resultsContent.innerHTML = `
-                <div style="text-align: center;">
-                    <div style="background: #dcfce7; color: #166534; padding: 20px; border-radius: 12px; margin-bottom: 20px;">
-                        <h3 style="margin-bottom: 15px;">✅ Client créé avec succès !</h3>
-                        <div style="font-size: 0.9rem; margin-bottom: 10px;">
-                            <strong>Entreprise:</strong> ${data.client_data.company_name}
-                        </div>
-                        ${data.client_data.contact_name ? `<div style="font-size: 0.9rem; margin-bottom: 10px;"><strong>Contact:</strong> ${data.client_data.contact_name}</div>` : ''}
-                        <div style="font-size: 0.9rem; margin-bottom: 10px;">
-                            <strong>ID Client:</strong> ${data.client_id}
-                        </div>
-                        ${data.account_number ? `<div style="font-size: 0.9rem; margin-bottom: 10px;"><strong>Numéro de compte:</strong> ${data.account_number}</div>` : ''}
-                        <div style="font-size: 0.8rem; color: #059669; margin-top: 15px; font-style: italic;">
-                            ${data.validation_note}
-                        </div>
-                    </div>
-
-                    <div class="action-buttons">
-                        <button onclick="processRequest()" class="action-button primary">
-                            📋 Créer un devis pour ce client
-                        </button>
-                        <button onclick="newRequest()" class="action-button secondary">
-                            ✏️ Nouvelle demande
-                        </button>
-                    </div>
-                </div>
-            `;
-
-            showNotification('✅ Client créé avec succès !', 'success');
-        }
-        
-        const selectedCompany = window.clientCreationData.search_results[companyIndex];
-        const contactInfo = {
-        contact_name: window.clientCreationData.contact_name,
-        email: '',
-        phone: ''
-        };
-        
-        showNotification('Création du client en cours...', 'info');
-        
-        try {
-        const response = await fetch('/api/assistant/create_client/confirm', {
-        method: 'POST',
-        headers: {
-        'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-        company_data: selectedCompany,
-        contact_info: contactInfo
-        })
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-        showClientCreationSuccess(data);
-        } else {
-        throw new Error(data.message || 'Erreur lors de la création du client');
-        }
-        
-        } catch (error) {
-        console.error('Erreur création client:', error);
-        showNotification('❌ ' + error.message, 'error');
-        }
-        }
-        
-        function showClientCreationSuccess(data) {
-        const resultsContent = document.getElementById('resultsContent');
-        
-        resultsContent.innerHTML = `
-        <div style="text-align: center; margin-bottom: 25px;">
-        <h3 style="color: #10b981; margin-bottom: 10px;">
-        ✅ Client créé avec succès !
-        </h3>
-        <div style="color: #6b7280; font-size: 0.9rem; margin-bottom: 15px;">
-        ${data.message}
-        </div>
-        </div>
-        
-        <div style="background: #f0fdf4; padding: 20px; border-radius: 15px; margin-bottom: 20px; border: 2px solid #10b981;">
-        <h4 style="color: #166534; margin-bottom: 15px;">🏢 Informations du client</h4>
-        <div style="color: #374151;">
-        <div style="margin-bottom: 8px;"><strong>Nom:</strong> ${data.client_data.Name}</div>
-        <div style="margin-bottom: 8px;"><strong>ID Client:</strong> ${data.client_id}</div>
-        <div style="margin-bottom: 8px;"><strong>Adresse:</strong> ${data.client_data.BillingStreet}, ${data.client_data.BillingCity} ${data.client_data.BillingPostalCode}</div>
-        <div style="margin-bottom: 8px;"><strong>Secteur:</strong> ${data.client_data.Industry}</div>
-        <div style="margin-bottom: 8px;"><strong>SIRET:</strong> ${data.client_data.AccountNumber}</div>
-        </div>
-        </div>
-        
-        <div class="action-buttons">
-        <button onclick="retryWithNewClient('${data.client_data.Name}', '${data.client_id}')" class="action-button primary">
-        🎯 Créer le devis avec ce client
-        </button>
-        <button onclick="newRequest()" class="action-button secondary">
-        ➕ Nouvelle demande
-        </button>
-        </div>
-        `;
-        }
-        
-        function retryWithNewClient(clientName, clientId) {
-        // Récupérer la demande originale et remplacer le nom du client
-        const originalPrompt = document.getElementById('mainInput').value.trim();
-        const newPrompt = originalPrompt.replace(/pour\s+[^,\s]+/i, `pour ${clientName}`);
-        
-        // Mettre à jour le champ de saisie
-        document.getElementById('mainInput').value = newPrompt;
-        
-        // Relancer le traitement
-        showNotification(`Création du devis pour le nouveau client: ${clientName}`, 'success');
-        setTimeout(() => {
-        processRequest();
-        }, 1000);
-        }
-        
-        function shouldShowSimilarClients(errorMessage) {
-            // Détection avancée des cas où afficher les clients similaires
-            const patterns = [
-                /clients? (les plus )?proches/i,
-                /similarit[ée]/i,
-                /Voulez-vous utiliser|souhaitiez-vous parler de/i,
-                /client existant|clients similaires/i,
-                /plusieurs clients correspondant|plusieurs possibilités/i,
-                /sélectionnez le bon client/i,
-                /lequel choisir\?/i,
-                /plusieurs correspondances/i
-            ];
-            return patterns.some(pattern => pattern.test(errorMessage));
-        }
-
-        function isClientRelatedError(errorMessage) {
-            // Détecte si l'erreur est liée à un problème de client
-            const patterns = [
-                /client (non trouvé|introuvable|inconnu)/i,
-                /aucun client.*trouvé/i,
-                /cr[ée]er.*client/i,
-                /nouveau client/i,
-                /client.*n'existe pas/i
-            ];
-            return patterns.some(pattern => pattern.test(errorMessage));
-        }
-
-        function extractClientNameFromError(errorMessage) {
-            // Tente d'extraire le nom du client de l'erreur
-            const match = errorMessage.match(/pour\s+([^,\n]+)|client\s+"?([^"\n]+)"?/i);
-            return match ? (match[1] || match[2]) : null;
-        }
-
-        function showErrorWithCreationOption(errorMessage, options = {}) {
-            const { showClientCreation = true } = options;
-            const resultsContent = document.getElementById('resultsContent');
-
-            resultsContent.innerHTML = `
-                <div style="text-align: center; margin-bottom: 25px;">
-                    <h3 style="color: #ef4444; margin-bottom: 15px;">❌ Erreur lors du traitement</h3>
-                    <p style="color: #6b7280; margin-bottom: 20px;">${errorMessage}</p>
-                    <div class="action-buttons">
-                        ${showClientCreation ? `
-                            <button onclick="startClientCreation()" class="action-button primary">
-                                ➕ Créer un nouveau client
-                            </button>
-                        ` : ''}
-                        <button onclick="processRequest()" class="action-button secondary">
-                            🔄 Réessayer
-                        </button>
-                        <button onclick="newRequest()" class="action-button secondary">
-                            ✏️ Modifier la demande
-                        </button>
-                        <button onclick="openClassicInterface()" class="action-button secondary">
-                            💼 Interface classique
-                        </button>
-                    </div>
-                </div>
-            `;
-
-            showNotification('Erreur lors du traitement de la demande', 'error');
-        }
-
-        function extractSimilarClientsFromError(errorMessage) {
-            const clients = [];
-
-            // Nouveaux patterns plus complets
-            const patterns = [
-                // Format 1: "1. Nom Client (similarité: XX.X%)"
-                /(\d+)\.\s+([^(]+?)\s*\(similarité:\s*(\d+\.?\d*)%\)/g,
-                // Format 2: "- Nom Client (XX.X% de similarité)"
-                /-\s+([^(]+?)\s*\((\d+\.?\d*)%\s*de similarité\)/g,
-                // Format 3: "Client: Nom Client (XX.X%)"
-                /Client:\s*([^(]+?)\s*\((\d+\.?\d*)%\)/g,
-                // Format 4: "• Nom Client (XX.X%)"
-                /•\s+([^(]+?)\s*\((\d+\.?\d*)%\)/g,
-                // Format 5: "Nom Client (XX.X% de match)"
-                /([^(]+?)\s*\((\d+\.?\d*)%\s*de match\)/g
-            ];
-
-            for (const pattern of patterns) {
-                let match;
-                while ((match = pattern.exec(errorMessage)) !== null) {
-                    const name = match[2] || match[1];
-                    const similarity = match[3] || match[2];
-
-                    clients.push({
-                        name: name.trim(),
-                        similarity: parseFloat(similarity) / 100,
-                        account_number: extractClientInfo(errorMessage, name, 'account'),
-                        id: `similar_${clients.length + 1}`,
-                        city: extractClientInfo(errorMessage, name, 'city'),
-                        industry: extractClientInfo(errorMessage, name, 'industry')
-                    });
-                }
-            }
-
-            return clients.filter((client, index, self) =>
-                index === self.findIndex(c => c.name === client.name)
-            );
-        }
-
-        function extractClientInfo(errorMessage, clientName, infoType) {
-            const patterns = {
-                city: new RegExp(`${escapeRegExp(clientName)}[^.]*?(?:à|dans|ville de|localisé à)\\s+([A-Z][a-z]+(?:\\s+[A-Z][a-z]+)*)`, 'i'),
-                industry: new RegExp(`${escapeRegExp(clientName)}[^.]*?(?:secteur|activité|domaine)[^:]*?:?\\s+([^.]+)`, 'i'),
-                account: new RegExp(`${escapeRegExp(clientName)}[^.]*?(?:référence|numéro|compte)[^:]*?:?\\s+([A-Z0-9-]+)`, 'i')
-            };
-
-            const match = errorMessage.match(patterns[infoType]);
-            return match ? match[1].trim() : (infoType === 'city' ? 'Ville inconnue' : infoType === 'industry' ? 'Secteur inconnu' : 'N/A');
-        }
-
-        function showSimilarClientsWithCreation(data) {
-            const resultsContent = document.getElementById('resultsContent');
-            const similarClients = data.similar_clients || [];
-            const errorMessage = data.error || data.message || 'Client non trouvé';
-
-            let clientsHtml = similarClients.map(client => `
-                <div class="similar-client-card" onclick="selectSimilarClient('${client.name}', '${client.account_number || client.id}')">
-                    <div class="client-info">
-                        <div class="client-name">${client.name}</div>
-                        ${client.account_number ? `<div class="client-account">${client.account_number}</div>` : ''}
-                        ${client.city ? `<div class="client-location">📍 ${client.city}</div>` : ''}
-                        ${client.industry ? `<div class="client-industry">🏢 ${client.industry}</div>` : ''}
-                    </div>
-                    <div class="client-similarity">
-                        <div class="similarity-badge">${(client.similarity * 100).toFixed(1)}%</div>
-                        <div class="select-hint">👆 Sélectionner</div>
-                    </div>
-                </div>
-            `).join('');
-
-            resultsContent.innerHTML = `
-                <div class="similar-clients-header">
-                    <h3>🔍 Clients similaires trouvés</h3>
-                    <div class="error-message">${errorMessage}</div>
-                    <div class="info-hint">
-                        💡 Sélectionnez un client existant ou créez-en un nouveau
-                    </div>
-                </div>
-
-                <div class="similar-clients-list">
-                    ${similarClients.length > 0 ? clientsHtml :
-                    '<div class="no-clients">Aucun client similaire trouvé</div>'}
-                </div>
-
-                <div class="action-buttons">
-                    <button onclick="startClientCreation()" class="action-button primary">
-                        ➕ Créer un nouveau client
-                    </button>
-                    <button onclick="processRequest()" class="action-button secondary">
-                        🔄 Réessayer
-                    </button>
-                    <button onclick="newRequest()" class="action-button secondary">
-                        ✏️ Modifier la demande
-                    </button>
-                </div>
-            `;
-        }
-
-        function showErrorWithCreationOption(errorMessage) {
-            const resultsContent = document.getElementById('resultsContent');
-
-            resultsContent.innerHTML = `
-                <div class="error-container">
-                    <h3>❌ Erreur lors du traitement</h3>
-                    <p>${errorMessage}</p>
-                    <div class="action-buttons">
-                        <button onclick="startClientCreation()" class="action-button primary">
-                            ➕ Créer un nouveau client
-                        </button>
-                        <button onclick="processRequest()" class="action-button secondary">
-                            🔄 Réessayer
-                        </button>
-                        <button onclick="newRequest()" class="action-button secondary">
-                            ✏️ Modifier la demande
-                        </button>
-                    </div>
-                </div>
-            `;
-
-            showNotification('Erreur lors du traitement de la demande', 'error');
-        }
-
-        function extractFromError(errorMessage, clientName, field) {
-            // Fonction pour extraire des informations supplémentaires comme la ville ou le secteur
-            const patterns = {
-                ville: new RegExp(`${escapeRegExp(clientName)}[^.]*?(?:à|dans|ville de)\\s+([A-Z][a-z]+(?:\\s+[A-Z][a-z]+)*)`, 'i'),
-                secteur: new RegExp(`${escapeRegExp(clientName)}[^.]*?(?:secteur|activité)[^:]*?:?\\s+([^.]+)`, 'i')
-            };
-
-            const match = errorMessage.match(patterns[field]);
-            return match ? match[1].trim() : 'Non spécifié';
-        }
-
-        function escapeRegExp(string) {
-            return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        }
-
-        function extractCompanyInfo(text) {
-        // Fonction simple pour extraire le nom de l'entreprise
-        const patterns = {
-        company_name: /(?:pour|de|chez)\s+([A-Z][A-Za-z\s&\-\.]+?)(?:\s+(?:à|dans|sur|,)|\s*$)/,
-        city: /(?:à|dans|sur)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/
-        };
-        
-        const info = {};
-        for (const [key, pattern] of Object.entries(patterns)) {
-        const match = text.match(pattern);
-        if (match) {
-        info[key] = match[1].trim();
-        }
-        }
-        
-        return info;
-        }
-
-        function selectSimilarClient(clientName, clientId) {
-            // Récupérer la demande originale
-            const originalPrompt = document.getElementById('mainInput').value.trim();
-
-            // Créer une nouvelle demande avec le client sélectionné
-            const newPrompt = originalPrompt.replace(/pour\s+[^,\s]+/i, `pour ${clientName}`);
-
-            // Mettre à jour le champ de saisie
-            document.getElementById('mainInput').value = newPrompt;
-
-            // Relancer le traitement
-            showNotification(`Client sélectionné: ${clientName}`, 'success');
-            setTimeout(() => {
-                processRequest();
-            }, 1000);
-        }
-
-        function showResults(data) {
-            const processingIndicator = document.getElementById('processingIndicator');
-            const resultsContent = document.getElementById('resultsContent');
-            
-            processingIndicator.style.display = 'none';
-            resultsContent.style.display = 'block';
-            
-            // Extraire les informations du devis
-            const client = data.client || {};
-            const products = data.products || [];
-            const totalAmount = data.total_amount || 0;
-            const quoteId = data.quote_id || 'N/A';
-            const status = isDraftMode ? 'Brouillon créé' : 'Devis généré';
-            
-            // Construire l'affichage des produits
-            let productsHtml = '';
-            products.forEach(product => {
-                productsHtml += `
-                    <div style="background: #f8fafc; padding: 15px; border-radius: 10px; margin-bottom: 10px;">
-                        <div style="display: flex; justify-content: space-between; align-items: center;">
-                            <div>
-                                <strong>${product.item_code || product.code}</strong> - ${product.item_name || product.name}
-                                <div style="color: #6b7280; font-size: 0.9rem;">
-                                    ${product.quantity} x ${(product.unit_price || 0).toFixed(2)} €
-                                </div>
-                            </div>
-                            <div style="font-weight: 600;">
-                                ${(product.line_total || (product.quantity * product.unit_price) || 0).toFixed(2)} €
-                            </div>
-                        </div>
-                    </div>
-                `;
-            });
-            
-            resultsContent.innerHTML = `
-                <div style="text-align: center; margin-bottom: 25px;">
-                    <h3 style="color: #1f2937; margin-bottom: 10px;">
-                        ${isDraftMode ? '📝' : '✅'} ${status}
-                    </h3>
-                    <div style="color: #6b7280; font-size: 0.9rem;">
-                        Référence : ${quoteId} | ${new Date().toLocaleString('fr-FR')}
-                    </div>
-                </div>
                 
-                <div style="background: #f8fafc; padding: 20px; border-radius: 15px; margin-bottom: 20px;">
-                    <h4 style="color: #374151; margin-bottom: 15px;">🏢 Client</h4>
-                    <div style="font-weight: 600; color: #1f2937;">
-                        ${client.name || 'Client non spécifié'}
-                        ${client.account_number ? `<span style="color: #6b7280; font-weight: normal;"> (${client.account_number})</span>` : ''}
-                    </div>
-                </div>
+                if (!response.ok) {
+                    throw new Error(`Erreur serveur: ${response.status}`);
+                }
                 
-                <div style="margin-bottom: 20px;">
-                    <h4 style="color: #374151; margin-bottom: 15px;">📦 Produits</h4>
-                    ${productsHtml}
-                </div>
-                
-                <div style="background: linear-gradient(135deg, #02B9FD, #832DFE); color: white; padding: 25px; border-radius: 15px; text-align: center;">
-                    <div style="font-size: 1.5rem; font-weight: 600;">
-                        Total: ${totalAmount.toFixed(2)} € HT
-                    </div>
-                    ${data.stock_info ? `<div style="margin-top: 10px; opacity: 0.9;">Stock disponible: ${data.stock_info}</div>` : ''}
-                </div>
-                
-                <div class="action-buttons">
-                    ${isDraftMode ? `
-                        <button onclick="confirmQuote()" class="action-button primary">
-                            ✅ Confirmer le devis
-                        </button>
-                    ` : ''}
-                    <button onclick="newRequest()" class="action-button secondary">
-                        ➕ Nouvelle demande
-                    </button>
-                    <button onclick="openClassicInterface()" class="action-button secondary">
-                        💼 Interface classique
-                    </button>
-                </div>
-            `;
-        }
-
-        async function confirmQuote() {
-            if (!currentQuoteData) {
-                showNotification('Aucun devis à confirmer', 'warning');
-                return;
-            }
-
-            try {
-                showNotification('Confirmation du devis en cours...', 'info');
-                
-                // Appeler l'API pour confirmer le devis
-                const response = await fetch('/api/assistant/workflow/create_quote', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        action: 'confirm',
-                        quote_data: currentQuoteData,
-                        confirmed: true
-                    })
-                });
-
                 const result = await response.json();
                 
+                // Ajouter la réponse
                 if (result.success) {
-                    showNotification('✅ Devis confirmé avec succès !', 'success');
-                    setTimeout(() => {
-                        newRequest();
-                    }, 2000);
+                    addAssistantMessage(result);
                 } else {
-                    throw new Error(result.message || 'Erreur lors de la confirmation');
+                    throw new Error(result.error || "Erreur inconnue");
                 }
                 
             } catch (error) {
-                console.error('Erreur confirmation:', error);
-                showNotification('❌ ' + error.message, 'error');
+                console.error("❌ Erreur:", error);
+                addAssistantMessage({
+                    response: {
+                        message: `❌ Erreur: ${error.message}`,
+                        suggestions: ['Réessayer', 'Reformuler la demande', 'Vérifier la connexion']
+                    }
+                });
+            } finally {
+                // Réinitialiser l'état
+                isProcessing = false;
+                sendButton.classList.remove('sending');
+                hideTypingIndicator();
+                input.focus();
             }
         }
 
-        function newRequest() {
-            const input = document.getElementById('mainInput');
-            const resultsSection = document.getElementById('resultsSection');
-            
-            // Réinitialiser
-            input.value = '';
-            input.focus();
-            resultsSection.classList.remove('show');
-            document.getElementById('inputIndicator').classList.remove('show');
-            currentQuoteData = null;
-        }
-
-        function openClassicInterface() {
-            window.open('/static/nova_interface.html', '_blank');
-        }
-
-        function showNotification(message, type = 'info') {
-            // Supprimer les notifications existantes
-            document.querySelectorAll('.notification').forEach(n => n.remove());
-            
-            const notification = document.createElement('div');
-            notification.className = `notification ${type}`;
-            notification.textContent = message;
-            document.body.appendChild(notification);
-            
-            setTimeout(() => {
-                notification.remove();
-            }, 4000);
-        }
-
-        // 🔧 CORRECTION: Initialisation robuste
+        // Initialisation
         document.addEventListener('DOMContentLoaded', function() {
-            console.log('🚀 Interface NOVA initialisée - Version corrigée');
-
-            // Vérifier que les éléments existent
-            const mainInput = document.getElementById('mainInput');
-
-            if (!mainInput) {
-                console.error('❌ Input mainInput non trouvé');
-                return;
+            console.log('🚀 NOVA Interface Élégante avec Chat initialisée');
+            
+            setupAutoResize();
+            
+            // Focus initial sur l'input
+            const input = document.getElementById('chatInput');
+            if (input) {
+                input.focus();
+                // Désactiver le bouton d'envoi initialement
+                document.getElementById('sendButton').disabled = true;
             }
+            
+            console.log('✅ Interface prête pour la conversation !');
+        });
 
-            // Auto-focus sur le champ de saisie
-            mainInput.focus();
+        // Gestion globale des erreurs
+        window.addEventListener('error', function(event) {
+            console.error('❌ Erreur JavaScript:', event.error);
+        });
 
-            console.log('✅ Événements JavaScript assignés');
-
-            // Test de connectivité initial
-            runAutoDiagnostic();
+        window.addEventListener('unhandledrejection', function(event) {
+            console.error('❌ Promise rejetée:', event.reason);
         });
     </script>
 </body>
