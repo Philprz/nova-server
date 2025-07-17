@@ -408,6 +408,7 @@
 -ANTHROPIC_API_KEY=sk-ant-api03-...
 -SALESFORCE_USERNAME=...
 -SAP_REST_BASE_URL=https://51.91.130.136:50000/b1s/v1
+-PRICE_ENGINE_URL=https://price-engine.example.com/api
 -INSEE_API_KEY=... # Validation SIRET
 -EMAIL_VALIDATION_ENABLED=true
 -CACHE_ENABLED=true
