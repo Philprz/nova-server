@@ -688,9 +688,36 @@ $pushResult = git push origin main 2>&1
 if ($LASTEXITCODE -eq 0) {
     Write-Host "Push réussi vers repository principal" -ForegroundColor "Green"
 } else {
-    Write-Host "Erreur lors du push vers repository principal:" -ForegroundColor "Red"
-    Write-Host "$pushResult" -ForegroundColor "Red"
-    exit 1
+    # Vérifier si l'erreur est due à des changements distants
+    if ($pushResult -match "fetch first|Updates were rejected") {
+        Write-Host "Changements distants détectés, synchronisation en cours..." -ForegroundColor "Yellow"
+
+        # Effectuer un pull pour récupérer les changements distants
+        Write-Host "Récupération des changements distants..." -ForegroundColor "Yellow"
+        $pullResult = git pull origin main 2>&1
+
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "Synchronisation réussie, nouveau push..." -ForegroundColor "Yellow"
+
+            # Réessayer le push après la synchronisation
+            $pushResult = git push origin main 2>&1
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "Push réussi vers repository principal après synchronisation" -ForegroundColor "Green"
+            } else {
+                Write-Host "Erreur lors du push après synchronisation:" -ForegroundColor "Red"
+                Write-Host "$pushResult" -ForegroundColor "Red"
+                exit 1
+            }
+        } else {
+            Write-Host "Erreur lors de la synchronisation:" -ForegroundColor "Red"
+            Write-Host "$pullResult" -ForegroundColor "Red"
+            exit 1
+        }
+    } else {
+        Write-Host "Erreur lors du push vers repository principal:" -ForegroundColor "Red"
+        Write-Host "$pushResult" -ForegroundColor "Red"
+        exit 1
+    }
 }
 
 Write-Host "Push vers repository secondaire (www-it-spirit-com/NOVAPOC)..." -ForegroundColor "Blue"
