@@ -11,7 +11,15 @@ import logging
 from services.cache_manager import RedisCacheManager
 
 logger = logging.getLogger("mcp_connector")
-
+def get_timeout_for_action(action):
+    """Retourne le timeout approprié selon l'action"""
+    timeouts = {
+        'salesforce_query': 60,  # Recherche peut être lente
+        'sap_read': 45,         # Lecture SAP
+        'sap_search': 60,       # Recherche SAP
+        'ping': 10              # Test rapide
+    }
+    return timeouts.get(action, 30)  # Default 30s
 class MCPCache:
     """Cache intelligent pour les appels MCP"""
     
@@ -149,22 +157,25 @@ class MCPConnector:
                 temp_out_path = temp_out.name
             
             try:
+                # Avant le bloc try avec subprocess.run(), ajouter :
+                timeout_seconds = get_timeout_for_action(action)
+
                 # Exécuter le script avec les arguments appropriés
                 script_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), f"{server_name}.py")
                 logger.info(f"Chemin du script MCP: {script_path}")
-                
+
                 if not os.path.exists(script_path):
                     logger.error(f"Script MCP introuvable: {script_path}")
                     return {"error": f"Script MCP introuvable: {script_path}"}
-                
+
                 # Utiliser subprocess.run() dans un thread séparé pour éviter le blocage
                 def run_subprocess():
                     try:
                         result = subprocess.run(
-                            [sys.executable, script_path, temp_in_path, temp_out_path],
+                            [sys.executable, script_path, "--input-file", temp_in_path, "--output-file", temp_out_path],  # 🔧 Arguments nommés
                             capture_output=True,
                             text=True,
-                            timeout=30,
+                            timeout=timeout_seconds,  # ✅ Variable maintenant définie
                             cwd=os.path.dirname(script_path)
                         )
                         return result
