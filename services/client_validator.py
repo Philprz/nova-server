@@ -176,14 +176,34 @@ class ClientValidator:
             return {'valid': False, 'error': str(e)}    
     async def validate_complete(self, client_data: Dict[str, Any], country: str = "FR") -> Dict[str, Any]:
         """
-        Validation complète d'un client selon le pays
-        
+        Validation complète d'un client avec enrichissement et contrôle de doublons
+
+        Effectue une validation en 6 étapes:
+        1. Validations de base universelles (champs obligatoires, formats)
+        2. Validations spécifiques au pays
+        3. Validation avancée de l'email
+        4. Contrôle de doublons (tolérant aux erreurs)
+        5. Enrichissement des données (tolérant aux erreurs)
+        6. Validation finale de cohérence
+
         Args:
-            client_data: Données du client à valider
-            country: Code pays (FR, US, UK, etc.)
-            
+            client_data: Données du client à valider (doit contenir au minimum email et pays)
+            country: Code pays ISO (FR, US, UK, etc.), FR par défaut
+
         Returns:
-            Résultat de validation avec erreurs, avertissements et données enrichies
+            Dict contenant:
+            - valid: bool - Statut global de validation
+            - errors: List[str] - Erreurs bloquantes
+            - warnings: List[str] - Avertissements non bloquants
+            - suggestions: List[str] - Suggestions d'amélioration
+            - enriched_data: Dict - Données enrichies
+            - duplicate_check: Dict - Résultats du contrôle doublons
+            - country: str - Pays utilisé pour la validation
+            - validation_timestamp: str - Horodatage ISO de la validation
+            - validation_level: str - Niveau de validation ("complete")
+
+        Raises:
+            ValueError: Si les données client sont vides ou invalides
         """
         self.validation_stats["total_validations"] += 1
         logger.info(f"🔍 Validation complète client pour pays: {country}")
@@ -220,13 +240,21 @@ class ClientValidator:
             logger.info("3️⃣ Validation email avancée...")
             await self._validate_email_advanced(client_data, validation_result)
             
-            # 4. Contrôle de doublons
+            # 4. Contrôle de doublons - AVEC GESTION D'ERREUR
             logger.info("4️⃣ Contrôle de doublons...")
-            await self._check_duplicates(client_data, validation_result)
-            
+            try:
+                await self._check_duplicates(client_data, validation_result)
+            except Exception as e:
+                logger.warning(f"Erreur contrôle doublons: {e}")
+                validation_result["warnings"].append(f"Contrôle de doublons partiel: {e}")
+
             # 5. Enrichissement automatique des données
             logger.info("5️⃣ Enrichissement des données...")
-            await self._enrich_data(client_data, validation_result)
+            try:
+                await self._enrich_data(client_data, validation_result)
+            except Exception as e:
+                logger.warning(f"Erreur enrichissement: {e}")
+                validation_result["warnings"].append(f"Enrichissement partiel: {e}")
             
             # 6. Validation finale de cohérence
             logger.info("6️⃣ Validation de cohérence...")
@@ -410,100 +438,75 @@ class ClientValidator:
                 result["suggestions"].append("Format d'email basique valide")
     
     async def _check_duplicates(self, client_data: Dict[str, Any], result: Dict[str, Any]):
-        """Contrôle de doublons avancé avec similarité"""
-        company_name = client_data.get("company_name", "")
-        if not company_name or not FUZZYWUZZY_AVAILABLE:
-            if not FUZZYWUZZY_AVAILABLE:
-                result["warnings"].append("Contrôle de doublons limité (fuzzywuzzy non disponible)")
-            return
-        
+        """Contrôle de doublons dans Salesforce et SAP"""
+
+        duplicate_check = {
+            "salesforce_duplicates": [],
+            "sap_duplicates": [],
+            "similarity_scores": [],
+            "warnings": []
+        }
+
+        company_name = client_data.get("company_name", "").strip()
+
         try:
-            # Import conditionnel des connecteurs
-            try:
-                from services.mcp_connector import MCPConnector
-                MCP_AVAILABLE = True
-            except ImportError:
-                MCP_AVAILABLE = False  # noqa: F841
-                result["warnings"].append("Contrôle de doublons non disponible (MCPConnector non disponible)")
-                return
-            
-            similar_clients = []
-            
-            # Recherche Salesforce
-            try:
-                # Échapper les apostrophes pour SOQL
-                safe_name = company_name.replace("'", "\\'")[:20]
-                sf_query = f"SELECT Id, Name, Phone, BillingCity FROM Account WHERE Name LIKE '%{safe_name}%' LIMIT 10"
-                sf_result = await MCPConnector.call_salesforce_mcp("salesforce_query", {"query": sf_query})
-                
-                if "error" not in sf_result and sf_result.get("records"):
-                    for record in sf_result["records"]:
-                        similarity = fuzz.ratio(company_name.lower(), record.get("Name", "").lower())
-                        if similarity >= 80:  # Seuil de similarité configuré
-                            similar_clients.append({
-                                "system": "Salesforce",
-                                "id": record.get("Id"),
-                                "name": record.get("Name"),
-                                "similarity": similarity,
-                                "phone": record.get("Phone"),
-                                "city": record.get("BillingCity")
+            # 🔧 CORRECTION : Import du connecteur MCP
+            from services.mcp_connector import MCPConnector
+
+            # Recherche doublons Salesforce
+            sf_search = await MCPConnector.call_salesforce_mcp("salesforce_query", {
+                "query": f"SELECT Id, Name, AccountNumber, Phone, Email FROM Account WHERE Name LIKE '%{company_name[:10]}%' LIMIT 10"
+            })
+
+            if sf_search.get("success") and sf_search.get("data"):
+                for account in sf_search["data"]:
+                    # Calculer similarité si fuzzywuzzy disponible
+                    if FUZZYWUZZY_AVAILABLE:
+                        similarity = fuzz.ratio(company_name.lower(), account["Name"].lower())
+                        if similarity > 70:  # Seuil de similarité
+                            duplicate_check["salesforce_duplicates"].append({
+                                "id": account["Id"],
+                                "name": account["Name"],
+                                "similarity": similarity
                             })
-            except Exception as e:
-                logger.warning(f"Erreur recherche Salesforce: {str(e)}")
-            
-            # Recherche SAP
+
+            # 🔧 CORRECTION : Recherche doublons SAP avec gestion d'erreur
             try:
                 sap_result = await MCPConnector.call_sap_mcp("sap_search", {
-                    "query": company_name[:20],
+                    "query": company_name,
                     "entity_type": "BusinessPartners",
                     "limit": 10
                 })
-                
-                if "error" not in sap_result and sap_result.get("results"):
-                    for record in sap_result["results"]:
-                        similarity = fuzz.ratio(company_name.lower(), record.get("CardName", "").lower())
-                        if similarity >= 80:
-                            similar_clients.append({
-                                "system": "SAP",
-                                "card_code": record.get("CardCode"),
-                                "name": record.get("CardName"),
-                                "similarity": similarity,
-                                "phone": record.get("Phone1"),
-                                "city": record.get("City")
-                            })
-            except Exception as e:
-                logger.warning(f"Erreur recherche SAP: {str(e)}")
-            
-            # Résultats de la recherche de doublons
-            if similar_clients:
-                # Trier par similarité décroissante
-                similar_clients.sort(key=lambda x: x["similarity"], reverse=True)
-                
-                result["duplicate_check"] = {
-                    "duplicates_found": True,
-                    "count": len(similar_clients),
-                    "similar_clients": similar_clients[:5],  # Limiter à 5 résultats
-                    "action_required": True,
-                    "highest_similarity": similar_clients[0]["similarity"]
-                }
-                
-                if similar_clients[0]["similarity"] >= 90:
-                    result["errors"].append(f"Client très similaire trouvé (similarité: {similar_clients[0]['similarity']}%)")
-                    result["suggestions"].append("Vérifiez s'il s'agit d'un doublon avant création")
-                else:
-                    result["warnings"].append(f"{len(similar_clients)} client(s) potentiellement similaire(s) trouvé(s)")
-            else:
-                result["duplicate_check"] = {
-                    "duplicates_found": False,
-                    "count": 0,
-                    "similar_clients": [],
-                    "action_required": False
-                }
-                result["suggestions"].append("✅ Aucun doublon détecté")
-        
+
+                if sap_result.get("success") and sap_result.get("data"):
+                    for partner in sap_result["data"]:
+                        partner_name = partner.get("CardName", "")
+                        if FUZZYWUZZY_AVAILABLE and partner_name:
+                            similarity = fuzz.ratio(company_name.lower(), partner_name.lower())
+                            if similarity > 70:
+                                duplicate_check["sap_duplicates"].append({
+                                    "card_code": partner.get("CardCode"),
+                                    "name": partner_name,
+                                    "similarity": similarity
+                                })
+            except Exception as sap_error:
+                logger.warning(f"Erreur recherche SAP: {sap_error}")
+                duplicate_check["warnings"].append(f"Impossible de vérifier les doublons SAP: {sap_error}")
+
+            # Ajouter les résultats au résultat principal
+            result["duplicate_check"] = duplicate_check
+
+            # Avertissements si doublons trouvés
+            if duplicate_check["salesforce_duplicates"]:
+                result["warnings"].append(f"Doublons potentiels trouvés dans Salesforce: {len(duplicate_check['salesforce_duplicates'])}")
+
+            if duplicate_check["sap_duplicates"]:
+                result["warnings"].append(f"Doublons potentiels trouvés dans SAP: {len(duplicate_check['sap_duplicates'])}")
+
         except Exception as e:
-            logger.warning(f"Erreur contrôle doublons: {str(e)}")
-            result["warnings"].append("Impossible de vérifier les doublons")
+            logger.exception(f"Erreur vérification doublons: {str(e)}")
+            duplicate_check["warnings"].append(f"❌ Erreur vérification doublons: {str(e)}")
+            result["duplicate_check"] = duplicate_check
     
     async def _enrich_data(self, client_data: Dict[str, Any], result: Dict[str, Any]):
         """Enrichissement automatique des données"""
