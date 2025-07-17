@@ -2,14 +2,15 @@ import os
 import logging
 import time
 from datetime import datetime
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from services.module_loader import ModuleLoader, ModuleConfig
-security = HTTPBasic()
-# Configuration logging selon charte IT SPIRIT
+
+# Configuration logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -21,262 +22,411 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-
-
-def get_current_user(credentials: HTTPBasicCredentials = Depends(security)):
-    if credentials.username != "admin" or credentials.password != "nova2025":
-        raise HTTPException(status_code=401)
-    return credentials.username
-# Configuration des modules avec préfixes distincts
+# Configuration des modules
 MODULES_CONFIG = {
     'sync': ModuleConfig('routes.routes_sync', '/sync', ['Synchronisation']),
     'products': ModuleConfig('routes.routes_products', '/products', ['Produits']),
     'devis': ModuleConfig('routes.routes_devis', '/devis', ['Devis']),
     'assistant': ModuleConfig('routes.routes_intelligent_assistant', '/api/assistant', ['Assistant Intelligent']),
     'clients': ModuleConfig('routes.routes_clients', '/clients', ['Clients']),
-    'companies': ModuleConfig('routes.routes_company_search', '/companies', ['Recherche d\'entreprises'])  # NOUVEAU
+    'companies': ModuleConfig('routes.routes_company_search', '/companies', ['Recherche d\'entreprises']),
+    'progress': ModuleConfig('routes.routes_progress', '/progress', ['Progress'])
 }
 
-# Création de l'application
+# Création de l'application FastAPI
 app = FastAPI(
     title="NOVA Middleware",
     description="Middleware d'intégration LLM - SAP - Salesforce",
-    version="1.0.0"
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc"
+)
+
+# Middleware CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Middleware de sécurité
 app.add_middleware(
     TrustedHostMiddleware,
-    allowed_hosts=["178.33.233.120", "localhost", "127.0.0.1"]
+    allowed_hosts=["178.33.233.120", "localhost", "127.0.0.1", "*"]
 )
 
 # Fichiers statiques
 if os.path.exists("static"):
     app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Chargement automatique des modules optionnels
+# Chargement des modules
 loader = ModuleLoader()
 loader.load_modules(MODULES_CONFIG)
 loader.register_to_fastapi(app)
 
-# ✅ AJOUT : Route de compatibilité unifiée
+# =============================================
+# ENDPOINTS PRINCIPAUX OBLIGATOIRES
+# =============================================
+
+@app.get("/")
+def root():
+    """Point d'entrée principal"""
+    return {
+        "message": "NOVA Middleware actif",
+        "version": "1.0.0", 
+        "status": "operational",
+        "timestamp": datetime.now().isoformat(),
+        "interface_url": "/api/assistant/interface",
+        "documentation": "/docs"
+    }
+
+@app.get("/health")
+async def health_check():
+    """Endpoint de santé du serveur"""
+    try:
+        # Vérifier les modules chargés
+        loaded_modules = loader.get_loaded_modules()
+        
+        # Vérifier les services critiques
+        services_status = {
+            "database": "unknown",
+            "mcp": "unknown", 
+            "progress_tracker": "unknown",
+            "modules": loaded_modules
+        }
+        
+        # Test simple de la base de données
+        try:
+            from services.database import get_database_status
+            services_status["database"] = get_database_status()
+        except:
+            services_status["database"] = "error"
+            
+        # Test du MCP
+        try:
+            from services.mcp_connector import MCPConnector
+            services_status["mcp"] = "ready"
+        except:
+            services_status["mcp"] = "error"
+            
+        # Test progress tracker
+        try:
+            from services.progress_tracker import progress_tracker
+            services_status["progress_tracker"] = "active"
+        except:
+            services_status["progress_tracker"] = "error"
+        
+        return {
+            "status": "healthy",
+            "timestamp": datetime.now().isoformat(),
+            "version": "1.0.0",
+            "services": services_status,
+            "uptime": "running"
+        }
+    except Exception as e:
+        logger.error(f"Erreur health check: {e}")
+        return {
+            "status": "unhealthy",
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
+
+@app.get("/diagnostic")
+async def diagnostic():
+    """Diagnostic complet du système"""
+    try:
+        # Modules chargés
+        loaded_modules = loader.get_loaded_modules()
+        
+        # Endpoints disponibles
+        endpoints = []
+        for route in app.routes:
+            if hasattr(route, 'methods') and hasattr(route, 'path'):
+                methods = list(route.methods) if route.methods else ['GET']
+                endpoints.append(f"{methods[0]} {route.path}")
+        
+        # Statistiques
+        stats = {
+            "total_endpoints": len(endpoints),
+            "loaded_modules": len(loaded_modules),
+            "static_files": os.path.exists("static"),
+            "log_file": os.path.exists("nova_server.log")
+        }
+        
+        return {
+            "status": "OK",
+            "timestamp": datetime.now().isoformat(),
+            "loaded_modules": loaded_modules,
+            "endpoints": sorted(endpoints),
+            "statistics": stats,
+            "environment": {
+                "python_version": os.sys.version,
+                "working_directory": os.getcwd(),
+                "environment_variables": {
+                    "DATABASE_URL": "***" if os.getenv("DATABASE_URL") else "NOT_SET",
+                    "ANTHROPIC_API_KEY": "***" if os.getenv("ANTHROPIC_API_KEY") else "NOT_SET"
+                }
+            }
+        }
+    except Exception as e:
+        logger.error(f"Erreur diagnostic: {e}")
+        return {
+            "status": "ERROR",
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
+
+# =============================================
+# ENDPOINTS DE COMPATIBILITÉ
+# =============================================
+
 @app.post("/generate_quote")
 async def generate_quote_unified(request: dict):
-    """
-    🎯 Route unifiée pour éviter les conflits
-    Redirige vers le bon endpoint selon le contexte
-    """
+    """Route unifiée pour la génération de devis"""
     try:
-        # Vérifier le format de la requête
         prompt = request.get("prompt", "").strip()
         draft_mode = request.get("draft_mode", False)
-
+        
         if not prompt:
             return {"success": False, "error": "Prompt manquant"}
-
-        # Utiliser directement le service chat
-        from routes.routes_intelligent_assistant import ChatMessage, chat_with_nova
-
-        # Créer la requête formatée
-        message_data = ChatMessage(message=prompt)
-
-        # Exécuter la génération
-        result = await chat_with_nova(message_data)
-
-        # Convertir le résultat en dict pour la réponse
-        if hasattr(result, 'dict'):
-            return result.dict()
+        
+        # Rediriger vers le bon endpoint selon disponibilité
+        if 'progress' in loader.get_loaded_modules():
+            # Mode avec progress tracking
+            from routes.routes_progress import generate_quote_legacy
+            return await generate_quote_legacy(request, None)
+        elif 'assistant' in loader.get_loaded_modules():
+            # Mode assistant direct
+            from routes.routes_intelligent_assistant import chat_with_nova, ChatMessage
+            message_data = ChatMessage(message=prompt)
+            result = await chat_with_nova(message_data)
+            return result.dict() if hasattr(result, 'dict') else result
         else:
-            return result
-
+            # Mode fallback
+            return {
+                "success": False,
+                "error": "Aucun module de génération de devis disponible"
+            }
     except Exception as e:
-        print(f"❌ Erreur route unifiée: {str(e)}")
+        logger.error(f"Erreur generate_quote_unified: {e}")
         return {
             "success": False,
             "error": f"Erreur serveur: {str(e)}"
         }
-# NOUVEAU : Route d'intégration pour l'enrichissement client
-@app.post("/enrich_client_with_company_data")
-async def enrich_client_with_company_data(request: dict):
-    """
-    🔍 Enrichit les données client avec l'agent de recherche d'entreprises
-    Intégration directe avec le workflow NOVA
-    """
-    try:
-        from services.company_search_service import company_search_service
-        
-        client_data = request.get('client_data', {})
-        if not client_data:
-            return {
-                'success': False,
-                'error': 'client_data requis'
-            }
-        
-        # Enrichissement via l'agent
-        enriched_data = await company_search_service.enrich_client_data(client_data)
-        
-        return {
-            'success': True,
-            'original_data': client_data,
-            'enriched_data': enriched_data,
-            'enrichment_applied': 'enriched_data' in enriched_data
-        }
-        
-    except Exception as e:
-        logger.error(f"Erreur enrichissement client: {e}")
-        return {
-            'success': False,
-            'error': str(e)
-        }
 
-# NOUVEAU : Route de validation SIREN intégrée
-@app.post("/validate_company_siren")
-async def validate_company_siren(request: dict):
-    """
-    ✅ Valide un SIREN d'entreprise
-    Intégration directe avec le workflow NOVA
-    """
+@app.post("/api/assistant/chat")
+async def chat_fallback(request: dict):
+    """Endpoint de fallback pour le chat"""
     try:
-        from services.company_search_service import company_search_service
-        
-        siren = request.get('siren')
-        if not siren:
-            return {
-                'valid': False,
-                'error': 'SIREN requis'
-            }
-        
-        # Validation via l'agent
-        validation_result = await company_search_service.validate_siren(siren)
-        
-        return validation_result
-        
-    except Exception as e:
-        logger.error(f"Erreur validation SIREN: {e}")
-        return {
-            'valid': False,
-            'error': str(e)
-        }
-
-# NOUVEAU : Route de recherche rapide pour suggestions
-@app.get("/quick_company_search/{query}")
-async def quick_company_search(query: str):
-    """
-    🔍 Recherche rapide d'entreprise pour suggestions
-    Intégration directe avec le workflow NOVA
-    """
-    try:
-        from services.company_search_service import company_search_service
-        
-        # Recherche rapide
-        search_result = await company_search_service.search_company(
-            query=query,
-            max_results=3
-        )
-        
-        if search_result['success'] and search_result['companies']:
-            return {
-                'found': True,
-                'companies': search_result['companies'],
-                'count': len(search_result['companies'])
-            }
+        if 'assistant' in loader.get_loaded_modules():
+            from routes.routes_intelligent_assistant import chat_with_nova, ChatMessage
+            message_data = ChatMessage(message=request.get("message", ""))
+            result = await chat_with_nova(message_data)
+            return result.dict() if hasattr(result, 'dict') else result
         else:
-            # Suggestions si pas de résultats
-            suggestions = await company_search_service.get_suggestions(query)
             return {
-                'found': False,
-                'suggestions': suggestions
+                "success": False,
+                "response": {
+                    "type": "error",
+                    "message": "Module assistant non disponible"
+                }
             }
-        
     except Exception as e:
-        logger.error(f"Erreur recherche rapide: {e}")
+        logger.error(f"Erreur chat_fallback: {e}")
         return {
-            'found': False,
-            'error': str(e)
-        }
-# ✅ AJOUT : Route de diagnostic
-@app.get("/diagnostic")
-async def diagnostic():
-    """
-    🔍 Endpoint de diagnostic pour tester la connectivité
-    """
-    try:
-        # Test des modules chargés
-        loaded_modules = loader.get_loaded_modules()
-
-        # Test des endpoints disponibles
-        endpoints = []
-        for route in app.routes:
-            if hasattr(route, 'methods') and hasattr(route, 'path'):
-                endpoints.append(f"{list(route.methods)[0]} {route.path}")
-
-        return {
-            "status": "OK",
-            "timestamp": str(datetime.now()),
-            "loaded_modules": loaded_modules,
-            "endpoints": endpoints,
-            "health": "Server running"
-        }
-
-    except Exception as e:
-        return {
-            "status": "ERROR",
+            "success": False,
             "error": str(e)
         }
 
-# ✅ AJOUT : Interface de diagnostic
-@app.get("/diagnostic/interface", response_class=HTMLResponse)
-async def diagnostic_interface():
-    """
-    🔍 Interface de diagnostic HTML
-    """
-    # Rediriger vers l'interface de diagnostic statique
-    from fastapi.responses import RedirectResponse
-    return RedirectResponse(url="/static/diagnostic.html")
+@app.get("/api/assistant/interface")
+async def assistant_interface():
+    """Interface assistant - fallback"""
+    try:
+        # Essayer de servir l'interface depuis le module assistant
+        if 'assistant' in loader.get_loaded_modules():
+            from routes.routes_intelligent_assistant import intelligent_interface
+            return await intelligent_interface()
+        else:
+            # Fallback vers l'interface statique
+            if os.path.exists("static/nova_interface.html"):
+                with open("static/nova_interface.html", "r", encoding="utf-8") as f:
+                    return HTMLResponse(content=f.read())
+            else:
+                return HTMLResponse(content="""
+                <!DOCTYPE html>
+                <html>
+                <head><title>NOVA Interface</title></head>
+                <body>
+                    <h1>NOVA Interface</h1>
+                    <p>Interface temporaire - Module assistant en cours de chargement</p>
+                    <p><a href="/docs">Documentation API</a></p>
+                    <p><a href="/diagnostic">Diagnostic système</a></p>
+                </body>
+                </html>
+                """)
+    except Exception as e:
+        logger.error(f"Erreur assistant_interface: {e}")
+        return HTMLResponse(content=f"<h1>Erreur</h1><p>{str(e)}</p>")
 
-# ✅ AJOUT : Middleware de logging des requêtes
+# =============================================
+# ENDPOINTS DE LISTE DES DEVIS BROUILLONS
+# =============================================
+
+@app.get("/list_draft_quotes")
+async def list_draft_quotes():
+    """Liste les devis en brouillon"""
+    try:
+        # Essayer d'utiliser le service SAP
+        from services.mcp_connector import MCPConnector
+        
+        sap_result = await MCPConnector.call_sap_mcp("sap_read", {
+            "endpoint": "/Quotations?$filter=DocumentStatus eq 'bost_Open'&$orderby=DocDate desc",
+            "method": "GET"
+        })
+        
+        if "error" not in sap_result:
+            draft_quotes = sap_result.get('value', [])
+            return {
+                "success": True,
+                "count": len(draft_quotes),
+                "draft_quotes": draft_quotes[:10]  # Limiter à 10
+            }
+        else:
+            return {
+                "success": True,
+                "count": 0,
+                "draft_quotes": [],
+                "message": "Aucun devis brouillon trouvé"
+            }
+    except Exception as e:
+        logger.error(f"Erreur list_draft_quotes: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "count": 0,
+            "draft_quotes": []
+        }
+
+@app.post("/validate_quote")
+async def validate_quote(request: dict):
+    """Valide un devis brouillon"""
+    try:
+        doc_entry = request.get("doc_entry")
+        if not doc_entry:
+            return {"success": False, "error": "doc_entry manquant"}
+        
+        # Implémenter la validation via SAP
+        from services.mcp_connector import MCPConnector
+        
+        # Changer le statut du devis à "valide"
+        sap_result = await MCPConnector.call_sap_mcp("sap_update", {
+            "endpoint": f"/Quotations({doc_entry})",
+            "method": "PATCH",
+            "data": {
+                "DocumentStatus": "bost_Close"
+            }
+        })
+        
+        if "error" not in sap_result:
+            return {
+                "success": True,
+                "message": f"Devis {doc_entry} validé avec succès"
+            }
+        else:
+            return {
+                "success": False,
+                "error": sap_result.get("error", "Erreur inconnue")
+            }
+    except Exception as e:
+        logger.error(f"Erreur validate_quote: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+# =============================================
+# MIDDLEWARE DE LOGGING
+# =============================================
+
 @app.middleware("http")
-async def log_requests(request, call_next):
-    """
-    📝 Middleware pour logger toutes les requêtes
-    """
+async def log_requests(request: Request, call_next):
+    """Log toutes les requêtes"""
     start_time = time.time()
-
-    # Logger la requête entrante
-    print(f"🔄 {request.method} {request.url}")
-
-    # Traiter la requête
+    
+    # Log de la requête entrante
+    logger.info(f"🔄 {request.method} {request.url}")
+    
+    # Traitement de la requête
     response = await call_next(request)
-
-    # Logger la réponse
+    
+    # Log de la réponse
     process_time = time.time() - start_time
-    print(f"✅ {request.method} {request.url} - {response.status_code} - {process_time:.2f}s")
-
+    logger.info(f"✅ {request.method} {request.url} - {response.status_code} - {process_time:.3f}s")
+    
     return response
 
-# Routes obligatoires (sans try/except car toujours présentes)
-from routes.routes_quote_details import router as quote_details_router
-from routes.routes_progress import router as progress_router  
-from routes import routes_suggestions
+# =============================================
+# INCLUSION DES ROUTES OBLIGATOIRES
+# =============================================
 
-app.include_router(quote_details_router, tags=["Quote Details"])
-app.include_router(progress_router, prefix="/progress", tags=["Progress"])
-app.include_router(routes_suggestions.router)
+# Routes toujours présentes
+try:
+    from routes.routes_quote_details import router as quote_details_router
+    app.include_router(quote_details_router, tags=["Quote Details"])
+except ImportError:
+    logger.warning("Module routes_quote_details non disponible")
 
-@app.get("/")
-def root():
-    """Point d'entrée avec redirection intelligente"""
-    if 'assistant' in loader.get_loaded_modules():
-        from fastapi.responses import RedirectResponse
-        return RedirectResponse(url="/api/assistant/interface")
-    
-    return {
-        "message": "NOVA Middleware actif",
-        "version": "1.0.0",
-        "status": "operational", 
-        "services": loader.get_status()
-    }
+try:
+    from routes.routes_progress import router as progress_router
+    app.include_router(progress_router, prefix="/progress", tags=["Progress"])
+except ImportError:
+    logger.warning("Module routes_progress non disponible")
+
+try:
+    from routes import routes_suggestions
+    app.include_router(routes_suggestions.router, tags=["Suggestions"])
+except ImportError:
+    logger.warning("Module routes_suggestions non disponible")
+
+# =============================================
+# GESTION DES ERREURS
+# =============================================
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """Gestionnaire d'erreurs HTTP personnalisé"""
+    logger.error(f"HTTP {exc.status_code}: {exc.detail} - {request.method} {request.url}")
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": exc.detail,
+            "status_code": exc.status_code,
+            "timestamp": datetime.now().isoformat(),
+            "path": str(request.url)
+        }
+    )
+
+@app.exception_handler(Exception)
+async def general_exception_handler(request: Request, exc: Exception):
+    """Gestionnaire d'erreurs générales"""
+    logger.error(f"Erreur non gérée: {str(exc)} - {request.method} {request.url}")
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "Erreur interne du serveur",
+            "details": str(exc),
+            "timestamp": datetime.now().isoformat(),
+            "path": str(request.url)
+        }
+    )
+
+# =============================================
+# POINT D'ENTRÉE
+# =============================================
 
 if __name__ == "__main__":
     import uvicorn
+    logger.info("🚀 Démarrage du serveur NOVA")
     uvicorn.run(app, host="0.0.0.0", port=8000)
