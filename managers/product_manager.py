@@ -112,7 +112,18 @@ class ProductManager:
                 "found": False,
                 "error": str(e)
             }
-    
+    async def _search_sap_product(self, product_code: str, product_name: str = "") -> Dict[str, Any]:
+        """Recherche produit SAP pour EnhancedDevisWorkflow"""
+        try:
+            # Utiliser la fonction existante _find_single_product
+            result = await self._find_single_product(product_code)
+            
+            if result.get("found"):
+                return {"found": True, "data": result}
+            else:
+                return {"found": False, "error": result.get("error", "Produit non trouvé")}
+        except Exception as e:
+            return {"found": False, "error": str(e)}    
     async def _generate_product_suggestions(self, product_code: str) -> Dict[str, Any]:
         """Génération de suggestions pour produit non trouvé"""
         try:

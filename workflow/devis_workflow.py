@@ -14,6 +14,8 @@ from services.progress_tracker import progress_tracker, QuoteTask
 from services.suggestion_engine import SuggestionEngine
 from services.client_validator import ClientValidator
 
+from services.websocket_manager import websocket_manager
+from services.company_search_service import company_search_service
 # Configuration de l'encodage
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
@@ -4862,6 +4864,143 @@ class DevisWorkflow:
             logger.info(f"🔄 Tracking initialisé pour la tâche: {self.task_id}")
 
         return self.task_id
-
+class EnhancedDevisWorkflow(DevisWorkflow):
+    """Workflow enrichi avec recherche parallèle"""
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.suggestion_engine = SuggestionEngine()
+        self.websocket_manager = websocket_manager
+        self.task_id = None
+    
+    async def process_prompt(self, prompt: str, task_id: str = None, draft_mode: bool = False):
+        """Traitement avec recherche parallèle"""
+        self.task_id = task_id
+        
+        # Extraction LLM classique
+        extracted_info = await self.llm_extractor.extract_devis_info(prompt)
+        
+        # Recherche parallèle
+        if extracted_info.get("client") and extracted_info.get("products"):
+            parallel_result = await self._parallel_client_product_search(extracted_info)
+            
+            # Continuer avec le workflow existant
+            return await super().process_prompt(prompt, draft_mode)
+        
+        return await super().process_prompt(prompt, draft_mode)
+    
+    async def _parallel_client_product_search(self, extracted_info: dict):
+        """Recherche parallèle client et produits"""
+        
+        # Notification WebSocket
+        await self._notify_websocket("parallel_search_started", {
+            "client_query": extracted_info.get("client"),
+            "product_queries": extracted_info.get("products", [])
+        })
+        
+        # Lancer recherches parallèles
+        client_task = asyncio.create_task(
+            self._search_client_with_notifications(extracted_info.get("client"))
+        )
+        product_task = asyncio.create_task(
+            self._search_products_with_notifications(extracted_info.get("products", []))
+        )
+        
+        # Attendre résultats
+        client_result, product_results = await asyncio.gather(
+            client_task, product_task, return_exceptions=True
+        )
+        
+        return {
+            "client_result": client_result,
+            "product_results": product_results
+        }
+    
+    async def _search_client_with_notifications(self, client_name: str):
+        """Recherche client avec notifications"""
+        
+        # Étape 1: Recherche Salesforce
+        await self._notify_websocket("client_search_step", {
+            "step": "salesforce",
+            "status": "searching",
+            "message": f"Recherche de '{client_name}' dans Salesforce..."
+        })
+        
+        sf_result = await self._search_salesforce_client(client_name)
+        
+        if sf_result.get("found"):
+            await self._notify_websocket("client_found", {
+                "source": "salesforce",
+                "client_data": sf_result["data"],
+                "message": f"Client '{client_name}' trouvé dans Salesforce"
+            })
+            return sf_result
+        
+        # Étape 2: Recherche externe
+        await self._notify_websocket("client_search_step", {
+            "step": "external_apis",
+            "status": "searching",
+            "message": f"Recherche externe de '{client_name}'..."
+        })
+        
+        external_result = await company_search_service.search_company(client_name)
+        
+        if external_result.get("success"):
+            await self._notify_websocket("client_external_data", {
+                "companies": external_result["companies"],
+                "message": f"Données externes trouvées pour '{client_name}'"
+            })
+            
+            return {
+                "found": False,
+                "external_data": external_result,
+                "requires_validation": True
+            }
+        
+        return {"found": False, "message": f"Client '{client_name}' introuvable"}
+    async def _search_sap_product(self, product_code: str, product_name: str):
+        """Déléguer à product_manager"""
+        return await self.product_manager._search_sap_product(product_code, product_name)
+    async def _search_products_with_notifications(self, products: list):
+        """Recherche produits avec notifications"""
+        
+        results = []
+        
+        for i, product in enumerate(products):
+            product_name = product.get("name", "")
+            
+            await self._notify_websocket("product_search_started", {
+                "product_index": i,
+                "product_name": product_name,
+                "message": f"Recherche produit {i+1}/{len(products)}"
+            })
+            
+            # Recherche SAP
+            sap_result = await self._search_sap_product(product.get("code", ""), product_name)
+            
+            if sap_result.get("found"):
+                await self._notify_websocket("product_found", {
+                    "product_index": i,
+                    "product_data": sap_result["data"],
+                    "message": f"Produit '{product_name}' trouvé"
+                })
+                results.append({"index": i, "found": True, "data": sap_result["data"]})
+            else:
+                await self._notify_websocket("product_not_found", {
+                    "product_index": i,
+                    "product_name": product_name,
+                    "message": f"Produit '{product_name}' introuvable"
+                })
+                results.append({"index": i, "found": False})
+        
+        return results
+    
+    async def _notify_websocket(self, event_type: str, data: dict):
+        """Notification WebSocket"""
+        if self.task_id:
+            await self.websocket_manager.send_task_update(self.task_id, {
+                "event": event_type,
+                "data": data
+            })
 # Export du routeur pour intégration dans main.py
 __all__ = ['DevisWorkflow', 'router_v2']

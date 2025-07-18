@@ -31,7 +31,8 @@ MODULES_CONFIG = {
     'assistant': ModuleConfig('routes.routes_intelligent_assistant', '/api/assistant', ['Assistant Intelligent']),
     'clients': ModuleConfig('routes.routes_clients', '/clients', ['Clients']),
     'companies': ModuleConfig('routes.routes_company_search', '/companies', ['Recherche d\'entreprises']),
-    'progress': ModuleConfig('routes.routes_progress', '/progress', ['Progress'])
+    'progress': ModuleConfig('routes.routes_progress', '/progress', ['Progress']),
+    'websocket': ModuleConfig('routes.routes_websocket', '', ['WebSocket'])
 }
 
 @asynccontextmanager
@@ -67,7 +68,11 @@ app = FastAPI(
     redoc_url="/redoc",
     lifespan=lifespan
 )
+# Import WebSocket
+from routes.routes_websocket import websocket_manager
 
+# Rendre websocket_manager disponible globalement
+app.state.websocket_manager = websocket_manager
 # Middleware CORS
 app.add_middleware(
     CORSMiddleware,
