@@ -9,8 +9,270 @@ from pydantic import BaseModel
 from services.websocket_manager import websocket_manager
 from services.progress_tracker import progress_tracker, TaskStatus
 from workflow.devis_workflow import DevisWorkflow
+from typing import Dict, Any, List, Optional
+import logging
+from datetime import datetime
+logger = logging.getLogger(__name__)
 
-router = APIRouter()
+# Configuration du router
+router = APIRouter(
+    prefix="/progress",
+    tags=["Progress"]
+)
+
+# =============================================
+# MODÈLES PYDANTIC
+# =============================================
+
+class TaskProgressResponse(BaseModel):
+    """Réponse de progression d'une tâche"""
+    task_id: str
+    status: str
+    overall_progress: int
+    current_step: Optional[str] = None
+    current_step_title: Optional[str] = None
+    completed_steps: int
+    total_steps: int
+    start_time: str
+    end_time: Optional[str] = None
+    duration: Optional[float] = None
+    draft_mode: bool
+    user_prompt: str
+    error: Optional[str] = None
+    result: Optional[Dict[str, Any]] = None
+
+class TaskDetailedResponse(BaseModel):
+    """Réponse détaillée avec phases"""
+    task_id: str
+    status: str
+    overall_progress: int
+    current_step: Optional[str] = None
+    current_step_title: Optional[str] = None
+    completed_steps: int
+    total_steps: int
+    start_time: str
+    end_time: Optional[str] = None
+    duration: Optional[float] = None
+    draft_mode: bool
+    user_prompt: str
+    error: Optional[str] = None
+    result: Optional[Dict[str, Any]] = None
+    phases: Dict[str, Any]
+
+# =============================================
+# ENDPOINTS REST
+# =============================================
+
+@router.get("/task/{task_id}")
+async def get_task_progress(task_id: str):
+    """
+    Récupère le statut de progression d'une tâche
+    """
+    try:
+        task = progress_tracker.get_task(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail=f"Tâche {task_id} non trouvée")
+        
+        progress = task.get_overall_progress()
+        return TaskProgressResponse(**progress)
+        
+    except Exception as e:
+        logger.error(f"Erreur récupération progression {task_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/task/{task_id}/detailed")
+async def get_task_detailed_progress(task_id: str):
+    """
+    Récupère le statut détaillé avec toutes les phases
+    """
+    try:
+        task = progress_tracker.get_task(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail=f"Tâche {task_id} non trouvée")
+        
+        detailed_progress = task.get_detailed_progress()
+        return TaskDetailedResponse(**detailed_progress)
+        
+    except Exception as e:
+        logger.error(f"Erreur récupération progression détaillée {task_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/tasks/active")
+async def get_active_tasks():
+    """
+    Liste toutes les tâches actives
+    """
+    try:
+        active_tasks = progress_tracker.get_active_tasks()
+        return {
+            "count": len(active_tasks),
+            "tasks": [task.get_overall_progress() for task in active_tasks]
+        }
+        
+    except Exception as e:
+        logger.error(f"Erreur récupération tâches actives: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/task/{task_id}")
+async def cancel_task(task_id: str):
+    """
+    Annule une tâche en cours
+    """
+    try:
+        success = progress_tracker.cancel_task(task_id)
+        if not success:
+            raise HTTPException(status_code=404, detail=f"Tâche {task_id} non trouvée")
+        
+        return {"success": True, "message": f"Tâche {task_id} annulée"}
+        
+    except Exception as e:
+        logger.error(f"Erreur annulation tâche {task_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/cleanup")
+async def cleanup_old_tasks(max_age_hours: int = 24):
+    """
+    Nettoie les anciennes tâches terminées
+    """
+    try:
+        cleaned_count = progress_tracker.cleanup_old_tasks(max_age_hours)
+        return {
+            "success": True,
+            "cleaned_tasks": cleaned_count,
+            "message": f"{cleaned_count} tâches anciennes supprimées"
+        }
+        
+    except Exception as e:
+        logger.error(f"Erreur nettoyage tâches: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# =============================================
+# WEBSOCKET POUR TEMPS RÉEL
+# =============================================
+
+@router.websocket("/ws/{task_id}")
+async def websocket_progress(websocket: WebSocket, task_id: str):
+    """
+    WebSocket pour suivi en temps réel d'une tâche
+    """
+    await websocket_manager.connect(websocket, task_id)
+    logger.info(f"Client connecté au WebSocket pour tâche {task_id}")
+    
+    try:
+        # Envoyer le statut initial
+        task = progress_tracker.get_task(task_id)
+        if task:
+            initial_progress = task.get_detailed_progress()
+            await websocket.send_json({
+                "type": "initial_progress",
+                "data": initial_progress
+            })
+        
+        # Maintenir la connexion active
+        while True:
+            try:
+                # Recevoir les messages du client (ping/pong)
+                message = await websocket.receive_json()
+                
+                if message.get("type") == "ping":
+                    await websocket.send_json({"type": "pong"})
+                    
+            except WebSocketDisconnect:
+                break
+                
+    except Exception as e:
+        logger.error(f"Erreur WebSocket pour tâche {task_id}: {e}")
+        
+    finally:
+        websocket_manager.disconnect(websocket, task_id)
+        logger.info(f"Client déconnecté du WebSocket pour tâche {task_id}")
+
+# =============================================
+# ENDPOINTS DE VALIDATION UTILISATEUR
+# =============================================
+
+@router.get("/task/{task_id}/validation")
+async def get_pending_validation(task_id: str):
+    """
+    Récupère les validations en attente pour une tâche
+    """
+    try:
+        task = progress_tracker.get_task(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail=f"Tâche {task_id} non trouvée")
+        
+        pending_validations = []
+        for step_id, validation_data in task.validation_data.items():
+            if validation_data.get("status") == "pending":
+                pending_validations.append({
+                    "step_id": step_id,
+                    "type": validation_data["type"],
+                    "data": validation_data["data"],
+                    "timestamp": validation_data["timestamp"]
+                })
+        
+        return {
+            "task_id": task_id,
+            "pending_validations": pending_validations
+        }
+        
+    except Exception as e:
+        logger.error(f"Erreur récupération validations {task_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/task/{task_id}/validation/{step_id}")
+async def submit_validation(task_id: str, step_id: str, user_response: Dict[str, Any]):
+    """
+    Soumet une réponse de validation utilisateur
+    """
+    try:
+        task = progress_tracker.get_task(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail=f"Tâche {task_id} non trouvée")
+        
+        # Traiter la validation
+        task.complete_user_validation(step_id, user_response)
+        
+        # Notifier via WebSocket
+        await websocket_manager.broadcast_to_task(task_id, {
+            "type": "validation_completed",
+            "step_id": step_id,
+            "user_response": user_response
+        })
+        
+        return {
+            "success": True,
+            "message": f"Validation complétée pour étape {step_id}"
+        }
+        
+    except Exception as e:
+        logger.error(f"Erreur validation {task_id}/{step_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# =============================================
+# ENDPOINTS DE STATISTIQUES
+# =============================================
+
+@router.get("/stats")
+async def get_progress_stats():
+    """
+    Statistiques globales du système de progression
+    """
+    try:
+        stats = progress_tracker.get_global_stats()
+        return {
+            "timestamp": datetime.now().isoformat(),
+            "active_tasks": stats.get("active_tasks", 0),
+            "completed_tasks": stats.get("completed_tasks", 0),
+            "failed_tasks": stats.get("failed_tasks", 0),
+            "total_tasks": stats.get("total_tasks", 0),
+            "average_duration": stats.get("average_duration", 0),
+            "success_rate": stats.get("success_rate", 0)
+        }
+        
+    except Exception as e:
+        logger.error(f"Erreur récupération statistiques: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 # === MODÈLES DE DONNÉES ===
 

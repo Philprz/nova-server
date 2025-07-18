@@ -13,7 +13,51 @@ class ProductSearchEngine:
     
     def __init__(self):
         self.mcp_connector = MCPConnector()
-    
+    def process_products(self, products_info):
+        """
+        🔧 FONCTION CORRIGÉE - Traitement des produits SAP/Salesforce
+        """
+        processed_products = []
+        
+        for product in products_info:
+            if isinstance(product, dict) and "error" not in product:
+                # 🔧 EXTRACTION CORRIGÉE DES DONNÉES PRODUIT
+                product_code = (product.get("code") or
+                               product.get("item_code") or
+                               product.get("ItemCode", ""))
+
+                product_name = (product.get("name") or
+                               product.get("item_name") or
+                               product.get("ItemName", "Sans nom"))
+
+                quantity = float(product.get("quantity", 1))
+                unit_price = float(product.get("unit_price", 0))
+                line_total = quantity * unit_price
+
+                product_data = {
+                    "code": product_code,
+                    "name": product_name,
+                    "quantity": quantity,
+                    "unit_price": unit_price,
+                    "line_total": line_total,
+                    # Enrichissement SAP
+                    "sap_material": product.get("MATNR", ""),
+                    "sap_description": product.get("MAKTX", ""),
+                    "sap_category": product.get("MATKL", ""),
+                    "sap_unit": product.get("MEINS", "PCE"),
+                    "sap_weight": product.get("NTGEW", 0),
+                    "sap_stock": product.get("LABST", 0),
+                    # Enrichissement Salesforce
+                    "sf_id": product.get("Id", ""),
+                    "sf_family": product.get("Family", ""),
+                    "sf_currency": product.get("CurrencyIsoCode", "EUR"),
+                    "sf_active": product.get("IsActive", True),
+                    "sf_discount_eligible": product.get("DiscountEligible__c", False)
+                }
+                
+                processed_products.append(product_data)
+        
+        return processed_products    
     async def search_products_by_characteristics(self, search_criteria: Dict[str, Any]) -> Dict[str, Any]:
         """
         Recherche des produits dans SAP selon les caractéristiques demandées

@@ -198,6 +198,8 @@ class MCPConnector:
                             [sys.executable, script_path, "--input-file", temp_in_path, "--output-file", temp_out_path],  # 🔧 Arguments nommés
                             capture_output=True,
                             text=True,
+                            encoding="utf-8",
+                            errors="replace",
                             timeout=timeout_seconds,  # ✅ Variable maintenant définie
                             cwd=os.path.dirname(script_path)
                         )
