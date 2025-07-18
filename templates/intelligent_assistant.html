@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>NOVA - Assistant Commercial Intelligent</title>
     <link rel="stylesheet" href="/static/it_spirit_styles.css">
+    <link rel="stylesheet" href="/static/progress_styles.css">
     <style>
         /* 🎨 STYLES IT SPIRIT - Interface Élégante avec Chat */
         :root {
@@ -88,73 +89,20 @@
         @keyframes float {
             0%, 100% { transform: translateY(0px) rotate(0deg); }
             33% { transform: translateY(-30px) rotate(120deg); }
-            66% { transform: translateY(20px) rotate(240deg); }
-        }
-
-        /* Toggle mode brouillon */
-        .mode-toggle {
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            z-index: 1000;
-        }
-
-        .toggle-switch {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            background: rgba(255, 255, 255, 0.2);
-            backdrop-filter: blur(10px);
-            padding: 10px 15px;
-            border-radius: 25px;
-            color: white;
-            font-size: 0.9rem;
-            border: 1px solid rgba(255, 255, 255, 0.3);
-        }
-
-        .switch {
-            width: 50px;
-            height: 25px;
-            background: rgba(255, 255, 255, 0.3);
-            border-radius: 25px;
-            position: relative;
-            cursor: pointer;
-            transition: all 0.3s ease;
-        }
-
-        .switch.active {
-            background: var(--success-green);
-        }
-
-        .switch-handle {
-            width: 21px;
-            height: 21px;
-            background: white;
-            border-radius: 50%;
-            position: absolute;
-            top: 2px;
-            left: 2px;
-            transition: all 0.3s ease;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-        }
-
-        .switch.active .switch-handle {
-            transform: translateX(25px);
+            66% { transform: translateY(15px) rotate(240deg); }
         }
 
         /* Container principal */
         .container {
-            max-width: 1000px;
+            max-width: 900px;
             margin: 0 auto;
-            padding: 40px 20px;
-            position: relative;
-            z-index: 1;
-            min-height: 100vh;
+            padding: 30px 20px;
+            height: 100vh;
             display: flex;
             flex-direction: column;
         }
 
-        /* Header avec logo - Design original */
+        /* En-tête avec logo */
         .header {
             text-align: center;
             margin-bottom: 40px;
@@ -162,120 +110,210 @@
 
         .logo-container {
             display: flex;
-            align-items: center;
             justify-content: center;
+            align-items: center;
             gap: 30px;
-            margin-bottom: 25px;
+            margin-bottom: 30px;
         }
 
+        /* 🔗 LOGO IT SPIRIT CLIQUABLE */
         .it-spirit-logo {
-            width: 140px;
-            height: auto;
-            position: relative;
+            width: 150px;
             background: rgba(255, 255, 255, 0.95);
-            padding: 15px 20px;
-            border-radius: 15px;
-            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
-            transition: transform 0.3s ease;
+            padding: 12px 20px;
+            border-radius: 12px;
+            font-weight: 700;
+            color: var(--primary-blue);
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+            backdrop-filter: blur(10px);
+            text-decoration: none;
+            display: inline-block;
+            transition: all 0.3s ease;
             cursor: pointer;
-            animation: fadeInScale 0.8s ease-out;
         }
 
         .it-spirit-logo:hover {
-            transform: scale(1.05);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2);
+            background: rgba(255, 255, 255, 1);
         }
 
-        .it-spirit-logo img {
-            width: 100%;
-            height: auto;
-            display: block;
+        .it-spirit-logo:active {
+            transform: translateY(0);
+        }
+
+        /* 🔁 TOGGLE MODE BROUILLON */
+        .draft-mode-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 15px;
+            margin: 20px 0;
+            padding: 15px 20px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .draft-mode-label {
+            font-family: 'Montserrat', Arial, sans-serif;
+            font-weight: 600;
+            font-size: 14px;
+            color: rgba(255, 255, 255, 0.9);
+            margin-right: 10px;
+        }
+
+        /* Switch Toggle */
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 60px;
+            height: 32px;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(255, 255, 255, 0.3);
+            transition: 0.4s;
+            border-radius: 32px;
+            border: 2px solid rgba(255, 255, 255, 0.4);
+        }
+
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 24px;
+            width: 24px;
+            left: 2px;
+            bottom: 2px;
+            background: white;
+            transition: 0.4s;
+            border-radius: 50%;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        input:checked + .toggle-slider {
+            background: var(--gradient-main);
+            border-color: var(--primary-blue);
+        }
+
+        input:checked + .toggle-slider:before {
+            transform: translateX(28px);
+            box-shadow: 0 2px 12px rgba(2, 185, 253, 0.4);
+        }
+
+        .toggle-slider:hover {
+            box-shadow: 0 0 16px rgba(255, 255, 255, 0.3);
+        }
+
+        /* Labels du toggle */
+        .toggle-labels {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .toggle-label-text {
+            font-family: 'Montserrat', Arial, sans-serif;
+            font-weight: 500;
+            font-size: 13px;
+            color: rgba(255, 255, 255, 0.8);
+            transition: all 0.3s ease;
+        }
+
+        .toggle-label-text.active {
+            color: var(--primary-blue);
+            font-weight: 700;
+            text-shadow: 0 0 8px rgba(2, 185, 253, 0.5);
+        }
+
+        /* Indicateur de statut */
+        .draft-status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-family: 'Montserrat', Arial, sans-serif;
+            font-weight: 600;
+            font-size: 12px;
+            padding: 6px 12px;
+            border-radius: 20px;
+            transition: all 0.3s ease;
+        }
+
+        .draft-status-indicator.production {
+            background: rgba(16, 185, 129, 0.2);
+            color: #10b981;
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+
+        .draft-status-indicator.draft {
+            background: rgba(245, 158, 11, 0.2);
+            color: #f59e0b;
+            border: 1px solid rgba(245, 158, 11, 0.3);
         }
 
         .nova-presentation {
-            color: white;
             font-size: 1.6rem;
-            font-weight: 400;
-            text-align: center;
+            font-weight: 300;
+            color: rgba(255, 255, 255, 0.95);
             margin: 20px 0 10px 0;
-            letter-spacing: 1px;
-            animation: fadeInScale 0.8s ease-out 0.5s backwards;
+            background: var(--gradient-main);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
         }
 
         .tagline {
-            color: rgba(255, 255, 255, 0.9);
             font-size: 1.1rem;
-            font-weight: 300;
-            text-align: center;
+            color: rgba(255, 255, 255, 0.8);
             margin-bottom: 40px;
-            animation: fadeInScale 0.8s ease-out 0.7s backwards;
+            line-height: 1.4;
         }
 
-        @keyframes fadeInScale {
-            from {
-                opacity: 0;
-                transform: scale(0.8);
-            }
-            to {
-                opacity: 1;
-                transform: scale(1);
-            }
-        }
-
-        /* Zone de conversation avec design élégant */
+        /* Section conversation */
         .conversation-section {
-            background: rgba(255, 255, 255, 0.15);
-            backdrop-filter: blur(20px);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            border-radius: 30px;
-            padding: 30px;
-            margin-bottom: 20px;
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            padding: 25px;
             flex: 1;
             display: flex;
             flex-direction: column;
-            min-height: 400px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
         }
 
-        .conversation-title {
-            color: white;
-            font-size: 1.4rem;
-            font-weight: 300;
-            text-align: center;
-            margin-bottom: 25px;
-            opacity: 0.9;
-        }
-
-        /* Messages de conversation */
+        /* Messages */
         .chat-messages {
             flex: 1;
             overflow-y: auto;
             margin-bottom: 20px;
-            display: flex;
-            flex-direction: column;
-            gap: 15px;
-            min-height: 250px;
-            max-height: 400px;
+            padding-right: 10px;
         }
 
         .message {
             display: flex;
             gap: 12px;
-            max-width: 85%;
-            animation: slideIn 0.3s ease;
-        }
-
-        .message.user {
-            align-self: flex-end;
-            flex-direction: row-reverse;
-        }
-
-        .message.assistant {
-            align-self: flex-start;
+            margin-bottom: 20px;
+            animation: slideIn 0.4s ease-out;
+            align-items: flex-start;
         }
 
         .message-avatar {
-            width: 36px;
-            height: 36px;
+            width: 40px;
+            height: 40px;
             border-radius: 50%;
             display: flex;
             align-items: center;
@@ -376,10 +414,10 @@
         .typing-indicator {
             display: flex;
             gap: 12px;
-            max-width: 85%;
-            align-self: flex-start;
+            align-items: center;
+            padding: 15px 0;
             opacity: 0;
-            transform: translateY(10px);
+            transform: translateY(20px);
             transition: all 0.3s ease;
         }
 
@@ -388,20 +426,14 @@
             transform: translateY(0);
         }
 
-        .typing-indicator .message-avatar {
-            background: rgba(255, 255, 255, 0.9);
-            color: var(--primary-blue);
-        }
-
         .typing-content {
-            background: rgba(255, 255, 255, 0.95);
-            padding: 15px 18px;
-            border-radius: 18px;
-            border-bottom-left-radius: 6px;
             display: flex;
             align-items: center;
-            gap: 8px;
-            border: 1px solid rgba(0, 0, 0, 0.1);
+            gap: 10px;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 12px 16px;
+            border-radius: 18px;
+            border-bottom-left-radius: 6px;
         }
 
         .typing-dots {
@@ -414,57 +446,44 @@
             height: 8px;
             background: var(--primary-blue);
             border-radius: 50%;
-            animation: typingPulse 1.4s infinite ease-in-out;
+            animation: typingAnimation 1.4s infinite ease-in-out;
         }
 
-        .typing-dot:nth-child(1) { animation-delay: -0.32s; }
-        .typing-dot:nth-child(2) { animation-delay: -0.16s; }
-        .typing-dot:nth-child(3) { animation-delay: 0s; }
+        .typing-dot:nth-child(1) { animation-delay: 0s; }
+        .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+        .typing-dot:nth-child(3) { animation-delay: 0.4s; }
 
-        @keyframes typingPulse {
-            0%, 80%, 100% {
-                transform: scale(0.8);
-                opacity: 0.5;
-            }
-            40% {
-                transform: scale(1);
-                opacity: 1;
-            }
+        @keyframes typingAnimation {
+            0%, 80%, 100% { transform: scale(0.8); opacity: 0.5; }
+            40% { transform: scale(1.2); opacity: 1; }
         }
 
-        /* Zone de saisie élégante */
+        /* Zone de saisie */
         .input-container {
             display: flex;
-            gap: 15px;
+            gap: 12px;
             align-items: flex-end;
         }
 
         .chat-input {
             flex: 1;
-            background: rgba(255, 255, 255, 0.95);
             border: none;
-            border-radius: 20px;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 25px;
             padding: 15px 20px;
-            font-size: 1.1rem;
-            font-family: inherit;
+            font-size: 1rem;
             resize: none;
             outline: none;
+            line-height: 1.4;
             max-height: 120px;
             min-height: 50px;
-            overflow-y: auto;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
             transition: all 0.3s ease;
-            line-height: 1.6;
         }
 
         .chat-input:focus {
-            transform: translateY(-2px);
-            box-shadow: 0 15px 40px rgba(0, 0, 0, 0.15);
             background: white;
-        }
-
-        .chat-input::placeholder {
-            color: #64748b;
-            font-style: italic;
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
         }
 
         .send-button {
@@ -536,6 +555,17 @@
             }
         }
 
+        @keyframes fadeInScale {
+            from {
+                opacity: 0;
+                transform: scale(0.9);
+            }
+            to {
+                opacity: 1;
+                transform: scale(1);
+            }
+        }
+
         /* Responsive Design */
         @media (max-width: 768px) {
             .container {
@@ -565,53 +595,22 @@
 
             .conversation-section {
                 padding: 20px;
-                border-radius: 20px;
-                min-height: 300px;
             }
 
-            .conversation-title {
-                font-size: 1.2rem;
-            }
-
-            .chat-messages {
-                min-height: 200px;
-                max-height: 300px;
-            }
-
-            .message {
-                max-width: 95%;
-            }
-
-            .chat-input {
-                font-size: 1rem;
+            .draft-mode-container {
+                flex-direction: column;
+                gap: 10px;
                 padding: 12px 16px;
             }
 
-            .send-button {
-                width: 45px;
-                height: 45px;
-            }
-
-            .mode-toggle {
-                position: relative;
-                top: auto;
-                right: auto;
-                margin-bottom: 20px;
-                text-align: center;
-            }
-
-            .welcome-title {
-                font-size: 1.5rem;
-            }
-
-            .welcome-subtitle {
-                font-size: 1rem;
+            .toggle-labels {
+                order: -1;
             }
         }
     </style>
 </head>
 <body>
-    <!-- Formes organiques de fond -->
+    <!-- Formes animées en arrière-plan -->
     <div class="background-shapes">
         <div class="shape shape-1"></div>
         <div class="shape shape-2"></div>
@@ -619,36 +618,54 @@
         <div class="shape shape-4"></div>
     </div>
 
-    <!-- Toggle mode brouillon -->
-    <div class="mode-toggle">
-        <div class="toggle-switch">
-            <span>Mode brouillon</span>
-            <div class="switch" id="draftToggle" onclick="toggleDraftMode()">
-                <div class="switch-handle"></div>
-            </div>
-        </div>
-    </div>
-
     <div class="container">
-        <!-- Header avec logo IT Spirit - Design original -->
+        <!-- En-tête -->
         <div class="header">
             <div class="logo-container">
-                <div class="it-spirit-logo" onclick="window.open('https://www.it-spirit.fr', '_blank')" title="Visiter le site IT Spirit">
-                    <img src="/static/Logo.png" alt="IT Spirit" />
+                <!-- 🔗 LOGO IT SPIRIT CLIQUABLE -->
+                <a href="/" class="it-spirit-logo" title="Retour à l'accueil IT SPIRIT - Solutions d'Intelligence Artificielle">
+                    IT SPIRIT
+                </a>
+            </div>
+            
+            <!-- 🔁 TOGGLE MODE BROUILLON -->
+            <div class="draft-mode-container">
+                <div class="draft-mode-label">Mode de création :</div>
+                
+                <div class="toggle-labels">
+                    <span class="toggle-label-text production-label active" id="productionLabel">
+                        📋 Production
+                    </span>
+                    
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="draftToggle" onchange="toggleDraftMode()">
+                        <span class="toggle-slider"></span>
+                    </label>
+                    
+                    <span class="toggle-label-text draft-label" id="draftLabel">
+                        📝 Brouillon
+                    </span>
+                </div>
+                
+                <div class="draft-status-indicator production" id="draftStatusIndicator">
+                    <span id="draftStatusIcon">🔒</span>
+                    <span id="draftStatusText">Devis définitifs</span>
                 </div>
             </div>
-            <div class="nova-presentation">vous présente NOVA</div>
-            <div class="tagline">L'esprit humain au cœur de la technologie</div>
+            
+            <div class="nova-presentation">Bonjour ! Je suis NOVA</div>
+            <div class="tagline">
+                Votre assistant commercial intelligent pour la génération automatique de devis.<br>
+                Intégration SAP Business One • Salesforce • Claude AI
+            </div>
         </div>
 
-        <!-- Zone de conversation élégante -->
+        <!-- Section conversation -->
         <div class="conversation-section">
-            <h2 class="conversation-title">Conversation avec votre assistant intelligent</h2>
-            
-            <!-- Messages de conversation -->
             <div class="chat-messages" id="chatMessages">
+                <!-- Message de bienvenue -->
                 <div class="welcome-message">
-                    <div class="welcome-title">👋 Bonjour ! Je suis NOVA</div>
+                    <div class="welcome-title">Bonjour ! Je suis NOVA</div>
                     <div class="welcome-subtitle">
                         Votre assistant commercial intelligent.<br>
                         Demandez-moi de créer un devis ou posez-moi vos questions !
@@ -686,11 +703,18 @@
     </div>
 
     <script>
-        // 🔧 JAVASCRIPT CHAT CONVERSATIONNEL ÉLÉGANT
+        // =====================================
+        // JAVASCRIPT AVEC PROGRESSION TEMPS RÉEL
+        // =====================================
         
         let isDraftMode = false;
         let isProcessing = false;
         let conversationHistory = [];
+        
+        // Variables de progression
+        let currentTaskId = null;
+        let pollingInterval = null;
+        let progressDisplayActive = false;
 
         // Configuration auto-resize du textarea
         function setupAutoResize() {
@@ -701,31 +725,55 @@
                 this.style.height = 'auto';
                 this.style.height = Math.min(this.scrollHeight, 120) + 'px';
                 
-                // Activer/désactiver le bouton d'envoi
                 const sendButton = document.getElementById('sendButton');
                 if (sendButton) {
                     sendButton.disabled = !this.value.trim();
                 }
             });
 
-            // Gestion de la touche Entrée
             textarea.addEventListener('keydown', function(event) {
                 if (event.key === 'Enter' && !event.shiftKey) {
                     event.preventDefault();
                     sendMessage();
                 }
             });
+
+            const sendButton = document.getElementById('sendButton');
+            if (sendButton) {
+                sendButton.disabled = true;
+            }
         }
 
-        // Toggle mode brouillon
+        // 🔁 TOGGLE MODE BROUILLON AMÉLIORÉ
         function toggleDraftMode() {
             const toggle = document.getElementById('draftToggle');
-            isDraftMode = !isDraftMode;
-            toggle.classList.toggle('active', isDraftMode);
+            const productionLabel = document.getElementById('productionLabel');
+            const draftLabel = document.getElementById('draftLabel');
+            const statusIndicator = document.getElementById('draftStatusIndicator');
+            const statusIcon = document.getElementById('draftStatusIcon');
+            const statusText = document.getElementById('draftStatusText');
             
-            addSystemMessage(isDraftMode ? 
-                '📝 Mode brouillon activé - Vos devis seront créés en tant que brouillons' : 
-                '📋 Mode production activé - Vos devis seront créés définitivement'
+            isDraftMode = toggle.checked;
+            
+            // Mettre à jour les labels
+            productionLabel.classList.toggle('active', !isDraftMode);
+            draftLabel.classList.toggle('active', isDraftMode);
+            
+            // Mettre à jour l'indicateur de statut
+            if (isDraftMode) {
+                statusIndicator.className = 'draft-status-indicator draft';
+                statusIcon.textContent = '📝';
+                statusText.textContent = 'Mode brouillon';
+            } else {
+                statusIndicator.className = 'draft-status-indicator production';
+                statusIcon.textContent = '🔒';
+                statusText.textContent = 'Devis définitifs';
+            }
+            
+            // Message système
+            addSystemMessage(isDraftMode ?
+                '📝 Mode brouillon activé - Vos devis seront créés en tant que brouillons pour validation' : 
+                '📋 Mode production activé - Vos devis seront créés définitivement dans le système'
             );
         }
 
@@ -744,8 +792,6 @@
             
             messagesContainer.appendChild(messageDiv);
             scrollToBottom();
-            
-            // Masquer le message de bienvenue s'il existe
             hideWelcomeMessage();
         }
 
@@ -762,11 +808,8 @@
             
             messagesContainer.appendChild(messageDiv);
             scrollToBottom();
-            
-            // Masquer le message de bienvenue
             hideWelcomeMessage();
             
-            // Ajouter à l'historique
             conversationHistory.push({
                 role: 'user',
                 content: content,
@@ -805,7 +848,6 @@
             messagesContainer.appendChild(messageDiv);
             scrollToBottom();
             
-            // Ajouter à l'historique
             conversationHistory.push({
                 role: 'assistant',
                 content: data.response?.message || "Réponse reçue",
@@ -814,7 +856,7 @@
             });
         }
 
-        // Masquer le message de bienvenue
+        // Utilitaires
         function hideWelcomeMessage() {
             const welcomeMsg = document.querySelector('.welcome-message');
             if (welcomeMsg) {
@@ -822,7 +864,6 @@
             }
         }
 
-        // Sélectionner une suggestion
         function selectSuggestion(suggestion) {
             const input = document.getElementById('chatInput');
             input.value = suggestion;
@@ -830,27 +871,23 @@
             input.style.height = Math.min(input.scrollHeight, 120) + 'px';
             input.focus();
             
-            // Activer le bouton d'envoi
             const sendButton = document.getElementById('sendButton');
             if (sendButton) {
                 sendButton.disabled = false;
             }
         }
 
-        // Afficher l'indicateur de frappe
         function showTypingIndicator() {
             const indicator = document.getElementById('typingIndicator');
             indicator.classList.add('show');
             scrollToBottom();
         }
 
-        // Masquer l'indicateur de frappe
         function hideTypingIndicator() {
             const indicator = document.getElementById('typingIndicator');
             indicator.classList.remove('show');
         }
 
-        // Faire défiler vers le bas
         function scrollToBottom() {
             const messagesContainer = document.getElementById('chatMessages');
             setTimeout(() => {
@@ -858,7 +895,7 @@
             }, 100);
         }
 
-        // Envoyer un message
+        // PROGRESSION FUNCTIONS (même code que précédemment)
         async function sendMessage() {
             if (isProcessing) return;
             
@@ -868,31 +905,27 @@
             
             if (!message) return;
             
-            // Ajouter le message utilisateur
             addUserMessage(message);
             
-            // Vider et réinitialiser l'input
             input.value = '';
             input.style.height = 'auto';
             sendButton.disabled = true;
             
-            // État de traitement
             isProcessing = true;
             sendButton.classList.add('sending');
-            showTypingIndicator();
+            
+            showProgressDisplay();
             
             try {
-                // Envoyer à l'API
-                const response = await fetch('/api/assistant/chat', {
+                const response = await fetch('/progress/start_quote', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                         'Accept': 'application/json'
                     },
                     body: JSON.stringify({
-                        message: message,
-                        draft_mode: isDraftMode,
-                        conversation_history: conversationHistory.slice(-10) // Derniers 10 messages pour le contexte
+                        prompt: message,
+                        draft_mode: isDraftMode
                     })
                 });
                 
@@ -902,48 +935,243 @@
                 
                 const result = await response.json();
                 
-                // Ajouter la réponse
-                if (result.success) {
-                    addAssistantMessage(result);
+                if (result.task_id) {
+                    currentTaskId = result.task_id;
+                    console.log("🔄 Démarrage polling pour task:", currentTaskId);
+                    startProgressPolling(currentTaskId);
                 } else {
-                    throw new Error(result.error || "Erreur inconnue");
+                    throw new Error("Aucun task_id reçu du serveur");
                 }
                 
             } catch (error) {
                 console.error("❌ Erreur:", error);
+                hideProgressDisplay();
                 addAssistantMessage({
                     response: {
                         message: `❌ Erreur: ${error.message}`,
                         suggestions: ['Réessayer', 'Reformuler la demande', 'Vérifier la connexion']
                     }
                 });
-            } finally {
-                // Réinitialiser l'état
+                
                 isProcessing = false;
                 sendButton.classList.remove('sending');
-                hideTypingIndicator();
                 input.focus();
             }
         }
 
-        // Initialisation
-        document.addEventListener('DOMContentLoaded', function() {
-            console.log('🚀 NOVA Interface Élégante avec Chat initialisée');
+        // Fonctions de progression (importées du fichier séparé)
+        function showProgressDisplay() {
+            hideTypingIndicator();
             
-            setupAutoResize();
+            let progressContainer = document.getElementById('progressContainer');
             
-            // Focus initial sur l'input
+            if (!progressContainer) {
+                progressContainer = document.createElement('div');
+                progressContainer.id = 'progressContainer';
+                progressContainer.className = 'progress-container';
+                progressContainer.innerHTML = `
+                    <div class="progress-message">
+                        <div class="progress-avatar">⚙️</div>
+                        <div class="progress-content">
+                            <div class="progress-title">🤖 NOVA traite votre demande...</div>
+                            <div class="progress-details">
+                                <div class="progress-bar-container">
+                                    <div class="progress-bar" id="progressBar">
+                                        <div class="progress-bar-fill" id="progressBarFill" style="width: 0%"></div>
+                                    </div>
+                                    <div class="progress-percentage" id="progressPercentage">0%</div>
+                                </div>
+                                <div class="progress-step" id="progressStep">Initialisation...</div>
+                                <div class="progress-phases" id="progressPhases"></div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                
+                const messagesContainer = document.getElementById('chatMessages');
+                messagesContainer.appendChild(progressContainer);
+            }
+            
+            progressContainer.style.display = 'block';
+            progressDisplayActive = true;
+            scrollToBottom();
+        }
+
+        function hideProgressDisplay() {
+            const progressContainer = document.getElementById('progressContainer');
+            if (progressContainer) {
+                progressContainer.style.display = 'none';
+            }
+            progressDisplayActive = false;
+            
+            if (pollingInterval) {
+                clearInterval(pollingInterval);
+                pollingInterval = null;
+            }
+        }
+
+        async function startProgressPolling(taskId) {
+            let attempts = 0;
+            const maxAttempts = 240;
+            
+            pollingInterval = setInterval(async () => {
+                attempts++;
+                
+                if (attempts > maxAttempts) {
+                    clearInterval(pollingInterval);
+                    updateProgressError("Timeout - La génération prend trop de temps");
+                    return;
+                }
+                
+                try {
+                    const response = await fetch(`/progress/quote_status/${taskId}?detailed=true`);
+                    if (!response.ok) {
+                        throw new Error(`Status ${response.status}`);
+                    }
+                    
+                    const progress = await response.json();
+                    updateProgressDisplay(progress);
+                    
+                    if (progress.status === 'completed') {
+                        clearInterval(pollingInterval);
+                        pollingInterval = null;
+                        
+                        hideProgressDisplay();
+                        showQuoteResult(progress.result || progress);
+                        resetProcessingState();
+                        
+                    } else if (progress.status === 'failed') {
+                        clearInterval(pollingInterval);
+                        pollingInterval = null;
+                        
+                        hideProgressDisplay();
+                        addAssistantMessage({
+                            response: {
+                                message: `❌ Erreur: ${progress.error || 'Échec de la génération'}`,
+                                suggestions: ['Réessayer', 'Modifier la demande', 'Contacter le support']
+                            }
+                        });
+                        resetProcessingState();
+                    }
+                    
+                } catch (error) {
+                    console.error("❌ Erreur polling:", error);
+                    updateProgressError(`Erreur de communication (tentative ${attempts}/${maxAttempts})`);
+                }
+            }, 1000);
+        }
+
+        function updateProgressDisplay(progress) {
+            if (!progressDisplayActive) return;
+            
+            const progressBarFill = document.getElementById('progressBarFill');
+            const progressPercentage = document.getElementById('progressPercentage');
+            const progressStep = document.getElementById('progressStep');
+            const progressPhases = document.getElementById('progressPhases');
+            
+            if (!progressBarFill) return;
+            
+            const overallProgress = progress.overall_progress || 0;
+            progressBarFill.style.width = `${overallProgress}%`;
+            progressPercentage.textContent = `${overallProgress}%`;
+            
+            const currentStepTitle = progress.current_step_title || 'En cours...';
+            progressStep.textContent = `📋 ${currentStepTitle}`;
+            
+            if (progress.phases && progressPhases) {
+                let phasesHtml = '';
+                Object.values(progress.phases).forEach(phase => {
+                    if (phase.steps && phase.steps.length > 0) {
+                        phasesHtml += `<div class="progress-phase">`;
+                        phasesHtml += `<div class="phase-title">${phase.name}</div>`;
+                        
+                        phase.steps.forEach(step => {
+                            const statusIcon = getStepStatusIcon(step.status);
+                            const statusClass = `step-${step.status}`;
+                            phasesHtml += `
+                                <div class="progress-phase-step ${statusClass}">
+                                    ${statusIcon} ${step.title}
+                                </div>
+                            `;
+                        });
+                        
+                        phasesHtml += `</div>`;
+                    }
+                });
+                progressPhases.innerHTML = phasesHtml;
+            }
+            
+            scrollToBottom();
+        }
+
+        function getStepStatusIcon(status) {
+            switch (status) {
+                case 'completed': return '✅';
+                case 'running': return '⚙️';
+                case 'failed': return '❌';
+                case 'pending': return '⏳';
+                default: return '📋';
+            }
+        }
+
+        function updateProgressError(errorMessage) {
+            const progressStep = document.getElementById('progressStep');
+            if (progressStep) {
+                progressStep.textContent = `⚠️ ${errorMessage}`;
+                progressStep.style.color = '#ef4444';
+            }
+        }
+
+        function resetProcessingState() {
+            isProcessing = false;
+            currentTaskId = null;
+            
+            const sendButton = document.getElementById('sendButton');
+            if (sendButton) {
+                sendButton.classList.remove('sending');
+            }
+            
             const input = document.getElementById('chatInput');
             if (input) {
                 input.focus();
-                // Désactiver le bouton d'envoi initialement
+            }
+        }
+
+        function showQuoteResult(result) {
+            let resultMessage = "✅ Devis traité avec succès !";
+            let suggestions = ['Voir le devis', 'Créer un nouveau devis', 'Modifier le devis'];
+            
+            if (result && result.message) {
+                resultMessage = result.message;
+            }
+            
+            if (result && result.suggestions) {
+                suggestions = result.suggestions;
+            }
+            
+            addAssistantMessage({
+                response: {
+                    message: resultMessage,
+                    suggestions: suggestions
+                }
+            });
+        }
+
+        // Initialisation
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('🚀 NOVA Interface avec Toggle et Progression initialisée');
+            
+            setupAutoResize();
+            
+            const input = document.getElementById('chatInput');
+            if (input) {
+                input.focus();
                 document.getElementById('sendButton').disabled = true;
             }
             
-            console.log('✅ Interface prête pour la conversation !');
+            console.log('✅ Interface prête avec mode brouillon et progression !');
         });
 
-        // Gestion globale des erreurs
         window.addEventListener('error', function(event) {
             console.error('❌ Erreur JavaScript:', event.error);
         });
