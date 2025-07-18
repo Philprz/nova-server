@@ -239,22 +239,28 @@ class ProgressTracker:
         return self.active_tasks.get(task_id)
     
     def complete_task(self, task_id: str, result: Dict[str, Any]):
-        """Termine une tâche et la déplace dans l'historique"""
+        """
+        🔧 MODIFICATION : Termine une tâche et sauvegarde le résultat
+        """
         if task_id not in self.active_tasks:
+            logger.warning(f"⚠️ Tentative de completion tâche inexistante: {task_id}")
             return False
-            
+
         task = self.active_tasks[task_id]
         task.complete_task(result)
-        
-        # Déplacer vers l'historique
-        self.completed_tasks.append(task.get_overall_progress())
-        
+
+        # 🔧 MODIFICATION : Sauvegarder le résultat dans l'historique
+        task_data = task.get_overall_progress()
+        task_data["result"] = result  # Ajouter le résultat
+        self.completed_tasks.append(task_data)
+
         # Limiter la taille de l'historique
         if len(self.completed_tasks) > self.max_completed_history:
             self.completed_tasks = self.completed_tasks[-self.max_completed_history:]
-        
+
         # Supprimer des tâches actives
         del self.active_tasks[task_id]
+        logger.info(f"✅ Tâche {task_id} déplacée vers l'historique avec résultat")
         return True
     
     def fail_task(self, task_id: str, error: str):
@@ -280,5 +286,134 @@ class ProgressTracker:
         """Retourne l'historique des tâches terminées"""
         return self.completed_tasks.copy()
 
+    # 🔧 NOUVELLES MÉTHODES POUR LE WORKFLOW
+
+    def set_current_task(self, task_id: str):
+        """
+        🔧 NOUVELLE MÉTHODE : Définit la tâche courante pour le tracking automatique
+        """
+        task = self.get_task(task_id)
+        if task:
+            self._current_task = task
+            logger.debug(f"Tâche courante définie: {task_id}")
+        else:
+            logger.warning(f"Impossible de définir la tâche courante: {task_id} introuvable")
+
+    def clear_current_task(self):
+        """
+        🔧 NOUVELLE MÉTHODE : Efface la tâche courante
+        """
+        self._current_task = None
+        logger.debug("Tâche courante effacée")
+
+    def get_current_task(self) -> Optional[QuoteTask]:
+        """
+        🔧 NOUVELLE MÉTHODE : Récupère la tâche courante
+        """
+        return getattr(self, '_current_task', None)
+
+    def get_task_statistics(self) -> Dict[str, Any]:
+        """
+        🔧 NOUVELLE MÉTHODE : Statistiques des tâches
+        """
+        completed_count = len(self.completed_tasks)
+        active_count = len(self.active_tasks)
+
+        # Analyser les statuts des tâches terminées
+        success_count = 0
+        failed_count = 0
+
+        for task_data in self.completed_tasks:
+            if task_data.get("status") == TaskStatus.COMPLETED:
+                success_count += 1
+            elif task_data.get("status") == TaskStatus.FAILED:
+                failed_count += 1
+
+        return {
+            "active_tasks": active_count,
+            "completed_tasks": completed_count,
+            "successful_tasks": success_count,
+            "failed_tasks": failed_count,
+            "success_rate": (success_count / completed_count * 100) if completed_count > 0 else 0,
+            "total_tasks_processed": completed_count + active_count
+        }
+
+    def cleanup_old_tasks(self, max_age_hours: int = 24):
+        """
+        🔧 NOUVELLE MÉTHODE : Nettoie les anciennes tâches
+        """
+        from datetime import datetime, timedelta
+        cutoff_time = datetime.now() - timedelta(hours=max_age_hours)
+
+        # Nettoyer les tâches actives anciennes (probablement abandonnées)
+        abandoned_tasks = []
+        for task_id, task in list(self.active_tasks.items()):
+            if task.created_at < cutoff_time:
+                abandoned_tasks.append(task_id)
+                # Marquer comme échouée et déplacer vers l'historique
+                task.fail_task("Tâche abandonnée (timeout)")
+                self.completed_tasks.append(task.get_overall_progress())
+                del self.active_tasks[task_id]
+
+        if abandoned_tasks:
+            logger.info(f"🧹 {len(abandoned_tasks)} tâches abandonnées nettoyées")
+
+        return len(abandoned_tasks)
+
 # Instance globale du tracker
 progress_tracker = ProgressTracker()
+
+# 🔧 FONCTIONS UTILITAIRES POUR LE WORKFLOW
+
+def get_or_create_task(task_id: str = None, user_prompt: str = "", draft_mode: bool = False) -> QuoteTask:
+    """
+    🔧 NOUVELLE FONCTION : Récupère une tâche existante ou en crée une nouvelle
+    """
+    if task_id:
+        existing_task = progress_tracker.get_task(task_id)
+        if existing_task:
+            logger.info(f"✅ Tâche existante récupérée: {task_id}")
+            return existing_task
+        else:
+            logger.warning(f"⚠️ Tâche {task_id} introuvable, création d'une nouvelle")
+
+    # Créer une nouvelle tâche
+    new_task = progress_tracker.create_task(user_prompt=user_prompt, draft_mode=draft_mode)
+    logger.info(f"🆕 Nouvelle tâche créée: {new_task.task_id}")
+    return new_task
+
+def track_workflow_step(step_id: str, message: str = "", progress: int = 0, task_id: str = None):
+    """
+    🔧 NOUVELLE FONCTION : Fonction utilitaire pour tracker une étape de workflow
+    """
+    if task_id:
+        task = progress_tracker.get_task(task_id)
+    else:
+        task = progress_tracker.get_current_task()
+
+    if task:
+        if progress == 0:
+            task.start_step(step_id, message)
+        elif progress == 100:
+            task.complete_step(step_id, message)
+        else:
+            task.update_step_progress(step_id, progress, message)
+
+        logger.debug(f"📊 Étape {step_id}: {progress}% - {message}")
+    else:
+        logger.warning(f"⚠️ Impossible de tracker l'étape {step_id}: aucune tâche active")
+
+def get_workflow_progress(task_id: str) -> Optional[Dict[str, Any]]:
+    """
+    🔧 NOUVELLE FONCTION : Récupère la progression d'un workflow
+    """
+    task = progress_tracker.get_task(task_id)
+    if task:
+        return task.get_overall_progress()
+
+    # Chercher dans l'historique
+    for completed_task in progress_tracker.completed_tasks:
+        if completed_task.get("task_id") == task_id:
+            return completed_task
+
+    return None
