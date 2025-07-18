@@ -3473,73 +3473,73 @@ class DevisWorkflow:
             logger.exception(f"Erreur validation quantités: {str(e)}")
             return self._build_error_response("Erreur validation quantités", str(e))
 
-# 🔧 NOUVELLES ROUTES FASTAPI OPTIMISÉES
-from fastapi import APIRouter, HTTPException
-from datetime import datetime
+    # 🔧 NOUVELLES ROUTES FASTAPI OPTIMISÉES
+    from fastapi import APIRouter, HTTPException
+    from datetime import datetime
 
-# Créer un routeur pour les nouvelles routes
-router_v2 = APIRouter()
+    # Créer un routeur pour les nouvelles routes
+    router_v2 = APIRouter()
 
-@router_v2.post("/generate_quote_v2")  # Nouvelle version optimisée
-async def generate_quote_optimized(request: dict):
-    """
-    Route optimisée avec validation séquentielle et cache
-    """
+    @router_v2.post("/generate_quote_v2")  # Nouvelle version optimisée
+    async def generate_quote_optimized(request: dict):
+        """
+        Route optimisée avec validation séquentielle et cache
+        """
 
-    try:
-        user_prompt = request.get("prompt", "").strip()
-        draft_mode = request.get("draft_mode", False)
+        try:
+            user_prompt = request.get("prompt", "").strip()
+            draft_mode = request.get("draft_mode", False)
 
-        if not user_prompt:
-            raise HTTPException(status_code=400, detail="Prompt requis")
+            if not user_prompt:
+                raise HTTPException(status_code=400, detail="Prompt requis")
 
-        # Initialiser le workflow optimisé
-        workflow = DevisWorkflow(validation_enabled=True, draft_mode=draft_mode)
+            # Initialiser le workflow optimisé
+            workflow = DevisWorkflow(validation_enabled=True, draft_mode=draft_mode)
 
-        # Lancer le processus
-        result = await workflow.process_quote_request(user_prompt, draft_mode)
+            # Lancer le processus
+            result = await workflow.process_quote_request(user_prompt, draft_mode)
 
-        return {
-            "success": True,
-            "data": result,
-            "performance": {
-                "cache_stats": await workflow.cache_manager.get_cache_stats(),
-                "timestamp": datetime.now().isoformat()
+            return {
+                "success": True,
+                "data": result,
+                "performance": {
+                    "cache_stats": await workflow.cache_manager.get_cache_stats(),
+                    "timestamp": datetime.now().isoformat()
+                }
             }
-        }
 
-    except Exception as e:
-        logger.exception(f"Erreur route generate_quote_v2: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        except Exception as e:
+            logger.exception(f"Erreur route generate_quote_v2: {str(e)}")
+            raise HTTPException(status_code=500, detail=str(e))
 
-@router_v2.post("/continue_quote")  # Route pour continuer après interaction
-async def continue_quote_after_interaction(request: dict):
-    """
-    Continue le workflow après une interaction utilisateur
-    """
+    @router_v2.post("/continue_quote")  # Route pour continuer après interaction
+    async def continue_quote_after_interaction(request: dict):
+        """
+        Continue le workflow après une interaction utilisateur
+        """
 
-    try:
-        task_id = request.get("task_id")
-        user_input = request.get("user_input", {})
-        context = request.get("context", {})
+        try:
+            task_id = request.get("task_id")
+            user_input = request.get("user_input", {})
+            context = request.get("context", {})
 
-        if not task_id:
-            raise HTTPException(status_code=400, detail="task_id requis")
+            if not task_id:
+                raise HTTPException(status_code=400, detail="task_id requis")
 
-        # Récupérer l'instance du workflow (en pratique, utiliser un cache/session)
-        workflow = DevisWorkflow()  # À adapter selon votre système de session
-        workflow.task_id = task_id
+            # Récupérer l'instance du workflow (en pratique, utiliser un cache/session)
+            workflow = DevisWorkflow()  # À adapter selon votre système de session
+            workflow.task_id = task_id
 
-        result = await workflow.continue_after_user_input(user_input, context)
+            result = await workflow.continue_after_user_input(user_input, context)
 
-        return {
-            "success": True,
-            "data": result
-        }
+            return {
+                "success": True,
+                "data": result
+            }
 
-    except Exception as e:
-        logger.exception(f"Erreur continue_quote: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        except Exception as e:
+            logger.exception(f"Erreur continue_quote: {str(e)}")
+            raise HTTPException(status_code=500, detail=str(e))
 
     async def _process_quote_workflow(self, extracted_info: Dict[str, Any]) -> Dict[str, Any]:
         """
