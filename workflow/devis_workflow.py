@@ -3769,11 +3769,11 @@ class DevisWorkflow:
 
             # Étape 4: Synchronisation
             self._track_step_start("save_to_sap", "💾 Enregistrement dans SAP")
-            sap_result = await self._sync_quote_to_sap(quote_result)
+            sap_result = await self._sync_quote_to_systems(quote_result)
             self._track_step_complete("save_to_sap", "✅ SAP mis à jour")
 
             self._track_step_start("sync_salesforce", "☁️ Synchronisation Salesforce")
-            sf_result = await self._sync_quote_to_salesforce(quote_result)
+            sf_result = await self._sync_quote_to_systems(quote_result)
             self._track_step_complete("sync_salesforce", "✅ Salesforce synchronisé")
             return {
                 "status": "success",
@@ -3782,7 +3782,7 @@ class DevisWorkflow:
                 "quote_id": quote_result.get("quote_id"),
                 "client": client_result,
                 "products": products_result,
-                "sync": sync_result,
+                "sync": sap_result,
                 "suggestions": [
                     "Voir le devis complet",
                     "Envoyer le devis au client",
