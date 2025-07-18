@@ -488,8 +488,6 @@ class DevisWorkflow:
             else:
                 result = await self._process_other_action(extracted_info)
 
-            # 🔧 MODIFICATION : S'assurer que le résultat est sauvegardé
-            result = await self._execute_full_workflow(prompt)
             
             # Marquer la tâche comme terminée avec le résultat
             if self.current_task:
@@ -502,7 +500,59 @@ class DevisWorkflow:
             if self.current_task:
                 progress_tracker.fail_task(self.task_id, str(e))
             raise
+    async def _execute_full_workflow(self, prompt: str) -> Dict[str, Any]:
+        """
+        🔧 MÉTHODE AJOUTÉE : Wrapper pour exécution complète du workflow
+        
+        ⚠️ NOTE : Cette méthode est appelée dans process_prompt mais semble redondante
+        car le workflow principal est déjà traité par _process_quote_workflow
+        
+        Args:
+            prompt: Demande utilisateur originale
+            
+        Returns:
+            Dict avec le résultat complet du workflow
+        """
+        try:
+            logger.info("🔄 Exécution du workflow complet")
+            
+            # 🔧 ATTENTION : Cette méthode ne devrait pas être nécessaire
+            # Le workflow est déjà traité dans process_prompt par :
+            # - _process_quote_workflow pour les devis
+            # - _process_other_action pour les autres actions
+            
+            # Si cette méthode est appelée, retourner le résultat déjà calculé
+            if hasattr(self, '_current_workflow_result'):
+                logger.info("✅ Retour du résultat déjà calculé")
+                return self._current_workflow_result
+            
+            # Sinon, re-exécuter l'extraction et le workflow de base
+            logger.warning("⚠️ Ré-exécution du workflow - ceci indique un problème de logique")
+            
+            # Extraction de base
+            extracted_info = await self.llm_extractor.extract_quote_info(prompt)
+            
+            # Router selon le type d'action
+            action_type = extracted_info.get("action_type", "DEVIS")
+            
+            # Exécuter le workflow approprié et sauvegarder le résultat
+            if action_type == "DEVIS":
+                self._current_workflow_result = await self._process_quote_workflow(extracted_info)
+            else:
+                self._current_workflow_result = await self._process_other_action(extracted_info)
 
+            # Utiliser le résultat sauvegardé (pas de re-calcul)
+            result = self._current_workflow_result
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"❌ Erreur _execute_full_workflow: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e),
+                "message": "Erreur lors de l'exécution du workflow complet"
+            }
     async def process_prompt_original(self, prompt: str, task_id: str = None, draft_mode: bool = False) -> Dict[str, Any]:
         """
         Traite une demande de devis en langage naturel avec tracking détaillé
@@ -2492,6 +2542,7 @@ class DevisWorkflow:
         """Retourne le prompt système minimal pour extraction rapide"""
         return """Extrait rapidement: nom client, produits demandés, quantités.
         Format JSON simple uniquement."""
+        
     async def _extract_info_unified(self, prompt: str, 
                                 extraction_mode: str = "standard") -> Dict[str, Any]:
         """
@@ -3136,6 +3187,7 @@ class DevisWorkflow:
         except Exception as e:
             logger.error(f"Erreur lors de la recherche d'alternatives: {str(e)}")
             return []
+        
     async def _handle_product_search(self, extracted_info: Dict[str, Any]) -> Dict[str, Any]:
         """
         Gère les demandes de recherche de produits par caractéristiques
