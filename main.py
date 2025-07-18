@@ -2,7 +2,7 @@ import os
 import logging
 import time
 from datetime import datetime
-from fastapi import FastAPI, Depends, HTTPException, status, Request
+from fastapi import FastAPI, Depends, HTTPException, status, Request, WebSocket
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
@@ -10,6 +10,8 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from services.module_loader import ModuleLoader, ModuleConfig
 
+from services.websocket_manager import websocket_manager
+from services.company_enrichment import company_enrichment_service
 # Configuration logging
 logging.basicConfig(
     level=logging.INFO,
@@ -69,6 +71,34 @@ loader.register_to_fastapi(app)
 # =============================================
 # ENDPOINTS PRINCIPAUX OBLIGATOIRES
 # =============================================
+# Ajouter les routes WebSocket
+app.include_router(progress_router, prefix="/progress", tags=["progress"])
+
+# Route pour la nouvelle interface
+@app.get("/interface/v3")
+async def get_interface_v3():
+    """Sert la nouvelle interface v3"""
+    return FileResponse("templates/nova_interface_v3.html")
+
+# Événement de démarrage
+@app.on_event("startup")
+async def startup_event():
+    """Initialisation au démarrage"""
+    
+    # Vérifier les API keys
+    if not os.getenv("INSEE_API_KEY"):
+        logger.warning("INSEE_API_KEY non configurée - enrichissement client limité")
+    
+    if not os.getenv("PAPPERS_API_KEY"):
+        logger.warning("PAPPERS_API_KEY non configurée - enrichissement client limité")
+    
+    # Initialiser le service d'enrichissement
+    logger.info("Service d'enrichissement initialisé")
+    
+    # Nettoyer les anciennes tâches
+    from services.progress_tracker import progress_tracker
+    cleaned = progress_tracker.cleanup_old_tasks(max_age_hours=24)
+    logger.info(f"Nettoyage: {cleaned} tâches anciennes supprimées")
 
 @app.get("/")
 def root():

@@ -4,9 +4,9 @@ Routes API pour le suivi de progression des générations de devis
 À intégrer dans main.py avec : app.include_router(progress_router, prefix="/progress", tags=["progress"])
 """
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
-
+from services.websocket_manager import websocket_manager
 from services.progress_tracker import progress_tracker, TaskStatus
 from workflow.devis_workflow import DevisWorkflow
 
@@ -244,3 +244,53 @@ async def get_progress_stats():
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erreur: {str(e)}")
+
+@router.websocket("/ws/{task_id}")
+async def websocket_endpoint(websocket: WebSocket, task_id: str):
+    """WebSocket endpoint pour suivi temps réel d'une tâche"""
+    await websocket_manager.connect(websocket, task_id)
+    
+    try:
+        # Envoyer l'état initial
+        task = progress_tracker.get_task(task_id)
+        if task:
+            await websocket.send_text(json.dumps({
+                "type": "initial_state",
+                "task_id": task_id,
+                "data": task.get_detailed_progress()
+            }))
+        
+        # Maintenir la connexion ouverte
+        while True:
+            try:
+                # Recevoir les messages du client (validations utilisateur)
+                data = await websocket.receive_text()
+                message = json.loads(data)
+                
+                if message.get("type") == "user_response":
+                    await handle_user_response(task_id, message.get("data", {}))
+                    
+            except WebSocketDisconnect:
+                break
+            except Exception as e:
+                logger.error(f"Erreur WebSocket: {e}")
+                break
+                
+    finally:
+        websocket_manager.disconnect(websocket, task_id)
+        
+async def handle_user_response(task_id: str, response_data: dict):
+    """Traite une réponse utilisateur"""
+    task = progress_tracker.get_task(task_id)
+    if not task:
+        return
+        
+    response_type = response_data.get("response_type")
+    step_id = response_data.get("step_id")
+    
+    if response_type == "client_validation":
+        # Traiter la validation client
+        await handle_client_validation(task_id, step_id, response_data)
+    elif response_type == "product_selection":
+        # Traiter la sélection produit
+        await handle_product_selection(task_id, step_id, response_data)

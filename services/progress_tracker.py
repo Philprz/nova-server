@@ -65,9 +65,6 @@ class ProgressStep:
             self.message = message
 
 class QuoteTask:
-    """Représente une tâche de génération de devis avec tracking détaillé"""
-    
-    # Définition des étapes métier standard
     BUSINESS_STEPS = {
         "analyze_request": [
             ("parse_prompt", "🔍 Analyse de votre demande"),
@@ -76,15 +73,18 @@ class QuoteTask:
         ],
         "validate_client": [
             ("search_client", "👤 Recherche du client"),
-            ("verify_client_info", "🔍 Vérification des informations"),
-            ("client_ready", "✅ Client identifié")
+            ("client_search_progress", "🔍 Consultation des bases de données"),
+            ("client_alternatives", "🔄 Évaluation des alternatives"),
+            ("client_validation", "✅ Validation utilisateur requise"),
+            ("client_creation", "🏗️ Création du nouveau client"),
+            ("client_ready", "✅ Client confirmé")
         ],
-        "process_products": [
-            ("connect_catalog", "🔌 Connexion au catalogue"),
-            ("lookup_products", "📦 Vérification des produits"),
-            ("check_stock", "📊 Vérification du stock"),
-            ("calculate_prices", "💰 Calcul des prix"),
-            ("products_ready", "✅ Produits confirmés")
+        "validate_products": [
+            ("search_products", "📦 Recherche des produits"),
+            ("product_search_progress", "🔍 Consultation du catalogue"),
+            ("product_alternatives", "🔄 Analyse des alternatives"),
+            ("product_validation", "✅ Sélection utilisateur requise"),
+            ("product_ready", "✅ Produits confirmés")
         ],
         "create_quote": [
             ("prepare_quote", "📋 Préparation du devis"),
@@ -93,7 +93,6 @@ class QuoteTask:
             ("quote_finalized", "✅ Devis finalisé")
         ]
     }
-
     def __init__(self, task_id: str = None, user_prompt: str = "", draft_mode: bool = False):
         self.task_id = task_id or f"quote_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:8]}"
         self.user_prompt = user_prompt
@@ -105,10 +104,29 @@ class QuoteTask:
         self.current_step: Optional[str] = None
         self.result: Optional[Dict[str, Any]] = None
         self.error: Optional[str] = None
-        
+        self.user_interactions = []  # Historique des interactions
+        self.validation_data = {}    # Données de validation
+        self.alternatives = {}       # Alternatives disponibles
         # Initialiser toutes les étapes
         self._initialize_steps()
+    def add_user_interaction(self, interaction_type: str, data: dict, response: dict = None):
+        """Ajoute une interaction utilisateur à l'historique"""
+        interaction = {
+            "timestamp": datetime.now().isoformat(),
+            "type": interaction_type,
+            "data": data,
+            "response": response,
+            "step_id": self.current_step
+        }
+        self.user_interactions.append(interaction)
         
+    def set_alternatives(self, step_id: str, alternatives: list):
+        """Définit les alternatives disponibles pour une étape"""
+        self.alternatives[step_id] = alternatives
+        
+    def get_alternatives(self, step_id: str) -> list:
+        """Récupère les alternatives pour une étape"""
+        return self.alternatives.get(step_id, [])        
     def _initialize_steps(self):
         """Initialise toutes les étapes métier"""
         for phase_name, phase_steps in self.BUSINESS_STEPS.items():
@@ -218,7 +236,36 @@ class QuoteTask:
         
         overall["phases"] = phases
         return overall
-
+    def require_user_validation(self, step_id: str, validation_type: str, data: dict):
+        """Marque une étape comme nécessitant une validation utilisateur"""
+        self.validation_data[step_id] = {
+            "type": validation_type,
+            "data": data,
+            "timestamp": datetime.now().isoformat(),
+            "status": "pending"
+        }
+        
+        # Mettre à jour le statut de l'étape
+        if step_id in self.steps:
+            self.steps[step_id].status = TaskStatus.PENDING
+            self.steps[step_id].message = f"Validation utilisateur requise: {validation_type}"
+            
+    def complete_user_validation(self, step_id: str, user_response: dict):
+        """Complète une validation utilisateur"""
+        if step_id in self.validation_data:
+            self.validation_data[step_id]["status"] = "completed"
+            self.validation_data[step_id]["user_response"] = user_response
+            self.validation_data[step_id]["completed_at"] = datetime.now().isoformat()
+            
+            # Enregistrer l'interaction
+            self.add_user_interaction(
+                interaction_type=self.validation_data[step_id]["type"],
+                data=self.validation_data[step_id]["data"],
+                response=user_response
+            )
+            
+            # Continuer l'étape
+            self.complete_step(step_id, f"Validation utilisateur complétée: {self.validation_data[step_id]['type']}")
 class ProgressTracker:
     """Gestionnaire global des tâches de progression"""
     
