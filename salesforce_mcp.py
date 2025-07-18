@@ -10,6 +10,7 @@ import asyncio
 from typing import Optional, List, Dict, Any
 import traceback
 import argparse
+import logging
 
 # Configuration de l'encodage pour Windows
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
@@ -628,6 +629,56 @@ def _refresh_objects_metadata(objects_to_refresh: List[str], cache: Dict[str, An
             errors.append({"object": obj_name, "error": str(e)})
     
     return updated, errors
+def create_opportunity_with_error_handling(data):
+        """
+        Création d'opportunité Salesforce avec gestion d'erreurs renforcée
+        """
+        try:
+            logger = logging.getLogger(__name__)
+            logger.info(f"🔵 Tentative création opportunité Salesforce: {data}")
+            
+            # Validation des données d'entrée
+            required_fields = ['Name', 'StageName', 'CloseDate']
+            for field in required_fields:
+                if field not in data or not data[field]:
+                    error_msg = f"Champ requis manquant: {field}"
+                    logger.error(f"❌ {error_msg}")
+                    return {"error": error_msg, "success": False}
+            
+            # Configuration par défaut pour éviter les erreurs
+            opportunity_data = {
+                'Name': data.get('Name', 'Devis NOVA'),
+                'StageName': data.get('StageName', 'Prospecting'),
+                'CloseDate': data.get('CloseDate', '2025-12-31'),
+                'Amount': data.get('Amount', 0),
+                'Description': data.get('Description', 'Devis généré par NOVA'),
+                'Type': data.get('Type', 'New Customer'),
+                'LeadSource': data.get('LeadSource', 'NOVA System')
+            }
+            
+            # Appel Salesforce avec retry
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    result = sf.Opportunity.create(opportunity_data)
+                    logger.info(f"✅ Opportunité créée: {result}")
+                    return {"success": True, "id": result['id']}
+                    
+                except Exception as sf_error:
+                    logger.warning(f"⚠️ Tentative {attempt + 1}/{max_retries} échouée: {sf_error}")
+                    if attempt == max_retries - 1:
+                        raise sf_error
+                    time.sleep(1)  # Attente avant retry
+                        
+        except Exception as e:
+            error_details = {
+                "error": str(e),
+                "type": type(e).__name__,
+                "traceback": traceback.format_exc(),
+                "success": False
+            }
+            logger.error(f"❌ Erreur création opportunité: {error_details}")
+            return error_details
 
 # === INITIALISATION ET GESTION ARGUMENTS ===
 init_salesforce()
