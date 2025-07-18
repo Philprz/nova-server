@@ -1,17 +1,16 @@
 import os
 import logging
 import time
+from contextlib import asynccontextmanager
 from datetime import datetime
-from fastapi import FastAPI, Depends, HTTPException, status, Request, WebSocket
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.security import HTTPBasic
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from services.module_loader import ModuleLoader, ModuleConfig
-
-from services.websocket_manager import websocket_manager
-from services.company_enrichment import company_enrichment_service
+import dotenv
 # Configuration logging
 logging.basicConfig(
     level=logging.INFO,
@@ -35,13 +34,38 @@ MODULES_CONFIG = {
     'progress': ModuleConfig('routes.routes_progress', '/progress', ['Progress'])
 }
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Code de démarrage
+    logger.info("Démarrage du serveur NOVA...")
+    # Vérifier les API keys
+    if not os.getenv("INSEE_API_KEY"):
+        logger.warning("INSEE_API_KEY non configurée - enrichissement client limité")
+
+    if not os.getenv("PAPPERS_API_KEY"):
+        logger.warning("PAPPERS_API_KEY non configurée - enrichissement client limité")
+
+    # Initialiser le service d'enrichissement
+    logger.info("Service d'enrichissement initialisé")
+
+    # Nettoyer les anciennes tâches
+    from services.progress_tracker import progress_tracker
+    cleaned = progress_tracker.cleanup_old_tasks(max_age_hours=24)
+    logger.info(f"Nettoyage: {cleaned} tâches anciennes supprimées")
+
+    yield
+
+    # Code d'arrêt
+    logger.info("Arrêt du serveur NOVA...")
+
 # Création de l'application FastAPI
 app = FastAPI(
     title="NOVA Middleware",
     description="Middleware d'intégration LLM - SAP - Salesforce",
     version="1.0.0",
     docs_url="/docs",
-    redoc_url="/redoc"
+    redoc_url="/redoc",
+    lifespan=lifespan
 )
 
 # Middleware CORS
@@ -71,34 +95,27 @@ loader.register_to_fastapi(app)
 # =============================================
 # ENDPOINTS PRINCIPAUX OBLIGATOIRES
 # =============================================
-# Ajouter les routes WebSocket
-app.include_router(progress_router, prefix="/progress", tags=["progress"])
-
+@app.get("/health")
+async def health_check():
+    """Endpoint de santé du serveur"""
+    try:
+        # Vérifier les modules chargés
+        loaded_modules = loader.get_loaded_modules()
+        return {
+            "status": "healthy",
+            "loaded_modules": loaded_modules,
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Erreur lors du health check: {str(e)}")
+        raise HTTPException
 # Route pour la nouvelle interface
 @app.get("/interface/v3")
 async def get_interface_v3():
     """Sert la nouvelle interface v3"""
     return FileResponse("templates/nova_interface_v3.html")
 
-# Événement de démarrage
-@app.on_event("startup")
-async def startup_event():
-    """Initialisation au démarrage"""
-    
-    # Vérifier les API keys
-    if not os.getenv("INSEE_API_KEY"):
-        logger.warning("INSEE_API_KEY non configurée - enrichissement client limité")
-    
-    if not os.getenv("PAPPERS_API_KEY"):
-        logger.warning("PAPPERS_API_KEY non configurée - enrichissement client limité")
-    
-    # Initialiser le service d'enrichissement
-    logger.info("Service d'enrichissement initialisé")
-    
-    # Nettoyer les anciennes tâches
-    from services.progress_tracker import progress_tracker
-    cleaned = progress_tracker.cleanup_old_tasks(max_age_hours=24)
-    logger.info(f"Nettoyage: {cleaned} tâches anciennes supprimées")
+
 
 @app.get("/")
 def root():
