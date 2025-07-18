@@ -3020,7 +3020,143 @@ class DevisWorkflow:
             {"id": "example2", "name": "Global Industries", "type": "Prospect", "industry": "Manufacturing"},
             {"id": "example3", "name": "Tech Solutions Ltd", "type": "Customer", "industry": "IT Services"}
         ]
+    async def _enhanced_product_search(self, product_name: str, product_code: str = "") -> Dict[str, Any]:
+        """
+        🔧 RECHERCHE PRODUIT AMÉLIORÉE pour cas comme "Imprimante 20 ppm"
+        """
+        try:
+            logger.info(f"🔍 Recherche produit améliorée: '{product_name}' (code: '{product_code}')")
 
+            # 1. Recherche exacte par code si fourni
+            if product_code:
+                exact_result = await self.mcp_connector.call_mcp(
+                    "sap_mcp",
+                    "sap_read",
+                    {
+                        "table": "OITM",
+                        "filter": f"ItemCode eq '{product_code}'",
+                        "select": "ItemCode,ItemName,OnHand,AvgPrice"
+                    }
+                )
+                
+                if exact_result.get("success") and exact_result.get("data"):
+                    return {
+                        "found": True,
+                        "product": exact_result["data"][0],
+                        "search_method": "exact_code"
+                    }
+
+            # 2. Recherche intelligente par nom pour "imprimantes"
+            if product_name:
+                search_terms = self._extract_product_keywords(product_name)
+                
+                for term in search_terms:
+                    logger.info(f"🔍 Recherche avec terme: '{term}'")
+                    
+                    fuzzy_result = await self.mcp_connector.call_mcp(
+                        "sap_mcp",
+                        "sap_read",
+                        {
+                            "table": "OITM",
+                            "filter": f"contains(tolower(ItemName),'{term.lower()}') or contains(tolower(U_Description),'{term.lower()}')",
+                            "select": "ItemCode,ItemName,OnHand,AvgPrice,U_Description",
+                            "top": 3
+                        }
+                    )
+                    
+                    if fuzzy_result.get("success") and fuzzy_result.get("data"):
+                        best_match = fuzzy_result["data"][0]
+                        logger.info(f"✅ Produit trouvé: {best_match.get('ItemName')} ({best_match.get('ItemCode')})")
+                        
+                        return {
+                            "found": True,
+                            "product": best_match,
+                            "search_method": "fuzzy",
+                            "search_term": term
+                        }
+
+            # 3. Créer un produit générique si rien trouvé
+            logger.warning(f"⚠️ Aucun produit trouvé pour '{product_name}' - Création générique")
+            
+            generic_product = self._create_generic_product(product_name)
+            
+            return {
+                "found": False,
+                "product": generic_product,
+                "search_method": "generic",
+                "warning": "Produit non trouvé dans le catalogue SAP"
+            }
+
+        except Exception as e:
+            logger.exception(f"❌ Erreur recherche produit: {str(e)}")
+            return {
+                "found": False,
+                "error": str(e)
+            }
+
+    def _extract_product_keywords(self, product_name: str) -> List[str]:
+        """
+        🔧 EXTRACTION INTELLIGENTE de mots-clés pour "Imprimante 20 ppm"
+        """
+        product_lower = product_name.lower()
+        keywords = []
+        
+        # Détection type de produit
+        if "imprimante" in product_lower:
+            keywords.extend(["printer", "imprimante", "laser"])
+            
+            # Détection vitesse
+            if "20 ppm" in product_lower or "20ppm" in product_lower:
+                keywords.extend(["20ppm", "20 ppm", "pages per minute"])
+                
+            # Détection technologie
+            if any(tech in product_lower for tech in ["laser", "jet", "inkjet"]):
+                keywords.extend(["laser", "inkjet"])
+            else:
+                keywords.append("laser")  # Par défaut pour imprimantes pro
+        
+        elif "ordinateur" in product_lower or "pc" in product_lower:
+            keywords.extend(["computer", "pc", "desktop"])
+        
+        elif "écran" in product_lower or "moniteur" in product_lower:
+            keywords.extend(["monitor", "screen", "display"])
+        
+        else:
+            # Mots génériques
+            keywords.append(product_name.split()[0])  # Premier mot
+        
+        logger.info(f"🔍 Mots-clés extraits de '{product_name}': {keywords}")
+        return keywords
+
+    def _create_generic_product(self, product_name: str) -> Dict[str, Any]:
+        """
+        🔧 CRÉATION PRODUIT GÉNÉRIQUE avec prix estimé
+        """
+        import time
+        
+        # Prix estimés selon le type
+        estimated_price = 100.0  # Par défaut
+        
+        if "imprimante" in product_name.lower():
+            if "20 ppm" in product_name.lower():
+                estimated_price = 250.0  # Imprimante laser 20 ppm
+            else:
+                estimated_price = 150.0  # Imprimante générique
+        elif "ordinateur" in product_name.lower():
+            estimated_price = 800.0
+        elif "écran" in product_name.lower():
+            estimated_price = 300.0
+        
+        generic_code = f"GEN{int(time.time()) % 10000:04d}"
+        
+        return {
+            "ItemCode": generic_code,
+            "ItemName": product_name.title(),
+            "OnHand": 999,  # Stock fictif
+            "AvgPrice": estimated_price,
+            "U_Description": f"Produit générique créé automatiquement - Prix estimé",
+            "Generic": True
+        }
     async def _get_available_products_list(self) -> List[Dict[str, Any]]:
         """Récupère la liste des produits disponibles depuis SAP"""
         try:
@@ -3607,20 +3743,23 @@ class DevisWorkflow:
             self._track_step_complete("search_client", f"✅ Client: {client_result.get('status', 'traité')}")
 
             # Étape 2: Récupération des produits
-            self._track_step_start("fetch_products", f"📦 Récupération de {len(products)} produit(s)")
+            self._track_step_start("lookup_products", f"📦 Recherche de {len(products)} produit(s)")
             products_result = await self._process_products_retrieval(products)
-            self._track_step_complete("fetch_products", f"✅ {len(products_result.get('products', []))} produit(s) trouvé(s)")
+            self._track_step_complete("lookup_products", f"✅ {len(products_result.get('products', []))} produit(s) trouvé(s)")
 
             # Étape 3: Création du devis
-            self._track_step_start("create_quote", "📋 Génération du devis")
+            self._track_step_start("prepare_quote", "📋 Préparation du devis")
             quote_result = await self._create_quote_document(client_result, products_result)
-            self._track_step_complete("create_quote", "✅ Devis créé avec succès")
+            self._track_step_complete("prepare_quote", "✅ Devis préparé")
 
             # Étape 4: Synchronisation
-            self._track_step_start("sync_systems", "🔄 Synchronisation SAP/Salesforce")
-            sync_result = await self._sync_quote_to_systems(quote_result)
-            self._track_step_complete("sync_systems", "✅ Synchronisation terminée")
+            self._track_step_start("save_to_sap", "💾 Enregistrement dans SAP")
+            sap_result = await self._sync_quote_to_sap(quote_result)
+            self._track_step_complete("save_to_sap", "✅ SAP mis à jour")
 
+            self._track_step_start("sync_salesforce", "☁️ Synchronisation Salesforce")
+            sf_result = await self._sync_quote_to_salesforce(quote_result)
+            self._track_step_complete("sync_salesforce", "✅ Salesforce synchronisé")
             return {
                 "status": "success",
                 "type": "quote_generated",
@@ -3716,7 +3855,119 @@ class DevisWorkflow:
                 return True
 
             return False
+    async def _create_client_automatically(self, client_name: str) -> Dict[str, Any]:
+        """
+        🆕 NOUVELLE MÉTHODE : Création automatique du client dans SAP et Salesforce
+        Basée sur l'exemple "rondot" des logs
+        """
+        try:
+            import re
+            import time
+            from datetime import datetime
 
+            logger.info(f"🚀 Début création automatique client: {client_name}")
+
+            # 1. Génération CardCode unique (éviter les doublons)
+            clean_name = re.sub(r'[^a-zA-Z0-9]', '', client_name)[:6].upper()
+            timestamp = str(int(time.time()))[-4:]
+            card_code = f"C{clean_name}{timestamp}"
+
+            # 2. Données client pour SAP
+            sap_client_data = {
+                "CardCode": card_code,
+                "CardName": client_name.title(),  # "rondot" -> "Rondot"
+                "CardType": "cCustomer",
+                "GroupCode": 100,  # Groupe client par défaut
+                "Currency": "EUR",
+                "Valid": "tYES",
+                "Frozen": "tNO",
+                "Notes": f"Client créé automatiquement par NOVA le {datetime.now().strftime('%d/%m/%Y')}"
+            }
+
+            logger.info(f"📝 Données SAP préparées: {card_code} - {client_name.title()}")
+
+            # 3. Création dans SAP d'abord
+            self._track_step_progress("search_client", 30, f"Création client SAP {card_code}...")
+            
+            sap_result = await self.mcp_connector.call_mcp(
+                "sap_mcp",
+                "sap_create_customer_complete",
+                {"customer_data": sap_client_data}
+            )
+
+            if not sap_result.get("success", False):
+                logger.error(f"❌ Échec création SAP: {sap_result.get('error')}")
+                return {
+                    "created": False,
+                    "error": f"Erreur SAP: {sap_result.get('error', 'Erreur inconnue')}"
+                }
+
+            logger.info(f"✅ Client SAP créé: {card_code}")
+
+            # 4. Création dans Salesforce ensuite
+            self._track_step_progress("search_client", 60, f"Création client Salesforce...")
+            
+            sf_client_data = {
+                "Name": client_name.title(),
+                "AccountNumber": card_code,
+                "Type": "Customer",
+                "Industry": "Technology",
+                "BillingCountry": "France",
+                "Description": f"Client créé automatiquement depuis SAP ({card_code})"
+            }
+
+            sf_result = await self.mcp_connector.call_mcp(
+                "salesforce_mcp",
+                "salesforce_create_record",
+                {
+                    "sobject": "Account",
+                    "data": sf_client_data
+                }
+            )
+
+            if sf_result.get("success"):
+                logger.info(f"✅ Client Salesforce créé: {sf_result.get('id')}")
+                
+                # Construire les données client pour le workflow
+                client_data = {
+                    "Id": sf_result.get("id"),
+                    "Name": client_name.title(),
+                    "AccountNumber": card_code,
+                    "Type": "Customer"
+                }
+
+                return {
+                    "created": True,
+                    "client_data": client_data,
+                    "sap_card_code": card_code,
+                    "salesforce_id": sf_result.get("id"),
+                    "message": f"Client '{client_name}' créé avec succès (SAP: {card_code}, SF: {sf_result.get('id')[:8]}...)"
+                }
+            else:
+                logger.warning(f"⚠️ Client SAP créé mais échec Salesforce: {sf_result.get('error')}")
+                
+                # Retourner quand même le client SAP
+                client_data = {
+                    "Id": f"SAP_{card_code}",  # ID temporaire
+                    "Name": client_name.title(),
+                    "AccountNumber": card_code,
+                    "Type": "Customer"
+                }
+
+                return {
+                    "created": True,
+                    "client_data": client_data,
+                    "sap_card_code": card_code,
+                    "salesforce_error": sf_result.get("error"),
+                    "message": f"Client '{client_name}' créé dans SAP uniquement (CardCode: {card_code})"
+                }
+
+        except Exception as e:
+            logger.exception(f"❌ Exception création automatique client: {str(e)}")
+            return {
+                "created": False,
+                "error": f"Exception: {str(e)}"
+            }
     async def _process_client_validation(self, client_name: str) -> Dict[str, Any]:
         """
         🔧 MODIFICATION CRITIQUE : Validation du client avec progression avancée
@@ -3804,7 +4055,70 @@ class DevisWorkflow:
                 "sap_matches": [],
                 "total_matches": 0
             }
+    async def _create_client_if_needed(self, client_name: str) -> Dict[str, Any]:
+        """Création automatique du client si nécessaire"""
+        try:
+            import re
+            import time
 
+            # Génération CardCode unique
+            clean_name = re.sub(r'[^a-zA-Z0-9]', '', client_name)[:8].upper()
+            timestamp = str(int(time.time()))[-4:]
+            card_code = f"AUTO{clean_name}{timestamp}"[:15]
+
+            # Données client SAP
+            sap_client_data = {
+                "CardCode": card_code,
+                "CardName": client_name,
+                "CardType": "cCustomer",
+                "GroupCode": 100,
+                "Currency": "EUR",
+                "Valid": "tYES",
+                "Frozen": "tNO",
+                "Notes": f"Client créé automatiquement par NOVA"
+            }
+
+            logger.info(f"🆕 Création client SAP: {card_code} ({client_name})")
+
+            # Création dans SAP
+            create_result = await self.mcp_connector.call_mcp(
+                "sap_mcp",
+                "sap_create_customer_complete",
+                {"customer_data": sap_client_data}
+            )
+
+            if create_result.get("success", False):
+                logger.info(f"✅ Client SAP créé avec succès: {card_code}")
+                
+                # Création parallèle dans Salesforce
+                sf_data = {
+                    "Name": client_name,
+                    "AccountNumber": card_code,
+                    "Type": "Customer",
+                    "Industry": "Technology"
+                }
+
+                sf_result = await self.mcp_connector.call_mcp(
+                    "salesforce_mcp",
+                    "salesforce_create_record",
+                    {"sobject": "Account", "data": sf_data}
+                )
+
+                return {
+                    "created": True,
+                    "sap_client": create_result.get("data", {"CardCode": card_code, "CardName": client_name}),
+                    "salesforce_client": sf_result.get("data") if sf_result.get("success") else None,
+                    "message": f"Client '{client_name}' créé avec succès"
+                }
+            else:
+                return {
+                    "created": False,
+                    "error": create_result.get("error", "Erreur inconnue lors de la création SAP")
+                }
+
+        except Exception as e:
+            logger.exception(f"Erreur création client: {str(e)}")
+            return {"created": False, "error": str(e)}
     async def _process_products_retrieval(self, products: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
         🔧 MODIFICATION CRITIQUE : Récupération des produits avec progression avancée
@@ -4003,7 +4317,67 @@ class DevisWorkflow:
             logger.error(f"❌ Erreur création devis: {str(e)}")
             self._track_step_progress("create_quote", 100, f"❌ Erreur: {str(e)}")
             raise
+    async def _create_salesforce_opportunity_safe(self, quote_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        🔧 CRÉATION SÉCURISÉE d'opportunité Salesforce
+        """
+        try:
+            client_data = quote_data.get("client_data", {})
+            
+            # Validation préalable
+            if not client_data or not client_data.get("Id"):
+                logger.error("❌ Impossible de créer l'opportunité : client Salesforce requis")
+                return {
+                    "success": False,
+                    "error": "Client Salesforce requis pour créer l'opportunité",
+                    "skip_reason": "missing_client"
+                }
 
+            # Données minimales pour éviter les erreurs
+            opportunity_data = {
+                "Name": f"Devis {quote_data.get('quote_id', 'AUTO')} - {client_data.get('Name', 'Client')}",
+                "AccountId": client_data["Id"],
+                "StageName": "Prospecting",  # Étape existante dans Salesforce
+                "CloseDate": (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
+            }
+            
+            # Ajouter le montant seulement s'il est valide
+            total_amount = quote_data.get("total_amount", 0)
+            if total_amount and total_amount > 0:
+                opportunity_data["Amount"] = total_amount
+
+            logger.info(f"📋 Création opportunité: {opportunity_data['Name']}")
+
+            result = await self.mcp_connector.call_mcp(
+                "salesforce_mcp",
+                "salesforce_create_record",
+                {
+                    "sobject": "Opportunity",
+                    "data": opportunity_data
+                }
+            )
+
+            if result.get("success"):
+                logger.info(f"✅ Opportunité créée: {result.get('id')}")
+                return {
+                    "success": True,
+                    "opportunity_id": result.get("id"),
+                    "data": opportunity_data
+                }
+            else:
+                logger.error(f"❌ Erreur création opportunité: {result.get('error')}")
+                return {
+                    "success": False,
+                    "error": result.get("error", "Erreur inconnue"),
+                    "attempted_data": opportunity_data
+                }
+
+        except Exception as e:
+            logger.exception(f"❌ Exception création opportunité: {str(e)}")
+            return {
+                "success": False,
+                "error": f"Exception: {str(e)}"
+            }
     async def _sync_quote_to_systems(self, quote_result: Dict[str, Any]) -> Dict[str, Any]:
         """
         🔧 MODIFICATION CRITIQUE : Synchronisation vers SAP/Salesforce avec progression

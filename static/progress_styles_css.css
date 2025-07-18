@@ -1,0 +1,359 @@
+/* 🎨 NOVA - STYLES DE PROGRESSION IT SPIRIT */
+/* Fichier: static/progress_styles.css */
+
+/* ================================================= */
+/* 🔄 ANIMATIONS DE PROGRESSION */
+/* ================================================= */
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+@keyframes shimmer {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+}
+
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* ================================================= */
+/* 📊 CONTENEURS DE PROGRESSION */
+/* ================================================= */
+
+.progress-container {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    padding: 20px;
+    margin: 15px 0;
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    animation: fadeInUp 0.5s ease-out;
+}
+
+.progress-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 15px;
+}
+
+.progress-title {
+    color: #ffffff;
+    font-size: 1.1rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.progress-percentage {
+    color: #02B9FD;
+    font-weight: 700;
+    font-size: 1rem;
+}
+
+/* ================================================= */
+/* 🔄 SPINNERS ET LOADERS */
+/* ================================================= */
+
+.spinner {
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-radius: 50%;
+    border-top-color: #02B9FD;
+    animation: spin 1s linear infinite;
+}
+
+.spinner-lg {
+    width: 40px;
+    height: 40px;
+    border-width: 3px;
+}
+
+.loading-dots {
+    display: inline-flex;
+    gap: 4px;
+}
+
+.loading-dots span {
+    width: 8px;
+    height: 8px;
+    background: #02B9FD;
+    border-radius: 50%;
+    animation: pulse 1.4s ease-in-out infinite both;
+}
+
+.loading-dots span:nth-child(1) { animation-delay: -0.32s; }
+.loading-dots span:nth-child(2) { animation-delay: -0.16s; }
+.loading-dots span:nth-child(3) { animation-delay: 0s; }
+
+/* ================================================= */
+/* 📈 BARRES DE PROGRESSION */
+/* ================================================= */
+
+.progress-bar-container {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 10px;
+    height: 8px;
+    overflow: hidden;
+    margin: 10px 0;
+    position: relative;
+}
+
+.progress-bar {
+    height: 100%;
+    background: linear-gradient(135deg, #02B9FD 0%, #832DFE 50%, #E220FB 100%);
+    border-radius: 10px;
+    transition: width 0.3s ease;
+    position: relative;
+    min-width: 0%;
+}
+
+.progress-bar.animated::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+    animation: shimmer 2s infinite;
+}
+
+.progress-bar-thick {
+    height: 12px;
+}
+
+.progress-bar-thin {
+    height: 4px;
+}
+
+/* ================================================= */
+/* 📋 ÉTAPES DE PROGRESSION */
+/* ================================================= */
+
+.progress-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 15px;
+}
+
+.progress-step {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    border-left: 3px solid transparent;
+    transition: all 0.3s ease;
+}
+
+.progress-step.pending {
+    border-left-color: #64748b;
+    color: #94a3b8;
+}
+
+.progress-step.running {
+    border-left-color: #02B9FD;
+    background: rgba(2, 185, 253, 0.1);
+    color: #ffffff;
+}
+
+.progress-step.completed {
+    border-left-color: #2DFE83;
+    background: rgba(45, 254, 131, 0.1);
+    color: #ffffff;
+}
+
+.progress-step.failed {
+    border-left-color: #FD5202;
+    background: rgba(253, 82, 2, 0.1);
+    color: #ffffff;
+}
+
+.step-icon {
+    width: 16px;
+    height: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.step-text {
+    flex: 1;
+    font-size: 0.9rem;
+}
+
+.step-status {
+    font-size: 0.8rem;
+    opacity: 0.8;
+}
+
+/* ================================================= */
+/* 🎯 ÉTATS SPÉCIAUX */
+/* ================================================= */
+
+.progress-success {
+    background: rgba(45, 254, 131, 0.1);
+    border: 1px solid rgba(45, 254, 131, 0.3);
+    color: #2DFE83;
+}
+
+.progress-error {
+    background: rgba(253, 82, 2, 0.1);
+    border: 1px solid rgba(253, 82, 2, 0.3);
+    color: #FD5202;
+}
+
+.progress-warning {
+    background: rgba(226, 32, 251, 0.1);
+    border: 1px solid rgba(226, 32, 251, 0.3);
+    color: #E220FB;
+}
+
+.progress-info {
+    background: rgba(2, 185, 253, 0.1);
+    border: 1px solid rgba(2, 185, 253, 0.3);
+    color: #02B9FD;
+}
+
+/* ================================================= */
+/* 📱 RESPONSIVE */
+/* ================================================= */
+
+@media (max-width: 768px) {
+    .progress-container {
+        padding: 15px;
+        margin: 10px 0;
+    }
+    
+    .progress-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+    
+    .progress-steps {
+        gap: 6px;
+    }
+    
+    .progress-step {
+        padding: 6px 10px;
+    }
+    
+    .step-text {
+        font-size: 0.85rem;
+    }
+}
+
+/* ================================================= */
+/* 🎨 VARIANTS COLORÉS */
+/* ================================================= */
+
+.progress-bar.blue {
+    background: linear-gradient(135deg, #02B9FD 0%, #0189C7 100%);
+}
+
+.progress-bar.purple {
+    background: linear-gradient(135deg, #832DFE 0%, #6A22D3 100%);
+}
+
+.progress-bar.green {
+    background: linear-gradient(135deg, #2DFE83 0%, #22C767 100%);
+}
+
+.progress-bar.pink {
+    background: linear-gradient(135deg, #E220FB 0%, #C01AD4 100%);
+}
+
+.progress-bar.orange {
+    background: linear-gradient(135deg, #FD5202 0%, #E8460C 100%);
+}
+
+/* ================================================= */
+/* 🔧 UTILITAIRES */
+/* ================================================= */
+
+.progress-hidden {
+    display: none;
+}
+
+.progress-visible {
+    display: block;
+}
+
+.progress-flex {
+    display: flex;
+}
+
+.progress-text-center {
+    text-align: center;
+}
+
+.progress-mt-2 {
+    margin-top: 0.5rem;
+}
+
+.progress-mb-2 {
+    margin-bottom: 0.5rem;
+}
+
+/* ================================================= */
+/* 🌙 MODE SOMBRE */
+/* ================================================= */
+
+@media (prefers-color-scheme: dark) {
+    .progress-container {
+        background: rgba(0, 0, 0, 0.3);
+        border-color: rgba(255, 255, 255, 0.1);
+    }
+    
+    .progress-step {
+        background: rgba(0, 0, 0, 0.2);
+    }
+}
+
+/* ================================================= */
+/* 🎯 FOCUS ET ACCESSIBILITÉ */
+/* ================================================= */
+
+.progress-step:focus {
+    outline: 2px solid #02B9FD;
+    outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .spinner,
+    .progress-bar.animated::after,
+    .loading-dots span {
+        animation: none !important;
+    }
+    
+    .progress-container {
+        animation: none !important;
+    }
+}
+
+/* ================================================= */
+/* 🔚 FIN DU FICHIER */
+/* ================================================= */
