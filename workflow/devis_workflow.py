@@ -1423,7 +1423,7 @@ class DevisWorkflow:
         # ===== Poursuivre avec la création du devis =====
         logger.info("Confirmation approuvée, poursuite de la création du devis")
         
-        self._track_step_start("create_quote", "Création du devis après confirmation...")
+        self._track_step_start("prepare_quote", "Création du devis après confirmation...")
         
         # Créer le devis dans Salesforce et SAP
         quote_result = await self._create_quote_in_salesforce()
@@ -1437,7 +1437,7 @@ class DevisWorkflow:
                 "message": f"Erreur lors de la création du devis: {quote_result.get('error', 'Erreur inconnue')}"
             }
             
-        self._track_step_complete("create_quote", "Devis créé avec succès")
+        self._track_step_complete("prepare_quote", "Devis créé avec succès")
         
         # Construire la réponse finale
         response = self._build_response()
@@ -2250,8 +2250,23 @@ class DevisWorkflow:
                         "message": self.client_suggestions.conversation_prompt
                     }
             else:
+                # === AUCUN CLIENT TROUVÉ - SUGGESTIONS ===
                 # Aucune suggestion, proposer création
                 logger.info(f"❌ Aucune suggestion trouvée pour: {client_name}")
+                # 🆕 TENTATIVE DE CRÉATION AUTOMATIQUE
+                creation_result = await self._create_client_automatically(client_name)
+
+                if creation_result.get("created"):
+                    logger.info(f"✅ Client '{client_name}' créé automatiquement !")
+                    return {
+                        "found": True,
+                        "data": creation_result.get("client_data"),
+                        "source": "auto_created",
+                        "message": creation_result.get("message"),
+                        "auto_created": True
+                    }
+
+                logger.warning(f"⚠️ Création automatique échouée: {creation_result.get('error')}")
                 return {
                     "found": False,
                     "suggestions": None,
@@ -4131,17 +4146,18 @@ class DevisWorkflow:
                     "message": "Aucun produit à traiter"
                 }
 
-            self._track_step_progress("fetch_products", 10, f"🔍 Recherche de {len(products)} produit(s)...")
+            self._track_step_progress("lookup_products", 10, f"🔍 Recherche de {len(products)} produit(s)...")
 
             found_products = []
             from services.mcp_connector import call_mcp_with_progress
 
             for i, product in enumerate(products):
                 product_name = product.get("name", "")
+                product_code = product.get("code", "")  # ← AJOUTER CETTE LIGNE
                 quantity = product.get("quantity", 1)
 
                 progress = int(20 + (i / len(products)) * 70)  # 20% à 90%
-                self._track_step_progress("fetch_products", progress,
+                self._track_step_progress("lookup_products", progress,
                                         f"📦 Recherche '{product_name}' ({i+1}/{len(products)})")
 
                 # Recherche dans SAP
@@ -4189,7 +4205,7 @@ class DevisWorkflow:
             not_found_count = len([p for p in found_products if p.get("status") == "not_found"])
             error_count = len([p for p in found_products if p.get("status") == "error"])
 
-            self._track_step_progress("fetch_products", 100,
+            self._track_step_progress("lookup_products", 100,
                                     f"✅ {found_count} trouvé(s), {not_found_count} manquant(s), {error_count} erreur(s)")
 
             result = {
@@ -4209,7 +4225,7 @@ class DevisWorkflow:
 
         except Exception as e:
             logger.error(f"❌ Erreur récupération produits: {str(e)}")
-            self._track_step_progress("fetch_products", 100, f"❌ Erreur: {str(e)}")
+            self._track_step_progress("lookup_products", 100, f"❌ Erreur: {str(e)}")
 
             return {
                 "status": "error",
