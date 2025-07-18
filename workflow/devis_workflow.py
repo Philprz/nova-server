@@ -3335,6 +3335,104 @@ class DevisWorkflow:
                 ]
             }
         }
+    async def _search_products_with_validation(self, products: List[Dict]) -> Dict[str, Any]:
+        """Recherche produits avec gestion des alternatives"""
+        
+        self._track_step_start("search_products", f"🔍 Recherche de {len(products)} produit(s)")
+        
+        results = []
+        requires_validation = False
+        
+        for i, product in enumerate(products):
+            product_name = product.get("name", "")
+            product_code = product.get("code", "")
+            quantity = product.get("quantity", 1)
+            
+            self._track_step_progress("product_search_progress", 
+                                    int((i / len(products)) * 100), 
+                                    f"Recherche: {product_name}")
+            
+            # Rechercher dans SAP
+            sap_results = await self.mcp_connector.search_sap_items(product_name, product_code)
+            
+            exact_matches = []
+            fuzzy_matches = []
+            
+            for result in sap_results.get("results", []):
+                name_similarity = self._calculate_similarity(product_name, result.get("ItemName", ""))
+                code_similarity = self._calculate_similarity(product_code, result.get("ItemCode", "")) if product_code else 0
+                
+                max_similarity = max(name_similarity, code_similarity)
+                
+                if max_similarity >= 0.9:
+                    exact_matches.append({"data": result, "similarity": max_similarity})
+                elif max_similarity >= 0.6:
+                    fuzzy_matches.append({"data": result, "similarity": max_similarity})
+            
+            if exact_matches:
+                # Produit trouvé
+                best_match = max(exact_matches, key=lambda x: x["similarity"])
+                results.append({
+                    "original": product,
+                    "found": True,
+                    "product_data": best_match["data"],
+                    "quantity": quantity,
+                    "status": "found"
+                })
+            elif fuzzy_matches:
+                # Alternatives trouvées
+                results.append({
+                    "original": product,
+                    "found": False,
+                    "alternatives": fuzzy_matches,
+                    "quantity": quantity,
+                    "status": "alternatives_available"
+                })
+                requires_validation = True
+            else:
+                # Aucun produit trouvé
+                results.append({
+                    "original": product,
+                    "found": False,
+                    "alternatives": [],
+                    "quantity": quantity,
+                    "status": "not_found"
+                })
+        
+        self._track_step_complete("product_search_progress", "Recherche terminée")
+        
+        if requires_validation:
+            self._track_step_start("product_alternatives", "🔄 Alternatives produits trouvées")
+            self._track_step_start("product_validation", "⏳ Sélection utilisateur requise")
+            
+            validation_data = {
+                "products": results,
+                "message": "Sélectionnez les produits appropriés"
+            }
+            
+            self.current_task.require_user_validation("product_validation", "product_selection", validation_data)
+            
+            await websocket_manager.send_user_interaction_required(self.task_id, {
+                "type": "product_selection",
+                "message": "Certains produits nécessitent votre attention",
+                "data": validation_data
+            })
+            
+            return {
+                "found": False,
+                "requires_validation": True,
+                "validation_type": "product_selection",
+                "results": results
+            }
+        else:
+            # Tous les produits trouvés
+            found_products = [r for r in results if r["found"]]
+            self._track_step_complete("search_products", f"✅ {len(found_products)} produit(s) trouvé(s)")
+            
+            return {
+                "found": True,
+                "products": found_products
+            }
     
     async def _find_product_alternatives(self, product: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Trouve des produits alternatifs avec avantages/inconvénients"""
@@ -3903,6 +4001,120 @@ class DevisWorkflow:
                 return True
 
             return False
+    async def _search_client_with_validation(self, client_name: str) -> Dict[str, Any]:
+        """Recherche client avec gestion des alternatives et validation"""
+        
+        # Étape 1: Recherche directe
+        self._track_step_start("search_client", f"🔍 Recherche du client '{client_name}'")
+        
+        # Rechercher dans Salesforce
+        self._track_step_progress("client_search_progress", 30, "Consultation Salesforce...")
+        sf_results = await self.mcp_connector.search_salesforce_accounts(client_name)
+        
+        # Rechercher dans SAP
+        self._track_step_progress("client_search_progress", 60, "Consultation SAP...")
+        sap_results = await self.mcp_connector.search_sap_customers(client_name)
+        
+        self._track_step_complete("client_search_progress", "Bases de données consultées")
+        
+        # Analyser les résultats
+        exact_matches = []
+        fuzzy_matches = []
+        
+        # Traiter les résultats Salesforce
+        for result in sf_results.get("results", []):
+            similarity = self._calculate_similarity(client_name, result.get("Name", ""))
+            if similarity >= 0.9:
+                exact_matches.append({"source": "Salesforce", "data": result, "similarity": similarity})
+            elif similarity >= 0.7:
+                fuzzy_matches.append({"source": "Salesforce", "data": result, "similarity": similarity})
+        
+        # Traiter les résultats SAP
+        for result in sap_results.get("results", []):
+            similarity = self._calculate_similarity(client_name, result.get("CardName", ""))
+            if similarity >= 0.9:
+                exact_matches.append({"source": "SAP", "data": result, "similarity": similarity})
+            elif similarity >= 0.7:
+                fuzzy_matches.append({"source": "SAP", "data": result, "similarity": similarity})
+        
+        if exact_matches:
+            # Client trouvé exactement
+            self._track_step_complete("search_client", f"✅ Client '{client_name}' trouvé")
+            return {
+                "found": True,
+                "client_data": exact_matches[0]["data"],
+                "source": exact_matches[0]["source"]
+            }
+        
+        elif fuzzy_matches:
+            # Alternatives trouvées - demander validation utilisateur
+            self._track_step_start("client_alternatives", f"🔄 {len(fuzzy_matches)} client(s) similaire(s) trouvé(s)")
+            
+            # Stocker les alternatives
+            self.current_task.set_alternatives("client_alternatives", fuzzy_matches)
+            
+            # Demander validation utilisateur
+            self._track_step_start("client_validation", "⏳ Validation utilisateur requise")
+            
+            validation_data = {
+                "client_name": client_name,
+                "alternatives": fuzzy_matches,
+                "options": [
+                    {"id": "select_alternative", "label": "Sélectionner un client existant"},
+                    {"id": "create_new", "label": "Créer un nouveau client"},
+                    {"id": "retry_search", "label": "Rechercher avec un autre nom"}
+                ]
+            }
+            
+            self.current_task.require_user_validation("client_validation", "client_selection", validation_data)
+            
+            # Envoyer via WebSocket
+            await websocket_manager.send_user_interaction_required(self.task_id, {
+                "type": "client_selection",
+                "message": f"Plusieurs clients similaires à '{client_name}' ont été trouvés",
+                "data": validation_data
+            })
+            
+            return {
+                "found": False,
+                "requires_validation": True,
+                "validation_type": "client_selection",
+                "alternatives": fuzzy_matches
+            }
+        
+        else:
+            # Aucun client trouvé - proposer création
+            self._track_step_start("client_alternatives", "❌ Aucun client trouvé")
+            
+            # Rechercher des informations INSEE/Pappers
+            enrichment_data = await self._search_company_info(client_name)
+            
+            self._track_step_start("client_validation", "⏳ Création de client requise")
+            
+            validation_data = {
+                "client_name": client_name,
+                "enrichment_data": enrichment_data,
+                "options": [
+                    {"id": "create_new", "label": "Créer ce nouveau client"},
+                    {"id": "retry_search", "label": "Rechercher avec un autre nom"}
+                ]
+            }
+            
+            self.current_task.require_user_validation("client_validation", "client_creation", validation_data)
+            
+            await websocket_manager.send_user_interaction_required(self.task_id, {
+                "type": "client_creation",
+                "message": f"Client '{client_name}' non trouvé - Création requise",
+                "data": validation_data
+            })
+            
+            return {
+                "found": False,
+                "requires_validation": True,
+                "validation_type": "client_creation",
+                "enrichment_data": enrichment_data
+            }
+        
     async def _create_client_automatically(self, client_name: str) -> Dict[str, Any]:
         """
         🆕 NOUVELLE MÉTHODE : Création automatique du client dans SAP et Salesforce

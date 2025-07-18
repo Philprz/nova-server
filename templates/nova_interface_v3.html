@@ -1,0 +1,877 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NOVA Assistant - Interface v3</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        .progress-container {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        
+        .step-item {
+            display: flex;
+            align-items: center;
+            padding: 10px;
+            margin: 5px 0;
+            border-radius: 5px;
+            transition: all 0.3s ease;
+        }
+        
+        .step-item.pending {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+        }
+        
+        .step-item.running {
+            background: #d1ecf1;
+            border-left: 4px solid #0dcaf0;
+        }
+        
+        .step-item.completed {
+            background: #d4edda;
+            border-left: 4px solid #198754;
+        }
+        
+        .step-item.failed {
+            background: #f8d7da;
+            border-left: 4px solid #dc3545;
+        }
+        
+        .step-icon {
+            font-size: 1.5rem;
+            margin-right: 15px;
+            width: 30px;
+            text-align: center;
+        }
+        
+        .step-content {
+            flex: 1;
+        }
+        
+        .step-title {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        
+        .step-message {
+            font-size: 0.9rem;
+            color: #666;
+        }
+        
+        .user-interaction {
+            background: #fff;
+            border: 2px solid #0d6efd;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        
+        .alternatives-list {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        .alternative-item {
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 10px;
+            margin: 5px 0;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .alternative-item:hover {
+            background: #f8f9fa;
+            border-color: #0d6efd;
+        }
+        
+        .alternative-item.selected {
+            background: #e7f3ff;
+            border-color: #0d6efd;
+        }
+        
+        .similarity-badge {
+            float: right;
+            font-size: 0.8rem;
+        }
+        
+        .chat-container {
+            height: 600px;
+            overflow-y: auto;
+            background: #fff;
+            border: 1px solid #ddd;
+            border-radius: 10px;
+            padding: 20px;
+        }
+        
+        .message {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 10px;
+        }
+        
+        .message.user {
+            background: #e3f2fd;
+            margin-left: 50px;
+        }
+        
+        .message.system {
+            background: #f5f5f5;
+            margin-right: 50px;
+        }
+        
+        .message.error {
+            background: #ffebee;
+            color: #c62828;
+        }
+        
+        .message.success {
+            background: #e8f5e8;
+            color: #2e7d32;
+        }
+        
+        .connection-status {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            z-index: 1000;
+        }
+        
+        .connection-status.connected {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .connection-status.disconnected {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .enrichment-data {
+            background: #f8f9fa;
+            border-radius: 5px;
+            padding: 15px;
+            margin: 10px 0;
+        }
+        
+        .enrichment-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 5px 0;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .enrichment-item:last-child {
+            border-bottom: none;
+        }
+        
+        .validation-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <div class="col-md-8">
+                <div class="card">
+                    <div class="card-header">
+                        <h3><i class="bi bi-robot"></i> NOVA Assistant v3</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="chat-container" id="chatContainer">
+                            <div class="message system">
+                                <strong>NOVA:</strong> Bonjour ! Je suis votre assistant intelligent pour la création de devis. Que puis-je faire pour vous ?
+                            </div>
+                        </div>
+                        
+                        <div class="input-group mt-3">
+                            <input type="text" class="form-control" id="messageInput" 
+                                   placeholder="Tapez votre demande... (ex: devis 10 imprimantes 40 ppm pour RONDOT)">
+                            <button class="btn btn-primary" onclick="sendMessage()">
+                                <i class="bi bi-send"></i> Envoyer
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-header">
+                        <h5><i class="bi bi-list-task"></i> Progression</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="progressContainer" class="progress-container">
+                            <div class="text-center text-muted">
+                                Aucune tâche en cours
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="card mt-3">
+                    <div class="card-header">
+                        <h5><i class="bi bi-clock-history"></i> Historique</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="historyContainer">
+                            <div class="text-center text-muted">
+                                Aucun historique
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Statut de connexion -->
+    <div id="connectionStatus" class="connection-status disconnected">
+        <i class="bi bi-wifi-off"></i> Déconnecté
+    </div>
+    
+    <!-- Modal pour interactions utilisateur -->
+    <div class="modal fade" id="userInteractionModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="modalTitle">Validation requise</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body" id="modalBody">
+                    <!-- Contenu dynamique -->
+                </div>
+                <div class="modal-footer" id="modalFooter">
+                    <!-- Actions dynamiques -->
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Variables globales
+        let currentTaskId = null;
+        let websocket = null;
+        let currentInteraction = null;
+        
+        // Configuration
+        const WS_URL = `ws://${window.location.host}/progress/ws/`;
+        const API_URL = `/progress/start_quote`;
+        
+        // Éléments DOM
+        const chatContainer = document.getElementById('chatContainer');
+        const messageInput = document.getElementById('messageInput');
+        const progressContainer = document.getElementById('progressContainer');
+        const connectionStatus = document.getElementById('connectionStatus');
+        const userInteractionModal = new bootstrap.Modal(document.getElementById('userInteractionModal'));
+        
+        // Gestion des messages
+        function sendMessage() {
+            const message = messageInput.value.trim();
+            if (!message) return;
+            
+            // Afficher le message utilisateur
+            addMessage('user', message);
+            messageInput.value = '';
+            
+            // Démarrer la génération de devis
+            startQuoteGeneration(message);
+        }
+        
+        function addMessage(type, content, timestamp = null) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${type}`;
+            
+            const time = timestamp ? new Date(timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
+            
+            messageDiv.innerHTML = `
+                <div class="d-flex justify-content-between">
+                    <div><strong>${type === 'user' ? 'Vous' : 'NOVA'}:</strong> ${content}</div>
+                    <small class="text-muted">${time}</small>
+                </div>
+            `;
+            
+            chatContainer.appendChild(messageDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+        
+        // Gestion des touches
+        messageInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+        
+        // Démarrage de la génération de devis
+        async function startQuoteGeneration(prompt) {
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        prompt: prompt,
+                        draft_mode: false
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`Erreur HTTP: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                currentTaskId = data.task_id;
+                
+                addMessage('system', `Génération de devis démarrée (ID: ${currentTaskId})`);
+                
+                // Connexion WebSocket
+                connectWebSocket(currentTaskId);
+                
+            } catch (error) {
+                console.error('Erreur démarrage génération:', error);
+                addMessage('error', `Erreur: ${error.message}`);
+            }
+        }
+        
+        // Connexion WebSocket
+        function connectWebSocket(taskId) {
+            if (websocket) {
+                websocket.close();
+            }
+            
+            websocket = new WebSocket(WS_URL + taskId);
+            
+            websocket.onopen = function() {
+                updateConnectionStatus(true);
+                console.log('WebSocket connecté');
+            };
+            
+            websocket.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                handleWebSocketMessage(data);
+            };
+            
+            websocket.onclose = function() {
+                updateConnectionStatus(false);
+                console.log('WebSocket déconnecté');
+            };
+            
+            websocket.onerror = function(error) {
+                console.error('Erreur WebSocket:', error);
+                updateConnectionStatus(false);
+            };
+        }
+        
+        // Gestion des messages WebSocket
+        function handleWebSocketMessage(data) {
+            console.log('Message WebSocket reçu:', data);
+            
+            switch(data.type) {
+                case 'initial_state':
+                    updateProgressDisplay(data.data);
+                    break;
+                    
+                case 'step_update':
+                    updateStepDisplay(data.step_id, data.status, data.message, data.details);
+                    break;
+                    
+                case 'task_update':
+                    updateProgressDisplay(data);
+                    break;
+                    
+                case 'user_interaction_required':
+                    handleUserInteractionRequired(data.interaction_data);
+                    break;
+                    
+                default:
+                    console.log('Type de message non géré:', data.type);
+            }
+        }
+        
+        // Mise à jour du statut de connexion
+        function updateConnectionStatus(connected) {
+            if (connected) {
+                connectionStatus.className = 'connection-status connected';
+                connectionStatus.innerHTML = '<i class="bi bi-wifi"></i> Connecté';
+            } else {
+                connectionStatus.className = 'connection-status disconnected';
+                connectionStatus.innerHTML = '<i class="bi bi-wifi-off"></i> Déconnecté';
+            }
+        }
+        
+        // Mise à jour de l'affichage de progression
+        function updateProgressDisplay(taskData) {
+            const phases = taskData.phases || {};
+            let html = '';
+            
+            for (const [phaseId, phase] of Object.entries(phases)) {
+                html += `<div class="mb-3">`;
+                html += `<h6 class="text-muted">${phase.name}</h6>`;
+                
+                for (const step of phase.steps) {
+                    html += createStepHtml(step);
+                }
+                
+                html += `</div>`;
+            }
+            
+            progressContainer.innerHTML = html;
+        }
+        
+        // Création du HTML pour une étape
+        function createStepHtml(step) {
+            const iconMap = {
+                'pending': 'bi-clock',
+                'running': 'bi-play-circle',
+                'completed': 'bi-check-circle',
+                'failed': 'bi-x-circle'
+            };
+            
+            return `
+                <div class="step-item ${step.status}" id="step-${step.id}">
+                    <div class="step-icon">
+                        <i class="bi ${iconMap[step.status] || 'bi-circle'}"></i>
+                    </div>
+                    <div class="step-content">
+                        <div class="step-title">${step.title}</div>
+                        <div class="step-message">${step.message || ''}</div>
+                        ${step.progress_percent ? `<div class="progress mt-2">
+                            <div class="progress-bar" style="width: ${step.progress_percent}%"></div>
+                        </div>` : ''}
+                    </div>
+                </div>
+            `;
+        }
+        
+        // Mise à jour d'une étape spécifique
+        function updateStepDisplay(stepId, status, message, details) {
+            const stepElement = document.getElementById(`step-${stepId}`);
+            if (stepElement) {
+                stepElement.className = `step-item ${status}`;
+                
+                const messageElement = stepElement.querySelector('.step-message');
+                if (messageElement) {
+                    messageElement.textContent = message;
+                }
+                
+                // Mettre à jour la barre de progression si nécessaire
+                if (details && details.progress_percent) {
+                    let progressBar = stepElement.querySelector('.progress-bar');
+                    if (!progressBar) {
+                        const progressDiv = document.createElement('div');
+                        progressDiv.className = 'progress mt-2';
+                        progressDiv.innerHTML = '<div class="progress-bar"></div>';
+                        stepElement.querySelector('.step-content').appendChild(progressDiv);
+                        progressBar = progressDiv.querySelector('.progress-bar');
+                    }
+                    progressBar.style.width = `${details.progress_percent}%`;
+                }
+            }
+        }
+        
+        // Gestion des interactions utilisateur
+        function handleUserInteractionRequired(interactionData) {
+            currentInteraction = interactionData;
+            
+            const modalTitle = document.getElementById('modalTitle');
+            const modalBody = document.getElementById('modalBody');
+            const modalFooter = document.getElementById('modalFooter');
+            
+            modalTitle.textContent = interactionData.message || 'Validation requise';
+            
+            // Construire le contenu selon le type d'interaction
+            if (interactionData.type === 'client_selection') {
+                modalBody.innerHTML = buildClientSelectionContent(interactionData.data);
+                modalFooter.innerHTML = buildClientSelectionActions();
+            } else if (interactionData.type === 'client_creation') {
+                modalBody.innerHTML = buildClientCreationContent(interactionData.data);
+                modalFooter.innerHTML = buildClientCreationActions();
+            } else if (interactionData.type === 'product_selection') {
+                modalBody.innerHTML = buildProductSelectionContent(interactionData.data);
+                modalFooter.innerHTML = buildProductSelectionActions();
+            }
+            
+            userInteractionModal.show();
+        }
+        
+        // Construction du contenu pour sélection client
+        function buildClientSelectionContent(data) {
+            let html = `
+                <div class="mb-3">
+                    <p>Recherche pour: <strong>${data.client_name}</strong></p>
+                    <p>Clients similaires trouvés:</p>
+                </div>
+                <div class="alternatives-list">
+            `;
+            
+            for (const alternative of data.alternatives) {
+                const clientData = alternative.data;
+                const similarity = Math.round(alternative.similarity * 100);
+                
+                html += `
+                    <div class="alternative-item" data-client-id="${clientData.Id}" onclick="selectAlternative(this)">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div>
+                                <strong>${clientData.Name}</strong>
+                                <span class="badge bg-primary similarity-badge">${similarity}%</span>
+                            </div>
+                        </div>
+                        <div class="mt-2">
+                            <small class="text-muted">
+                                ${clientData.BillingCity || ''} ${clientData.BillingCountry || ''}
+                                <br>Source: ${alternative.source}
+                            </small>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            html += `</div>`;
+            return html;
+        }
+        
+        // Construction du contenu pour création client
+        function buildClientCreationContent(data) {
+            let html = `
+                <div class="mb-3">
+                    <p>Client non trouvé: <strong>${data.client_name}</strong></p>
+                    <p>Informations enrichies disponibles:</p>
+                </div>
+            `;
+            
+            if (data.enrichment_data && data.enrichment_data.consolidated_data) {
+                const enriched = data.enrichment_data.consolidated_data;
+                
+                html += `
+                    <div class="enrichment-data">
+                        <h6>Données trouvées:</h6>
+                `;
+                
+                if (enriched.company_name) {
+                    html += `<div class="enrichment-item">
+                        <span>Nom officiel:</span>
+                        <strong>${enriched.company_name}</strong>
+                    </div>`;
+                }
+                
+                if (enriched.siren) {
+                    html += `<div class="enrichment-item">
+                        <span>SIREN:</span>
+                        <strong>${enriched.siren}</strong>
+                    </div>`;
+                }
+                
+                if (enriched.address) {
+                    html += `<div class="enrichment-item">
+                        <span>Adresse:</span>
+                        <strong>${enriched.address.street || ''} ${enriched.address.postal_code || ''} ${enriched.address.city || ''}</strong>
+                    </div>`;
+                }
+                
+                if (enriched.activity && enriched.activity.ape_label) {
+                    html += `<div class="enrichment-item">
+                        <span>Activité:</span>
+                        <strong>${enriched.activity.ape_label}</strong>
+                    </div>`;
+                }
+                
+                html += `</div>`;
+            } else {
+                html += `<div class="alert alert-warning">
+                    Aucune information enrichie disponible pour ce client.
+                </div>`;
+            }
+            
+            return html;
+        }
+        
+        // Construction du contenu pour sélection produit
+        function buildProductSelectionContent(data) {
+            let html = `
+                <div class="mb-3">
+                    <p>Sélectionnez les produits appropriés:</p>
+                </div>
+            `;
+            
+            for (const product of data.products) {
+                if (product.status === 'alternatives_available') {
+                    html += `
+                        <div class="mb-4">
+                            <h6>Produit recherché: <strong>${product.original.name}</strong> (Qté: ${product.quantity})</h6>
+                            <div class="alternatives-list">
+                    `;
+                    
+                    for (const alternative of product.alternatives) {
+                        const productData = alternative.data;
+                        const similarity = Math.round(alternative.similarity * 100);
+                        
+                        html += `
+                            <div class="alternative-item" data-product-code="${productData.ItemCode}" onclick="selectProductAlternative(this)">
+                                <div class="d-flex justify-content-between align-items-start">
+                                    <div>
+                                        <strong>${productData.ItemName}</strong>
+                                        <span class="badge bg-primary similarity-badge">${similarity}%</span>
+                                    </div>
+                                </div>
+                                <div class="mt-2">
+                                    <small class="text-muted">
+                                        Code: ${productData.ItemCode}
+                                        <br>Prix: ${productData.Price || 'N/A'}€
+                                        <br>Stock: ${productData.Stock || 'N/A'}
+                                    </small>
+                                </div>
+                            </div>
+                        `;
+                    }
+                    
+                    html += `</div></div>`;
+                }
+            }
+            
+            return html;
+        }
+        
+        // Actions pour sélection client
+        function buildClientSelectionActions() {
+            return `
+                <button type="button" class="btn btn-secondary" onclick="retryClientSearch()">
+                    <i class="bi bi-search"></i> Rechercher autre nom
+                </button>
+                <button type="button" class="btn btn-success" onclick="createNewClient()">
+                    <i class="bi bi-plus-circle"></i> Créer nouveau client
+                </button>
+                <button type="button" class="btn btn-primary" onclick="validateClientSelection()" disabled id="validateClientBtn">
+                    <i class="bi bi-check"></i> Valider sélection
+                </button>
+            `;
+        }
+        
+        // Actions pour création client
+        function buildClientCreationActions() {
+            return `
+                <button type="button" class="btn btn-secondary" onclick="retryClientSearch()">
+                    <i class="bi bi-search"></i> Rechercher autre nom
+                </button>
+                <button type="button" class="btn btn-success" onclick="confirmClientCreation()">
+                    <i class="bi bi-plus-circle"></i> Créer ce client
+                </button>
+            `;
+        }
+        
+        // Actions pour sélection produit
+        function buildProductSelectionActions() {
+            return `
+                <button type="button" class="btn btn-secondary" onclick="cancelProductSelection()">
+                    <i class="bi bi-x"></i> Annuler
+                </button>
+                <button type="button" class="btn btn-primary" onclick="validateProductSelection()" disabled id="validateProductBtn">
+                    <i class="bi bi-check"></i> Valider sélection
+                </button>
+            `;
+        }
+        
+        // Fonctions de sélection
+        function selectAlternative(element) {
+            // Désélectionner les autres
+            document.querySelectorAll('.alternative-item').forEach(item => {
+                item.classList.remove('selected');
+            });
+            
+            // Sélectionner l'élément cliqué
+            element.classList.add('selected');
+            
+            // Activer le bouton de validation
+            const validateBtn = document.getElementById('validateClientBtn');
+            if (validateBtn) {
+                validateBtn.disabled = false;
+            }
+        }
+        
+        function selectProductAlternative(element) {
+            // Désélectionner les autres dans le même groupe
+            const parent = element.closest('.alternatives-list');
+            parent.querySelectorAll('.alternative-item').forEach(item => {
+                item.classList.remove('selected');
+            });
+            
+            // Sélectionner l'élément cliqué
+            element.classList.add('selected');
+            
+            // Vérifier si toutes les sélections sont faites
+            const allSelected = document.querySelectorAll('.alternatives-list .alternative-item.selected').length === 
+                               document.querySelectorAll('.alternatives-list').length;
+            
+            // Activer le bouton de validation si tout est sélectionné
+            const validateBtn = document.getElementById('validateProductBtn');
+            if (validateBtn) {
+                validateBtn.disabled = !allSelected;
+            }
+        }
+        
+        // Fonctions de validation
+        function validateClientSelection() {
+            const selected = document.querySelector('.alternative-item.selected');
+            if (!selected) return;
+            
+            const clientId = selected.dataset.clientId;
+            
+            // Envoyer la réponse via WebSocket
+            sendUserResponse({
+                response_type: 'client_validation',
+                step_id: 'client_validation',
+                selected_option: 'existing_client',
+                client_id: clientId
+            });
+            
+            userInteractionModal.hide();
+            addMessage('system', 'Client sélectionné, poursuite du traitement...');
+        }
+        
+        function createNewClient() {
+            sendUserResponse({
+                response_type: 'client_validation',
+                step_id: 'client_validation',
+                selected_option: 'create_new'
+            });
+            
+            userInteractionModal.hide();
+            addMessage('system', 'Création du nouveau client en cours...');
+        }
+        
+        function confirmClientCreation() {
+            sendUserResponse({
+                response_type: 'client_validation',
+                step_id: 'client_validation',
+                selected_option: 'confirm_create'
+            });
+            
+            userInteractionModal.hide();
+            addMessage('system', 'Création du client confirmée...');
+        }
+        
+        function retryClientSearch() {
+            const newName = prompt('Nouveau nom de client:');
+            if (newName) {
+                sendUserResponse({
+                    response_type: 'client_validation',
+                    step_id: 'client_validation',
+                    selected_option: 'retry_search',
+                    new_client_name: newName
+                });
+                
+                userInteractionModal.hide();
+                addMessage('system', `Nouvelle recherche pour: ${newName}`);
+            }
+        }
+        
+        function validateProductSelection() {
+            const selections = [];
+            
+            document.querySelectorAll('.alternatives-list').forEach(list => {
+                const selected = list.querySelector('.alternative-item.selected');
+                if (selected) {
+                    selections.push({
+                        product_code: selected.dataset.productCode,
+                        // Ajouter d'autres données nécessaires
+                    });
+                }
+            });
+            
+            sendUserResponse({
+                response_type: 'product_selection',
+                step_id: 'product_validation',
+                selections: selections
+            });
+            
+            userInteractionModal.hide();
+            addMessage('system', 'Produits sélectionnés, poursuite du traitement...');
+        }
+        
+        function cancelProductSelection() {
+            sendUserResponse({
+                response_type: 'product_selection',
+                step_id: 'product_validation',
+                selected_option: 'cancel'
+            });
+            
+            userInteractionModal.hide();
+            addMessage('system', 'Sélection annulée');
+        }
+        
+        // Envoi de réponse utilisateur
+        function sendUserResponse(responseData) {
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                websocket.send(JSON.stringify({
+                    type: 'user_response',
+                    data: responseData
+                }));
+            }
+        }
+        
+        // Initialisation
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('Interface NOVA v3 initialisée');
+            
+            // Charger l'historique au démarrage
+            loadHistory();
+        });
+        
+        // Chargement de l'historique
+        async function loadHistory() {
+            try {
+                const response = await fetch('/progress/quote_history?limit=5');
+                const data = await response.json();
+                
+                const historyContainer = document.getElementById('historyContainer');
+                
+                if (data.history && data.history.length > 0) {
+                    let html = '';
+                    
+                    for (const task of data.history) {
+                        const status = task.status === 'completed' ? 'success' : 'danger';
+                        const icon = task.status === 'completed' ? 'check-circle' : 'x-circle';
+                        
+                        html += `
+                            <div class="card mb-2">
+                                <div class="card-body p-2">
+                                    <div class="d-flex justify-content-between">
+                                        <small>
+                                            <i class="bi bi-${icon} text-${status}"></i>
+                                            ${task.user_prompt.substring(0, 30)}...
+                                        </small>
+                                        <small class="text-muted">
+                                            ${new Date(task.start_time).toLocaleString()}
+                                        </small>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    }
+                    
+                    historyContainer.innerHTML = html;
+                } else {
+                    historyContainer.innerHTML = '<div class="text-center text-muted">Aucun historique</div>';
+                }
+                
+            } catch (error) {
+                console.error('Erreur chargement historique:', error);
+            }
+        }
+    </script>
+</body>
+</html>
+    
