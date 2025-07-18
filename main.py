@@ -100,6 +100,9 @@ loader.register_to_fastapi(app)
 # =============================================
 # ENDPOINTS PRINCIPAUX OBLIGATOIRES
 # =============================================
+@app.get("/interface/itspirit")
+async def interface_itspirit():
+    return FileResponse("templates/nova_interface_final.html")
 @app.get("/health")
 async def health_check():
     """Endpoint de santé du serveur"""
