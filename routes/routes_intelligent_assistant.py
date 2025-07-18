@@ -7,7 +7,7 @@ capable de comprendre les demandes en langage naturel et proposer
 des solutions proactives.
 """
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, BackgroundTasks
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from typing import Dict, Any, List, Optional
@@ -18,6 +18,11 @@ import json
 
 # Configuration du router FastAPI
 router = APIRouter(tags=["Assistant Intelligent"])
+# Import du système de progression
+from services.progress_tracker import progress_tracker, TaskStatus
+from workflow.devis_workflow import DevisWorkflow
+
+logger = logging.getLogger(__name__)
 
 # Import des services NOVA existants
 from services.suggestion_engine import SuggestionEngine, SuggestionResult
@@ -27,8 +32,256 @@ from workflow.devis_workflow import DevisWorkflow
 
 # Import des routes existantes pour réutiliser la logique
 import asyncio
-
 import httpx
+
+# 🔧 MODIFICATION : Ajouter le modèle pour la progression
+class ProgressChatMessage(BaseModel):
+    """Message de chat avec support progression"""
+    message: str
+    draft_mode: bool = False
+    conversation_history: Optional[list] = []
+    use_progress_tracking: bool = True  # 🆕 NOUVEAU : Active le tracking
+
+class ProgressChatResponse(BaseModel):
+    """Réponse avec support progression"""
+    success: bool
+    task_id: Optional[str] = None  # 🆕 NOUVEAU : ID pour le polling
+    response: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+    use_polling: bool = False  # 🆕 NOUVEAU : Indique si utiliser polling
+
+# 🔧 MODIFICATION : Fonction chat_with_nova modifiée
+@router.post("/chat")
+async def chat_with_nova_with_progress(
+    message_data: ProgressChatMessage, 
+    background_tasks: BackgroundTasks
+):
+    """
+    Chat avec NOVA - Version avec progression temps réel
+    """
+    try:
+        logger.info(f"📨 Message reçu: {message_data.message[:100]}...")
+        
+        # Détecter si c'est une demande de devis (nécessite progression)
+        message_lower = message_data.message.lower()
+        needs_progress = any(keyword in message_lower for keyword in [
+            'devis', 'quote', 'quotation', 'proposition', 'offre',
+            'prix', 'tarif', 'commande', 'créer', 'générer'
+        ])
+        
+        # 🆕 NOUVEAU : Si progression nécessaire ET activée
+        if needs_progress and message_data.use_progress_tracking:
+            logger.info("🔄 Demande de devis détectée - Mode progression activé")
+            
+            # Créer une tâche de tracking
+            task = progress_tracker.create_task(
+                user_prompt=message_data.message,
+                draft_mode=message_data.draft_mode
+            )
+            
+            # Lancer la génération en arrière-plan
+            background_tasks.add_task(
+                _execute_quote_with_progress,
+                task.task_id,
+                message_data.message,
+                message_data.draft_mode,
+                message_data.conversation_history
+            )
+            
+            return ProgressChatResponse(
+                success=True,
+                task_id=task.task_id,
+                use_polling=True,
+                response={
+                    "type": "progress_started",
+                    "message": "🤖 NOVA analyse votre demande de devis...",
+                    "task_id": task.task_id,
+                    "polling_url": f"/progress/quote_status/{task.task_id}"
+                }
+            )
+        
+        # 🔧 MODIFICATION : Mode synchrone pour les autres demandes
+        else:
+            logger.info("💬 Traitement chat standard (sans progression)")
+            
+            # Appeler l'ancien système pour les questions simples
+            result = await _handle_simple_chat(message_data)
+            
+            return ProgressChatResponse(
+                success=True,
+                use_polling=False,
+                response=result
+            )
+            
+    except Exception as e:
+        logger.error(f"❌ Erreur chat_with_nova_with_progress: {str(e)}", exc_info=True)
+        return ProgressChatResponse(
+            success=False,
+            error=str(e),
+            response={
+                "message": f"❌ Erreur: {str(e)}",
+                "suggestions": ['Réessayer', 'Reformuler', 'Contacter le support']
+            }
+        )
+
+# 🆕 NOUVELLE FONCTION : Exécution avec progression
+async def _execute_quote_with_progress(
+    task_id: str, 
+    message: str, 
+    draft_mode: bool,
+    conversation_history: list
+):
+    """
+    Exécute la génération de devis avec tracking de progression
+    """
+    try:
+        logger.info(f"🔄 Démarrage génération avec progression - Task: {task_id}")
+        
+        # Créer le workflow avec le task_id existant
+        workflow = DevisWorkflow(
+            validation_enabled=True, 
+            draft_mode=draft_mode,
+            task_id=task_id  # 🔧 IMPORTANT : Passer le task_id existant
+        )
+        
+        # Exécuter le workflow (il gère automatiquement le tracking)
+        result = await workflow.process_prompt(message, task_id=task_id)
+        
+        # Le workflow gère automatiquement la completion de la tâche
+        logger.info(f"✅ Génération terminée avec succès - Task: {task_id}")
+        
+    except Exception as e:
+        logger.error(f"❌ Erreur génération avec progression: {str(e)}", exc_info=True)
+        # En cas d'erreur, marquer la tâche comme échouée
+        progress_tracker.fail_task(task_id, f"Erreur d'exécution: {str(e)}")
+
+# 🔧 MODIFICATION : Fonction pour chat simple (sans progression)
+async def _handle_simple_chat(message_data: ProgressChatMessage) -> Dict[str, Any]:
+    """
+    Gère les messages de chat simples sans progression
+    """
+    try:
+        # Importer les modules nécessaires
+        from services.llm_extractor import llm_extractor
+        from intelligence.suggestion_engine import SuggestionEngine
+        
+        message = message_data.message
+        logger.info(f"💬 Chat simple: {message[:50]}...")
+        
+        # Analyser le type de demande
+        extraction = await llm_extractor.extract_quote_info(message)
+        
+        if extraction.get("action_type") == "RECHERCHE_PRODUIT":
+            # Recherche de produits
+            return await _handle_product_search(extraction)
+            
+        elif extraction.get("action_type") == "INFO_CLIENT":
+            # Information client
+            return await _handle_client_info(extraction)
+            
+        elif extraction.get("action_type") == "CONSULTATION_STOCK":
+            # Consultation stock
+            return await _handle_stock_query(extraction)
+            
+        else:
+            # Chat général
+            return {
+                "type": "chat",
+                "message": f"🤖 J'ai compris votre demande: {message}\n\n" +
+                          "💡 Je peux vous aider avec:\n" +
+                          "• Création de devis\n" +
+                          "• Recherche de produits\n" +
+                          "• Information clients\n" +
+                          "• Consultation de stock",
+                "suggestions": [
+                    "Créer un devis",
+                    "Rechercher un produit", 
+                    "Info client",
+                    "Vérifier le stock"
+                ]
+            }
+            
+    except Exception as e:
+        logger.error(f"❌ Erreur chat simple: {str(e)}", exc_info=True)
+        return {
+            "type": "error",
+            "message": f"❌ Erreur de traitement: {str(e)}",
+            "suggestions": ['Réessayer', 'Reformuler']
+        }
+
+# 🆕 NOUVELLES FONCTIONS : Gestionnaires spécialisés
+
+async def _handle_product_search(extraction: Dict[str, Any]) -> Dict[str, Any]:
+    """Gère la recherche de produits"""
+    try:
+        search_criteria = extraction.get("search_criteria", {})
+        category = search_criteria.get("category", "")
+        characteristics = search_criteria.get("characteristics", [])
+        
+        # Ici, appeler votre système de recherche de produits
+        # Pour l'exemple, on retourne une réponse structurée
+        
+        return {
+            "type": "product_search",
+            "message": f"🔍 Recherche de {category} avec les caractéristiques: {', '.join(characteristics)}",
+            "suggestions": [
+                "Voir les résultats",
+                "Affiner la recherche",
+                "Créer un devis avec ces produits"
+            ]
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Erreur recherche produit: {str(e)}")
+        return {
+            "type": "error",
+            "message": "❌ Erreur lors de la recherche de produits",
+            "suggestions": ['Réessayer', 'Reformuler la recherche']
+        }
+
+async def _handle_client_info(extraction: Dict[str, Any]) -> Dict[str, Any]:
+    """Gère les demandes d'information client"""
+    try:
+        client_name = extraction.get("client", "")
+        
+        return {
+            "type": "client_info",
+            "message": f"👤 Recherche d'informations pour le client: {client_name}",
+            "suggestions": [
+                "Voir le profil complet",
+                "Historique des commandes",
+                "Créer un devis pour ce client"
+            ]
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Erreur info client: {str(e)}")
+        return {
+            "type": "error",
+            "message": "❌ Erreur lors de la récupération des informations client",
+            "suggestions": ['Réessayer', 'Vérifier le nom du client']
+        }
+
+async def _handle_stock_query(extraction: Dict[str, Any]) -> Dict[str, Any]:
+    """Gère les consultations de stock"""
+    try:
+        return {
+            "type": "stock_query",
+            "message": "📦 Consultation du stock en cours...",
+            "suggestions": [
+                "Voir le stock détaillé",
+                "Alertes stock faible",
+                "Commander des produits"
+            ]
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Erreur consultation stock: {str(e)}")
+        return {
+            "type": "error",
+            "message": "❌ Erreur lors de la consultation du stock",
+            "suggestions": ['Réessayer', 'Contacter le responsable stock']
+        }
 
 async def get_unified_data(data_type: str, limit: int = 20):
     """Service unifié pour récupérer clients et produits"""

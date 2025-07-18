@@ -49,54 +49,63 @@ class DevisWorkflow:
             validation_enabled: Active la validation des données
             draft_mode: Mode brouillon (True) ou normal (False)
             force_production: Force le mode production même si connexions échouent
-        task_id: ID de tâche existant pour récupérer une tâche en cours
+            task_id: ID de tâche existant pour récupérer une tâche en cours
         """
+        # Initialisation des composants principaux
         self.mcp_connector = MCPConnector()
         self.llm_extractor = LLMExtractor()
         self.client_validator = ClientValidator() if validation_enabled else None
         self.validation_enabled = validation_enabled
         self.draft_mode = draft_mode
-        self.force_production = force_production  # 🆕 NOUVEAU PARAMÈTRE
+        self.force_production = force_production
         self.context = {}
+        self.workflow_steps = []
 
-        # Configuration mode production
+        # Configuration mode production/démo
+        self.demo_mode = not force_production
         if force_production:
             logger.info("🔥 MODE PRODUCTION FORCÉ - Pas de fallback démo")
-            self.demo_mode = False
-        else:
-            self.demo_mode = True  # Mode démo par défaut
 
-        # NOUVEAU : Support du tracking de progression
-        self.current_task: Optional[QuoteTask] = None
-        self.task_id: Optional[str] = task_id  # Utiliser le task_id fourni
-        
-        # Si un task_id est fourni, récupérer la tâche existante
         if task_id:
+            # Utiliser le task_id fourni
+            self.task_id = task_id
             self.current_task = progress_tracker.get_task(task_id)
             if self.current_task:
                 logger.info(f"✅ Tâche récupérée: {task_id}")
             else:
-                logger.warning(f"⚠️ Tâche {task_id} introuvable")
-        
-        # Ancien système de workflow_steps conservé pour compatibilité
-        self.workflow_steps = []
-        # 🧠 NOUVEAU : Initialiser le moteur de suggestions
+                logger.warning(f"⚠️ Tâche {task_id} introuvable - Création nouvelle tâche")
+                self.current_task = None
+                self.task_id = None
+        else:
+            self.current_task = None
+            self.task_id = None
+            try:
+                self.current_task = progress_tracker.get_task(task_id)
+                if self.current_task:
+                    logger.info(f"✅ Tâche récupérée: {task_id}")
+                    # Synchroniser le contexte existant si disponible
+                    if hasattr(self.current_task, 'context'):
+                        self.context.update(self.current_task.context)
+                else:
+                    logger.warning(f"⚠️ Tâche {task_id} introuvable")
+            except Exception as e:
+                logger.error(f"Erreur lors de la récupération de la tâche {task_id}: {str(e)}")
+
+        # Initialisation des moteurs
         self.suggestion_engine = SuggestionEngine()
         self.client_suggestions = None
         self.product_suggestions = []
 
-        # 🆕 NOUVEAUX COMPOSANTS
+        # Initialisation des validateurs et cache
         from services.cache_manager import referential_cache
         from workflow.validation_workflow import SequentialValidator
-
         self.cache_manager = referential_cache
         self.sequential_validator = SequentialValidator(self.mcp_connector, self.llm_extractor)
 
-        # Pré-charger le cache au démarrage (seulement si dans un contexte async)
+        # Pré-chargement asynchrone du cache
         try:
             asyncio.create_task(self._initialize_cache())
         except RuntimeError:
-            # Pas d'event loop actif, initialisation différée
             logger.info("⏳ Initialisation du cache différée (pas d'event loop actif)")
 
         logger.info("✅ Workflow initialisé avec cache et validation séquentielle")
@@ -436,66 +445,63 @@ class DevisWorkflow:
             logger.exception(f"Erreur création opportunité Salesforce: {str(e)}")
             return {"success": False, "error": str(e)}
 
-    async def process_prompt(self, prompt: str, task_id: str = None, draft_mode: bool = False) -> Dict[str, Any]:
+    async def process_prompt(self, prompt: str, task_id: Optional[str] = None) -> Dict[str, Any]:
         """
-        Version corrigée avec gestion robuste des erreurs
+        Traite un prompt avec tracking de progression
         """
-
         try:
-            # Initialiser le tracking
-            if task_id:
-                self.current_task = progress_tracker.get_task(task_id)
+            # 🔧 MODIFICATION : Utiliser le task_id fourni si disponible
+            if task_id and not self.task_id:
                 self.task_id = task_id
-                if not self.current_task:
-                    raise ValueError(f"Tâche {task_id} introuvable")
-            else:
+                self.current_task = progress_tracker.get_task(task_id)
+            
+            # Si pas de task existante, en créer une nouvelle
+            if not self.current_task:
                 self.task_id = self._initialize_task_tracking(prompt)
-
-            # Stocker le mode draft
-            if draft_mode:
-                self.draft_mode = draft_mode
-                logger.info("Mode DRAFT activé")
-
+            
             logger.info(f"=== DÉMARRAGE WORKFLOW - Tâche {self.task_id} ===")
 
-            # Phase 1: Extraction des informations (avec fallback robuste)
-            self._track_step_start("parse_prompt", "Analyse de votre demande...")
+            # 🔧 MODIFICATION : Démarrer le tracking de progression
+            self._track_step_start("parse_prompt", "🔍 Analyse de votre demande")
 
-            try:
-                extracted_info = await self._extract_info_unified(prompt, "standard")
+            # Extraction des informations (code existant adapté)
+            extracted_info = await self.llm_extractor.extract_quote_info(prompt)
+            self._track_step_progress("parse_prompt", 100, "✅ Demande analysée")
+            self._track_step_complete("parse_prompt")
 
-                if extracted_info and "client" in extracted_info:
-                    self._track_step_complete("parse_prompt", "✅ Demande analysée")
+            # 🔧 MODIFICATION : Vérification du mode production
+            mode = "PRODUCTION" if not self.draft_mode else "DRAFT"
+            logger.info(f"🔧 MODE {mode} ACTIVÉ")
 
-                    # 🎯 FORCER LE MODE PRODUCTION - Utiliser le workflow complet
-                    logger.info("🚀 ACTIVATION MODE PRODUCTION - Workflow complet")
+            # Vérifier les connexions
+            self._track_step_start("validate_input", "🔧 Vérification des connexions")
+            connections_ok = await self._check_connections()
+            if not connections_ok:
+                raise Exception("Connexions SAP/Salesforce indisponibles")
+            self._track_step_complete("validate_input", "✅ Connexions validées")
 
-                    # Continuer avec le workflow production au lieu de retourner du démo
-                    return await self.process_prompt_original(prompt, task_id, draft_mode)
+            # Router selon le type d'action
+            action_type = extracted_info.get("action_type", "DEVIS")
 
-                else:
-                    raise ValueError("Extraction impossible")
+            if action_type == "DEVIS":
+                result = await self._process_quote_workflow(extracted_info)
+            else:
+                result = await self._process_other_action(extracted_info)
 
-            except Exception as e:
-                self._track_step_fail("parse_prompt", "Erreur extraction", str(e))
-                raise
-
+            # 🔧 MODIFICATION : S'assurer que le résultat est sauvegardé
+            result = await self._execute_full_workflow(prompt)
+            
+            # Marquer la tâche comme terminée avec le résultat
+            if self.current_task:
+                progress_tracker.complete_task(self.task_id, result)
+            
+            return result
+            
         except Exception as e:
-            logger.exception(f"Erreur workflow principal: {str(e)}")
-
-            # Retourner une erreur détaillée
-            return {
-                "success": False,
-                "error": f"Erreur lors de la génération du devis: {str(e)}",
-                "message": f"Erreur lors de la génération du devis: {str(e)}",
-                "task_id": getattr(self, 'task_id', None),
-                "timestamp": datetime.now().isoformat(),
-                "debug_info": {
-                    "exception_type": type(e).__name__,
-                    "exception_message": str(e),
-                    "workflow_step": "extraction_info"
-                }
-            }
+            logger.error(f"❌ Erreur process_prompt: {str(e)}", exc_info=True)
+            if self.current_task:
+                progress_tracker.fail_task(self.task_id, str(e))
+            raise
 
     async def process_prompt_original(self, prompt: str, task_id: str = None, draft_mode: bool = False) -> Dict[str, Any]:
         """
@@ -3534,6 +3540,584 @@ async def continue_quote_after_interaction(request: dict):
     except Exception as e:
         logger.exception(f"Erreur continue_quote: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+    async def _process_quote_workflow(self, extracted_info: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        🔧 MODIFICATION : Workflow de devis avec progression détaillée
+        """
+        try:
+            client_name = extracted_info.get("client", "")
+            products = extracted_info.get("products", [])
+
+            # Étape 1: Recherche/Validation client
+            self._track_step_start("search_client", f"👤 Recherche du client: {client_name}")
+            client_result = await self._process_client_validation(client_name)
+            self._track_step_complete("search_client", f"✅ Client: {client_result.get('status', 'traité')}")
+
+            # Étape 2: Récupération des produits
+            self._track_step_start("fetch_products", f"📦 Récupération de {len(products)} produit(s)")
+            products_result = await self._process_products_retrieval(products)
+            self._track_step_complete("fetch_products", f"✅ {len(products_result.get('products', []))} produit(s) trouvé(s)")
+
+            # Étape 3: Création du devis
+            self._track_step_start("create_quote", "📋 Génération du devis")
+            quote_result = await self._create_quote_document(client_result, products_result)
+            self._track_step_complete("create_quote", "✅ Devis créé avec succès")
+
+            # Étape 4: Synchronisation
+            self._track_step_start("sync_systems", "🔄 Synchronisation SAP/Salesforce")
+            sync_result = await self._sync_quote_to_systems(quote_result)
+            self._track_step_complete("sync_systems", "✅ Synchronisation terminée")
+
+            return {
+                "status": "success",
+                "type": "quote_generated",
+                "message": "✅ Devis généré avec succès !",
+                "quote_id": quote_result.get("quote_id"),
+                "client": client_result,
+                "products": products_result,
+                "sync": sync_result,
+                "suggestions": [
+                    "Voir le devis complet",
+                    "Envoyer le devis au client",
+                    "Créer un nouveau devis",
+                    "Modifier le devis"
+                ]
+            }
+
+        except Exception as e:
+            logger.error(f"❌ Erreur workflow devis: {str(e)}")
+            raise
+
+    async def _process_other_action(self, extracted_info: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        🔧 MODIFICATION : Traitement des autres types d'actions
+        """
+        action_type = extracted_info.get("action_type", "UNKNOWN")
+
+        return {
+            "status": "success",
+            "type": "other_action",
+            "message": f"Action {action_type} traitée",
+            "data": extracted_info
+        }
+
+    # 🔧 NOUVELLE MÉTHODE : Version publique pour les tests
+    async def test_connections(self) -> bool:
+        """
+        🔧 NOUVELLE MÉTHODE : Version publique de _check_connections pour les tests
+        """
+        return await self._check_connections()
+
+    async def _check_connections(self) -> bool:
+        """
+        🔧 MODIFICATION CRITIQUE : Vérifier les connexions avec progression avancée
+        """
+        try:
+            # Utiliser la nouvelle fonction de test avec progression
+            from services.mcp_connector import test_mcp_connections_with_progress
+
+            self._track_step_progress("validate_input", 10, "🔍 Initialisation des tests...")
+
+            # Exécuter les tests de connexion avec progression intégrée
+            connection_results = await test_mcp_connections_with_progress()
+
+            # Analyser les résultats
+            overall_status = connection_results.get("overall_status", "unknown")
+            connections = connection_results.get("connections", {})
+
+            sf_connected = connections.get("salesforce", {}).get("connected", False)
+            sap_connected = connections.get("sap", {}).get("connected", False)
+
+            # Déterminer le message de statut
+            if overall_status == "all_connected":
+                status_msg = "✅ Toutes les connexions validées"
+                connections_ok = True
+            elif overall_status == "partial_connection":
+                status_msg = f"⚠️ Connexions partielles (SF: {'✅' if sf_connected else '❌'}, SAP: {'✅' if sap_connected else '❌'})"
+                connections_ok = self.force_production  # Continuer si mode production forcé
+            else:
+                status_msg = "❌ Aucune connexion disponible"
+                connections_ok = False
+
+            self._track_step_progress("validate_input", 100, status_msg)
+
+            # Log détaillé
+            logger.info(f"🔧 Test connexions terminé - Statut: {overall_status}")
+            logger.info(f"🔧 SF: {sf_connected}, SAP: {sap_connected}, Force Production: {self.force_production}")
+
+            # En mode production forcé, continuer même avec des connexions partielles
+            if self.force_production and not connections_ok:
+                logger.warning("🔥 MODE PRODUCTION FORCÉ - Continuation malgré les erreurs de connexion")
+                connections_ok = True
+                self._track_step_progress("validate_input", 100, "🔥 Mode production forcé - Continuation")
+
+            return connections_ok
+
+        except Exception as e:
+            logger.error(f"❌ Erreur vérification connexions: {str(e)}")
+            self._track_step_progress("validate_input", 100, f"❌ Erreur: {str(e)}")
+
+            # En mode production forcé, continuer même en cas d'erreur
+            if self.force_production:
+                logger.warning("🔥 MODE PRODUCTION FORCÉ - Continuation malgré l'erreur")
+                return True
+
+            return False
+
+    async def _process_client_validation(self, client_name: str) -> Dict[str, Any]:
+        """
+        🔧 MODIFICATION CRITIQUE : Validation du client avec progression avancée
+        """
+        try:
+            self._track_step_progress("search_client", 20, f"🔍 Recherche '{client_name}' dans Salesforce...")
+
+            # Recherche dans Salesforce avec progression
+            from services.mcp_connector import call_mcp_with_progress
+
+            sf_accounts = await call_mcp_with_progress(
+                "salesforce_mcp",
+                "salesforce_query",
+                {
+                    "query": f"""
+                    SELECT Id, Name, AccountNumber, Type, Industry, Phone, Website,
+                           BillingCity, BillingCountry, Description
+                    FROM Account
+                    WHERE Name LIKE '%{client_name}%' OR AccountNumber LIKE '%{client_name}%'
+                    ORDER BY Name LIMIT 5
+                    """
+                },
+                "search_client_sf",
+                f"🔍 Recherche '{client_name}' dans Salesforce"
+            )
+
+            self._track_step_progress("search_client", 60, f"🔍 Recherche '{client_name}' dans SAP...")
+
+            # Recherche dans SAP - utiliser la recherche de clients/partenaires commerciaux
+            sap_customers = await call_mcp_with_progress(
+                "sap_mcp",
+                "sap_read",
+                {
+                    "endpoint": f"/BusinessPartners?$filter=contains(CardName,'{client_name}') and CardType eq 'cCustomer'&$top=5",
+                    "method": "GET"
+                },
+                "search_client_sap",
+                f"🔍 Recherche '{client_name}' dans SAP"
+            )
+
+            self._track_step_progress("search_client", 90, "📊 Analyse des résultats...")
+
+            # Analyser les résultats
+            sf_matches = []
+            if sf_accounts and "error" not in sf_accounts:
+                sf_matches = sf_accounts.get("records", [])
+
+            sap_matches = []
+            if sap_customers and "error" not in sap_customers:
+                sap_matches = sap_customers.get("value", [])
+
+            # Déterminer le statut
+            total_matches = len(sf_matches) + len(sap_matches)
+
+            if total_matches > 0:
+                status = "found"
+                message = f"✅ {total_matches} client(s) trouvé(s)"
+            else:
+                status = "not_found"
+                message = f"❌ Aucun client trouvé pour '{client_name}'"
+
+            self._track_step_progress("search_client", 100, message)
+
+            result = {
+                "status": status,
+                "client_name": client_name,
+                "salesforce_matches": sf_matches,
+                "sap_matches": sap_matches,
+                "total_matches": total_matches,
+                "message": message
+            }
+
+            logger.info(f"🔍 Recherche client terminée: {total_matches} résultat(s)")
+            return result
+
+        except Exception as e:
+            logger.error(f"❌ Erreur validation client: {str(e)}")
+            self._track_step_progress("search_client", 100, f"❌ Erreur: {str(e)}")
+
+            return {
+                "status": "error",
+                "client_name": client_name,
+                "error": str(e),
+                "salesforce_matches": [],
+                "sap_matches": [],
+                "total_matches": 0
+            }
+
+    async def _process_products_retrieval(self, products: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        🔧 MODIFICATION CRITIQUE : Récupération des produits avec progression avancée
+        """
+        try:
+            if not products:
+                return {
+                    "status": "success",
+                    "products": [],
+                    "message": "Aucun produit à traiter"
+                }
+
+            self._track_step_progress("fetch_products", 10, f"🔍 Recherche de {len(products)} produit(s)...")
+
+            found_products = []
+            from services.mcp_connector import call_mcp_with_progress
+
+            for i, product in enumerate(products):
+                product_name = product.get("name", "")
+                quantity = product.get("quantity", 1)
+
+                progress = int(20 + (i / len(products)) * 70)  # 20% à 90%
+                self._track_step_progress("fetch_products", progress,
+                                        f"📦 Recherche '{product_name}' ({i+1}/{len(products)})")
+
+                # Recherche dans SAP
+                sap_result = await call_mcp_with_progress(
+                    "sap_mcp",
+                    "sap_read",
+                    {
+                        "endpoint": f"/Items?$filter=contains(ItemName,'{product_name}') or contains(ItemCode,'{product_name}')&$top=3",
+                        "method": "GET"
+                    },
+                    f"search_product_{i}",
+                    f"📦 Recherche '{product_name}' dans SAP"
+                )
+
+                # Analyser le résultat
+                if sap_result and "error" not in sap_result:
+                    sap_items = sap_result.get("value", [])
+                    if sap_items:
+                        # Prendre le premier résultat le plus pertinent
+                        best_match = sap_items[0]
+                        found_products.append({
+                            "original_request": product,
+                            "sap_item": best_match,
+                            "item_code": best_match.get("ItemCode"),
+                            "item_name": best_match.get("ItemName"),
+                            "unit_price": best_match.get("UnitPrice", 0),
+                            "quantity": quantity,
+                            "status": "found"
+                        })
+                    else:
+                        found_products.append({
+                            "original_request": product,
+                            "status": "not_found",
+                            "error": f"Produit '{product_name}' non trouvé"
+                        })
+                else:
+                    found_products.append({
+                        "original_request": product,
+                        "status": "error",
+                        "error": sap_result.get("error", "Erreur de recherche")
+                    })
+
+            # Calculer les statistiques
+            found_count = len([p for p in found_products if p.get("status") == "found"])
+            not_found_count = len([p for p in found_products if p.get("status") == "not_found"])
+            error_count = len([p for p in found_products if p.get("status") == "error"])
+
+            self._track_step_progress("fetch_products", 100,
+                                    f"✅ {found_count} trouvé(s), {not_found_count} manquant(s), {error_count} erreur(s)")
+
+            result = {
+                "status": "success",
+                "products": found_products,
+                "statistics": {
+                    "total_requested": len(products),
+                    "found": found_count,
+                    "not_found": not_found_count,
+                    "errors": error_count
+                },
+                "message": f"Traitement terminé: {found_count}/{len(products)} produits trouvés"
+            }
+
+            logger.info(f"📦 Récupération produits terminée: {found_count}/{len(products)} trouvés")
+            return result
+
+        except Exception as e:
+            logger.error(f"❌ Erreur récupération produits: {str(e)}")
+            self._track_step_progress("fetch_products", 100, f"❌ Erreur: {str(e)}")
+
+            return {
+                "status": "error",
+                "products": [],
+                "error": str(e),
+                "statistics": {
+                    "total_requested": len(products) if products else 0,
+                    "found": 0,
+                    "not_found": 0,
+                    "errors": len(products) if products else 0
+                }
+            }
+            found_products = []
+
+            for product in products:
+                # Recherche dans SAP
+                sap_result = await MCPConnector.sap_search_products(search_term=product, limit=3)
+                if sap_result and sap_result.get("products"):
+                    found_products.extend(sap_result["products"])
+
+            return {
+                "status": "success",
+                "products": found_products,
+                "total_found": len(found_products)
+            }
+
+        except Exception as e:
+            logger.error(f"❌ Erreur récupération produits: {str(e)}")
+            return {
+                "status": "error",
+                "products": [],
+                "error": str(e)
+            }
+
+    async def _create_quote_document(self, client_result: Dict[str, Any], products_result: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        🔧 MODIFICATION CRITIQUE : Création du document de devis avec progression
+        """
+        try:
+            self._track_step_progress("create_quote", 20, "📋 Génération de l'ID de devis...")
+
+            quote_id = f"QUOTE_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+            self._track_step_progress("create_quote", 40, "📊 Calcul des totaux...")
+
+            # Calculer les totaux
+            products = products_result.get("products", [])
+            total_amount = 0
+            line_items = []
+
+            for product in products:
+                if product.get("status") == "found":
+                    unit_price = float(product.get("unit_price", 0))
+                    quantity = int(product.get("quantity", 1))
+                    line_total = unit_price * quantity
+                    total_amount += line_total
+
+                    line_items.append({
+                        "item_code": product.get("item_code"),
+                        "item_name": product.get("item_name"),
+                        "quantity": quantity,
+                        "unit_price": unit_price,
+                        "line_total": line_total
+                    })
+
+            self._track_step_progress("create_quote", 70, "📄 Assemblage du document...")
+
+            # Créer le document de devis
+            quote_document = {
+                "quote_id": quote_id,
+                "client_info": {
+                    "name": client_result.get("client_name", ""),
+                    "salesforce_matches": client_result.get("salesforce_matches", []),
+                    "sap_matches": client_result.get("sap_matches", []),
+                    "selected_client": None  # À définir lors de la sélection
+                },
+                "line_items": line_items,
+                "totals": {
+                    "subtotal": total_amount,
+                    "tax_rate": 0.20,  # 20% TVA par défaut
+                    "tax_amount": total_amount * 0.20,
+                    "total_amount": total_amount * 1.20
+                },
+                "metadata": {
+                    "created_at": datetime.now().isoformat(),
+                    "created_by": "NOVA Assistant",
+                    "status": "draft",
+                    "draft_mode": self.draft_mode,
+                    "task_id": self.task_id
+                },
+                "statistics": products_result.get("statistics", {}),
+                "original_request": {
+                    "client": client_result.get("client_name"),
+                    "products_requested": len(products_result.get("products", []))
+                }
+            }
+
+            self._track_step_progress("create_quote", 100, f"✅ Devis {quote_id} créé (Total: {total_amount:.2f}€)")
+
+            logger.info(f"📋 Devis créé: {quote_id} - {len(line_items)} lignes - Total: {total_amount:.2f}€")
+
+            return quote_document
+
+        except Exception as e:
+            logger.error(f"❌ Erreur création devis: {str(e)}")
+            self._track_step_progress("create_quote", 100, f"❌ Erreur: {str(e)}")
+            raise
+
+    async def _sync_quote_to_systems(self, quote_result: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        🔧 MODIFICATION CRITIQUE : Synchronisation vers SAP/Salesforce avec progression
+        """
+        try:
+            quote_id = quote_result.get("quote_id")
+            sync_results = {
+                "quote_id": quote_id,
+                "sync_timestamp": datetime.now().isoformat(),
+                "systems": {}
+            }
+
+            # En mode draft, simuler la synchronisation
+            if self.draft_mode:
+                self._track_step_progress("sync_systems", 50, "🔄 Mode brouillon - Simulation...")
+
+                sync_results["systems"] = {
+                    "salesforce": {
+                        "status": "simulated",
+                        "message": "Synchronisation simulée (mode brouillon)",
+                        "opportunity_id": f"SIMU_SF_{quote_id}"
+                    },
+                    "sap": {
+                        "status": "simulated",
+                        "message": "Synchronisation simulée (mode brouillon)",
+                        "quotation_id": f"SIMU_SAP_{quote_id}"
+                    }
+                }
+
+                self._track_step_progress("sync_systems", 100, "✅ Synchronisation simulée")
+                return sync_results
+
+            # Mode production - synchronisation réelle
+            self._track_step_progress("sync_systems", 25, "☁️ Synchronisation Salesforce...")
+
+            # Synchronisation Salesforce
+            try:
+                from services.mcp_connector import call_mcp_with_progress
+
+                # Créer l'opportunité Salesforce
+                opportunity_data = {
+                    "Name": f"Devis {quote_id}",
+                    "StageName": "Prospecting",
+                    "CloseDate": (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d"),
+                    "Amount": quote_result.get("totals", {}).get("total_amount", 0),
+                    "Description": f"Devis généré automatiquement par NOVA - ID: {quote_id}"
+                }
+
+                sf_result = await call_mcp_with_progress(
+                    "salesforce_mcp",
+                    "salesforce_create_opportunity",
+                    {"opportunity_data": opportunity_data},
+                    "sync_sf",
+                    "☁️ Création opportunité Salesforce"
+                )
+
+                if sf_result and "error" not in sf_result:
+                    sync_results["systems"]["salesforce"] = {
+                        "status": "success",
+                        "opportunity_id": sf_result.get("id"),
+                        "message": "Opportunité créée avec succès"
+                    }
+                else:
+                    sync_results["systems"]["salesforce"] = {
+                        "status": "error",
+                        "error": sf_result.get("error", "Erreur inconnue"),
+                        "message": "Échec création opportunité"
+                    }
+
+            except Exception as e:
+                sync_results["systems"]["salesforce"] = {
+                    "status": "error",
+                    "error": str(e),
+                    "message": "Erreur lors de la synchronisation Salesforce"
+                }
+
+            self._track_step_progress("sync_systems", 75, "💾 Synchronisation SAP...")
+
+            # Synchronisation SAP
+            try:
+                # Préparer les données du devis SAP
+                line_items = quote_result.get("line_items", [])
+                sap_lines = []
+
+                for item in line_items:
+                    sap_lines.append({
+                        "ItemCode": item.get("item_code"),
+                        "Quantity": item.get("quantity"),
+                        "UnitPrice": item.get("unit_price")
+                    })
+
+                quotation_data = {
+                    "CardCode": "C00001",  # Code client par défaut - à améliorer
+                    "DocDate": datetime.now().strftime("%Y-%m-%d"),
+                    "DocDueDate": (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d"),
+                    "Comments": f"Devis NOVA {quote_id}",
+                    "DocumentLines": sap_lines
+                }
+
+                sap_result = await call_mcp_with_progress(
+                    "sap_mcp",
+                    "sap_create_quotation_complete",
+                    {"quotation_data": quotation_data},
+                    "sync_sap",
+                    "💾 Création devis SAP"
+                )
+
+                if sap_result and "error" not in sap_result:
+                    sync_results["systems"]["sap"] = {
+                        "status": "success",
+                        "quotation_id": sap_result.get("DocEntry"),
+                        "doc_num": sap_result.get("DocNum"),
+                        "message": "Devis SAP créé avec succès"
+                    }
+                else:
+                    sync_results["systems"]["sap"] = {
+                        "status": "error",
+                        "error": sap_result.get("error", "Erreur inconnue"),
+                        "message": "Échec création devis SAP"
+                    }
+
+            except Exception as e:
+                sync_results["systems"]["sap"] = {
+                    "status": "error",
+                    "error": str(e),
+                    "message": "Erreur lors de la synchronisation SAP"
+                }
+
+            # Déterminer le statut global
+            sf_success = sync_results["systems"].get("salesforce", {}).get("status") == "success"
+            sap_success = sync_results["systems"].get("sap", {}).get("status") == "success"
+
+            if sf_success and sap_success:
+                sync_results["overall_status"] = "success"
+                status_msg = "✅ Synchronisation complète réussie"
+            elif sf_success or sap_success:
+                sync_results["overall_status"] = "partial"
+                status_msg = "⚠️ Synchronisation partielle"
+            else:
+                sync_results["overall_status"] = "failed"
+                status_msg = "❌ Échec de synchronisation"
+
+            self._track_step_progress("sync_systems", 100, status_msg)
+
+            logger.info(f"🔄 Synchronisation terminée: {sync_results['overall_status']}")
+            return sync_results
+
+        except Exception as e:
+            logger.error(f"❌ Erreur synchronisation: {str(e)}")
+            self._track_step_progress("sync_systems", 100, f"❌ Erreur: {str(e)}")
+            raise
+
+    def _initialize_task_tracking(self, prompt: str) -> str:
+        """
+        🔧 MODIFICATION : Initialiser le tracking si pas déjà fait
+        """
+        if not self.current_task:
+            from services.progress_tracker import progress_tracker
+            self.current_task = progress_tracker.create_task(
+                user_prompt=prompt,
+                draft_mode=self.draft_mode
+            )
+            self.task_id = self.current_task.task_id
+            logger.info(f"🔄 Tracking initialisé pour la tâche: {self.task_id}")
+
+        return self.task_id
 
 # Export du routeur pour intégration dans main.py
 __all__ = ['DevisWorkflow', 'router_v2']
