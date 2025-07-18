@@ -408,3 +408,4 @@ class ClientManager:
         """Vider le cache client"""
         self.client_cache.clear()
         logger.info("Cache client vidé")
+        

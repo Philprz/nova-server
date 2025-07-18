@@ -460,7 +460,7 @@ async def _execute_quote_generation(task_id: str, prompt: str, draft_mode: bool)
     """
     try:
         # Créer le workflow avec le bon mode
-        workflow = DevisWorkflow(validation_enabled=True, draft_mode=draft_mode)
+        workflow = EnhancedDevisWorkflow(validation_enabled=True, draft_mode=draft_mode)
         
         # Exécuter le workflow (il gérera automatiquement le tracking)
         await workflow.process_prompt(prompt, task_id=task_id)

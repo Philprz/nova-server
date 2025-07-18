@@ -11,7 +11,33 @@ from enum import Enum
 import logging
 
 logger = logging.getLogger(__name__)
-
+# Étapes métier parallèles
+BUSINESS_STEPS_PARALLEL = {
+    "analyze_request": [
+        ("parse_prompt", "🔍 Analyse de votre demande"),
+        ("extract_entities", "📋 Identification des besoins"),
+        ("validate_input", "✅ Demande comprise")
+    ],
+    "parallel_search": [
+        ("search_client_start", "👤 Recherche client..."),
+        ("search_product_start", "📦 Recherche produits..."),
+        ("search_client_progress", "🔄 Consultation bases client"),
+        ("search_product_progress", "🔄 Consultation catalogue"),
+        ("search_client_complete", "👤 Résultat recherche client"),
+        ("search_product_complete", "📦 Résultat recherche produits")
+    ],
+    "user_validation": [
+        ("client_validation", "❓ Validation client requise"),
+        ("product_validation", "❓ Validation produits requise"),
+        ("user_confirmed", "✅ Choix utilisateur confirmé")
+    ],
+    "quote_generation": [
+        ("prepare_quote", "📋 Préparation du devis"),
+        ("save_to_sap", "💾 Enregistrement SAP"),
+        ("sync_salesforce", "☁️ Synchronisation Salesforce"),
+        ("quote_finalized", "✅ Devis finalisé")
+    ]
+}
 class TaskStatus(str, Enum):
     """Statuts possibles d'une tâche"""
     PENDING = "pending"
@@ -266,6 +292,29 @@ class QuoteTask:
             
             # Continuer l'étape
             self.complete_step(step_id, f"Validation utilisateur complétée: {self.validation_data[step_id]['type']}")
+class ParallelStep:
+    """Étape parallèle avec statut indépendant"""
+    
+    def __init__(self, step_id: str, title: str, parent_group: str = None):
+        self.step_id = step_id
+        self.title = title
+        self.parent_group = parent_group
+        self.status = TaskStatus.PENDING
+        self.details = {}
+        self.sub_steps = []
+        self.timestamp = datetime.now()
+    
+    def add_detail(self, key: str, value: Any):
+        """Ajoute des détails"""
+        self.details[key] = value
+    
+    def add_sub_step(self, title: str, status: str = "pending"):
+        """Ajoute une sous-étape"""
+        self.sub_steps.append({
+            "title": title,
+            "status": status,
+            "timestamp": datetime.now().isoformat()
+        })
 class ProgressTracker:
     """Gestionnaire global des tâches de progression"""
     
