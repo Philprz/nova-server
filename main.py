@@ -105,19 +105,109 @@ async def interface_itspirit():
     return FileResponse("templates/nova_interface_final.html")
 @app.get("/health")
 async def health_check():
-    """Endpoint de santé du serveur"""
+    """Endpoint de santé du serveur - VERSION CORRIGÉE"""
     try:
-        # Vérifier les modules chargés
+        # Vérifier les modules chargés - VERSION SÉCURISÉE
         loaded_modules = loader.get_loaded_modules()
+        
+        # 🔧 CORRECTION : Sérialiser seulement les informations essentielles
+        modules_info = []
+        if loaded_modules:
+            for module_name, module_info in loaded_modules.items():
+                try:
+                    # Extraire seulement les données sérialisables
+                    safe_module_info = {
+                        "name": str(module_name),
+                        "status": "loaded",
+                        "type": str(type(module_info).__name__)
+                    }
+                    
+                    # Ajouter des informations additionnelles si disponibles
+                    if hasattr(module_info, 'description'):
+                        safe_module_info["description"] = str(module_info.description)
+                    
+                    modules_info.append(safe_module_info)
+                except Exception as e:
+                    # En cas d'erreur, ajouter une entrée minimale
+                    modules_info.append({
+                        "name": str(module_name),
+                        "status": "error",
+                        "error": str(e)
+                    })
+        
+        # Vérifier les services essentiels
+        services_status = {
+            "database": "unknown",
+            "sap_mcp": "unknown",
+            "salesforce_mcp": "unknown",
+            "llm_service": "unknown"
+        }
+        
+        # Test rapide de connectivité base de données
+        try:
+            import psycopg2
+            from config.database_config import get_db_connection
+            conn = get_db_connection()
+            if conn:
+                services_status["database"] = "connected"
+                conn.close()
+        except Exception:
+            services_status["database"] = "disconnected"
+        
+        # Test rapide des services MCP
+        try:
+            import requests
+            import socket
+            
+            # Vérifier si les ports MCP sont ouverts
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sap_result = sock.connect_ex(('localhost', 3001))
+            services_status["sap_mcp"] = "connected" if sap_result == 0 else "disconnected"
+            sock.close()
+            
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sf_result = sock.connect_ex(('localhost', 3002))
+            services_status["salesforce_mcp"] = "connected" if sf_result == 0 else "disconnected"
+            sock.close()
+            
+        except Exception:
+            services_status["sap_mcp"] = "error"
+            services_status["salesforce_mcp"] = "error"
+        
+        # Test LLM (Claude)
+        try:
+            import os
+            api_key = os.getenv("ANTHROPIC_API_KEY")
+            services_status["llm_service"] = "configured" if api_key else "not_configured"
+        except Exception:
+            services_status["llm_service"] = "error"
+        
+        # Retour JSON-safe
         return {
             "status": "healthy",
-            "loaded_modules": loaded_modules,
-            "timestamp": datetime.now().isoformat()
+            "server": "NOVA",
+            "version": "1.0.0",
+            "timestamp": datetime.now().isoformat(),
+            "modules": modules_info,
+            "services": services_status,
+            "endpoints": {
+                "interface": "/interface/itspirit",
+                "api": "/api/assistant/chat",
+                "docs": "/docs"
+            }
         }
+        
     except Exception as e:
         logger.error(f"Erreur lors du health check: {str(e)}")
-        raise HTTPException
-# Route pour la nouvelle interface
+        # Retour d'erreur minimal mais JSON-safe
+        return {
+            "status": "error",
+            "server": "NOVA",
+            "timestamp": datetime.now().isoformat(),
+            "error": str(e),
+            "message": "Service partiellement disponible"
+        }
+        
 @app.get("/interface/v3")
 async def get_interface_v3():
     """Sert la nouvelle interface v3"""
@@ -136,57 +226,6 @@ def root():
         "interface_url": "/api/assistant/interface",
         "documentation": "/docs"
     }
-
-@app.get("/health")
-async def health_check():
-    """Endpoint de santé du serveur"""
-    try:
-        # Vérifier les modules chargés
-        loaded_modules = loader.get_loaded_modules()
-        
-        # Vérifier les services critiques
-        services_status = {
-            "database": "unknown",
-            "mcp": "unknown", 
-            "progress_tracker": "unknown",
-            "modules": loaded_modules
-        }
-        
-        # Test simple de la base de données
-        try:
-            from services.database import get_database_status
-            services_status["database"] = get_database_status()
-        except:
-            services_status["database"] = "error"
-            
-        # Test du MCP
-        try:
-            from services.mcp_connector import MCPConnector
-            services_status["mcp"] = "ready"
-        except:
-            services_status["mcp"] = "error"
-            
-        # Test progress tracker
-        try:
-            from services.progress_tracker import progress_tracker
-            services_status["progress_tracker"] = "active"
-        except:
-            services_status["progress_tracker"] = "error"
-        
-        return {
-            "status": "healthy",
-            "timestamp": datetime.now().isoformat(),
-            "version": "1.0.0",
-            "services": services_status,
-            "uptime": "running"
-        }
-    except Exception as e:
-        logger.error(f"Erreur health check: {e}")
-        return {
-            "status": "unhealthy",
-            "error": str(e),
-            "timestamp": datetime.now().isoformat()
-        }
 
 @app.get("/diagnostic")
 async def diagnostic():
