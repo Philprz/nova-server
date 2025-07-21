@@ -9,7 +9,7 @@ des solutions proactives.
 
 from fastapi import APIRouter, HTTPException, Request, BackgroundTasks
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Dict, Any, List, Optional
 import logging
 from datetime import datetime
@@ -50,12 +50,21 @@ class ProgressChatResponse(BaseModel):
     error: Optional[str] = None
     use_polling: bool = False  # 🆕 NOUVEAU : Indique si utiliser polling
 
-# ✅ AJOUT DU MODÈLE MANQUANT POUR WORKFLOW
+# ✅ MODÈLES CORRIGÉS avec validation Field
 class WorkflowCreateQuoteRequest(BaseModel):
     """Modèle pour l'endpoint /api/assistant/workflow/create_quote"""
-    message: str  # ← Le champ attendu par le test
-    draft_mode: bool = False
-    force_production: bool = False
+    message: str = Field(..., description="Demande de devis en langage naturel", min_length=3)
+    draft_mode: bool = Field(False, description="Mode brouillon (true) ou production (false)")
+    force_production: bool = Field(False, description="Force le mode production même si connexions échouent")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "message": "Créer un devis pour 100 unités de référence A00025 pour le client Edge Communications",
+                "draft_mode": False,
+                "force_production": True
+            }
+        }
 
 class WorkflowCreateQuoteResponse(BaseModel):
     """Réponse pour l'endpoint workflow"""
@@ -80,12 +89,15 @@ async def create_quote_workflow(request: WorkflowCreateQuoteRequest):
         user_message = request.message.strip()
         
         if not user_message:
+            logger.warning("Message vide reçu")
             return WorkflowCreateQuoteResponse(
                 success=False,
-                error="Message vide"
+                error="Message vide",
+                message="Le message ne peut pas être vide"
             )
 
         logger.info(f"🔄 Workflow creation devis: {user_message}")
+        logger.info(f"📋 Paramètres: draft_mode={request.draft_mode}, force_production={request.force_production}")
 
         # Utiliser le workflow existant
         from workflow.devis_workflow import DevisWorkflow
@@ -98,6 +110,7 @@ async def create_quote_workflow(request: WorkflowCreateQuoteRequest):
 
         # Traitement du workflow
         workflow_result = await workflow.process_prompt(user_message)
+        logger.info(f"✅ Workflow terminé avec résultat: {workflow_result.get('success')}")
         
         if workflow_result.get('success'):
             # Extraire les données pour la réponse
@@ -134,7 +147,7 @@ async def create_quote_workflow(request: WorkflowCreateQuoteRequest):
 
             return WorkflowCreateQuoteResponse(
                 success=True,
-                status="success",
+                status="completed",
                 client={
                     "name": client_data.get('name', 'Client extrait'),
                     "account_number": client_data.get('account_number', 'N/A'),
@@ -145,8 +158,12 @@ async def create_quote_workflow(request: WorkflowCreateQuoteRequest):
                 quote_id=workflow_result.get('quote_id', f"NOVA-{datetime.now().strftime('%Y%m%d%H%M%S')}")
             )
         else:
+            error_message = workflow_result.get('message', 'Erreur lors de la génération du devis')
+            logger.error(f"❌ Échec workflow: {error_message}")
+
             return WorkflowCreateQuoteResponse(
                 success=False,
+                status="failed",
                 error=workflow_result.get('message', 'Erreur lors du traitement'),
                 message=workflow_result.get('message', 'Erreur workflow')
             )
@@ -155,7 +172,9 @@ async def create_quote_workflow(request: WorkflowCreateQuoteRequest):
         logger.exception(f"Erreur create_quote_workflow: {str(e)}")
         return WorkflowCreateQuoteResponse(
             success=False,
-            error=f"Erreur serveur: {str(e)}"
+            status="error",
+            error=f"Erreur serveur: {str(e)}",
+            message="Erreur système lors du traitement"
         )
 # 🔧 MODIFICATION : Fonction chat_with_nova modifiée
 @router.post("/chat")

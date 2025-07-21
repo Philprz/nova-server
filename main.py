@@ -22,24 +22,7 @@ logging.basicConfig(
         logging.StreamHandler()
     ]
 )
-# ✅ MODÈLES POUR L'ENDPOINT WORKFLOW (à ajouter après les imports)
-class WorkflowCreateQuoteRequest(BaseModel):
-    """Modèle pour l'endpoint /api/assistant/workflow/create_quote"""
-    message: str  # ← Champ attendu par le test_nova_endpoints.py
-    draft_mode: bool = False
-    force_production: bool = False
 
-class WorkflowCreateQuoteResponse(BaseModel):
-    """Réponse pour l'endpoint workflow"""
-    success: bool
-    task_id: Optional[str] = None
-    status: Optional[str] = None
-    client: Optional[Dict[str, Any]] = None
-    products: Optional[List[Dict[str, Any]]] = None
-    total_amount: Optional[float] = None
-    quote_id: Optional[str] = None
-    error: Optional[str] = None
-    message: Optional[str] = None
     
 logger = logging.getLogger(__name__)
 
@@ -88,111 +71,7 @@ app = FastAPI(
     redoc_url="/redoc",
     lifespan=lifespan
 )
-# ✅ ENDPOINT À AJOUTER APRÈS LA DÉCLARATION app = FastAPI()
-@app.post("/api/assistant/workflow/create_quote", response_model=WorkflowCreateQuoteResponse)
-async def create_quote_workflow_endpoint(request: WorkflowCreateQuoteRequest):
-    """
-    🎯 Endpoint spécifique pour le workflow de création de devis
-    Corrige l'erreur 422 pour le prompt: "devis 30 imprimantes 34 ppm pour TARTEMP0"
-    """
-    try:
-        user_message = request.message.strip()
-        
-        if not user_message:
-            return WorkflowCreateQuoteResponse(
-                success=False,
-                error="Message vide"
-            )
 
-        logger.info(f"🔄 Workflow creation devis: {user_message}")
-
-        # Vérifier si le module assistant est chargé
-        if 'assistant' not in loader.get_loaded_modules():
-            return WorkflowCreateQuoteResponse(
-                success=False,
-                error="Module assistant non disponible"
-            )
-
-        # Utiliser le workflow existant
-        try:
-            from workflow.devis_workflow import DevisWorkflow
-            
-            workflow = DevisWorkflow(
-                validation_enabled=True,
-                draft_mode=request.draft_mode,
-                force_production=request.force_production or True  # Force production par défaut
-            )
-
-            # Traitement du workflow avec le message utilisateur
-            workflow_result = await workflow.process_prompt(user_message)
-            
-            if workflow_result and workflow_result.get('success'):
-                # Extraire les données pour la réponse
-                client_data = workflow_result.get('client', {})
-                products_data = workflow_result.get('products', [])
-
-                # Formater les produits selon le format attendu
-                formatted_products = []
-                for product in products_data:
-                    if isinstance(product, dict) and "error" not in product:
-                        # 🔧 EXTRACTION CORRIGÉE DES DONNÉES PRODUIT (RESPECTE LES NOMS DE VARIABLES EXISTANTS)
-                        product_code = (product.get("code") or
-                                        product.get("item_code") or
-                                        product.get("ItemCode", ""))
-
-                        product_name = (product.get("name") or
-                                        product.get("item_name") or
-                                        product.get("ItemName", "Sans nom"))
-
-                        quantity = float(product.get("quantity", 1))
-                        unit_price = float(product.get("unit_price", 0))
-                        line_total = quantity * unit_price
-
-                        product_data = {
-                            "item_code": product_code,
-                            "code": product_code,
-                            "item_name": product_name,
-                            "name": product_name,
-                            "quantity": quantity,
-                            "unit_price": unit_price,
-                            "line_total": line_total
-                        }
-                        formatted_products.append(product_data)
-
-                return WorkflowCreateQuoteResponse(
-                    success=True,
-                    status="success",
-                    client={
-                        "name": client_data.get('name', 'Client extrait'),
-                        "account_number": client_data.get('account_number', 'N/A'),
-                        "salesforce_id": client_data.get('salesforce_id', '')
-                    },
-                    products=formatted_products,
-                    total_amount=workflow_result.get('total_amount', 0),
-                    quote_id=workflow_result.get('quote_id', f"NOVA-{datetime.now().strftime('%Y%m%d%H%M%S')}")
-                )
-            else:
-                # En cas d'échec du workflow
-                error_msg = workflow_result.get('message', 'Erreur lors du traitement') if workflow_result else 'Workflow failed'
-                return WorkflowCreateQuoteResponse(
-                    success=False,
-                    error=error_msg,
-                    message=error_msg
-                )
-                
-        except ImportError as e:
-            logger.error(f"Import DevisWorkflow failed: {e}")
-            return WorkflowCreateQuoteResponse(
-                success=False,
-                error=f"Module workflow non disponible: {str(e)}"
-            )
-
-    except Exception as e:
-        logger.exception(f"Erreur create_quote_workflow_endpoint: {str(e)}")
-        return WorkflowCreateQuoteResponse(
-            success=False,
-            error=f"Erreur serveur: {str(e)}"
-        )
 # Import WebSocket
 from routes.routes_websocket import websocket_manager
 
@@ -341,15 +220,21 @@ async def get_interface_v3():
 
 
 @app.get("/")
-def root():
+async def root():
     """Point d'entrée principal"""
     return {
-        "message": "NOVA Middleware actif",
-        "version": "1.0.0", 
-        "status": "operational",
+        "service": "NOVA Server",
+        "version": "2.1.0",
+        "status": "active",
+        "description": "Intégration LLM Claude avec SAP et Salesforce",
         "timestamp": datetime.now().isoformat(),
-        "interface_url": "/api/assistant/interface",
-        "documentation": "/docs"
+        "modules_loaded": len([m for m in getattr(app.state, 'loaded_modules', {}).values() if m.get('loaded')]),
+        "endpoints": [
+            "/docs - Documentation Swagger",
+            "/health - Diagnostic système",
+            "/api/assistant/workflow/create_quote - Création de devis (via module assistant)",
+            "/static/nova_interface.html - Interface utilisateur"
+        ]
     }
 
 @app.get("/diagnostic")
