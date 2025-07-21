@@ -82,14 +82,15 @@ class DevisWorkflow:
             self.current_task = None
             self.task_id = None
             try:
-                self.current_task = progress_tracker.get_task(task_id)
-                if self.current_task:
-                    logger.info(f"✅ Tâche récupérée: {task_id}")
-                    # Synchroniser le contexte existant si disponible
-                    if hasattr(self.current_task, 'context'):
-                        self.context.update(self.current_task.context)
-                else:
-                    logger.warning(f"⚠️ Tâche {task_id} introuvable")
+                if task_id:
+                    self.current_task = progress_tracker.get_task(task_id)
+                    if self.current_task:
+                        logger.info(f"✅ Tâche récupérée: {task_id}")
+                        # Synchroniser le contexte existant si disponible
+                        if hasattr(self.current_task, 'context'):
+                            self.context.update(self.current_task.context)
+                    else:
+                        logger.warning(f"⚠️ Tâche {task_id} introuvable")
             except Exception as e:
                 logger.error(f"Erreur lors de la récupération de la tâche {task_id}: {str(e)}")
 
@@ -167,6 +168,7 @@ class DevisWorkflow:
 
         response = {
             "success": False,
+            "status": "error",
             "error": error_message,
             "message": error_message,
             "timestamp": datetime.now().isoformat(),
@@ -502,6 +504,7 @@ class DevisWorkflow:
             if self.current_task:
                 progress_tracker.fail_task(self.task_id, str(e))
             raise
+    
     async def _execute_full_workflow(self, prompt: str) -> Dict[str, Any]:
         """
         🔧 MÉTHODE AJOUTÉE : Wrapper pour exécution complète du workflow
@@ -555,6 +558,7 @@ class DevisWorkflow:
                 "error": str(e),
                 "message": "Erreur lors de l'exécution du workflow complet"
             }
+    
     async def process_prompt_original(self, prompt: str, task_id: str = None, draft_mode: bool = False) -> Dict[str, Any]:
         """
         Traite une demande de devis en langage naturel avec tracking détaillé
@@ -862,7 +866,19 @@ class DevisWorkflow:
             # Étape 3.2: Recherche produits
             self._track_step_start("lookup_products", "Vérification des produits...")
             
+            # ✅ NOUVEAU CODE AVEC PRICE ENGINE
+            # Étape 1: Récupérer les données techniques
+            self._track_step_start("get_products_info", "Récupération des informations produits...")
             products_info = await self._get_products_info(extracted_info.get("products", []))
+            self._track_step_complete("get_products_info", f"{len(products_info)} produit(s) trouvé(s)")
+
+            # Étape 2: Calculer les prix avec le Price Engine
+            self._track_step_start("calculate_prices", "Calcul des prix avec Price Engine...")
+            products_info = await self._apply_price_calculations(products_info, client_info.get("data", {}))
+            self._track_step_complete("calculate_prices", "Prix calculés avec succès")
+
+            # Étape 3: Calculer le total
+            total_amount = sum(p.get("line_total", 0) for p in products_info if not p.get("error"))
             self.context["products_info"] = products_info
             
             self._track_step_progress("lookup_products", 60, f"{len(products_info)} produits analysés")
@@ -878,11 +894,24 @@ class DevisWorkflow:
             
             # Étape 3.4: Calcul des prix
             self._track_step_complete("check_stock", "Stock disponible")
-            self._track_step_start("calculate_prices", "Calcul des prix...")
-            
-            # Simulation calcul prix (logique déjà dans get_products_info)
-            await asyncio.sleep(0.2)
-            self._track_step_progress("calculate_prices", 90, "Prix calculés")
+            # ✅ NOUVEAU CODE AVEC PRICE ENGINE
+            from services.price_engine import PriceEngine
+
+            self._track_step_start("calculate_prices", "Calcul des prix avec Price Engine...")
+            price_engine = PriceEngine()
+
+            # Calculer les prix avec le nouveau moteur
+            pricing_result = await price_engine.calculate_quote_pricing({
+                "client_data": client_data,
+                "products": products_data,
+                "special_conditions": extracted_info.get("conditions", {})
+            })
+
+            # Mettre à jour les produits avec les nouveaux prix
+            products_data = pricing_result.get("updated_products", products_data)
+            total_amount = pricing_result.get("total_amount", 0.0)
+
+            self._track_step_progress("calculate_prices", 90, "Prix calculés avec Price Engine")
             
             # Étape 3.5: Produits prêts
             self._track_step_complete("calculate_prices", "Prix finalisés")
@@ -991,10 +1020,7 @@ class DevisWorkflow:
             }
             
             # Valider avec le validateur client
-            validation_result = await self._handle_client_not_found_with_validation(
-                extracted_info.get("client"), 
-                extracted_info  # ✅ Passer le contexte complet
-            )
+            validation_result = await self.client_validator.validate_and_enrich_client(client_name)
             
             # CORRECTION 3: Accepter les warnings mais pas les erreurs critiques
             critical_errors = [err for err in validation_result.get("errors", []) 
@@ -1741,6 +1767,11 @@ class DevisWorkflow:
             
             # Ajouter description avec gestion d'erreurs
             try:
+                # CORRECTION: Définir sap_ref correctement
+                sap_ref = ""
+                if sap_quote and sap_quote.get('doc_num'):
+                    sap_ref = f" (SAP DocNum: {sap_quote.get('doc_num')})"
+                
                 opportunity_data['Description'] = f'Devis généré automatiquement via NOVA{sap_ref} - Mode: {"Brouillon" if self.draft_mode else "Définitif"}'
                 opportunity_data['LeadSource'] = 'NOVA Middleware'
                 opportunity_data['Probability'] = 50 if not self.draft_mode else 25
@@ -1879,6 +1910,7 @@ class DevisWorkflow:
                     "error_timestamp": datetime.now().isoformat()
                 }
             }
+    
     async def _create_sap_client_if_needed(self, client_info: Dict) -> Dict:
         """Crée un client SAP si nécessaire - STRUCTURE DE RETOUR CORRIGÉE"""
         import logging
@@ -2037,17 +2069,22 @@ class DevisWorkflow:
         products_info = self.context.get("products_info", [])
         extracted_info = self.context.get("extracted_info", {})
         
+        # CORRECTION CRITIQUE: Vérifier les conditions d'erreur AVANT de construire la réponse
         if not client_info.get("found", False):
             return {
+                "success": False,
                 "status": "error",
                 "message": f"Client non trouvé: {client_info.get('error', 'Erreur inconnue')}",
+                "error": client_info.get('error', 'Client non trouvé'),
                 "next_steps": "Veuillez vérifier le nom du client et réessayer."
             }
         
         if not quote_result.get("success", False):
             return {
+                "success": False,
                 "status": "error",
                 "message": f"Échec de la création du devis: {quote_result.get('error', 'Erreur inconnue')}",
+                "error": quote_result.get('error', 'Erreur création devis'),
                 "next_steps": "Veuillez contacter le support technique."
             }
         
@@ -2456,114 +2493,58 @@ class DevisWorkflow:
             return []
         
     async def _get_products_info(self, products: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Récupère les informations produits depuis SAP - VERSION CORRIGÉE POUR LES PRIX"""
+        """
+        Récupère UNIQUEMENT les informations techniques des produits depuis SAP
+        Le calcul des prix est délégué au Price Engine
+        """
         if not products:
             logger.warning("Aucun produit spécifié")
             return []
 
-        logger.info(f"🔍 RECHERCHE PRODUITS RÉELS: {products}")
-
+        logger.info(f"🔍 RECHERCHE PRODUITS (sans calcul prix): {products}")
         enriched_products = []
 
         for product in products:
             try:
-                # Appel MCP pour récupérer les détails du produit
+                # Récupérer les données techniques SAP
                 product_details = await MCPConnector.call_sap_mcp("sap_get_product_details", {
                     "item_code": product["code"]
                 })
 
-                logger.info(f"🏭 RÉSULTAT SAP: {product_details}")
+                logger.info(f"🏭 DONNÉES SAP RÉCUPÉRÉES: {product['code']}")
                 
                 if "error" in product_details:
                     logger.error(f"Erreur produit {product['code']}: {product_details['error']}")
-                    # Vérifier si malgré l'erreur, nous avons des informations utiles
-                    if product_details.get("ItemName") is not None:
-                        enriched_product = {
-                            "code": product["code"],
-                            "quantity": product["quantity"],
-                            "name": product_details.get("ItemName", "Unknown"),
-                            "unit_price": float(product_details.get("Price", 0.0)),
-                            "stock": product_details.get("stock", {}).get("total", 0),
-                            "details": product_details,
-                            "salesforce_id": await self._find_product_in_salesforce(product["code"])
-                        }
-                        enriched_products.append(enriched_product)
-                    else:
-                        enriched_products.append({
-                            "code": product["code"],
-                            "quantity": product["quantity"],
-                            "error": product_details["error"]
-                        })
+                    enriched_products.append({
+                        "code": product["code"],
+                        "quantity": product["quantity"],
+                        "error": product_details["error"]
+                    })
                     continue
                 
-                # CORRECTION PRINCIPALE: Récupérer le prix depuis la structure retournée par sap_mcp.py
-                unit_price = 0.0
+                # Calculer le stock total (logique conservée car technique)
+                total_stock = self._extract_stock_from_sap_data(product_details)
                 
-                # 1. Utiliser l'information PriceEngine si disponible
-                if (
-                    "price_details" in product_details
-                    and product_details["price_details"].get("price_engine")
-                ):
-                    pe = product_details["price_details"]["price_engine"]
-                    unit_price = float(pe.get("unit_price_after_discount", 0.0))
-                    logger.info(f"Prix trouvé via 'PriceEngine': {unit_price}")
-
-                # 2. Sinon, utiliser la clé "Price" directement (enrichi par sap_mcp.py)
-                elif "Price" in product_details:
-                    unit_price = float(product_details.get("Price", 0.0))
-                    logger.info(f"Prix trouvé via 'Price': {unit_price}")
-                
-                # 3. Si pas de prix direct, essayer dans price_details (nouveau format)
-                elif "price_details" in product_details and product_details["price_details"].get("price"):
-                    unit_price = float(product_details["price_details"]["price"])
-                    logger.info(f"Prix trouvé via 'price_details': {unit_price}")
-                
-                # 4. Fallback sur ItemPrices[0].Price (format SAP natif)
-                elif "ItemPrices" in product_details and len(product_details["ItemPrices"]) > 0:
-                    unit_price = float(product_details["ItemPrices"][0].get("Price", 0.0))
-                    logger.info(f"Prix trouvé via 'ItemPrices[0]': {unit_price}")
-                
-                # 5. Autres fallbacks
-                elif "LastPurchasePrice" in product_details:
-                    unit_price = float(product_details.get("LastPurchasePrice", 0.0))
-                    logger.info(f"Prix trouvé via 'LastPurchasePrice': {unit_price}")
-                
-                # Si toujours aucun prix trouvé, utiliser une valeur par défaut
-                if unit_price == 0.0:
-                    logger.warning(f"⚠️ Aucun prix trouvé pour {product['code']}, utilisation d'un prix par défaut")
-                    unit_price = 100.0  # Prix par défaut de 100€
-                    
-                # Enrichir le produit avec ID Salesforce
+                # Récupérer l'ID Salesforce
                 salesforce_id = await self._find_product_in_salesforce(product["code"])
                 
-                # Calculer le stock total depuis la nouvelle structure sap_mcp.py
-                total_stock = 0
-                if "stock" in product_details and isinstance(product_details["stock"], dict):
-                    # Nouvelle structure avec stock.total
-                    total_stock = float(product_details["stock"].get("total", 0))
-                    logger.info(f"Stock trouvé via 'stock.total': {total_stock}")
-                elif "QuantityOnStock" in product_details:
-                    # Structure SAP native
-                    total_stock = float(product_details.get("QuantityOnStock", 0))
-                    logger.info(f"Stock trouvé via 'QuantityOnStock': {total_stock}")
-                elif "OnHand" in product_details:
-                    # Fallback sur OnHand
-                    total_stock = float(product_details.get("OnHand", 0))
-                    logger.info(f"Stock trouvé via 'OnHand': {total_stock}")
-                
+                # ✅ NOUVEAU : Produit enrichi SANS calcul de prix
                 enriched_product = {
                     "code": product["code"],
                     "quantity": product["quantity"],
                     "name": product_details.get("ItemName", "Unknown"),
-                    "unit_price": unit_price,
                     "stock": total_stock,
-                    "line_total": product["quantity"] * unit_price,  # CORRECTION: Calculer le total de ligne
-                    "details": product_details,
-                    "salesforce_id": salesforce_id
+                    "salesforce_id": salesforce_id,
+                    # ✅ Conserver les données SAP brutes pour le Price Engine
+                    "sap_raw_data": product_details,
+                    # ✅ Prix à null - sera calculé par le Price Engine
+                    "unit_price": None,
+                    "line_total": None,
+                    "price_calculated": False
                 }
                 
                 enriched_products.append(enriched_product)
-                logger.info(f"Produit enrichi: {product['code']} - Prix: {unit_price}€ - Stock: {total_stock}")
+                logger.info(f"✅ Produit enrichi (sans prix): {product['code']} - Stock: {total_stock}")
                 
             except Exception as e:
                 logger.error(f"Erreur récupération produit {product['code']}: {str(e)}")
@@ -2574,6 +2555,182 @@ class DevisWorkflow:
                 })
         
         return enriched_products
+
+    def _extract_stock_from_sap_data(self, product_details: Dict) -> float:
+        """Extrait le stock total depuis les données SAP"""
+        total_stock = 0.0
+        
+        if "stock" in product_details and isinstance(product_details["stock"], dict):
+            total_stock = float(product_details["stock"].get("total", 0))
+        elif "QuantityOnStock" in product_details:
+            total_stock = float(product_details.get("QuantityOnStock", 0))
+        elif "OnHand" in product_details:
+            total_stock = float(product_details.get("OnHand", 0))
+        
+        return total_stock
+
+    async def _apply_price_engine(self, client_data: Dict, products_data: List[Dict]) -> Dict[str, Any]:
+        """Applique le Price Engine pour calculer les prix finaux"""
+        try:
+            from services.price_engine import PriceEngine
+            
+            price_engine = PriceEngine()
+            
+            # Préparer les données pour le Price Engine
+            pricing_request = {
+                "client": {
+                    "id": client_data.get("Id"),
+                    "name": client_data.get("Name"),
+                    "account_number": client_data.get("AccountNumber"),
+                    "type": client_data.get("Type", "Standard"),
+                    "city": client_data.get("BillingCity"),
+                    "country": client_data.get("BillingCountry")
+                },
+                "products": [
+                    {
+                        "code": p.get("code"),
+                        "name": p.get("name"),
+                        "quantity": p.get("quantity", 1),
+                        "base_price": p.get("sap_data", {}).get("Price", 0),
+                        "category": p.get("sap_data", {}).get("ItemsGroupCode"),
+                        "sap_data": p.get("sap_data", {})
+                    }
+                    for p in products_data
+                ],
+                "conditions": {
+                    "draft_mode": self.draft_mode,
+                    "timestamp": datetime.now().isoformat()
+                }
+            }
+            
+            # Calculer les prix avec le Price Engine
+            pricing_result = await price_engine.calculate_pricing(pricing_request)
+            
+            if pricing_result.get("success"):
+                return {
+                    "success": True,
+                    "updated_products": pricing_result.get("products", []),
+                    "total_amount": pricing_result.get("total_amount", 0.0),
+                    "pricing_details": pricing_result.get("details", {})
+                }
+            else:
+                logger.error(f"Erreur Price Engine: {pricing_result.get('error')}")
+                return {"success": False, "error": pricing_result.get("error")}
+                
+        except Exception as e:
+            logger.error(f"Erreur application Price Engine: {str(e)}")
+            return {"success": False, "error": str(e)}
+        
+    async def _apply_price_calculations(self, products_data: List[Dict], client_data: Dict) -> List[Dict]:
+        """
+        Applique les calculs de prix via le Price Engine
+        """
+        try:
+            from services.price_engine import PriceEngine
+            
+            logger.info("💰 Démarrage calculs Prix Engine...")
+            
+            # Préparer les données pour le Price Engine
+            price_engine = PriceEngine()
+            
+            pricing_request = {
+                "client": {
+                    "id": client_data.get("Id"),
+                    "name": client_data.get("Name"),
+                    "account_number": client_data.get("AccountNumber"),
+                    "type": client_data.get("Type", "Standard"),
+                    "city": client_data.get("BillingCity"),
+                    "country": client_data.get("BillingCountry")
+                },
+                "products": [
+                    {
+                        "code": p.get("code"),
+                        "name": p.get("name"),
+                        "quantity": p.get("quantity", 1),
+                        "sap_data": p.get("sap_raw_data", {}),
+                        "stock": p.get("stock", 0)
+                    }
+                    for p in products_data if not p.get("error")
+                ],
+                "conditions": {
+                    "draft_mode": self.draft_mode,
+                    "timestamp": datetime.now().isoformat()
+                }
+            }
+            
+            # 🚀 APPEL AU PRICE ENGINE
+            pricing_result = await price_engine.calculate_pricing(pricing_request)
+            
+            if not pricing_result.get("success"):
+                logger.error(f"❌ Erreur Price Engine: {pricing_result.get('error')}")
+                raise Exception(pricing_result.get("error", "Erreur Price Engine"))
+            
+            # Fusionner les résultats du Price Engine avec les données produits
+            priced_products = []
+            pricing_products = {p["code"]: p for p in pricing_result.get("products", [])}
+            
+            for product in products_data:
+                if product.get("error"):
+                    priced_products.append(product)  # Conserver les erreurs
+                    continue
+                    
+                product_code = product["code"]
+                pricing_data = pricing_products.get(product_code, {})
+                
+                # ✅ Fusionner données techniques + prix
+                priced_product = {
+                    **product,  # Données techniques existantes
+                    "unit_price": pricing_data.get("unit_price", 0.0),
+                    "line_total": pricing_data.get("line_total", 0.0),
+                    "price_calculated": True,
+                    "pricing_details": pricing_data.get("details", {}),
+                    "discounts": pricing_data.get("discounts", []),
+                    "price_engine_version": pricing_result.get("version", "1.0")
+                }
+                
+                priced_products.append(priced_product)
+            
+            logger.info(f"✅ Price Engine appliqué sur {len(priced_products)} produits")
+            return priced_products
+            
+        except Exception as e:
+            logger.error(f"❌ Erreur application Price Engine: {str(e)}")
+            # En cas d'erreur, retourner les produits avec prix par défaut
+            return self._apply_fallback_pricing(products_data)
+
+    def _apply_fallback_pricing(self, products_data: List[Dict]) -> List[Dict]:
+        """Prix de secours si le Price Engine échoue"""
+        logger.warning("⚠️ Application des prix de secours...")
+        
+        for product in products_data:
+            if not product.get("error") and product.get("unit_price") is None:
+                # Prix de secours basé sur les données SAP brutes
+                sap_data = product.get("sap_raw_data", {})
+                fallback_price = self._extract_fallback_price_from_sap(sap_data)
+                
+                product.update({
+                    "unit_price": fallback_price,
+                    "line_total": product["quantity"] * fallback_price,
+                    "price_calculated": True,
+                    "pricing_method": "fallback"
+                })
+        
+        return products_data
+
+    def _extract_fallback_price_from_sap(self, sap_data: Dict) -> float:
+        """Extrait un prix de secours depuis les données SAP"""
+        # Votre logique actuelle de récupération de prix (extraite de l'ancienne version)
+        if "price_details" in sap_data and sap_data["price_details"].get("price_engine"):
+            pe = sap_data["price_details"]["price_engine"]
+            return float(pe.get("unit_price_after_discount", 0.0))
+        elif "Price" in sap_data:
+            return float(sap_data.get("Price", 0.0))
+        elif "ItemPrices" in sap_data and len(sap_data["ItemPrices"]) > 0:
+            return float(sap_data["ItemPrices"][0].get("Price", 0.0))
+        elif "LastPurchasePrice" in sap_data:
+            return float(sap_data.get("LastPurchasePrice", 0.0))
+        else:
+            return 100.0  # Prix par défaut
 
     def _get_standard_system_prompt(self) -> str:
         """Retourne le prompt système standard pour l'extraction"""
@@ -2625,6 +2782,7 @@ class DevisWorkflow:
         except Exception as e:
             logger.error(f"Erreur extraction {extraction_mode}: {e}")
             return {"error": str(e)}
+    
     async def _extract_info_from_prompt(self, prompt: str) -> Dict[str, Any]:
         """
         Extraction des informations avec fallback robuste
@@ -3070,6 +3228,7 @@ class DevisWorkflow:
             {"id": "example2", "name": "Global Industries", "type": "Prospect", "industry": "Manufacturing"},
             {"id": "example3", "name": "Tech Solutions Ltd", "type": "Customer", "industry": "IT Services"}
         ]
+    
     async def _enhanced_product_search(self, product_name: str, product_code: str = "") -> Dict[str, Any]:
         """
         🔧 RECHERCHE PRODUIT AMÉLIORÉE pour cas comme "Imprimante 20 ppm"
@@ -3207,6 +3366,7 @@ class DevisWorkflow:
             "U_Description": f"Produit générique créé automatiquement - Prix estimé",
             "Generic": True
         }
+    
     async def _get_available_products_list(self) -> List[Dict[str, Any]]:
         """Récupère la liste des produits disponibles depuis SAP"""
         try:
@@ -3337,6 +3497,7 @@ class DevisWorkflow:
                 ]
             }
         }
+    
     async def _search_products_with_validation(self, products: List[Dict]) -> Dict[str, Any]:
         """Recherche produits avec gestion des alternatives"""
         
@@ -3471,7 +3632,7 @@ class DevisWorkflow:
         except Exception as e:
             logger.error(f"Erreur lors de la recherche d'alternatives: {str(e)}")
             return []
-        
+    
     async def _handle_product_search(self, extracted_info: Dict[str, Any]) -> Dict[str, Any]:
         """
         Gère les demandes de recherche de produits par caractéristiques
@@ -3617,6 +3778,7 @@ class DevisWorkflow:
                 "Consulter un client: 'informations sur le client [nom]'"
             ]
         }
+    
     async def handle_client_suggestions(self, choice: Dict, workflow_context: Dict) -> Dict:
         """
         🔧 GESTION COMPLÈTE DES SUGGESTIONS CLIENT
@@ -3682,6 +3844,7 @@ class DevisWorkflow:
         
         else:
             return self._build_error_response("Impossible de créer le client", validation_result.get("error", ""))
+    
     async def _continue_workflow_after_client_selection(self, client_data: Dict, original_context: Dict) -> Dict:
         """
         🔧 CONTINUATION AUTOMATIQUE DU WORKFLOW APRÈS SÉLECTION CLIENT
@@ -4003,6 +4166,7 @@ class DevisWorkflow:
                 return True
 
             return False
+    
     async def _search_client_with_validation(self, client_name: str) -> Dict[str, Any]:
         """Recherche client avec gestion des alternatives et validation"""
         
@@ -4230,6 +4394,7 @@ class DevisWorkflow:
                 "created": False,
                 "error": f"Exception: {str(e)}"
             }
+    
     async def _process_client_validation(self, client_name: str) -> Dict[str, Any]:
         """
         🔧 MODIFICATION CRITIQUE : Validation du client avec progression avancée
@@ -4317,6 +4482,7 @@ class DevisWorkflow:
                 "sap_matches": [],
                 "total_matches": 0
             }
+    
     async def _create_client_if_needed(self, client_name: str) -> Dict[str, Any]:
         """Création automatique du client si nécessaire"""
         try:
@@ -4381,6 +4547,7 @@ class DevisWorkflow:
         except Exception as e:
             logger.exception(f"Erreur création client: {str(e)}")
             return {"created": False, "error": str(e)}
+    
     async def _process_products_retrieval(self, products: List[Dict[str, Any]]) -> Dict[str, Any]:
             """
             🔧 CORRECTION CRITIQUE : Récupération des produits avec progression avancée
@@ -4637,6 +4804,7 @@ class DevisWorkflow:
             logger.error(f"❌ Erreur création devis: {str(e)}")
             self._track_step_progress("create_quote", 100, f"❌ Erreur: {str(e)}")
             raise
+    
     async def _create_salesforce_opportunity_safe(self, quote_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         🔧 CRÉATION SÉCURISÉE d'opportunité Salesforce
@@ -4698,6 +4866,7 @@ class DevisWorkflow:
                 "success": False,
                 "error": f"Exception: {str(e)}"
             }
+    
     async def _sync_quote_to_systems(self, quote_result: Dict[str, Any]) -> Dict[str, Any]:
         """
         🔧 MODIFICATION CRITIQUE : Synchronisation vers SAP/Salesforce avec progression
@@ -4864,6 +5033,7 @@ class DevisWorkflow:
             logger.info(f"🔄 Tracking initialisé pour la tâche: {self.task_id}")
 
         return self.task_id
+
 class EnhancedDevisWorkflow(DevisWorkflow):
     """Workflow enrichi avec recherche parallèle"""
     
@@ -4958,9 +5128,11 @@ class EnhancedDevisWorkflow(DevisWorkflow):
             }
         
         return {"found": False, "message": f"Client '{client_name}' introuvable"}
+    
     async def _search_sap_product(self, product_code: str, product_name: str):
         """Déléguer à product_manager"""
         return await self.product_manager._search_sap_product(product_code, product_name)
+    
     async def _search_products_with_notifications(self, products: list):
         """Recherche produits avec notifications"""
         
@@ -5002,5 +5174,6 @@ class EnhancedDevisWorkflow(DevisWorkflow):
                 "event": event_type,
                 "data": data
             })
+
 # Export du routeur pour intégration dans main.py
 __all__ = ['DevisWorkflow', 'router_v2']
