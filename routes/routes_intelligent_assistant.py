@@ -9,7 +9,7 @@ des solutions proactives.
 
 from fastapi import APIRouter, HTTPException, Request, BackgroundTasks
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 from typing import Dict, Any, List, Optional
 import logging
 from datetime import datetime
@@ -52,25 +52,33 @@ class ProgressChatResponse(BaseModel):
 
 # ✅ MODÈLES CORRIGÉS avec validation Field
 class WorkflowCreateQuoteRequest(BaseModel):
-    """Modèle pour l'endpoint /api/assistant/workflow/create_quote"""
+    """Modèle corrigé pour l'endpoint /api/assistant/workflow/create_quote"""
     message: str = Field(..., description="Demande de devis en langage naturel", min_length=3)
-    draft_mode: bool = Field(False, description="Mode brouillon (true) ou production (false)")
-    force_production: bool = Field(False, description="Force le mode production même si connexions échouent")
+    draft_mode: bool = Field(False, description="Mode brouillon")
+    force_production: bool = Field(False, description="Force le mode production")
+
+    @validator('message')
+    def message_must_not_be_empty(cls, v):
+        if not v or v.strip() == "":
+            raise ValueError('Le message ne peut pas être vide')
+        if len(v.strip()) < 3:
+            raise ValueError('Le message doit contenir au moins 3 caractères')
+        return v.strip()
 
     class Config:
         json_schema_extra = {
             "example": {
-                "message": "Créer un devis pour 100 unités de référence A00025 pour le client Edge Communications",
+                "message": "devis 30 imprimantes 34 ppm pour TARTEMP0",
                 "draft_mode": False,
                 "force_production": True
             }
         }
 
 class WorkflowCreateQuoteResponse(BaseModel):
-    """Réponse pour l'endpoint workflow"""
+    """Réponse standardisée"""
     success: bool
-    task_id: Optional[str] = None
     status: Optional[str] = None
+    task_id: Optional[str] = None
     client: Optional[Dict[str, Any]] = None
     products: Optional[List[Dict[str, Any]]] = None
     total_amount: Optional[float] = None
@@ -82,46 +90,52 @@ class WorkflowCreateQuoteResponse(BaseModel):
 @router.post("/workflow/create_quote", response_model=WorkflowCreateQuoteResponse)
 async def create_quote_workflow(request: WorkflowCreateQuoteRequest):
     """
-    🎯 Endpoint spécifique pour le workflow de création de devis
-    Compatible avec le test: POST /api/assistant/workflow/create_quote
+    🎯 Endpoint corrigé pour workflow de création de devis
+    Résoud l'erreur 422 en gérant correctement la validation et l'appel
     """
     try:
         user_message = request.message.strip()
         
+        # Validation supplémentaire (redondante mais sécurise)
         if not user_message:
-            logger.warning("Message vide reçu")
+            logger.error("❌ Message vide reçu après validation Pydantic")
             return WorkflowCreateQuoteResponse(
                 success=False,
+                status="validation_error",
                 error="Message vide",
                 message="Le message ne peut pas être vide"
             )
 
-        logger.info(f"🔄 Workflow creation devis: {user_message}")
+        logger.info(f"🔄 Début workflow: {user_message}")
         logger.info(f"📋 Paramètres: draft_mode={request.draft_mode}, force_production={request.force_production}")
 
-        # Utiliser le workflow existant
+        # Import du workflow
         from workflow.devis_workflow import DevisWorkflow
         
+        # Initialisation avec les bons paramètres
         workflow = DevisWorkflow(
             validation_enabled=True,
             draft_mode=request.draft_mode,
             force_production=request.force_production
         )
 
-        # Traitement du workflow
+        # 🔧 MODIFICATION CRITIQUE: Utiliser process_prompt au lieu de process_quote_request
+        # Le workflow attend process_prompt selon le code existant
         workflow_result = await workflow.process_prompt(user_message)
-        logger.info(f"✅ Workflow terminé avec résultat: {workflow_result.get('success')}")
         
-        if workflow_result.get('success'):
-            # Extraire les données pour la réponse
+        logger.info(f"✅ Workflow terminé. Success: {workflow_result.get('success')}")
+        
+        # Analyser le résultat
+        if workflow_result.get('status') == 'success' or "succès" in workflow_result.get('message', '').lower():
+            # Format de réponse standardisé
             client_data = workflow_result.get('client', {})
             products_data = workflow_result.get('products', [])
 
-            # Formater les produits
+            # Formater les produits selon la structure attendue
             formatted_products = []
             for product in products_data:
                 if isinstance(product, dict) and "error" not in product:
-                    # 🔧 EXTRACTION CORRIGÉE DES DONNÉES PRODUIT
+                    # 🔧 EXTRACTION CORRIGÉE DES DONNÉES PRODUIT (selon votre exemple)
                     product_code = (product.get("code") or
                                     product.get("item_code") or
                                     product.get("ItemCode", ""))
@@ -134,6 +148,7 @@ async def create_quote_workflow(request: WorkflowCreateQuoteRequest):
                     unit_price = float(product.get("unit_price", 0))
                     line_total = quantity * unit_price
 
+                    # Structure standardisée
                     product_data = {
                         "item_code": product_code,
                         "code": product_code,
@@ -145,9 +160,11 @@ async def create_quote_workflow(request: WorkflowCreateQuoteRequest):
                     }
                     formatted_products.append(product_data)
 
+            # Réponse de succès
             return WorkflowCreateQuoteResponse(
                 success=True,
                 status="completed",
+                task_id=workflow_result.get("task_id"),
                 client={
                     "name": client_data.get('name', 'Client extrait'),
                     "account_number": client_data.get('account_number', 'N/A'),
@@ -158,18 +175,19 @@ async def create_quote_workflow(request: WorkflowCreateQuoteRequest):
                 quote_id=workflow_result.get('quote_id', f"NOVA-{datetime.now().strftime('%Y%m%d%H%M%S')}")
             )
         else:
-            error_message = workflow_result.get('message', 'Erreur lors de la génération du devis')
+            # Échec du workflow
+            error_message = workflow_result.get('error', workflow_result.get('message', 'Erreur workflow inconnue'))
             logger.error(f"❌ Échec workflow: {error_message}")
 
             return WorkflowCreateQuoteResponse(
                 success=False,
                 status="failed",
-                error=workflow_result.get('message', 'Erreur lors du traitement'),
-                message=workflow_result.get('message', 'Erreur workflow')
+                error=error_message,
+                message=error_message
             )
 
     except Exception as e:
-        logger.exception(f"Erreur create_quote_workflow: {str(e)}")
+        logger.exception(f"💥 Erreur critique dans create_quote_workflow: {str(e)}")
         return WorkflowCreateQuoteResponse(
             success=False,
             status="error",
