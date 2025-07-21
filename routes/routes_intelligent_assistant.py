@@ -50,6 +50,113 @@ class ProgressChatResponse(BaseModel):
     error: Optional[str] = None
     use_polling: bool = False  # 🆕 NOUVEAU : Indique si utiliser polling
 
+# ✅ AJOUT DU MODÈLE MANQUANT POUR WORKFLOW
+class WorkflowCreateQuoteRequest(BaseModel):
+    """Modèle pour l'endpoint /api/assistant/workflow/create_quote"""
+    message: str  # ← Le champ attendu par le test
+    draft_mode: bool = False
+    force_production: bool = False
+
+class WorkflowCreateQuoteResponse(BaseModel):
+    """Réponse pour l'endpoint workflow"""
+    success: bool
+    task_id: Optional[str] = None
+    status: Optional[str] = None
+    client: Optional[Dict[str, Any]] = None
+    products: Optional[List[Dict[str, Any]]] = None
+    total_amount: Optional[float] = None
+    quote_id: Optional[str] = None
+    error: Optional[str] = None
+    message: Optional[str] = None
+
+# ✅ AJOUT DE L'ENDPOINT MANQUANT
+@router.post("/workflow/create_quote", response_model=WorkflowCreateQuoteResponse)
+async def create_quote_workflow(request: WorkflowCreateQuoteRequest):
+    """
+    🎯 Endpoint spécifique pour le workflow de création de devis
+    Compatible avec le test: POST /api/assistant/workflow/create_quote
+    """
+    try:
+        user_message = request.message.strip()
+        
+        if not user_message:
+            return WorkflowCreateQuoteResponse(
+                success=False,
+                error="Message vide"
+            )
+
+        logger.info(f"🔄 Workflow creation devis: {user_message}")
+
+        # Utiliser le workflow existant
+        from workflow.devis_workflow import DevisWorkflow
+        
+        workflow = DevisWorkflow(
+            validation_enabled=True,
+            draft_mode=request.draft_mode,
+            force_production=request.force_production
+        )
+
+        # Traitement du workflow
+        workflow_result = await workflow.process_prompt(user_message)
+        
+        if workflow_result.get('success'):
+            # Extraire les données pour la réponse
+            client_data = workflow_result.get('client', {})
+            products_data = workflow_result.get('products', [])
+
+            # Formater les produits
+            formatted_products = []
+            for product in products_data:
+                if isinstance(product, dict) and "error" not in product:
+                    # 🔧 EXTRACTION CORRIGÉE DES DONNÉES PRODUIT
+                    product_code = (product.get("code") or
+                                    product.get("item_code") or
+                                    product.get("ItemCode", ""))
+
+                    product_name = (product.get("name") or
+                                    product.get("item_name") or
+                                    product.get("ItemName", "Sans nom"))
+
+                    quantity = float(product.get("quantity", 1))
+                    unit_price = float(product.get("unit_price", 0))
+                    line_total = quantity * unit_price
+
+                    product_data = {
+                        "item_code": product_code,
+                        "code": product_code,
+                        "item_name": product_name,
+                        "name": product_name,
+                        "quantity": quantity,
+                        "unit_price": unit_price,
+                        "line_total": line_total
+                    }
+                    formatted_products.append(product_data)
+
+            return WorkflowCreateQuoteResponse(
+                success=True,
+                status="success",
+                client={
+                    "name": client_data.get('name', 'Client extrait'),
+                    "account_number": client_data.get('account_number', 'N/A'),
+                    "salesforce_id": client_data.get('salesforce_id', '')
+                },
+                products=formatted_products,
+                total_amount=workflow_result.get('total_amount', 0),
+                quote_id=workflow_result.get('quote_id', f"NOVA-{datetime.now().strftime('%Y%m%d%H%M%S')}")
+            )
+        else:
+            return WorkflowCreateQuoteResponse(
+                success=False,
+                error=workflow_result.get('message', 'Erreur lors du traitement'),
+                message=workflow_result.get('message', 'Erreur workflow')
+            )
+
+    except Exception as e:
+        logger.exception(f"Erreur create_quote_workflow: {str(e)}")
+        return WorkflowCreateQuoteResponse(
+            success=False,
+            error=f"Erreur serveur: {str(e)}"
+        )
 # 🔧 MODIFICATION : Fonction chat_with_nova modifiée
 @router.post("/chat")
 async def chat_with_nova_with_progress(
