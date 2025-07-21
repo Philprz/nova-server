@@ -31,7 +31,7 @@ class ProductSearchEngine:
                                product.get("ItemName", "Sans nom"))
 
                 quantity = float(product.get("quantity", 1))
-                unit_price = float(product.get("unit_price", 0))
+                unit_price = float(product.get("price", 0))
                 line_total = quantity * unit_price
 
                 product_data = {
