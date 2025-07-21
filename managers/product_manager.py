@@ -86,7 +86,7 @@ class ProductManager:
                 product_data = {
                     "code": result.get("ItemCode"),
                     "name": result.get("ItemName"),
-                    "price": float(result.get("UnitPrice", 0)),
+                    "price": float(result.get("Price", 0)),
                     "stock": int(result.get("QuantityOnStock", 0)),
                     "available": result.get("InStock", False),
                     "found": True,
@@ -231,7 +231,7 @@ class ProductManager:
                     {
                         "code": item.get("ItemCode"),
                         "name": item.get("ItemName"),
-                        "price": float(item.get("UnitPrice", 0)),
+                        "price": float(item.get("Price", 0)),
                         "stock": int(item.get("QuantityOnStock", 0)),
                         "available": item.get("InStock", False)
                     }
@@ -291,7 +291,7 @@ class ProductManager:
                     products.append({
                         "code": item.get("ItemCode"),
                         "name": item.get("ItemName"),
-                        "price": float(item.get("UnitPrice", 0)),
+                        "price": float(item.get("Price", 0)),
                         "stock": int(item.get("QuantityOnStock", 0)),
                         "available": item.get("InStock", False),
                         "category": item.get("ItemsGroupCode"),
