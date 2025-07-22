@@ -214,14 +214,16 @@ class ClientManager:
             return self.error_handler.handle_client_creation_error(client_data.name, str(e))
     
     async def _search_salesforce_client(self, client_name: str) -> Dict[str, Any]:
-        """Recherche dans Salesforce"""
+        """Recherche dans Salesforce - VERSION CORRIGÉE"""
         try:
-            # Échapper les caractères spéciaux pour SOQL
             safe_name = client_name.replace("'", "\\'")
+            
+            # 🔧 REQUÊTE CORRIGÉE - CHAMPS VÉRIFIÉS
             query = f"""
-                SELECT Id, Name, AccountNumber, Phone, Email, 
-                       BillingStreet, BillingCity, BillingPostalCode, BillingCountry,
-                       Industry, AnnualRevenue, CreatedDate, LastModifiedDate
+                SELECT Id, Name, AccountNumber, Phone, 
+                    BillingStreet, BillingCity, BillingPostalCode, BillingCountry,
+                    ShippingStreet, ShippingCity, ShippingPostalCode, ShippingCountry,
+                    Industry, Type, CreatedDate, LastModifiedDate
                 FROM Account 
                 WHERE Name LIKE '%{safe_name}%' 
                 ORDER BY LastModifiedDate DESC
@@ -231,20 +233,67 @@ class ClientManager:
             result = await self.mcp_connector.call_salesforce_mcp("salesforce_query", {"query": query})
             
             if "error" not in result and result.get("records"):
+                client_data = result["records"][0]
                 return {
                     "found": True,
-                    "data": result["records"][0],
+                    "data": client_data,
                     "source": "salesforce"
                 }
             else:
                 return {
                     "found": False,
-                    "error": result.get("error", "Client non trouvé")
+                    "error": result.get("error", "Client non trouvé"),
+                    "suggestions": []
                 }
                 
         except Exception as e:
             logger.exception(f"Erreur recherche Salesforce: {str(e)}")
-            return {"found": False, "error": str(e)}
+            return {
+                "found": False,
+                "error": str(e),
+                "suggestions": []
+            }
+
+    # 2. AJOUTER MÉTHODE MANQUANTE
+    async def search_client(self, client_name: str) -> Dict[str, Any]:
+        """Point d'entrée principal recherche client"""
+        logger.info(f"🔍 Recherche client: {client_name}")
+        
+        # Vérifier cache
+        cache_key = f"client_{client_name.lower()}"
+        if cache_key in self.client_cache:
+            cached_data = self.client_cache[cache_key]
+            cache_age = (datetime.now() - cached_data['timestamp']).seconds
+            if cache_age < 300:  # 5 minutes
+                logger.info("Client trouvé en cache")
+                return cached_data['data']
+        
+        # Recherche Salesforce
+        sf_result = await self._search_salesforce_client(client_name)
+        
+        if sf_result.get("found"):
+            # Mise en cache
+            self.client_cache[cache_key] = {
+                'data': sf_result,
+                'timestamp': datetime.now()
+            }
+            return sf_result
+        
+        # Fallback SAP si nécessaire
+        try:
+            sap_result = await self._search_sap_client(client_name)
+            if sap_result.get("found"):
+                sap_result["needs_salesforce_sync"] = True
+                return sap_result
+        except:
+            pass
+        
+        # Générer suggestions si aucun résultat
+        return {
+            "found": False,
+            "suggestions": await self._generate_client_suggestions(client_name),
+            "message": f"Client '{client_name}' non trouvé"
+        }
     
     async def _search_sap_client(self, client_name: str) -> Dict[str, Any]:
         """Recherche dans SAP"""
