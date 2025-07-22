@@ -12,21 +12,17 @@ from fastapi.staticfiles import StaticFiles
 from routes.routes_intelligent_assistant import router as assistant_router
 from routes.routes_clients import router as clients_router  
 from routes.routes_devis import router as devis_router
-# Configuration de l'encodage UTF-8 pour Windows
 if sys.platform == "win32":
-    import io
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
-    
-    # Configuration du logger pour éviter les erreurs d'emojis
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler('nova.log', encoding='utf-8'),
-            logging.StreamHandler(sys.stdout)
-        ]
-    )
+    os.environ["PYTHONIOENCODING"] = "utf-8"    
+# Configuration du logger pour éviter les erreurs d'emojis
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('nova.log', encoding='utf-8'),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
 
 logger = logging.getLogger(__name__)
 

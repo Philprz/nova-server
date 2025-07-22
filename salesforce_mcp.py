@@ -12,10 +12,9 @@ import traceback
 import argparse
 import logging
 
-# Configuration de l'encodage pour Windows
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
-sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
-
+# Configuration sécurisée pour Windows
+if sys.platform == "win32":
+    os.environ["PYTHONIOENCODING"] = "utf-8"
 # Créer le dossier logs s'il n'existe pas
 import shutil
 if os.path.exists("logs") and not os.path.isdir("logs"):

@@ -197,7 +197,7 @@ class ReferentialCache:
         self.PRODUCT_TTL = timedelta(minutes=30)  # Stocks plus dynamiques
         self.SUGGESTION_TTL = timedelta(hours=1)  # Suggestions peuvent évoluer
         
-        logger.info("🚀 Cache référentiel initialisé")
+        logger.info("Cache référentiel initialisé")
     
     # ==================== CACHE CLIENTS ====================
     

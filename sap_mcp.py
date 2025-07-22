@@ -17,10 +17,9 @@ from typing import Dict, Optional, Any
 import io
 import sys
 from dotenv import load_dotenv
-# Configuration de l'encodage pour Windows
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
-sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
-
+# Configuration sécurisée pour Windows
+if sys.platform == "win32":
+    os.environ["PYTHONIOENCODING"] = "utf-8"
 # Créer les dossiers nécessaires
 os.makedirs("logs", exist_ok=True)
 os.makedirs("cache", exist_ok=True)
