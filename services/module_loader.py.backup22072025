@@ -1,4 +1,4 @@
-# services/module_loader.py - VERSION CORRIGÉE
+# services/module_loader.py
 import importlib
 import logging
 from typing import Dict, Optional, Any
@@ -22,7 +22,6 @@ class ModuleLoader:
     """Gestionnaire centralisé de chargement des modules optionnels"""
     
     def __init__(self):
-        """CORRECTION: __init__ ne prend aucun paramètre"""
         self.loaded_modules: Dict[str, Any] = {}
         self.failed_modules: Dict[str, str] = {}
         
@@ -38,11 +37,10 @@ class ModuleLoader:
             self.loaded_modules[name] = {
                 'module': module,
                 'router': module.router,
-                'config': config,
-                'loaded': True
+                'config': config
             }
             
-            logger.info(f"Module {name} charge depuis {config.module_path}")
+            logger.info(f"✅ Module {name} chargé depuis {config.module_path}")
             return module
             
         except ImportError as e:
@@ -50,15 +48,10 @@ class ModuleLoader:
             self.failed_modules[name] = error_msg
             
             if config.required:
-                logger.error(f"[ERROR] {error_msg} (REQUIS)")
+                logger.error(f"❌ {error_msg} (REQUIS)")
                 raise
             else:
-                logger.warning(f"[WARNING] {error_msg}")
-                
-        except Exception as e:
-            error_msg = f"Erreur lors du chargement du module {name}: {e}"
-            self.failed_modules[name] = error_msg
-            logger.error(f"[ERROR] {error_msg}")
+                logger.warning(f"⚠️ {error_msg}")
                 
         return None
     
@@ -69,29 +62,40 @@ class ModuleLoader:
             
         return self.loaded_modules
     
-    async def load_all_modules(self):
-        """Méthode pour compatibilité avec l'ancien code"""
-        # Cette méthode est conservée pour la compatibilité
-        logger.info(f"Modules disponibles: {len(self.loaded_modules)}")
-        return self.loaded_modules
-    
     def get_loaded_modules(self) -> Dict[str, Any]:
         """Retourne la liste des modules chargés"""
         return self.loaded_modules
     
-    def get_failed_modules(self) -> Dict[str, str]:
-        """Retourne la liste des modules qui ont échoué au chargement"""
-        return self.failed_modules
-    
-    def get_status(self) -> Dict[str, Any]:
-        """Retourne le statut complet du chargeur de modules"""
-        total_modules = len(self.loaded_modules) + len(self.failed_modules)
+    def get_status(self) -> Dict[str, str]:
+        """Retourne le statut de tous les modules"""
+        status = {}
         
-        return {
-            "total_modules": total_modules,
-            "loaded_count": len(self.loaded_modules),
-            "failed_count": len(self.failed_modules),
-            "success_rate": len(self.loaded_modules) / total_modules * 100 if total_modules > 0 else 0,
-            "loaded_modules": list(self.loaded_modules.keys()),
-            "failed_modules": list(self.failed_modules.keys())
-        }
+        for name in self.loaded_modules:
+            status[name] = "loaded"
+            
+        for name, error in self.failed_modules.items():
+            status[name] = "failed"
+            
+        return status
+    
+    def register_to_fastapi(self, app, exclude: list = None):
+        """Enregistre automatiquement tous les routers chargés"""
+        exclude = exclude or []
+        
+        for name, module_info in self.loaded_modules.items():
+            if name in exclude:
+                continue
+                
+            config = module_info['config']
+            router = module_info['router']
+            
+            # Enregistrement avec ou sans préfixe
+            kwargs = {'tags': config.tags}
+            if config.prefix:
+                kwargs['prefix'] = config.prefix
+                
+            app.include_router(router, **kwargs)
+            logger.info(f"✅ Routes {name.title()} enregistrées")
+
+# Instance globale réutilisable            
+module_loader = ModuleLoader()

@@ -1,12 +1,12 @@
 import os
 import json
 import httpx
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from dotenv import load_dotenv
 import logging
 import asyncio
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-
+from datetime import datetime
 load_dotenv()
 logger = logging.getLogger("llm_extractor")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -252,3 +252,116 @@ Réponds UNIQUEMENT au format JSON suivant:
         except Exception as e:
             logger.error(f"❌ Erreur extraction client: {e}")
             return {"success": False, "error": str(e)}
+
+
+    async def extract_quote_request(self, text_input: str) -> Dict[str, Any]:
+        """
+        Méthode de compatibilité - utilise extract_quote_info en interne
+        Correction pour l'erreur AttributeError 'extract_quote_request'
+        """
+        try:
+            logger.info("extract_quote_request appelée, redirection vers extract_quote_info")
+            result = await self.extract_quote_info(text_input)
+            
+            # Adapter le format si nécessaire pour compatibilité
+            return {
+                "success": True if "error" not in result else False,
+                "timestamp": datetime.now().isoformat(),
+                "extraction_type": "quote_request",
+                "raw_input": text_input,
+                "extracted_info": result,
+                "confidence_score": 85.0,  # Score par défaut
+                "extraction_notes": ["Extraction via LLM réussie"]
+            }
+        except Exception as e:
+            logger.error(f"Erreur extract_quote_request: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e),
+                "extraction_type": "quote_request",
+                "timestamp": datetime.now().isoformat()
+            }
+
+    async def extract_customer_data(self, text_input: str) -> Dict[str, Any]:
+        """
+        Extrait spécifiquement les données client
+        Correction pour les erreurs de méthodes manquantes
+        """
+        try:
+            logger.info("Extraction de données client démarrée")
+            result = await self.extract_client_info_from_text(text_input)
+            
+            return {
+                "success": result.get("success", False),
+                "extraction_type": "customer_data",
+                "customer_info": result.get("client_data", {}),
+                "confidence_score": result.get("confidence", 0),
+                "missing_fields": result.get("missing_fields", []),
+                "timestamp": datetime.now().isoformat()
+            }
+        except Exception as e:
+            logger.error(f"Erreur extraction données client: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e),
+                "extraction_type": "customer_data"
+            }
+
+    def get_supported_extractions(self) -> List[str]:
+        """Retourne la liste des types d'extraction supportés"""
+        return [
+            "quote_request",
+            "customer_data", 
+            "product_search",
+            "contact_info",
+            "stock_inquiry"
+        ]
+
+    async def extract_product_search(self, text_input: str) -> Dict[str, Any]:
+        """
+        Extrait les critères de recherche de produits
+        """
+        try:
+            logger.info("Extraction de critères de recherche produit")
+            result = await self.extract_quote_info(text_input)
+            
+            if result.get("action_type") == "RECHERCHE_PRODUIT":
+                return {
+                    "success": True,
+                    "extraction_type": "product_search",
+                    "search_criteria": result.get("search_criteria", {}),
+                    "query_details": result.get("query_details", ""),
+                    "timestamp": datetime.now().isoformat()
+                }
+            else:
+                return {
+                    "success": False,
+                    "error": "Pas de critères de recherche produit détectés",
+                    "extraction_type": "product_search"
+                }
+        except Exception as e:
+            logger.error(f"Erreur extraction recherche produit: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e),
+                "extraction_type": "product_search"
+            }
+
+# ====
+# FACTORY PATTERN ET INSTANCE GLOBALE  
+# ====
+
+# Instance globale de l'extracteur
+_llm_extractor: Optional['LLMExtractor'] = None
+
+def get_llm_extractor() -> LLMExtractor:
+    """
+    Factory pattern pour obtenir l'instance de l'extracteur LLM
+    Singleton pattern pour éviter les connexions multiples
+    """
+    global _llm_extractor
+    if _llm_extractor is None:
+        _llm_extractor = LLMExtractor()
+        logger.info("Nouvelle instance LLMExtractor créée")
+    return _llm_extractor
+

@@ -4117,7 +4117,7 @@ class DevisWorkflow:
         """
         try:
             # Utiliser la nouvelle fonction de test avec progression
-            from services.mcp_connector import test_mcp_connections_with_progress
+            from services. import test_mcp_connections_with_progress
 
             self._track_step_progress("validate_input", 10, "🔍 Initialisation des tests...")
 
@@ -4403,7 +4403,7 @@ class DevisWorkflow:
             self._track_step_progress("search_client", 20, f"🔍 Recherche '{client_name}' dans Salesforce...")
 
             # Recherche dans Salesforce avec progression
-            from services.mcp_connector import call_mcp_with_progress
+            from services. import call_mcp_with_progress
 
             sf_accounts = await call_mcp_with_progress(
                 "salesforce_mcp",
@@ -4563,7 +4563,7 @@ class DevisWorkflow:
                 self._track_step_progress("lookup_products", 10, f"🔍 Recherche de {len(products)} produit(s)...")
 
                 found_products = []
-                from services.mcp_connector import call_mcp_with_progress
+                from services. import call_mcp_with_progress
 
                 for i, product in enumerate(products):
                     product_name = product.get("name", "")
@@ -4904,7 +4904,7 @@ class DevisWorkflow:
 
             # Synchronisation Salesforce
             try:
-                from services.mcp_connector import call_mcp_with_progress
+                from services. import call_mcp_with_progress
 
                 # Créer l'opportunité Salesforce
                 opportunity_data = {

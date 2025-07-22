@@ -1,3 +1,4 @@
+# main.py - CORRECTIONS CRITIQUES POUR NOVA
 
 import uvicorn
 import logging
@@ -9,7 +10,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-# Configuration de l'encodage UTF-8 pour Windows
+# CORRECTION 1: Configuration de l'encodage UTF-8 pour Windows
 if sys.platform == "win32":
     import io
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
@@ -42,7 +43,7 @@ async def lifespan(app: FastAPI):
         logger.info("=" * 50)
         
         # Tests de santé
-        from services.health_checker import HealthChecker
+        from services. import HealthChecker
         health_checker = HealthChecker()
         
         logger.info("Execution des tests de sante...")
@@ -52,30 +53,29 @@ async def lifespan(app: FastAPI):
         if HEALTH_CHECK_RESULTS["summary"]["success_rate"] < 50:
             logger.error("SYSTEME CRITIQUE NON OPERATIONNEL")
             logger.error("Impossible de demarrer NOVA avec des erreurs critiques")
+            
+            # Affichage des recommandations sans emojis
+            logger.info("RECOMMANDATIONS:")
+            for rec in HEALTH_CHECK_RESULTS["recommendations"]:
+                # Suppression des emojis pour éviter les erreurs d'encodage
+                clean_rec = rec.replace("🔧", "[FIX]").replace("🛠️", "[TOOL]")
+                logger.info(f"   {clean_rec}")
+            
+            logger.info("=" * 50)
+            
+            # Démarrage en mode dégradé mais fonctionnel
+            logger.warning("DEMARRAGE EN MODE DEGRADE")
         
-        # Affichage des recommandations sans emojis
-        logger.info("RECOMMANDATIONS:")
-        for rec in HEALTH_CHECK_RESULTS["recommendations"]:
-            # Suppression des emojis pour éviter les erreurs d'encodage
-            clean_rec = rec.replace("🔧", "[FIX]").replace("🛠️", "[TOOL]")
-            logger.info(f"   {clean_rec}")
-        
-        logger.info("=" * 50)
-        
-        # Démarrage en mode dégradé mais fonctionnel
-        logger.warning("DEMARRAGE EN MODE DEGRADE")
-        
-        # 2. CHARGEMENT DES MODULES
+        # 2. CHARGEMENT DES MODULES - CORRECTION PRINCIPALE
         logger.info("Chargement des modules...")
         
-        # Import du ModuleLoader
-        from services.module_loader import ModuleLoader, ModuleConfig
-        
-        # CORRECTION: ModuleLoader ne prend aucun argument
-        loader = ModuleLoader()
+        # CORRECTION: ModuleLoader ne prend aucun argument dans __init__
+        from services. import ModuleLoader
+        loader = ModuleLoader()  # SUPPRESSION de l'argument app
         app.state.module_loader = loader
         
         # Configuration des modules disponibles
+        from services. import ModuleConfig
         modules_config = {
             "salesforce": ModuleConfig(
                 module_path="routes.salesforce_routes",
@@ -123,7 +123,7 @@ async def lifespan(app: FastAPI):
         
         # Le serveur est maintenant prêt
         yield
-    
+        
     except Exception as e:
         logger.error(f"Erreur critique au demarrage: {str(e)}")
         logger.error(f"Details: {type(e).__name__}")
@@ -148,9 +148,9 @@ app = FastAPI(
 if os.path.exists("static"):
     app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# ====
+# =====================================
 # ENDPOINTS DE SANTÉ ET DIAGNOSTIC
-# ====
+# =====================================
 
 @app.get("/health")
 async def health():
@@ -182,7 +182,7 @@ async def health():
             }
         else:
             return basic_health
-    
+        
     except Exception as e:
         logger.error(f"Erreur lors du health check: {str(e)}")
         return JSONResponse(
@@ -250,11 +250,10 @@ async def recheck_system():
             "success_rate": HEALTH_CHECK_RESULTS["summary"]["success_rate"],
             "timestamp": HEALTH_CHECK_RESULTS["timestamp"]
         }
-    
+        
     except Exception as e:
         logger.error(f"Erreur lors de la revérification: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Échec de la revérification: {str(e)}")
-
 # Endpoint de base
 @app.get("/")
 async def root():
