@@ -24,14 +24,18 @@ if sys.platform == "win32":
 os.makedirs("logs", exist_ok=True)
 os.makedirs("cache", exist_ok=True)
 log_file = open("logs/sap_mcp.log", "w", encoding="utf-8")
-
+# CORRECTION: Rediriger stdout pour éviter la pollution MCP
+original_stdout = sys.stdout
 # Journalisation améliorée
 def log(message, level="INFO"):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     formatted_message = f"[{timestamp}] [{level}] {message}"
     log_file.write(f"{formatted_message}\n")
     log_file.flush()
-    print(formatted_message)
+    # CORRECTION: Écrire seulement dans le log, pas sur stdout
+    if level == "ERROR":
+        print(formatted_message, file=sys.stderr)
+    # Ne pas polluer stdout avec les logs normaux
 
 log("Démarrage du serveur MCP SAP - VERSION PRODUCTION", "STARTUP")
 
@@ -975,7 +979,7 @@ mcp_functions = {
     "sap_create_customer_complete": sap_create_customer_complete,
     "sap_create_quotation_complete": sap_create_quotation_complete,
     "sap_create_quotation_draft": sap_create_quotation_draft,
-    "sap_valida te_draft_quote": sap_validate_draft_quote,
+    "sap_validate_draft_quote": sap_validate_draft_quote,
     "get_quotation_details": get_quotation_details,
     "_get_customer_details": _get_customer_details,
     "sap_search_quotes": sap_search_quotes
@@ -996,7 +1000,8 @@ if __name__ == "__main__":
     parser.add_argument("--input-file", help="Fichier d'entrée JSON")
     parser.add_argument("--output-file", help="Fichier de sortie JSON")
     args, unknown = parser.parse_known_args()
-    
+    # CORRECTION: Rediriger stdout vers le log pour le mode MCP
+    sys.stdout = log_file
     if args.input_file and args.output_file:
         try:
             with open(args.input_file, 'r') as f:
