@@ -259,12 +259,14 @@ async def root():
         }
     }
 
-# Point d'entrée de l'application
 if __name__ == "__main__":
     # Configuration spécifique pour Windows
     if sys.platform == "win32":
         # Configuration pour éviter les problèmes d'encodage
         os.environ["PYTHONIOENCODING"] = "utf-8"
     
-    # Démarrage du serveur
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    # CORRECTION: Ne pas lancer uvicorn ici car startup_script.py s'en charge
+    # Démarrage du serveur - COMMENTÉ pour éviter le conflit
+    # uvicorn.run(app, host="0.0.0.0", port=8000)
+    
+    print("NOVA FastAPI app initialisée - Prête pour startup_script.py")
