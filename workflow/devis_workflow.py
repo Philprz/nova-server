@@ -16,11 +16,11 @@ from services.client_validator import ClientValidator
 
 from services.websocket_manager import websocket_manager
 from services.company_search_service import company_search_service
-# Configuration de l'encodage
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+# Configuration sécurisée pour Windows
+if sys.platform == "win32":
+    os.environ["PYTHONIOENCODING"] = "utf-8"
 
-# Configuration des logs
+# Configuration des logs avec gestion d'erreur
 os.makedirs('logs', exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,

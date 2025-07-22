@@ -197,15 +197,7 @@ def start_nova_server():
             logger.error("Fichier main.py manquant!")
             logger.error("Le fichier main.py contenant l'application FastAPI est requis")
             return False
-        
-        # avant l'import de main.py qui pourrait avoir ses propres configurations
-        os.environ["PYTHONIOENCODING"] = "utf-8"
-        if sys.platform == "win32":
-            # Forcer l'encodage console avant import
-            import codecs
-            sys.stdout = codecs.getwriter('utf-8')(sys.stdout.detach())
-            sys.stderr = codecs.getwriter('utf-8')(sys.stderr.detach())
-        
+                
         from main import app  # Correction: Import de l'app FastAPI
         import uvicorn
         logger.info("Lancement de NOVA sur http://localhost:8000")
