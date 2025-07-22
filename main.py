@@ -9,6 +9,9 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from routes.routes_intelligent_assistant import router as assistant_router
+from routes.routes_clients import router as clients_router  
+from routes.routes_devis import router as devis_router
 # Configuration de l'encodage UTF-8 pour Windows
 if sys.platform == "win32":
     import io
@@ -29,6 +32,7 @@ logger = logging.getLogger(__name__)
 
 # Variables globales
 HEALTH_CHECK_RESULTS = None
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -76,26 +80,11 @@ async def lifespan(app: FastAPI):
         app.state.module_loader = loader
         
         # Configuration des modules disponibles
-        modules_config = {
-            "salesforce": ModuleConfig(
-                module_path="routes.salesforce_routes",
-                prefix="/api/salesforce",
-                tags=["Salesforce CRM"],
-                required=False
-            ),
-            "sap": ModuleConfig(
-                module_path="routes.sap_routes", 
-                prefix="/api/sap",
-                tags=["SAP ERP"],
-                required=False
-            ),
-            "assistant": ModuleConfig(
-                module_path="routes.assistant_routes",
-                prefix="/api/assistant", 
-                tags=["IA Assistant"],
-                required=True
-            )
-        }
+        app.include_router(assistant_router, prefix="/api/assistant", tags=["IA Assistant"])
+        app.include_router(clients_router, prefix="/api/clients", tags=["Clients"])
+        app.include_router(devis_router, prefix="/api/devis", tags=["Devis"])
+
+        logger.info("Modules charges: 3/3")
         
         # Chargement des modules
         loaded_modules = loader.load_modules(modules_config)
