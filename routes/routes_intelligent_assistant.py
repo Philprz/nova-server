@@ -1736,7 +1736,7 @@ async def continue_workflow_with_choice(request: Request):
 
 # Modèle pour la compatibilité avec le frontend existant
 class GenerateQuoteRequest(BaseModel):
-    prompt: str
+    message: str
     draft_mode: Optional[bool] = False
     force_production: Optional[bool] = False  # Nouveau paramètre pour forcer la production
 
