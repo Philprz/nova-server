@@ -7,7 +7,8 @@ import subprocess
 import logging
 from datetime import datetime
 import asyncio
-
+from dotenv import load_dotenv
+load_dotenv()
 # Configuration de l'encodage pour Windows
 if sys.platform == "win32":
     # Correction : La redéfinition manuelle de sys.stdout/stderr entre en conflit
@@ -196,10 +197,17 @@ def start_nova_server():
             logger.error("Fichier main.py manquant!")
             logger.error("Le fichier main.py contenant l'application FastAPI est requis")
             return False
-        # Import de l'application FastAPI
+        
+        # avant l'import de main.py qui pourrait avoir ses propres configurations
+        os.environ["PYTHONIOENCODING"] = "utf-8"
+        if sys.platform == "win32":
+            # Forcer l'encodage console avant import
+            import codecs
+            sys.stdout = codecs.getwriter('utf-8')(sys.stdout.detach())
+            sys.stderr = codecs.getwriter('utf-8')(sys.stderr.detach())
+        
         from main import app  # Correction: Import de l'app FastAPI
         import uvicorn
-        
         logger.info("Lancement de NOVA sur http://localhost:8000")
         logger.info("Documentation: http://localhost:8000/docs")
         logger.info("Interface: http://localhost:8000/api/assistant/interface")
