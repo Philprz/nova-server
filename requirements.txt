@@ -24,6 +24,8 @@ psycopg2-binary
 # Utilitaires (existant)
 aiohttp
 email-validator
+openai
+pytest
 
 # Validation client enrichie (existant)
 fuzzywuzzy>=0.18.0
