@@ -6,7 +6,7 @@ import sys
 from datetime import datetime
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from routes.routes_intelligent_assistant import router as assistant_router
@@ -70,7 +70,12 @@ async def lifespan(app: FastAPI):
         
         # Import du ModuleLoader
         from services.module_loader import ModuleLoader, ModuleConfig
-        
+        # Configuration simplifiée - seulement modules optionnels non critiques
+        modules_config = {
+            'sync': ModuleConfig('routes.routes_sync', '/sync', ['Synchronisation'], required=False),
+            'products': ModuleConfig('routes.routes_products', '/products', ['Produits'], required=False)
+        }
+
         # CORRECTION: ModuleLoader ne prend aucun argument
         loader = ModuleLoader()
         app.state.module_loader = loader
@@ -79,25 +84,20 @@ async def lifespan(app: FastAPI):
         app.include_router(assistant_router, prefix="/api/assistant", tags=["IA Assistant"])
         app.include_router(clients_router, prefix="/api/clients", tags=["Clients"])
         app.include_router(devis_router, prefix="/api/devis", tags=["Devis"])
-
+        # Route pour servir l'interface IT Spirit
+        @app.get('/interface/itspirit', response_class=HTMLResponse)
+        async def itspirit_interface():
+            """Sert l'interface IT Spirit personnalisée"""
+            try:
+                with open('templates/nova_interface_final.html', 'r', encoding='utf-8') as f: 
+                    return HTMLResponse(content=f.read())
+            except FileNotFoundError:
+                raise HTTPException(status_code=404, detail="Interface IT Spirit non trouvée")
+        
         logger.info("Modules charges: 3/3")
-        
-        # Chargement des modules
-        loaded_modules = loader.load_modules(modules_config)
-        
-        # Ajout des routes des modules chargés
-        for name, module_info in loaded_modules.items():
-            if 'router' in module_info:
-                app.include_router(
-                    module_info['router'],
-                    prefix=module_info['config'].prefix,
-                    tags=module_info['config'].tags
-                )
-                logger.info(f"Module {name} integre avec succes")
-        
-        # Statistiques modules
-        logger.info(f"Modules charges: {len(loaded_modules)}")
-        
+        logger.info("Modules charges: 3/3")
+        # Routes principales déjà incluses directement
+        logger.info("Routes principales configurées")                
         # 3. FINALISATION DU DÉMARRAGE
         logger.info("=" * 60)
         logger.info("NOVA DEMARRE AVEC SUCCES")
