@@ -452,6 +452,7 @@ class DevisWorkflow:
         """
         Traite un prompt avec tracking de progression
         """
+        extracted_info: Optional[Dict[str, Any]] = None
         try:
             # 🔧 MODIFICATION : Utiliser le task_id fourni si disponible
             if task_id and not self.task_id:
@@ -469,6 +470,8 @@ class DevisWorkflow:
 
             # Extraction des informations (code existant adapté)
             extracted_info = await self.llm_extractor.extract_quote_info(prompt)
+            if not extracted_info:
+                raise ValueError("Extraction des informations échouée")
             self._track_step_progress("parse_prompt", 100, "✅ Demande analysée")
             self._track_step_complete("parse_prompt")
 
