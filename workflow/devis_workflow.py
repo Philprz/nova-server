@@ -4057,8 +4057,23 @@ class DevisWorkflow:
             self._track_step_complete("lookup_products", f"✅ {len(products_result.get('products', []))} produit(s) trouvé(s)")
 
             # Étape 3: Création du devis
+            # Étape 3: Création du devis
             self._track_step_start("prepare_quote", "📋 Préparation du devis")
             quote_result = await self._create_quote_document(client_result, products_result)
+            
+            # Vérification critique du résultat
+            if quote_result is None:
+                logger.error("❌ _create_quote_document a retourné None")
+                quote_result = {
+                    "status": "error",
+                    "quote_data": {
+                        "quote_id": f"ERROR_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                        "client": {},
+                        "products": [],
+                        "totals": {"total_amount": 0},
+                        "currency": "EUR"
+                    }
+                }
             self._track_step_complete("prepare_quote", "✅ Devis préparé")
 
             # Étape 4: Synchronisation
@@ -4414,12 +4429,10 @@ class DevisWorkflow:
             
             client_result = await call_mcp_with_progress(
                 "salesforce_mcp", 
-                "salesforce_query", 
-                {
-                    "query": f"SELECT Id, Name, AccountNumber, Phone, Email, BillingCity, BillingCountry FROM Account WHERE Name LIKE '%{client_name}%' LIMIT 10"
-                },
+                "salesforce_query",
+                {"query": f"SELECT Id, Name, AccountNumber, Phone FROM Account WHERE Name LIKE '%{client_name}%' LIMIT 1"},
                 "search_client",
-                f"🔍 Recherche client {client_name}"
+                f"🔍 Recherche {client_name}"
             )
             
             if client_result.get("error"):
@@ -4565,10 +4578,10 @@ class DevisWorkflow:
                     try:
                         code_result = await call_mcp_with_progress(
                             "sap_mcp",
-                            "sap_get_product_details",
-                            {"item_code": product_code},
+                            "sap_read",
+                            {"entity": "Items", "filters": {"ItemName": product["name"]}},
                             "lookup_products",
-                            f"🔍 Recherche code {product_code}"
+                            f"📦 Recherche {product['name']}"
                         )
                         
                         if not code_result.get("error") and code_result.get("data", {}).get("ItemCode"):
