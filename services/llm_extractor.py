@@ -4,7 +4,6 @@ import httpx
 from typing import Dict, Any, List, Optional
 from dotenv import load_dotenv
 import logging
-import asyncio
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from datetime import datetime
 load_dotenv()
@@ -149,29 +148,27 @@ Réponds UNIQUEMENT au format JSON suivant:
         logger.error(f"🚨 FONCTION extract_quote_info APPELÉE AVEC: {prompt}")
         logger.info(f"Extraction d'informations de devis à partir de: {prompt}")
 
-        user_message = f"Voici la demande de devis à analyser: {prompt}"
-
         try:
             response_data = await self._call_claude(prompt)
             claude_content = response_data.get("content", [{}])[0].get("text", "")
-            logger.info(f"🎯 CONTENU CLAUDE EXTRAIT: {claude_content}")
+            logger.info(f"CONTENU CLAUDE EXTRAIT: {claude_content}")
             start_idx = claude_content.find("{")
             end_idx = claude_content.rfind("}") + 1
             if start_idx >= 0 and end_idx > start_idx:
                 json_str = claude_content[start_idx:end_idx]
                 logger.info(f"🔧 JSON EXTRAIT: {json_str}")
                 extracted_data = json.loads(json_str)
-                logger.info(f"✅ EXTRACTION RÉUSSIE: {extracted_data}")
+                logger.info(f"EXTRACTION RÉUSSIE: {extracted_data}")
                 action_type = extracted_data.get("action_type", "NON_DÉTECTÉ")
-                logger.info(f"🎯 TYPE D'ACTION DÉTECTÉ: {action_type}")
+                logger.info(f"TYPE D'ACTION DÉTECTÉ: {action_type}")
                 if action_type == "RECHERCHE_PRODUIT":
                     search_criteria = extracted_data.get('search_criteria', {})
                     logger.info(f"🔍 CRITÈRES DE RECHERCHE: {search_criteria}")
                 elif action_type == "DEVIS":
                     client = extracted_data.get('client', 'Non spécifié')
                     products = extracted_data.get('products', [])
-                    logger.info(f"📋 CLIENT DEVIS: {client}")
-                    logger.info(f"📦 PRODUITS DEVIS: {products}")
+                    logger.info(f"CLIENT DEVIS: {client}")
+                    logger.info(f"PRODUITS DEVIS: {products}")
                 return extracted_data
             else:
                 logger.error("Impossible de trouver du JSON dans la réponse Claude")
