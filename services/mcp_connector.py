@@ -32,94 +32,141 @@ except ImportError as e:
     get_llm_extractor = None
 # Configuration du logging
 logger = logging.getLogger("mcp_connector")
+
+# === FONCTION UTILITAIRE POUR LES WORKFLOWS ===
+
+async def call_mcp_with_progress(server_name: str, action: str, params: Dict[str, Any],
+                                step_id: str = "mcp_call", message: str = "") -> Dict[str, Any]:
+    """
+    Appel MCP avec tracking de progression intégré
+
+    Args:
+        server_name: Nom du serveur MCP
+        action: Action à exécuter
+        params: Paramètres de l'action
+        step_id: ID de l'étape pour le tracking
+        message: Message de progression personnalisé
+
+    Returns:
+        Résultat de l'appel MCP
+    """
+    try:
+        # Tenter de récupérer le task tracker actuel
+        from services.progress_tracker import progress_tracker
+        current_task = getattr(progress_tracker, '_current_task', None)
+
+        if current_task and hasattr(current_task, 'update_step_progress'):
+            # Démarrer la progression
+            start_msg = message or f"Exécution {server_name}.{action}"
+            current_task.update_step_progress(step_id, 10, start_msg)
+
+            # Exécuter l'appel MCP
+            result = await mcp_connector.call_mcp(server_name, action, params)
+
+            # Terminer la progression
+            if "error" in result:
+                current_task.update_step_progress(step_id, 100, f"Erreur {action}")
+            else:
+                success_msg = message.replace("🔄", "✅") if message else f"{action} terminé"
+                current_task.update_step_progress(step_id, 100, success_msg)
+
+            return result
+        else:
+            # Pas de tracking disponible, appel direct
+            return await mcp_connector.call_mcp(server_name, action, params)
+
+    except Exception as e:
+        logger.error(f"Erreur call_mcp_with_progress: {str(e)}")
+        return {"error": str(e)}
+    
 async def test_mcp_connections_with_progress() -> Dict[str, Any]:
-                """
-                Test des connexions MCP avec progression détaillée
-                
-                Returns:
-                    État détaillé des connexions
-                """
-                results = {
-                    "overall_status": "unknown",
-                    "connections": {},
-                    "timestamp": datetime.now().isoformat()
-                }
+    """Test des connexions MCP avec progression détaillée
+    Test des connexions MCP avec progression détaillée
+    
+    Returns:
+        État détaillé des connexions
+    """
+    results = {
+        "overall_status": "unknown",
+        "connections": {},
+        "timestamp": datetime.now().isoformat()
+    }
 
-                try:
-                    from services.progress_tracker import progress_tracker
-                    current_task = getattr(progress_tracker, '_current_task', None)
-                    mcp_connector = MCPConnector()
+    try:
+        from services.progress_tracker import progress_tracker
+        current_task = getattr(progress_tracker, '_current_task', None)
+        mcp_connector = MCPConnector()
 
-                    # Test Salesforce
-                    if current_task:
-                        current_task.update_step_progress("test_connections", 25, "🔍 Test Salesforce...")
+        # Test Salesforce
+        if current_task:
+            current_task.update_step_progress("test_connections", 25, "🔍 Test Salesforce...")
 
-                    try:
-                        sf_result = await mcp_connector.call_mcp("salesforce_mcp", "salesforce_query", {
-                            "query": "SELECT Id, Name FROM Account LIMIT 1"
-                        })
-                        results["connections"]["salesforce"] = {
-                            "connected": "error" not in sf_result,
-                            "details": sf_result,
-                            "test_time": datetime.now().isoformat()
-                        }
-                    except Exception as e:
-                        results["connections"]["salesforce"] = {
-                            "connected": False,
-                            "error": str(e),
-                            "test_time": datetime.now().isoformat()
-                        }
+        try:
+            sf_result = await mcp_connector.call_mcp("salesforce_mcp", "salesforce_query", {
+                "query": "SELECT Id, Name FROM Account LIMIT 1"
+            })
+            results["connections"]["salesforce"] = {
+                "connected": "error" not in sf_result,
+                "details": sf_result,
+                "test_time": datetime.now().isoformat()
+            }
+        except Exception as e:
+            results["connections"]["salesforce"] = {
+                "connected": False,
+                "error": str(e),
+                "test_time": datetime.now().isoformat()
+            }
 
-                    # Test SAP
-                    if current_task:
-                        current_task.update_step_progress("test_connections", 75, "🔍 Test SAP...")
+        # Test SAP
+        if current_task:
+            current_task.update_step_progress("test_connections", 75, "🔍 Test SAP...")
 
-                    try:
-                        # Utiliser sap_read au lieu de get_items (d'après les logs d'erreur)
-                        sap_result = await mcp_connector.call_mcp("sap_mcp", "sap_read", {
-                            "endpoint": "/Items?$top=1",
-                            "method": "GET"
-                        })
-                        results["connections"]["sap"] = {
-                            "connected": "error" not in sap_result,
-                            "details": sap_result,
-                            "test_time": datetime.now().isoformat()
-                        }
-                    except Exception as e:
-                        results["connections"]["sap"] = {
-                            "connected": False,
-                            "error": str(e),
-                            "test_time": datetime.now().isoformat()
-                        }
+        try:
+            # Utiliser sap_read au lieu de get_items (d'après les logs d'erreur)
+            sap_result = await mcp_connector.call_mcp("sap_mcp", "sap_read", {
+                "endpoint": "/Items?$top=1",
+                "method": "GET"
+            })
+            results["connections"]["sap"] = {
+                "connected": "error" not in sap_result,
+                "details": sap_result,
+                "test_time": datetime.now().isoformat()
+            }
+        except Exception as e:
+            results["connections"]["sap"] = {
+                "connected": False,
+                "error": str(e),
+                "test_time": datetime.now().isoformat()
+            }
 
-                    # Déterminer le statut global
-                    sf_ok = results["connections"].get("salesforce", {}).get("connected", False)
-                    sap_ok = results["connections"].get("sap", {}).get("connected", False)
+        # Déterminer le statut global
+        sf_ok = results["connections"].get("salesforce", {}).get("connected", False)
+        sap_ok = results["connections"].get("sap", {}).get("connected", False)
 
-                    if sf_ok and sap_ok:
-                        results["overall_status"] = "all_connected"
-                    elif sf_ok or sap_ok:
-                        results["overall_status"] = "partial_connection"
-                    else:
-                        results["overall_status"] = "no_connection"
+        if sf_ok and sap_ok:
+            results["overall_status"] = "all_connected"
+        elif sf_ok or sap_ok:
+            results["overall_status"] = "partial_connection"
+        else:
+            results["overall_status"] = "no_connection"
 
-                    if current_task:
-                        status_msg = {
-                            "all_connected": "✅ Toutes les connexions OK",
-                            "partial_connection": "⚠️ Connexions partielles", 
-                            "no_connection": "❌ Aucune connexion"
-                        }.get(results["overall_status"], "❓ Statut inconnu")
+        if current_task:
+            status_msg = {
+                "all_connected": "✅ Toutes les connexions OK",
+                "partial_connection": "⚠️ Connexions partielles", 
+                "no_connection": "❌ Aucune connexion"
+            }.get(results["overall_status"], "❓ Statut inconnu")
 
-                        current_task.update_step_progress("test_connections", 100, status_msg)
+            current_task.update_step_progress("test_connections", 100, status_msg)
 
-                    logger.info(f"Test connexions terminé: {results['overall_status']}")
-                    return results
+        logger.info(f"Test connexions terminé: {results['overall_status']}")
+        return results
 
-                except Exception as e:
-                    logger.error(f"Erreur test_mcp_connections_with_progress: {str(e)}")
-                    results["overall_status"] = "error"
-                    results["error"] = str(e)
-                    return results
+    except Exception as e:
+        logger.error(f"Erreur test_mcp_connections_with_progress: {str(e)}")
+        results["overall_status"] = "error"
+        results["error"] = str(e)
+        return results
 def get_timeout_for_action(action: str) -> int:
     """Retourne le timeout approprié selon l'action"""
     timeouts = {
