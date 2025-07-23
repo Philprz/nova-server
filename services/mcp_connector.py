@@ -24,11 +24,10 @@ try:
 except ImportError:
     Salesforce = None
 try:
-    from services.llm_extractor import get_llm_extractor, LLMExtractor
-    logger.info("LLMExtractor importé avec succès")
+    from services.llm_extractor import get_llm_extractor
+    logger.info("get_llm_extractor importé avec succès")
 except ImportError as e:
-    logger.warning(f"Impossible d'importer LLMExtractor: {e}")
-    LLMExtractor = None
+    logger.warning(f"Impossible d'importer get_llm_extractor: {e}")
     get_llm_extractor = None
 # Configuration du logging
 logger = logging.getLogger("mcp_connector")
@@ -60,11 +59,7 @@ async def call_mcp_with_progress(server_name: str, action: str, params: Dict[str
             start_msg = message or f"Exécution {server_name}.{action}"
             current_task.update_step_progress(step_id, 10, start_msg)
 
-            # Exécuter l'appel MCP
-            # Exécuter l'appel MCP en utilisant l'instance globale
-            from services.mcp_connector import get_mcp_connector
-            connector = get_mcp_connector()
-            result = await connector.call_mcp(server_name, action, params)
+            result = await mcp_connector.call_mcp(server_name, action, params)
 
             # Terminer la progression
             if "error" in result:
@@ -76,7 +71,8 @@ async def call_mcp_with_progress(server_name: str, action: str, params: Dict[str
             return result
         else:
             # Pas de tracking disponible, appel direct
-            return await mcp_connector.call_mcp(server_name, action, params)
+            connector = MCPConnector()
+            return await connector.call_mcp(server_name, action, params)
 
     except Exception as e:
         logger.error(f"Erreur call_mcp_with_progress: {str(e)}")

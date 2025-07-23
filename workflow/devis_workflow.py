@@ -452,16 +452,17 @@ class DevisWorkflow:
         """
         Traite un prompt avec tracking de progression
         """
+        extracted_info: Optional[Dict[str, Any]] = None
         try:
             # 🔧 MODIFICATION : Utiliser le task_id fourni si disponible
             if task_id and not self.task_id:
                 self.task_id = task_id
                 self.current_task = progress_tracker.get_task(task_id)
-            
+
             # Si pas de task existante, en créer une nouvelle
             if not self.current_task:
                 self.task_id = self._initialize_task_tracking(prompt)
-            
+
             logger.info(f"=== DÉMARRAGE WORKFLOW - Tâche {self.task_id} ===")
 
             # 🔧 MODIFICATION : Démarrer le tracking de progression
@@ -469,6 +470,8 @@ class DevisWorkflow:
 
             # Extraction des informations (code existant adapté)
             extracted_info = await self.llm_extractor.extract_quote_info(prompt)
+            if not extracted_info:
+                raise ValueError("Extraction des informations échouée")
             self._track_step_progress("parse_prompt", 100, "✅ Demande analysée")
             self._track_step_complete("parse_prompt")
 
@@ -491,7 +494,7 @@ class DevisWorkflow:
             else:
                 result = await self._process_other_action(extracted_info)
 
-            
+
             # Marquer la tâche comme terminée avec le résultat
             if self.current_task:
                 progress_tracker.complete_task(self.task_id, result)
@@ -4056,7 +4059,6 @@ class DevisWorkflow:
             products_result = await self._process_products_retrieval(products)
             self._track_step_complete("lookup_products", f"✅ {len(products_result.get('products', []))} produit(s) trouvé(s)")
 
-            # Étape 3: Création du devis
             # Étape 3: Création du devis
             self._track_step_start("prepare_quote", "📋 Préparation du devis")
             quote_result = await self._create_quote_document(client_result, products_result)
