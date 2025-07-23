@@ -13,7 +13,7 @@ from services.mcp_connector import MCPConnector
 from services.progress_tracker import progress_tracker, QuoteTask
 from services.suggestion_engine import SuggestionEngine
 from services.client_validator import ClientValidator
-
+from services.mcp_connector import test_mcp_connections_with_progress
 from services.websocket_manager import websocket_manager
 from services.company_search_service import company_search_service
 # Configuration sécurisée pour Windows
