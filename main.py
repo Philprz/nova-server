@@ -3,6 +3,7 @@ import uvicorn
 import logging
 import os
 import sys
+import asyncio
 from datetime import datetime
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
@@ -12,6 +13,11 @@ from fastapi.staticfiles import StaticFiles
 from routes.routes_intelligent_assistant import router as assistant_router
 from routes.routes_clients import router as clients_router  
 from routes.routes_devis import router as devis_router
+from routes.routes_progress import router as progress_router
+from routes.routes_devis import router as quote_router
+from routes.routes_clients import router as client_router
+
+
 if sys.platform == "win32":
     os.environ["PYTHONIOENCODING"] = "utf-8"    
 # Configuration du logger pour éviter les erreurs d'emojis
@@ -46,6 +52,7 @@ async def lifespan(app: FastAPI):
         health_checker = HealthChecker()
         
         logger.info("Execution des tests de sante...")
+        await asyncio.sleep(2)  # <-- ⚠️ Ajout critique
         HEALTH_CHECK_RESULTS = await health_checker.run_full_health_check()
         
         # Affichage des résultats
@@ -84,6 +91,9 @@ async def lifespan(app: FastAPI):
         app.include_router(assistant_router, prefix="/api/assistant", tags=["IA Assistant"])
         app.include_router(clients_router, prefix="/api/clients", tags=["Clients"])
         app.include_router(devis_router, prefix="/api/devis", tags=["Devis"])
+        app.include_router(progress_router, prefix="/progress", tags=["Suivi tâches"])
+        app.include_router(quote_router, prefix="/api/assistant", tags=["Quote"])
+        app.include_router(client_router, prefix="/api/assistant", tags=["Client"])
         # Route pour servir l'interface IT Spirit
         @app.get('/interface/itspirit', response_class=HTMLResponse)
         async def itspirit_interface():
@@ -94,8 +104,7 @@ async def lifespan(app: FastAPI):
             except FileNotFoundError:
                 raise HTTPException(status_code=404, detail="Interface IT Spirit non trouvée")
         
-        logger.info("Modules charges: 3/3")
-        logger.info("Modules charges: 3/3")
+        logger.info("Modules charges: 6/6")
         # Routes principales déjà incluses directement
         logger.info("Routes principales configurées")                
         # 3. FINALISATION DU DÉMARRAGE
