@@ -190,12 +190,18 @@ class QuoteTask:
         logger.error(f"Étape échouée: {step_id} - {error}")
         return True
     
-    def update_step_progress(self, step_id: str, progress_percent: int, message: str = "") -> bool:
-        """Met à jour la progression d'une étape"""
+    def update_step_progress(self, step_id: str, progress: int, message: str = "") -> bool:
+        """Met à jour la progression d'une étape avec notification"""
         if step_id not in self.steps:
+            logger.warning(f"Étape inconnue pour mise à jour: {step_id}")
             return False
             
-        self.steps[step_id].update_progress(progress_percent, message)
+        self.steps[step_id].update_progress(progress, message)
+        self.current_step = step_id
+        
+        # Log pour debugging
+        logger.debug(f"📊 Progression {step_id}: {progress}% - {message}")
+        
         return True
     
     def complete_task(self, result: Dict[str, Any]):

@@ -96,7 +96,28 @@ async def get_task_detailed_progress(task_id: str):
     except Exception as e:
         logger.error(f"Erreur récupération progression détaillée {task_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
+@router.get("/quote_status/{task_id}")
+async def get_quote_status(task_id: str, detailed: bool = False):
+    """
+    Route spécifique pour l'interface NOVA - Compatible avec l'ancien système
+    """
+    try:
+        task = progress_tracker.get_task(task_id)
+        if not task:
+            # Chercher dans l'historique
+            for completed_task in progress_tracker.completed_tasks:
+                if completed_task.get("task_id") == task_id:
+                    return completed_task
+            raise HTTPException(status_code=404, detail=f"Tâche {task_id} non trouvée")
+        
+        if detailed:
+            return task.get_detailed_progress()
+        else:
+            return task.get_overall_progress()
+        
+    except Exception as e:
+        logger.error(f"Erreur récupération quote_status {task_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 @router.get("/tasks/active")
 async def get_active_tasks():
     """
