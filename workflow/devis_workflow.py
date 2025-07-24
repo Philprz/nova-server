@@ -137,9 +137,29 @@ class DevisWorkflow:
             self.current_task.start_step(step_id, message)
     
     def _track_step_progress(self, step_id: str, progress: int, message: str = ""):
-        """Met à jour la progression d'une étape"""
+        """Track et notifie la progression avec WebSocket"""
         if self.current_task:
-            self.current_task.update_step_progress(step_id, progress, message)
+            if progress == 0:
+                self.current_task.start_step(step_id, message)
+            elif progress == 100:
+                self.current_task.complete_step(step_id, message)
+            else:
+                self.current_task.update_step_progress(step_id, progress, message)
+            
+            # Notification WebSocket si disponible
+            try:
+                from services.websocket_manager import websocket_manager
+                asyncio.create_task(websocket_manager.broadcast_to_task(
+                    self.current_task.task_id,
+                    {
+                        "type": "progress_update",
+                        "step_id": step_id,
+                        "progress": progress,
+                        "message": message
+                    }
+                ))
+            except Exception:
+                pass  # WebSocket optionnel
     
     def _track_step_complete(self, step_id: str, message: str = ""):
         """Termine une étape avec succès"""
@@ -4472,114 +4492,138 @@ class DevisWorkflow:
         Basée sur l'exemple "rondot" des logs
         """
         try:
-            import re
-            import time
-            from datetime import datetime
-
-            logger.info(f"🚀 Début création automatique client: {client_name}")
-
-            # 1. Génération CardCode unique (éviter les doublons)
-            clean_name = re.sub(r'[^a-zA-Z0-9]', '', client_name)[:6].upper()
-            timestamp = str(int(time.time()))[-4:]
-            card_code = f"C{clean_name}{timestamp}"
-
-            # 2. Données client pour SAP
-            sap_client_data = {
-                "CardCode": card_code,
-                "CardName": client_name.title(),  # "rondot" -> "Rondot"
-                "CardType": "cCustomer",
-                "GroupCode": 100,  # Groupe client par défaut
-                "Currency": "EUR",
-                "Valid": "tYES",
-                "Frozen": "tNO",
-                "Notes": f"Client créé automatiquement par NOVA le {datetime.now().strftime('%d/%m/%Y')}"
-            }
-
-            logger.info(f"📝 Données SAP préparées: {card_code} - {client_name.title()}")
-
-            # 3. Création dans SAP d'abord
-            self._track_step_progress("search_client", 30, f"Création client SAP {card_code}...")
+            # Vérifier si déjà en cours de création
+            creation_key = f"creating_client_{client_name.lower().strip()}"
+            if hasattr(self, '_creation_locks') and creation_key in self._creation_locks:
+                logger.warning(f"⚠️ Création client {client_name} déjà en cours")
+                return {"created": False, "error": "Création déjà en cours"}
             
-            sap_result = await self.mcp_connector.call_mcp(
-                "sap_mcp",
-                "sap_create_customer_complete",
-                {"customer_data": sap_client_data}
-            )
+            # Verrouiller la création
+            if not hasattr(self, '_creation_locks'):
+                self._creation_locks = set()
+            self._creation_locks.add(creation_key)
+            
+            try:
+                logger.info(f"🚀 Début création automatique client: {client_name}")
+                import re
+                import time
+                from datetime import datetime
 
-            if not sap_result.get("success", False):
-                logger.error(f"❌ Échec création SAP: {sap_result.get('error')}")
+                logger.info(f"🚀 Début création automatique client: {client_name}")
+
+                # 1. Génération CardCode unique (éviter les doublons)
+                clean_name = re.sub(r'[^a-zA-Z0-9]', '', client_name)[:6].upper()
+                timestamp = str(int(time.time()))[-4:]
+                card_code = f"C{clean_name}{timestamp}"
+
+                # 2. Données client pour SAP
+                sap_client_data = {
+                    "CardCode": card_code,
+                    "CardName": client_name.title(),  # "rondot" -> "Rondot"
+                    "CardType": "cCustomer",
+                    "GroupCode": 100,  # Groupe client par défaut
+                    "Currency": "EUR",
+                    "Valid": "tYES",
+                    "Frozen": "tNO",
+                    "Notes": f"Client créé automatiquement par NOVA le {datetime.now().strftime('%d/%m/%Y')}"
+                }
+
+                logger.info(f"📝 Données SAP préparées: {card_code} - {client_name.title()}")
+
+                # 3. Création dans SAP d'abord
+                self._track_step_progress("search_client", 30, f"Création client SAP {card_code}...")
+                
+                sap_result = await self.mcp_connector.call_mcp(
+                    "sap_mcp",
+                    "sap_create_customer_complete",
+                    {"customer_data": sap_client_data}
+                )
+
+                if not sap_result.get("success", False):
+                    logger.error(f"❌ Échec création SAP: {sap_result.get('error')}")
+                    return {
+                        "created": False,
+                        "error": f"Erreur SAP: {sap_result.get('error', 'Erreur inconnue')}"
+                    }
+
+                logger.info(f"✅ Client SAP créé: {card_code}")
+
+                # 4. Création dans Salesforce ensuite
+                self._track_step_progress("search_client", 60, f"Création client Salesforce...")
+                
+                sf_client_data = {
+                    "Name": client_name.title(),
+                    "AccountNumber": card_code,
+                    "Type": "Customer",
+                    "Industry": "Technology",
+                    "BillingCountry": "France",
+                    "Description": f"Client créé automatiquement depuis SAP ({card_code})"
+                }
+
+                sf_result = await self.mcp_connector.call_mcp(
+                    "salesforce_mcp",
+                    "salesforce_create_record",
+                    {
+                        "sobject": "Account",
+                        "data": sf_client_data
+                    }
+                )
+
+                if sf_result.get("success"):
+                    logger.info(f"✅ Client Salesforce créé: {sf_result.get('id')}")
+                    
+                    # Construire les données client pour le workflow
+                    client_data = {
+                        "Id": sf_result.get("id"),
+                        "Name": client_name.title(),
+                        "AccountNumber": card_code,
+                        "Type": "Customer"
+                    }
+
+                    return {
+                        "created": True,
+                        "client_data": client_data,
+                        "sap_card_code": card_code,
+                        "salesforce_id": sf_result.get("id"),
+                        "message": f"Client '{client_name}' créé avec succès (SAP: {card_code}, SF: {sf_result.get('id')[:8]}...)"
+                    }
+                else:
+                    logger.warning(f"⚠️ Client SAP créé mais échec Salesforce: {sf_result.get('error')}")
+                    
+                    # Retourner quand même le client SAP
+                    client_data = {
+                        "Id": f"SAP_{card_code}",  # ID temporaire
+                        "Name": client_name.title(),
+                        "AccountNumber": card_code,
+                        "Type": "Customer"
+                    }
+
+                    return {
+                        "created": True,
+                        "client_data": client_data,
+                        "sap_card_code": card_code,
+                        "salesforce_error": sf_result.get("error"),
+                        "message": f"Client '{client_name}' créé dans SAP uniquement (CardCode: {card_code})"
+                    }
+            except Exception as e:
+                logger.exception(f"❌ Exception lors de la création automatique du client: {e}")
                 return {
                     "created": False,
-                    "error": f"Erreur SAP: {sap_result.get('error', 'Erreur inconnue')}"
+                    "error": f"Exception: {str(e)}"
                 }
-
-            logger.info(f"✅ Client SAP créé: {card_code}")
-
-            # 4. Création dans Salesforce ensuite
-            self._track_step_progress("search_client", 60, f"Création client Salesforce...")
-            
-            sf_client_data = {
-                "Name": client_name.title(),
-                "AccountNumber": card_code,
-                "Type": "Customer",
-                "Industry": "Technology",
-                "BillingCountry": "France",
-                "Description": f"Client créé automatiquement depuis SAP ({card_code})"
-            }
-
-            sf_result = await self.mcp_connector.call_mcp(
-                "salesforce_mcp",
-                "salesforce_create_record",
-                {
-                    "sobject": "Account",
-                    "data": sf_client_data
-                }
-            )
-
-            if sf_result.get("success"):
-                logger.info(f"✅ Client Salesforce créé: {sf_result.get('id')}")
-                
-                # Construire les données client pour le workflow
-                client_data = {
-                    "Id": sf_result.get("id"),
-                    "Name": client_name.title(),
-                    "AccountNumber": card_code,
-                    "Type": "Customer"
-                }
-
-                return {
-                    "created": True,
-                    "client_data": client_data,
-                    "sap_card_code": card_code,
-                    "salesforce_id": sf_result.get("id"),
-                    "message": f"Client '{client_name}' créé avec succès (SAP: {card_code}, SF: {sf_result.get('id')[:8]}...)"
-                }
-            else:
-                logger.warning(f"⚠️ Client SAP créé mais échec Salesforce: {sf_result.get('error')}")
-                
-                # Retourner quand même le client SAP
-                client_data = {
-                    "Id": f"SAP_{card_code}",  # ID temporaire
-                    "Name": client_name.title(),
-                    "AccountNumber": card_code,
-                    "Type": "Customer"
-                }
-
-                return {
-                    "created": True,
-                    "client_data": client_data,
-                    "sap_card_code": card_code,
-                    "salesforce_error": sf_result.get("error"),
-                    "message": f"Client '{client_name}' créé dans SAP uniquement (CardCode: {card_code})"
-                }
+            finally:
+                # Libérer le verrou
+                if hasattr(self, '_creation_locks') and creation_key in self._creation_locks:
+                    self._creation_locks.remove(creation_key)
 
         except Exception as e:
-            logger.exception(f"❌ Exception création automatique client: {str(e)}")
+            logger.exception(f"❌ Exception création automatique client (global): {str(e)}")
             return {
                 "created": False,
-                "error": f"Exception: {str(e)}"
+                "error": f"Exception globale: {str(e)}"
             }
-    
+
+
     async def _process_client_validation(self, client_name: str) -> Dict[str, Any]:
         """
         Validation client avec recherche Salesforce et gestion d'erreurs
