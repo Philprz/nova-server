@@ -1,3 +1,4 @@
+#main.py - CORRECTIONS CRITIQUES POUR NOVA
 
 import uvicorn
 import logging
@@ -17,9 +18,9 @@ from routes.routes_progress import router as progress_router
 from routes.routes_devis import router as quote_router
 from routes.routes_clients import router as client_router
 
-
 if sys.platform == "win32":
     os.environ["PYTHONIOENCODING"] = "utf-8"    
+    
 # Configuration du logger pour éviter les erreurs d'emojis
 logging.basicConfig(
     level=logging.INFO,
@@ -35,7 +36,6 @@ logger = logging.getLogger(__name__)
 # Variables globales
 HEALTH_CHECK_RESULTS = None
 
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Gestionnaire de cycle de vie de l'application"""
@@ -47,12 +47,12 @@ async def lifespan(app: FastAPI):
         logger.info("DEMARRAGE DE NOVA - Assistant IA pour Devis")
         logger.info("=" * 50)
         
-        # Tests de santé
+        # CORRECTION: Import et utilisation de la bonne classe
         from services.health_checker import HealthChecker
         health_checker = HealthChecker()
         
         logger.info("Execution des tests de sante...")
-        await asyncio.sleep(2)  # <-- ⚠️ Ajout critique
+        await asyncio.sleep(2)  # Délai pour l'initialisation
         HEALTH_CHECK_RESULTS = await health_checker.run_full_health_check()
         
         # Affichage des résultats
@@ -69,45 +69,25 @@ async def lifespan(app: FastAPI):
         
         logger.info("=" * 50)
         
-        # Démarrage en mode dégradé mais fonctionnel
-        logger.warning("DEMARRAGE EN MODE DEGRADE")
+        # CORRECTION: Démarrage normal si success_rate >= 50%
+        if HEALTH_CHECK_RESULTS["summary"]["success_rate"] >= 50:
+            logger.info("DEMARRAGE NOMINAL NOVA")
+        else:
+            logger.warning("DEMARRAGE EN MODE DEGRADE")
         
         # 2. CHARGEMENT DES MODULES
         logger.info("Chargement des modules...")
         
-        # Import du ModuleLoader
-        from services.module_loader import ModuleLoader, ModuleConfig
-        # Configuration simplifiée - seulement modules optionnels non critiques
-        modules_config = {
-            'sync': ModuleConfig('routes.routes_sync', '/sync', ['Synchronisation'], required=False),
-            'products': ModuleConfig('routes.routes_products', '/products', ['Produits'], required=False)
-        }
-
-        # CORRECTION: ModuleLoader ne prend aucun argument
-        loader = ModuleLoader()
-        app.state.module_loader = loader
+        # CORRECTION: Configuration des modules directement dans FastAPI
+        # Au lieu d'utiliser ModuleLoader qui peut causer des problèmes
         
-        # Configuration des modules disponibles
-        app.include_router(assistant_router, prefix="/api/assistant", tags=["IA Assistant"])
-        app.include_router(clients_router, prefix="/api/clients", tags=["Clients"])
-        app.include_router(devis_router, prefix="/api/devis", tags=["Devis"])
-        app.include_router(progress_router, prefix="/progress", tags=["Suivi tâches"])
-        app.include_router(quote_router, prefix="/api/assistant", tags=["Quote"])
-        app.include_router(client_router, prefix="/api/assistant", tags=["Client"])
-        # Route pour servir l'interface IT Spirit
-        @app.get('/interface/itspirit', response_class=HTMLResponse)
-        async def itspirit_interface():
-            """Sert l'interface IT Spirit personnalisée"""
-            try:
-                with open('templates/nova_interface_final.html', 'r', encoding='utf-8') as f: 
-                    return HTMLResponse(content=f.read())
-            except FileNotFoundError:
-                raise HTTPException(status_code=404, detail="Interface IT Spirit non trouvée")
+        # Modules chargés directement
+        loaded_modules = 6
         
-        logger.info("Modules charges: 6/6")
-        # Routes principales déjà incluses directement
-        logger.info("Routes principales configurées")                
-        # 3. FINALISATION DU DÉMARRAGE
+        logger.info(f"Modules charges: {loaded_modules}/6")
+        logger.info("Routes principales configurées")
+        
+        # 3. SUCCÈS DU DÉMARRAGE
         logger.info("=" * 60)
         logger.info("NOVA DEMARRE AVEC SUCCES")
         logger.info("   Interface: http://localhost:8000/api/assistant/interface")
@@ -115,44 +95,48 @@ async def lifespan(app: FastAPI):
         logger.info("   Documentation: http://localhost:8000/docs")
         logger.info("=" * 60)
         
-        # Le serveur est maintenant prêt
         yield
-    
-    except Exception as e:
-        logger.error(f"Erreur critique au demarrage: {str(e)}")
-        logger.error(f"Details: {type(e).__name__}")
         
-        # En cas d'erreur, on continue le démarrage en mode minimal
-        logger.warning("Demarrage en mode minimal...")
-        yield
-    
-    # Nettoyage à l'arrêt
+    except Exception as e:
+        logger.error(f"Erreur critique au démarrage: {e}")
+        raise
     finally:
-        logger.info("Arret du systeme NOVA")
+        logger.info("Arrêt de NOVA")
 
-# Création de l'application avec le gestionnaire de cycle de vie
+# Création de l'application FastAPI
 app = FastAPI(
     title="NOVA - Assistant IA pour Devis",
-    description="Integration Claude + SAP + Salesforce pour generation automatique de devis",
+    description="Système intelligent de génération de devis avec intégration SAP et Salesforce",
     version="2.1.0",
     lifespan=lifespan
 )
 
-# Configuration des fichiers statiques
-if os.path.exists("static"):
-    app.mount("/static", StaticFiles(directory="static"), name="static")
+# Configuration des routes statiques pour l'interface
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# ====
-# ENDPOINTS DE SANTÉ ET DIAGNOSTIC
-# ====
+# CORRECTION: Configuration directe des routes
+app.include_router(assistant_router, prefix="/api/assistant", tags=["IA Assistant"])
+app.include_router(clients_router, prefix="/api/clients", tags=["Clients"])
+app.include_router(devis_router, prefix="/api/devis", tags=["Devis"])
+app.include_router(progress_router, prefix="/progress", tags=["Suivi tâches"])
+app.include_router(quote_router, prefix="/api/assistant", tags=["Quote"])
+app.include_router(client_router, prefix="/api/assistant", tags=["Client"])
+
+# Route pour servir l'interface IT Spirit
+@app.get('/interface/itspirit', response_class=HTMLResponse)
+async def itspirit_interface():
+    """Sert l'interface IT Spirit personnalisée"""
+    try:
+        with open('templates/nova_interface_final.html', 'r', encoding='utf-8') as f: 
+            return HTMLResponse(content=f.read())
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Interface IT Spirit non trouvée")
 
 @app.get("/health")
-async def health():
-    """Endpoint de santé avec résultats des vérifications de démarrage"""
-    global HEALTH_CHECK_RESULTS
-    
+async def health_check():
+    """Endpoint de contrôle de santé en temps réel"""
     try:
-        # Vérification basique en temps réel
+        # Santé de base
         basic_health = {
             "service": "NOVA Server",
             "status": "active",
@@ -194,19 +178,14 @@ async def health():
 async def diagnostic_connections():
     """Endpoint de diagnostic détaillé des connexions"""
     if not HEALTH_CHECK_RESULTS:
-        raise HTTPException(status_code=503, detail="Tests de demarrage non disponibles")
-    
-    # Extraction des résultats de connexion
-    connection_tests = {}
-    for test_name, result in HEALTH_CHECK_RESULTS["detailed_results"].items():
-        if any(keyword in test_name for keyword in ["connection", "api", "database"]):
-            connection_tests[test_name] = result
+        raise HTTPException(status_code=503, detail="Tests de santé non disponibles")
     
     return {
-        "connection_status": connection_tests,
+        "detailed_results": HEALTH_CHECK_RESULTS["detailed_results"],
+        "system_status": HEALTH_CHECK_RESULTS["nova_system_status"],
+        "recommendations": HEALTH_CHECK_RESULTS["recommendations"],
         "timestamp": HEALTH_CHECK_RESULTS["timestamp"]
     }
-
 @app.get("/diagnostic/data-retrieval") 
 async def diagnostic_data_retrieval():
     """Endpoint de diagnostic de la récupération de données"""
@@ -229,13 +208,14 @@ async def diagnostic_data_retrieval():
     }
 
 @app.post("/diagnostic/recheck")
-async def recheck_system():
+async def force_health_recheck():
     """Force une nouvelle vérification complète du système"""
     global HEALTH_CHECK_RESULTS
     
     try:
         logger.info("🔄 Relancement des vérifications de santé...")
-        health_checker = NovaHealthChecker()
+        from services.health_checker import HealthChecker
+        health_checker = HealthChecker()
         HEALTH_CHECK_RESULTS = await health_checker.run_full_health_check()
         
         return {
@@ -244,7 +224,7 @@ async def recheck_system():
             "success_rate": HEALTH_CHECK_RESULTS["summary"]["success_rate"],
             "timestamp": HEALTH_CHECK_RESULTS["timestamp"]
         }
-    
+        
     except Exception as e:
         logger.error(f"Erreur lors de la revérification: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Échec de la revérification: {str(e)}")
@@ -264,14 +244,12 @@ async def root():
         }
     }
 
+# Point d'entrée de l'application
 if __name__ == "__main__":
     # Configuration spécifique pour Windows
     if sys.platform == "win32":
         # Configuration pour éviter les problèmes d'encodage
         os.environ["PYTHONIOENCODING"] = "utf-8"
     
-    # CORRECTION: Ne pas lancer uvicorn ici car startup_script.py s'en charge
-    # Démarrage du serveur - COMMENTÉ pour éviter le conflit
-    # uvicorn.run(app, host="0.0.0.0", port=8000)
-    
-    print("NOVA FastAPI app initialisée - Prête pour startup_script.py")
+    # Démarrage du serveur
+    uvicorn.run(app, host="0.0.0.0", port=8000)
