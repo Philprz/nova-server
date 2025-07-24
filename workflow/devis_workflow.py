@@ -2501,25 +2501,31 @@ class DevisWorkflow:
         if not products:
             logger.warning("Aucun produit spécifié")
             return []
-
+            
         logger.info(f"🔍 RECHERCHE PRODUITS (sans calcul prix): {products}")
         enriched_products = []
 
         for product in products:
             try:
-                # Récupérer les données techniques SAP
-                product_details = await MCPConnector.call_sap_mcp("sap_get_product_details", {
-                    "item_code": product["code"]
-                })
-
-                logger.info(f"🏭 DONNÉES SAP RÉCUPÉRÉES: {product['code']}")
+                product_code = product.get("code", "")
+                product_name = product.get("name", "")
                 
-                if "error" in product_details:
-                    logger.error(f"Erreur produit {product['code']}: {product_details['error']}")
+                # PROBLÈME ICI : Si product_code est vide, on ne fait rien
+                if product_code:
+                    # Recherche par code exact (existant)
+                    product_details = await MCPConnector.call_sap_mcp("sap_get_product_details", {
+                        "item_code": product_code
+                    })
+                elif product_name:
+                    # NOUVELLE LOGIQUE : Recherche par nom
+                    logger.info(f"🔍 Produit sans code, recherche par nom: {product_name}")
+                    product_details = await self._search_product_by_name_only(product_name)
+                else:
+                    logger.error(f"❌ Produit sans code ni nom: {product}")
                     enriched_products.append({
-                        "code": product["code"],
-                        "quantity": product["quantity"],
-                        "error": product_details["error"]
+                        "code": "",
+                        "quantity": product.get("quantity", 1),
+                        "error": "Produit sans code ni nom"
                     })
                     continue
                 
@@ -2555,8 +2561,98 @@ class DevisWorkflow:
                     "error": str(e)
                 })
         
-        return enriched_products
-
+        return enriched_product
+    async def _find_similar_products(self, product_name: str) -> List[Dict[str, Any]]:
+        """
+        Trouve des produits similaires basés sur des mots-clés
+        """
+        if not product_name:
+            return []
+            
+        try:
+            # Extraire des mots-clés intelligents
+            keywords = self._extract_product_keywords(product_name)
+            similar_products = []
+            
+            for keyword in keywords[:2]:  # Limiter à 2 mots-clés
+                search_result = await self.mcp_connector.call_mcp(
+                    "sap_mcp",
+                    "sap_search",
+                    {
+                        "search_term": keyword,
+                        "search_fields": ["ItemName", "U_Description"],
+                        "limit": 3
+                    }
+                )
+                
+                if search_result.get("success") and search_result.get("results"):
+                    for product in search_result["results"]:
+                        if product not in similar_products:  # Éviter les doublons
+                            similar_products.append({
+                                "code": product.get("ItemCode"),
+                                "name": product.get("ItemName"),
+                                "price": float(product.get("AvgPrice", 0)),
+                                "description": product.get("U_Description", ""),
+                                "matched_keyword": keyword
+                            })
+            
+            logger.info(f"🔍 {len(similar_products)} alternatives trouvées pour '{product_name}'")
+            return similar_products[:5]  # Limiter à 5 alternatives max
+            
+        except Exception as e:
+            logger.error(f"Erreur recherche alternatives: {str(e)}")
+            return []
+    async def _search_product_by_name_only(self, product_name: str) -> Dict[str, Any]:
+        """
+        Recherche un produit SAP par nom uniquement (quand pas de code)
+        """
+        try:
+            logger.info(f"🔍 Recherche SAP par nom: {product_name}")
+            
+            # Utiliser la méthode MCP de recherche générale
+            search_result = await self.mcp_connector.call_mcp(
+                "sap_mcp",
+                "sap_search",
+                {
+                    "search_term": product_name,
+                    "search_fields": ["ItemName", "U_Description"],
+                    "limit": 5
+                }
+            )
+            
+            if search_result.get("success") and search_result.get("results"):
+                # Prendre le premier résultat comme meilleure correspondance
+                best_match = search_result["results"][0]
+                
+                logger.info(f"✅ Produit trouvé par nom: {best_match.get('ItemName')} ({best_match.get('ItemCode')})")
+                
+                # Retourner au format attendu par _get_products_info
+                return {
+                    "ItemCode": best_match.get("ItemCode"),
+                    "ItemName": best_match.get("ItemName"),
+                    "OnHand": best_match.get("OnHand", 0),
+                    "AvgPrice": best_match.get("AvgPrice", 0),
+                    "U_Description": best_match.get("U_Description", ""),
+                    "found_by": "name_search"
+                }
+            elif search_result.get("success"):
+                # Recherche réussie mais aucun résultat
+                logger.warning(f"❌ Aucun produit SAP trouvé pour: {product_name}")
+                return {
+                    "error": f"Aucun produit trouvé pour '{product_name}'"
+                }
+            else:
+                # Erreur dans la recherche MCP
+                logger.error(f"❌ Erreur recherche MCP: {search_result.get('error')}")
+                return {
+                    "error": f"Erreur recherche SAP: {search_result.get('error')}"
+                }
+                
+        except Exception as e:
+            logger.exception(f"❌ Exception recherche par nom: {str(e)}")
+            return {
+                "error": f"Erreur système: {str(e)}"
+            }
     def _extract_stock_from_sap_data(self, product_details: Dict) -> float:
         """Extrait le stock total depuis les données SAP"""
         total_stock = 0.0
@@ -5029,7 +5125,70 @@ class EnhancedDevisWorkflow(DevisWorkflow):
             "client_result": client_result,
             "product_results": product_results
         }
-    
+    async def _search_company_info(self, company_name: str) -> Dict[str, Any]:
+        """
+        Recherche des informations enrichies sur une entreprise
+        """
+        logger.info(f"🔍 Recherche informations entreprise: {company_name}")
+        
+        try:
+            # Utiliser le service d'enrichissement existant
+            from workflow.client_creation_workflow import client_creation_workflow
+            
+            # Rechercher les informations via INSEE/Pappers
+            search_result = await client_creation_workflow.search_company_by_name(company_name)
+            
+            if search_result.get("success") and search_result.get("companies"):
+                # Prendre la première entreprise trouvée
+                company_data = search_result["companies"][0]
+                
+                return {
+                    "found": True,
+                    "company_name": company_data.get("company_name", company_name),
+                    "siret": company_data.get("siret", "Non disponible"),
+                    "siren": company_data.get("siren", "Non disponible"),
+                    "address": {
+                        "street": company_data.get("address", ""),
+                        "postal_code": company_data.get("postal_code", ""),
+                        "city": company_data.get("city", "")
+                    },
+                    "activity": {
+                        "code": company_data.get("activity_code", ""),
+                        "label": company_data.get("activity_label", "")
+                    },
+                    "status": company_data.get("status", "Inconnu"),
+                    "creation_date": company_data.get("creation_date", ""),
+                    "source": company_data.get("source", "recherche_automatique")
+                }
+            else:
+                # Données minimales si pas d'enrichissement possible
+                return {
+                    "found": False,
+                    "company_name": company_name,
+                    "siret": "À renseigner",
+                    "siren": "À renseigner", 
+                    "address": {
+                        "street": "À renseigner",
+                        "postal_code": "À renseigner",
+                        "city": "À renseigner"
+                    },
+                    "activity": {
+                        "code": "À renseigner",
+                        "label": "À renseigner"
+                    },
+                    "status": "À vérifier",
+                    "creation_date": "",
+                    "source": "creation_manuelle"
+                }
+                
+        except Exception as e:
+            logger.error(f"Erreur enrichissement données client: {str(e)}")
+            return {
+                "found": False,
+                "company_name": company_name,
+                "siret": "Erreur récupération",
+                "error": str(e)
+            }
     async def _search_client_with_notifications(self, client_name: str):
         """Recherche client avec notifications"""
         
@@ -5072,7 +5231,189 @@ class EnhancedDevisWorkflow(DevisWorkflow):
             }
         
         return {"found": False, "message": f"Client '{client_name}' introuvable"}
-    
+    async def continue_workflow_with_user_input(self, user_input: Dict[str, Any], interaction_type: str = None) -> Dict[str, Any]:
+        """Gère la continuation du workflow après interaction utilisateur"""
+        
+        try:
+            logger.info(f"🔄 Continuation workflow - Type: {interaction_type}")
+            
+            context = self.context.copy()
+            
+            if interaction_type == "client_selection":
+                return await self._handle_client_selection(user_input, context)
+                
+            elif interaction_type == "client_creation_confirmation":
+                return await self._handle_client_creation_confirmation(user_input, context)
+        except Exception as e:
+            logger.error(f"❌ Erreur lors de la continuation du workflow: {str(e)}")
+            return {"success": False, "error": str(e)}  
+        
+    async def _handle_client_creation_confirmation(self, user_input: Dict[str, Any], context: Dict) -> Dict[str, Any]:
+        """Gère la confirmation de création d'un nouveau client"""
+        
+        action = user_input.get("action")
+        client_name = user_input.get("client_name") or context.get("client_name")
+        
+        if action == "confirm_create":
+            # L'utilisateur confirme la création
+            logger.info(f"✅ Utilisateur confirme création client: {client_name}")
+            
+            # Récupérer les données enrichies du contexte
+            enrichment_data = context.get("enrichment_data", {})
+            
+            # Procéder à la création avec les données validées
+            creation_result = await self._create_validated_client(client_name, enrichment_data)
+            
+            if creation_result.get("created"):
+                # Client créé avec succès - continuer le workflow
+                self.context["client_info"] = {
+                    "data": creation_result["client_data"], 
+                    "found": True
+                }
+                
+                # Continuer avec la validation des produits
+                original_products = context.get("original_products", [])
+                return await self._continue_product_validation(original_products)
+            else:
+                return {
+                    "success": False,
+                    "message": f"❌ Erreur lors de la création du client: {creation_result.get('error')}",
+                    "type": "error"
+                }
+        
+        elif action == "cancel_create":
+            # L'utilisateur annule la création
+            return {
+                "success": False,
+                "message": "❌ Création du client annulée par l'utilisateur",
+                "type": "cancelled"
+            }
+        
+        elif action == "modify_search":
+            # L'utilisateur veut modifier la recherche
+            return {
+                "success": False,
+                "requires_user_input": True,
+                "message": "🔍 Veuillez préciser le nom exact du client:",
+                "input_type": "text",
+                "placeholder": "Nom exact de l'entreprise"
+            }
+        
+        else:
+            return {
+                "success": False,
+                "message": "❌ Action non reconnue",
+                "type": "error"
+            }
+    async def _create_validated_client(self, client_name: str, enrichment_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Crée un client après validation utilisateur avec les données enrichies
+        """
+        try:
+            logger.info(f"🚀 Création client validé: {client_name}")
+            
+            # Utiliser les données enrichies pour la création
+            import re
+            import time
+            from datetime import datetime
+            
+            # Génération CardCode unique
+            clean_name = re.sub(r'[^a-zA-Z0-9]', '', client_name)[:6].upper()
+            timestamp = str(int(time.time()))[-4:]
+            card_code = f"C{clean_name}{timestamp}"
+            
+            # Préparer les données pour SAP avec informations enrichies
+            sap_client_data = {
+                "CardCode": card_code,
+                "CardName": enrichment_data.get("company_name", client_name.title()),
+                "CardType": "cCustomer",
+                "GroupCode": 100,
+                "Currency": "EUR",
+                "Valid": "tYES",
+                "Frozen": "tNO",
+                "FederalTaxID": enrichment_data.get("siret", ""),
+                "Notes": f"Client créé avec validation utilisateur le {datetime.now().strftime('%d/%m/%Y')}"
+            }
+            
+            # Ajouter l'adresse si disponible
+            address_data = enrichment_data.get("address", {})
+            if address_data.get("street"):
+                sap_client_data.update({
+                    "MailAddress": address_data.get("street", ""),
+                    "MailZipCode": address_data.get("postal_code", ""),
+                    "MailCity": address_data.get("city", "")
+                })
+            
+            logger.info(f"📝 Données SAP validées préparées: {card_code}")
+            
+            # Création dans SAP
+            sap_result = await self.mcp_connector.call_mcp(
+                "sap_mcp",
+                "sap_create_customer_complete",
+                {"customer_data": sap_client_data}
+            )
+            
+            if not sap_result.get("success", False):
+                logger.error(f"❌ Échec création SAP: {sap_result.get('error')}")
+                return {
+                    "created": False,
+                    "error": f"Erreur SAP: {sap_result.get('error', 'Erreur inconnue')}"
+                }
+            
+            logger.info(f"✅ Client SAP créé: {card_code}")
+            
+            # Préparer les données pour Salesforce
+            sf_client_data = {
+                "Name": enrichment_data.get("company_name", client_name.title()),
+                "AccountNumber": card_code,
+                "Type": "Customer",
+                "Industry": enrichment_data.get("activity", {}).get("label", ""),
+                "BillingStreet": address_data.get("street", ""),
+                "BillingPostalCode": address_data.get("postal_code", ""),
+                "BillingCity": address_data.get("city", ""),
+                "Description": f"Client créé avec validation - SIRET: {enrichment_data.get('siret', 'N/A')}"
+            }
+            
+            # Création dans Salesforce
+            sf_result = await self.mcp_connector.call_mcp(
+                "salesforce_mcp",
+                "salesforce_create_record",
+                {
+                    "sobject_type": "Account",
+                    "data": sf_client_data
+                }
+            )
+            
+            if not sf_result.get("success", False):
+                logger.error(f"❌ Échec création Salesforce: {sf_result.get('error')}")
+                return {
+                    "created": False,
+                    "error": f"Erreur Salesforce: {sf_result.get('error', 'Erreur inconnue')}"
+                }
+            
+            sf_client_id = sf_result.get("data", {}).get("Id")
+            logger.info(f"✅ Client Salesforce créé: {sf_client_id}")
+            
+            return {
+                "created": True,
+                "client_data": {
+                    "Id": sf_client_id,
+                    "Name": enrichment_data.get("company_name", client_name.title()),
+                    "AccountNumber": card_code,
+                    "SIRET": enrichment_data.get("siret", ""),
+                    "BillingStreet": address_data.get("street", ""),
+                    "BillingCity": address_data.get("city", "")
+                },
+                "sap_card_code": card_code,
+                "creation_method": "validated_by_user"
+            }
+            
+        except Exception as e:
+            logger.exception(f"❌ Erreur création client validé: {str(e)}")
+            return {
+                "created": False,
+                "error": f"Erreur système: {str(e)}"
+            }
     async def _search_sap_product(self, product_code: str, product_name: str):
         """Déléguer à product_manager"""
         return await self.product_manager._search_sap_product(product_code, product_name)
