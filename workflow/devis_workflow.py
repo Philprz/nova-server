@@ -3285,18 +3285,39 @@ class DevisWorkflow:
                             "search_term": term
                         }
 
-            # 3. Créer un produit générique si rien trouvé
-            logger.warning(f"⚠️ Aucun produit trouvé pour '{product_name}' - Création générique")
+            # 3. Recherche intelligente avec mots-clés
+            logger.info(f"🔍 Recherche intelligente pour: {product_name}")
+            keywords = self._extract_product_keywords(product_name)
             
-            generic_product = self._create_generic_product(product_name)
+            for keyword in keywords[:2]:  # Tester 2 mots-clés max
+                keyword_result = await self.mcp_connector.call_mcp(
+                    "sap_mcp",
+                    "sap_search",
+                    {
+                        "search_term": keyword,
+                        "search_fields": ["ItemName", "U_Description"],
+                        "limit": 3
+                    }
+                )
+                
+                if keyword_result.get("success") and keyword_result.get("results"):
+                    best_match = keyword_result["results"][0]
+                    logger.info(f"✅ Produit trouvé via mot-clé '{keyword}': {best_match.get('ItemName')}")
+                    
+                    return {
+                        "found": True,
+                        "product": {
+                            "code": best_match.get("ItemCode"),
+                            "name": best_match.get("ItemName"),
+                            "price": float(best_match.get("AvgPrice", 0)),
+                            "stock": int(best_match.get("OnHand", 0)),
+                            "description": best_match.get("U_Description", "")
+                        },
+                        "search_method": "keyword_match",
+                        "matched_keyword": keyword
+                    }
             
-            return {
-                "found": False,
-                "product": generic_product,
-                "search_method": "generic",
-                "warning": "Produit non trouvé dans le catalogue SAP"
-            }
-
+            
         except Exception as e:
             logger.exception(f"❌ Erreur recherche produit: {str(e)}")
             return {
@@ -4063,9 +4084,9 @@ class DevisWorkflow:
             self._track_step_start("prepare_quote", "📋 Préparation du devis")
             quote_result = await self._create_quote_document(client_result, products_result)
             
-            # Vérification critique du résultat
-            if quote_result is None:
-                logger.error("❌ _create_quote_document a retourné None")
+            # Vérification critique et protection contre None
+            if quote_result is None or not isinstance(quote_result, dict):
+                logger.error("❌ _create_quote_document a retourné None ou invalide")
                 quote_result = {
                     "status": "error",
                     "quote_data": {
@@ -4074,7 +4095,8 @@ class DevisWorkflow:
                         "products": [],
                         "totals": {"total_amount": 0},
                         "currency": "EUR"
-                    }
+                    },
+                    "error": "Erreur création document devis"
                 }
             self._track_step_complete("prepare_quote", "✅ Devis préparé")
 
@@ -4093,12 +4115,12 @@ class DevisWorkflow:
                 "message": "✅ Devis généré avec succès !",
                 "task_id": self.task_id,
                 
-                # Données essentielles pour l'interface
-                "quote_id": quote_result.get("quote_data", {}).get("quote_id"),
-                "client": quote_result.get("quote_data", {}).get("client", {}),
-                "products": quote_result.get("quote_data", {}).get("products", []),
-                "total_amount": quote_result.get("quote_data", {}).get("totals", {}).get("total_amount", 0),
-                "currency": quote_result.get("quote_data", {}).get("currency", "EUR"),
+                # Protection contre les attributs manquants
+                "quote_id": quote_result.get("quote_data", {}).get("quote_id") if quote_result and isinstance(quote_result, dict) else f"FALLBACK_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                "client": quote_result.get("quote_data", {}).get("client", {}) if quote_result and isinstance(quote_result, dict) else {},
+                "products": quote_result.get("quote_data", {}).get("products", []) if quote_result and isinstance(quote_result, dict) else [],
+                "total_amount": quote_result.get("quote_data", {}).get("totals", {}).get("total_amount", 0) if quote_result and isinstance(quote_result, dict) else 0,
+                "currency": quote_result.get("quote_data", {}).get("currency", "EUR") if quote_result and isinstance(quote_result, dict) else "EUR",
                 
                 # Données complètes pour utilisation avancée
                 "quote_data": quote_result.get("quote_data", {}),
@@ -4464,6 +4486,21 @@ class DevisWorkflow:
             else:
                 # Client non trouvé
                 logger.warning(f"⚠️ Client '{client_name}' non trouvé dans Salesforce")
+                # 🆕 TENTATIVE DE CRÉATION AUTOMATIQUE
+                logger.info(f"🚀 Tentative de création automatique pour: {client_name}")
+                creation_result = await self._create_client_automatically(client_name)
+
+                if creation_result.get("created"):
+                    logger.info(f"✅ Client '{client_name}' créé automatiquement !")
+                    return {
+                        "found": True,
+                        "data": creation_result.get("client_data"),
+                        "source": "auto_created",
+                        "message": creation_result.get("message"),
+                        "auto_created": True
+                    }
+
+                logger.warning(f"⚠️ Création automatique échouée: {creation_result.get('error')}")
                 return {
                     "status": "not_found",
                     "data": None,
@@ -4544,7 +4581,33 @@ class DevisWorkflow:
         except Exception as e:
             logger.exception(f"Erreur création client: {str(e)}")
             return {"created": False, "error": str(e)}
-    
+    def _extract_product_keywords(self, product_name: str) -> List[str]:
+        """Extrait des mots-clés intelligents pour la recherche produit"""
+        product_lower = product_name.lower()
+        keywords = []
+        
+        # Dictionnaire de synonymes pour élargir la recherche
+        synonyms = {
+            "imprimante": ["printer", "imprimante", "laser", "jet"],
+            "ordinateur": ["computer", "pc", "desktop"],
+            "écran": ["monitor", "screen", "display"],
+            "clavier": ["keyboard", "clavier"],
+            "souris": ["mouse", "souris"]
+        }
+        
+        # Chercher des correspondances
+        for word, related in synonyms.items():
+            if word in product_lower:
+                keywords.extend(related)
+                break
+        
+        # Si pas de correspondance, utiliser le premier mot
+        if not keywords:
+            first_word = product_name.split()[0].lower()
+            if len(first_word) >= 3:
+                keywords.append(first_word)
+        
+        return keywords[:3]  # Limiter à 3 mots-clés
     async def _process_products_retrieval(self, products: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
         Récupération des produits avec progression avancée
