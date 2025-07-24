@@ -132,6 +132,7 @@ class DevisWorkflow:
     
     def _track_step_start(self, step_id: str, message: str = ""):
         """Démarre le tracking d'une étape"""
+        self._track_step_complete("extract_info", "✅ Informations extraites avec succès")
         if self.current_task:
             self.current_task.start_step(step_id, message)
     
@@ -1423,61 +1424,110 @@ class DevisWorkflow:
         }
 
     async def create_quote_with_confirmation(self, confirmed: bool = False) -> Dict[str, Any]:
-        """Crée le devis après confirmation de l'utilisateur
-        
+        """
+        Crée le devis après confirmation de l'utilisateur
+
         Args:
             confirmed: True si l'utilisateur a confirmé la création du devis
-            
+
         Returns:
             Réponse formatée avec les détails du devis créé
         """
         logger.info(f"Traitement de la confirmation utilisateur, confirmé={confirmed}")
-        
+
         if not confirmed:
             return {
                 "status": "cancelled",
                 "message": "Création du devis annulée"
             }
-            
+
         # Récupérer le contexte pour poursuivre le workflow
         client_info = self.context.get("client_info", {})
         products_info = self.context.get("products_info", [])
-        
+
         if not client_info or not products_info:
             logger.error("Contexte incomplet pour finaliser le devis")
             return {
                 "status": "error",
                 "message": "Données insuffisantes pour créer le devis"
             }
-        
+
+        # 🆕 ENRICHISSEMENT CLIENT
+        client_name = client_info.get("data", {}).get("Name", "")
+        if client_name and not client_info.get("enriched"):
+            logger.info("🔍 Enrichissement informations client avant création devis")
+            try:
+                company_info = await self._search_company_info(client_name)
+                if company_info.get("found"):
+                    client_info["enriched_data"] = company_info
+                    client_info["enriched"] = True
+                    self.context["client_info"] = client_info
+                    logger.info(f"✅ Client enrichi avec SIREN: {company_info.get('siren', 'N/A')}")
+            except Exception as e:
+                logger.warning(f"Enrichissement client échoué: {str(e)}")
+
+        # 🆕 RECHERCHE ALTERNATIVES PRODUITS
+        enhanced_products = []
+        for i, product in enumerate(products_info):
+            if product.get("error") or not product.get("found"):
+                product_name = product.get("original_name", product.get("name", ""))
+                if product_name:
+                    logger.info(f"🔍 Recherche alternatives pour produit: {product_name}")
+                    try:
+                        alternatives = await self._find_similar_products(product_name)
+                        if alternatives:
+                            return {
+                                "status": "user_interaction_required",
+                                "interaction_type": "product_selection",
+                                "message": f"Alternatives trouvées pour '{product_name}'",
+                                "product_index": i,
+                                "alternatives": alternatives,
+                                "context": {
+                                    "client_info": client_info,
+                                    "products_info": products_info,
+                                    "confirmed": confirmed
+                                }
+                            }
+                    except Exception as e:
+                        logger.warning(f"Recherche alternatives échouée: {str(e)}")
+            enhanced_products.append(product)
+
+        self.context["products_info"] = enhanced_products
+
         # ===== Poursuivre avec la création du devis =====
         logger.info("Confirmation approuvée, poursuite de la création du devis")
-        
         self._track_step_start("prepare_quote", "Création du devis après confirmation...")
-        
+
         # Créer le devis dans Salesforce et SAP
         quote_result = await self._create_quote_in_salesforce()
         self.context["quote_result"] = quote_result
-        
+
         if not quote_result.get("success"):
             self._track_step_fail("create_quote", quote_result.get("error", "Erreur inconnue"),
-                               "Impossible de créer le devis confirmé")
+                                "Impossible de créer le devis confirmé")
             return {
                 "status": "error",
                 "message": f"Erreur lors de la création du devis: {quote_result.get('error', 'Erreur inconnue')}"
             }
-            
+
         self._track_step_complete("prepare_quote", "Devis créé avec succès")
-        
-        # Construire la réponse finale
-        response = self._build_response()
-        
-        # Marquer la tâche comme terminée
+
+        # 🧾 Réponse enrichie
+        response = {
+            "status": "success",
+            "message": "Devis créé avec succès",
+            "quote_data": quote_result.get("quote_data", {}),
+            "client_enrichment": client_info.get("enriched_data"),
+            "alternatives_used": any(p.get("alternative_selected") for p in enhanced_products)
+        }
+
+        # 🔁 Finalisation (restaurée)
         if self.current_task and self.task_id:
             from services.progress_tracker import progress_tracker
             progress_tracker.complete_task(self.task_id, response)
-            
+
         return response
+
         
     async def _check_sap_client_by_name(self, client_name: str, salesforce_client: Dict[str, Any] = None) -> Dict[str, Any]:
         """Vérifie si le client existe dans SAP par son nom
