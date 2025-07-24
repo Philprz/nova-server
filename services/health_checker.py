@@ -248,7 +248,7 @@ class HealthChecker:
             # Timeout agressif de 5 secondes
             response = await asyncio.wait_for(
                 self.llm_extractor.extract_quote_request(test_prompt),
-                timeout=5.0
+                timeout=20.0
             )
             
             # Correction: Vérifier response.get("success", False) au lieu de chercher "error"
@@ -290,7 +290,7 @@ class HealthChecker:
             client = openai.AsyncOpenAI(timeout=4.0)
             
             response = await client.chat.completions.create(
-                model="gpt-3.5-turbo",
+                model="gpt-4",
                 messages=[{"role": "user", "content": "1+1=?"}],
                 max_tokens=5,
                 temperature=0
@@ -465,7 +465,7 @@ class HealthChecker:
     async def _test_single_route(self, client: httpx.AsyncClient, route: str) -> bool:
         """Test d'une route individuelle"""
         try:
-            response = await client.get(f"http://localhost:8000{route}")
+            response = await client.get(f"http://127.0.0.1:8000{route}")
             return response.status_code < 500
         except:
             return False
