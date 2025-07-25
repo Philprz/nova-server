@@ -320,7 +320,148 @@ class DevisWorkflow:
                 return await self._continue_product_validation(original_products)
 
         return self._build_error_response("Sélection client invalide", "Données client manquantes")
+    async def _search_company_enrichment(self, company_name: str) -> Dict[str, Any]:
+        """Enrichissement des données client via INSEE/PAPPERS"""
+        try:
+           
+            # Recherche via agent d'enrichissement
+            search_result = await company_search_service.search_companies(company_name)
+            
+            if search_result.get("success") and search_result.get("companies"):
+                company = search_result["companies"][0]  # Premier résultat
+                
+                return {
+                    "success": True,
+                    "company_data": {
+                        "official_name": company.get("denomination", company_name),
+                        "siren": company.get("siren", ""),
+                        "siret": company.get("siret", ""),
+                        "address": {
+                            "street": company.get("adresse", ""),
+                            "postal_code": company.get("code_postal", ""),
+                            "city": company.get("ville", ""),
+                            "country": "France"
+                        },
+                        "activity": {
+                            "code": company.get("activite_principale", ""),
+                            "label": company.get("libelle_activite", "")
+                        },
+                        "legal_form": company.get("forme_juridique", ""),
+                        "status": company.get("etat", ""),
+                        "creation_date": company.get("date_creation", ""),
+                        "source": "INSEE/PAPPERS"
+                    }
+                }
+            else:
+                # Pas de données enrichies disponibles
+                return {
+                    "success": False,
+                    "message": "Aucune donnée d'enrichissement trouvée",
+                    "company_data": {
+                        "official_name": company_name,
+                        "source": "manual"
+                    }
+                }
+                
+        except Exception as e:
+            logger.error(f"Erreur enrichissement: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "company_data": {"official_name": company_name, "source": "manual"}
+            }
 
+    ## 4. PRÉVENTION DOUBLONS
+
+    async def _check_duplicates_enhanced(self, client_name: str, enrichment_data: Dict) -> Dict[str, Any]:
+        """🔎 Détection avancée des doublons (SIREN + similarité de nom)"""
+        try:
+            potential_duplicates = []
+
+            # 1️⃣ Recherche par SIREN
+            potential_duplicates += await self._search_duplicates_by_siren(enrichment_data)
+
+            # 2️⃣ Recherche par mots du nom
+            potential_duplicates += await self._search_duplicates_by_name(client_name)
+
+            # 3️⃣ Nettoyage et scoring
+            scored_duplicates = self._deduplicate_and_score(client_name, potential_duplicates)
+
+            # 4️⃣ Filtrage final
+            probable_duplicates = [dup for dup in scored_duplicates if dup["similarity_score"] > 0.7]
+
+            if probable_duplicates:
+                return {
+                    "has_duplicates": True,
+                    "duplicates": probable_duplicates,
+                    "duplicate_count": len(probable_duplicates),
+                    "requires_user_choice": True,
+                    "message": f"⚠️ {len(probable_duplicates)} client(s) similaire(s) détecté(s)",
+                    "actions": [
+                        {"action": "use_existing", "label": "📋 Utiliser client existant"},
+                        {"action": "create_anyway", "label": "➕ Créer quand même"},
+                        {"action": "cancel", "label": "❌ Annuler"}
+                    ]
+                }
+            else:
+                return {"has_duplicates": False, "message": "✅ Aucun doublon détecté"}
+
+        except Exception as e:
+            logger.error(f"❌ Erreur vérification doublons: {e}")
+            return {"has_duplicates": False, "error": str(e)}
+
+
+    async def _search_duplicates_by_siren(self, enrichment_data: Dict) -> list:
+        """🔍 Recherche des doublons via le SIREN"""
+        siren = enrichment_data.get("company_data", {}).get("siren", "")
+        if not siren:
+            return []
+        
+        query = f"""
+            SELECT Id, Name, AccountNumber, FederalTaxID 
+            FROM Account 
+            WHERE FederalTaxID LIKE '%{siren}%'
+        """
+        result = await self.mcp_connector.call_mcp("salesforce_mcp", "salesforce_query", {"query": query})
+        return result.get("data", []) if result.get("success") else []
+
+
+    async def _search_duplicates_by_name(self, client_name: str) -> list:
+        """🔍 Recherche des doublons par mots significatifs dans le nom"""
+        words = {word for word in client_name.split() if len(word) > 3}
+        if not words:
+            return []
+        
+        conditions = " OR ".join([f"Name LIKE '%{word}%'" for word in words])
+        query = f"""
+            SELECT Id, Name, AccountNumber 
+            FROM Account 
+            WHERE {conditions}
+        """
+        result = await self.mcp_connector.call_mcp("salesforce_mcp", "salesforce_query", {"query": query})
+        return result.get("data", []) if result.get("success") else []
+
+
+    def _deduplicate_and_score(self, client_name: str, duplicates: list) -> list:
+        """🧠 Déduplique et ajoute un score de similarité"""
+        seen_ids = set()
+        unique = []
+
+        for dup in duplicates:
+            account_id = dup.get("Id")
+            if account_id and account_id not in seen_ids:
+                seen_ids.add(account_id)
+                dup["similarity_score"] = self._calculate_similarity(client_name, dup.get("Name", ""))
+                unique.append(dup)
+        return unique
+
+    def _calculate_similarity(self, name1: str, name2: str) -> float:
+        """Calcul simple de similarité entre deux noms"""
+        try:
+            from difflib import SequenceMatcher
+            return SequenceMatcher(None, name1.lower(), name2.lower()).ratio()
+        except:
+            return 0.0
     async def _handle_client_creation(self, user_input: Dict, context: Dict) -> Dict[str, Any]:
         """Gère la création d'un nouveau client"""
 
@@ -3293,8 +3434,9 @@ class DevisWorkflow:
         ])
         
         return {
-            "success": False,
+            "success": True,
             "workflow_status": "waiting_for_input",
+            "response_type": "user_input_required",
             "message": message,
             "questions": questions,
             "extracted_info": extracted_info,
@@ -4637,14 +4779,21 @@ class DevisWorkflow:
                     "data": None,
                     "message": "Nom de client vide"
                 }
-            
+
             # Recherche dans Salesforce avec progression
             self._track_step_progress("search_client", 30, f"🔍 Recherche '{client_name}' dans Salesforce...")
             
             client_result = await call_mcp_with_progress(
                 "salesforce_mcp", 
                 "salesforce_query",
-                {"query": f"SELECT Id, Name, AccountNumber, Phone FROM Account WHERE Name LIKE '%{client_name}%' LIMIT 1"},
+                {
+                    "query": f"""
+                        SELECT Id, Name, AccountNumber, Phone 
+                        FROM Account 
+                        WHERE Name LIKE '%{client_name}%' 
+                        LIMIT 5
+                    """
+                },
                 "search_client",
                 f"🔍 Recherche {client_name}"
             )
@@ -4656,16 +4805,14 @@ class DevisWorkflow:
                     "data": None,
                     "message": f"Erreur recherche client: {client_result['error']}"
                 }
-            
-            # Analyser les résultats
+
+            # Analyse des résultats
             records = client_result.get("data", {}).get("records", [])
             total_size = client_result.get("data", {}).get("totalSize", 0)
             
             if total_size > 0 and records:
-                # Client trouvé - prendre le premier résultat
                 client_data = records[0]
                 logger.info(f"✅ Client trouvé: {client_data.get('Name')} (ID: {client_data.get('Id')})")
-                
                 return {
                     "status": "found",
                     "data": client_data,
@@ -4674,30 +4821,47 @@ class DevisWorkflow:
                     "alternatives": records[1:] if len(records) > 1 else []
                 }
             else:
-                # Client non trouvé
-                logger.warning(f"⚠️ Client '{client_name}' non trouvé dans Salesforce")
-                # 🆕 TENTATIVE DE CRÉATION AUTOMATIQUE
-                logger.info(f"🚀 Tentative de création automatique pour: {client_name}")
-                creation_result = await self._create_client_automatically(client_name)
+                enrichment_result = await self._search_company_enrichment(client_name)
+                duplicate_check = await self._check_duplicates_enhanced(client_name, enrichment_result)
 
-                if creation_result.get("created"):
-                    logger.info(f"✅ Client '{client_name}' créé automatiquement !")
+                if duplicate_check.get("has_duplicates"):
+                    return await self._handle_potential_duplicates(duplicate_check, client_name)
+                # Client non trouvé → enrichissement puis création
+                logger.warning(f"⚠️ Client '{client_name}' non trouvé dans Salesforce")
+                logger.info(f"🚀 Tentative d'enrichissement et création pour: {client_name}")
+                
+                enrichment_result = await self._search_company_enrichment(client_name)
+                
+                user_validation = await self._request_user_validation_for_client_creation(client_name, enrichment_result)
+                if user_validation.get("status") == "approved":
+                    creation_result = await self._create_client_automatically(client_name)
+
+                    if creation_result.get("created"):
+                        logger.info(f"✅ Client '{client_name}' créé automatiquement !")
+                        return {
+                            "status": "created",
+                            "data": creation_result.get("client_data"),
+                            "source": "auto_created",
+                            "message": creation_result.get("message"),
+                            "auto_created": True
+                        }
+                    else:
+                        logger.warning(f"⚠️ Création automatique échouée: {creation_result.get('error')}")
+                        return {
+                            "status": "not_found",
+                            "data": None,
+                            "message": f"Création échouée: {creation_result.get('error')}",
+                            "search_term": client_name
+                        }
+                else:
+                    logger.info(f"⏹️ Création client annulée par l'utilisateur")
                     return {
-                        "found": True,
-                        "data": creation_result.get("client_data"),
-                        "source": "auto_created",
-                        "message": creation_result.get("message"),
-                        "auto_created": True
+                        "status": "cancelled",
+                        "data": None,
+                        "message": "Création annulée par l'utilisateur",
+                        "search_term": client_name
                     }
 
-                logger.warning(f"⚠️ Création automatique échouée: {creation_result.get('error')}")
-                return {
-                    "status": "not_found",
-                    "data": None,
-                    "message": f"Client '{client_name}' non trouvé",
-                    "search_term": client_name
-                }
-                
         except Exception as e:
             logger.exception(f"Erreur validation client {client_name}: {str(e)}")
             return {
@@ -4705,6 +4869,36 @@ class DevisWorkflow:
                 "data": None,
                 "message": f"Erreur système: {str(e)}"
             }
+    async def _handle_potential_duplicates(self, duplicate_check: Dict, client_name: str) -> Dict[str, Any]:
+        """Gère les doublons potentiels détectés"""
+        
+        duplicates = duplicate_check.get("duplicates", [])
+        
+        return {
+            "status": "user_interaction_required",
+            "interaction_type": "duplicate_resolution",
+            "message": f"Doublons potentiels trouvés pour '{client_name}'",
+            "duplicates": duplicates,
+            "options": duplicate_check.get("actions", []),
+            "context": {
+                "client_name": client_name,
+                "duplicate_check": duplicate_check
+            }
+        }
+    async def _request_user_validation_for_client_creation(self, client_name: str, enrichment_data: Dict) -> Dict[str, Any]:
+        """Demande validation utilisateur pour création client"""
+        
+        # Pour le POC, approuver automatiquement si des données enrichies existent
+        if enrichment_data.get("success"):
+            return {"status": "approved", "enrichment_data": enrichment_data}
+        
+        # Sinon, demander validation (dans une vraie implémentation)
+        return {
+            "status": "requires_validation",
+            "message": f"Créer le client '{client_name}' ?",
+            "enrichment_data": enrichment_data
+        }
+
 
     
     async def _create_client_if_needed(self, client_name: str) -> Dict[str, Any]:
@@ -5101,7 +5295,7 @@ class DevisWorkflow:
     
     async def _sync_quote_to_systems(self, quote_result: Dict) -> Dict[str, Any]:
         """
-        Synchronisation vers SAP/Salesforce
+        Synchronisation vers SAP/Salesforce - VERSION PRODUCTION
         """
         try:
             quote_data = quote_result.get("quote_data", {})
@@ -5113,36 +5307,93 @@ class DevisWorkflow:
                 }
             
             quote_id = quote_data.get("quote_id")
-            logger.info(f"💾 Synchronisation du devis {quote_id}")
+            logger.info(f"💾 Synchronisation production du devis {quote_id}")
             
             # === PRÉPARATION DONNÉES SAP ===
             client_data = quote_data.get("client", {})
             products_data = quote_data.get("products", [])
             
-            # Pour l'instant, on simule la synchronisation
-            # TODO: Implémenter les vrais appels MCP sap_create_quotation_complete
+            # Préparation structure SAP quotation_data
+            sap_quotation_data = {
+                "CardCode": client_data.get("CardCode") or client_data.get("sap_code"),
+                "CardName": client_data.get("CardName") or client_data.get("name"),
+                "DocDate": datetime.now().strftime("%Y-%m-%d"),
+                "DocDueDate": (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d"),
+                "DocumentLines": [
+                    {
+                        "ItemCode": product.get("ItemCode") or product.get("code"),
+                        "Quantity": product.get("Quantity") or product.get("quantity", 1),
+                        "UnitPrice": product.get("UnitPrice") or product.get("price", 0),
+                        "LineTotal": (product.get("UnitPrice") or product.get("price", 0)) * (product.get("Quantity") or product.get("quantity", 1))
+                    }
+                    for product in products_data
+                ]
+            }
             
+            # === SYNCHRONISATION SAP ===
+            logger.info(f"📡 Appel SAP sap_create_quotation_complete")
+            sap_result = await self.mcp_connector.sap_create_quotation_complete(sap_quotation_data)
+            
+            # === PRÉPARATION DONNÉES SALESFORCE ===
+            sf_opportunity_data = {
+                "Name": f"Devis {client_data.get('name', 'Client')} - {datetime.now().strftime('%Y-%m-%d')}",
+                "AccountId": client_data.get("salesforce_id"),
+                "CloseDate": (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d"),
+                "StageName": "Quotation",
+                "Amount": quote_data.get("total_amount", 0),
+                "Description": f"Devis généré automatiquement - {quote_id}"
+            }
+            
+            sf_line_items = [
+                {
+                    "Product2Id": product.get("salesforce_id"),
+                    "Quantity": product.get("Quantity") or product.get("quantity", 1),
+                    "UnitPrice": product.get("UnitPrice") or product.get("price", 0)
+                }
+                for product in products_data
+                if product.get("salesforce_id")
+            ]
+            
+            # === SYNCHRONISATION SALESFORCE ===
+            logger.info(f"📡 Appel Salesforce salesforce_create_opportunity_complete")
+            sf_result = await self.mcp_connector.salesforce_create_opportunity_complete(
+                sf_opportunity_data, sf_line_items
+            )
+            
+            # === TRAITEMENT DES RÉSULTATS ===
             sync_results = {
                 "sap_sync": {
                     "attempted": True,
-                    "success": False,  # Simulation - sera True quand implémenté
-                    "message": "Synchronisation SAP simulée",
-                    "quote_sap_id": f"SAP_{quote_id}"
+                    "success": sap_result.get("success", False),
+                    "message": sap_result.get("error", "Synchronisation SAP réussie") if not sap_result.get("success") else "Devis SAP créé",
+                    "quote_sap_id": sap_result.get("DocNum") or sap_result.get("DocEntry"),
+                    "doc_entry": sap_result.get("DocEntry")
                 },
                 "salesforce_sync": {
                     "attempted": True,
-                    "success": False,  # Simulation - sera True quand implémenté  
-                    "message": "Synchronisation Salesforce simulée",
-                    "opportunity_id": f"SF_{quote_id}"
+                    "success": sf_result.get("success", False),
+                    "message": sf_result.get("error", "Synchronisation Salesforce réussie") if not sf_result.get("success") else "Opportunité Salesforce créée",
+                    "opportunity_id": sf_result.get("id") or sf_result.get("opportunity_id")
                 }
             }
             
-            logger.info(f"✅ Synchronisation simulée pour {quote_id}")
+            # Détermination du statut global
+            if sync_results["sap_sync"]["success"] and sync_results["salesforce_sync"]["success"]:
+                status = "success"
+                message = f"Synchronisation complète réussie pour {quote_id}"
+            elif sync_results["sap_sync"]["success"] or sync_results["salesforce_sync"]["success"]:
+                status = "partial_success"
+                message = f"Synchronisation partielle pour {quote_id}"
+            else:
+                status = "error"
+                message = f"Échec synchronisation pour {quote_id}"
+            
+            logger.info(f"✅ Synchronisation terminée: {status}")
             
             return {
-                "status": "simulated",  # Sera "success" quand implémenté
+                "status": status,
                 "sync_results": sync_results,
-                "message": "Synchronisation simulée (mode développement)"
+                "message": message
             }
             
         except Exception as e:
@@ -5151,7 +5402,6 @@ class DevisWorkflow:
                 "status": "error",
                 "message": f"Erreur synchronisation: {str(e)}"
             }
-
 
     def _initialize_task_tracking(self, prompt: str) -> str:
         """
