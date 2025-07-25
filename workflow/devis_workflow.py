@@ -452,7 +452,10 @@ class DevisWorkflow:
             account_id = dup.get("Id")
             if account_id and account_id not in seen_ids:
                 seen_ids.add(account_id)
-                dup["similarity_score"] = self._calculate_similarity(client_name, dup.get("Name", ""))
+                dup["similarity_score"] = self._calculate_similarity(
+                    client_name.upper().strip(),
+                    dup.get("Name", "").upper().strip()
+                )
                 unique.append(dup)
         return unique
 
