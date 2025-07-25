@@ -17,6 +17,7 @@ from routes.routes_devis import router as devis_router
 from routes.routes_progress import router as progress_router
 from routes.routes_devis import router as quote_router
 from routes.routes_clients import router as client_router
+from routes.routes_client_listing import router as client_listing_router
 
 if sys.platform == "win32":
     os.environ["PYTHONIOENCODING"] = "utf-8"    
@@ -121,7 +122,7 @@ app.include_router(devis_router, prefix="/api/devis", tags=["Devis"])
 app.include_router(progress_router, prefix="/progress", tags=["Suivi tâches"])
 app.include_router(quote_router, prefix="/api/assistant", tags=["Quote"])
 app.include_router(client_router, prefix="/api/assistant", tags=["Client"])
-
+app.include_router(client_listing_router, prefix="/api/clients", tags=["Client Listing"])
 # Route pour servir l'interface IT Spirit
 @app.get('/interface/itspirit', response_class=HTMLResponse)
 async def itspirit_interface():

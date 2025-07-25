@@ -8,6 +8,7 @@ import logging
 import asyncio
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
+
 from services.llm_extractor import LLMExtractor
 from services.mcp_connector import MCPConnector, call_mcp_with_progress, test_mcp_connections_with_progress
 from services.progress_tracker import progress_tracker, QuoteTask
@@ -15,6 +16,8 @@ from services.suggestion_engine import SuggestionEngine
 from services.client_validator import ClientValidator
 from services.websocket_manager import websocket_manager
 from services.company_search_service import company_search_service
+
+from utils.client_lister import find_client_everywhere
 # Configuration sécurisée pour Windows
 if sys.platform == "win32":
     os.environ["PYTHONIOENCODING"] = "utf-8"
@@ -3749,7 +3752,7 @@ class DevisWorkflow:
             if product_code:
                 exact_result = await self.mcp_connector.call_mcp(
                     "sap_mcp",
-                    "sap_read",
+                    "sap_search",
                     {
                         "table": "OITM",
                         "filter": f"ItemCode eq '{product_code}'",
@@ -3773,7 +3776,7 @@ class DevisWorkflow:
                     
                     fuzzy_result = await self.mcp_connector.call_mcp(
                         "sap_mcp",
-                        "sap_read",
+                        "sap_search",
                         {
                             "table": "OITM",
                             "filter": f"contains(tolower(ItemName),'{term.lower()}') or contains(tolower(U_Description),'{term.lower()}')",
@@ -5350,7 +5353,7 @@ class DevisWorkflow:
                     try:
                         code_result = await call_mcp_with_progress(
                             "sap_mcp",
-                            "sap_read",
+                            "sap_search",
                             {"entity": "Items", "filters": {"ItemName": product["name"]}},
                             "lookup_products",
                             f"📦 Recherche {product['name']}"
