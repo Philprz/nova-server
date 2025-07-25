@@ -4597,7 +4597,7 @@ class DevisWorkflow:
             # Étape 3 : création du devis
             self._track_step_start("prepare_quote", "📋 Préparation du devis")
             quote_result = await self._create_quote_document(client_result, products_result)
-            # Vérification critique et protection contre None
+            # Protection critique contre quote_result None
             if quote_result is None or not isinstance(quote_result, dict):
                 logger.error("❌ _create_quote_document a retourné None ou un type invalide")
                 quote_result = {
@@ -4611,6 +4611,23 @@ class DevisWorkflow:
                     },
                     "error": "Erreur création document devis",
                 }
+
+            # Protection supplémentaire pour quote_data
+            quote_data = quote_result.get("quote_data") if quote_result else None
+            if quote_data is None:
+                logger.error("❌ quote_data est None - Création d'un objet par défaut")
+                quote_data = {
+                    "quote_id": f"FALLBACK_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                    "client": {},
+                    "products": [],
+                    "totals": {"total_amount": 0},
+                    "currency": "EUR",
+                }
+
+            # Protection pour products_result
+            if products_result is None:
+                logger.error("❌ products_result est None - Création d'un objet par défaut")
+                products_result = {"products": []}
             self._track_step_complete("prepare_quote", "✅ Devis préparé")
 
             # Étape 4 : synchronisation (ex. SAP et Salesforce)
@@ -4788,6 +4805,7 @@ class DevisWorkflow:
             }
     def _sanitize_soql_string(self, value: str) -> str:
         return value.replace("'", "\\'")
+    
     async def _propose_existing_clients_selection(self, client_name: str, search_result: Dict[str, Any]) -> Dict[str, Any]:
         
         """Propose à l'utilisateur de sélectionner parmi les clients existants trouvés"""
@@ -4820,7 +4838,7 @@ class DevisWorkflow:
             
             # Retourner interface de sélection
             return {
-                "found": False,
+                "found": True,  # CORRECTION: True au lieu de False car clients trouvés
                 "requires_user_selection": True,
                 "selection_type": "existing_clients",
                 "message": f"J'ai trouvé {len(client_options)} client(s) existant(s) pour '{client_name}'",
