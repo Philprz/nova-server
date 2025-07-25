@@ -247,16 +247,19 @@ class HealthChecker:
     async def _test_chatgpt_api(self) -> Dict[str, Any]:
         """Test de l'API ChatGPT OpenAI"""
         start_time = time.time()
-        
+
         try:
-            client = openai.AsyncOpenAI()
-            response = await client.chat.completions.create(
-                model="gpt-4",
-                messages=[{"role": "user", "content": "Test"}],
+            client = openai.AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+            completion = await client.chat.completions.create(
+                model=os.getenv("OPENAI_MODEL"),
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant."},
+                    {"role": "user", "content": "Test"}
+                ],
                 max_tokens=5
             )
-            
-            if response and response.choices:
+
+            if completion and completion.choices:
                 return {
                     "success": True,
                     "message": "API ChatGPT OpenAI opérationnelle",
@@ -270,7 +273,7 @@ class HealthChecker:
                     "timestamp": datetime.now().isoformat(),
                     "duration_ms": round((time.time() - start_time) * 1000, 2)
                 }
-                
+
         except Exception as e:
             return {
                 "success": False,

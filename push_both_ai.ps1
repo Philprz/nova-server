@@ -400,13 +400,19 @@ Impact:
     
     switch ($Provider) {
         "OpenAI" {
+            $currentAPIKey = if ($APIKey) { $APIKey } else { $env:OPENAI_API_KEY }
+            if (-not $currentAPIKey) {
+                Write-Host "Clé API OpenAI non fournie. Utilisez -APIKey ou définissez OPENAI_API_KEY." -ForegroundColor Red
+                return $null
+            }
+            $model = if ($env:OPENAI_MODEL) { $env:OPENAI_MODEL } else { "gpt-4" }
             $headers = @{
-                "Authorization" = "Bearer $APIKey"
+                "Authorization" = "Bearer $currentAPIKey"
                 "Content-Type" = "application/json"
             }
-            
+
             $body = @{
-                "model" = "gpt-4"
+                "model" = $model
                 "messages" = @(
                     @{
                         "role" = "system"
@@ -420,7 +426,7 @@ Impact:
                 "temperature" = 0.3
                 "max_tokens" = 1000
             } | ConvertTo-Json -Depth 10
-            
+
             try {
                 $response = Invoke-RestMethod -Uri "https://api.openai.com/v1/chat/completions" -Method Post -Headers $headers -Body $body
                 return $response.choices[0].message.content
@@ -430,16 +436,22 @@ Impact:
                 return $null
             }
         }
-        
+
         "Claude" {
+            $currentAPIKey = if ($APIKey) { $APIKey } else { $env:ANTHROPIC_API_KEY }
+            if (-not $currentAPIKey) {
+                Write-Host "Clé API Anthropic non fournie. Utilisez -APIKey ou définissez ANTHROPIC_API_KEY." -ForegroundColor Red
+                return $null
+            }
+            $model = if ($env:ANTHROPIC_MODEL) { $env:ANTHROPIC_MODEL } else { "claude-3-opus-20240229" }
             $headers = @{
-                "x-api-key" = $APIKey
+                "x-api-key" = $currentAPIKey
                 "anthropic-version" = "2023-06-01"
                 "content-type" = "application/json"
             }
-            
+
             $body = @{
-                "model" = "claude-3-opus-20240229"
+                "model" = $model
                 "max_tokens" = 1000
                 "messages" = @(
                     @{
@@ -449,7 +461,7 @@ Impact:
                 )
                 "temperature" = 0.3
             } | ConvertTo-Json -Depth 10
-            
+
             try {
                 $response = Invoke-RestMethod -Uri "https://api.anthropic.com/v1/messages" -Method Post -Headers $headers -Body $body
                 return $response.content[0].text

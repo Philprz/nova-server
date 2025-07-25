@@ -9,8 +9,9 @@ from datetime import datetime
 load_dotenv()
 logger = logging.getLogger("llm_extractor")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1") 
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-3-sonnet-20240229")
 
 class LLMExtractor:
     """
@@ -68,7 +69,7 @@ Réponds UNIQUEMENT au format JSON suivant:
             "content-type": "application/json"
         }
         payload = {
-            "model": "claude-3-7-sonnet-20250219",
+            "model": ANTHROPIC_MODEL,
             "max_tokens": 1024,
             "system": system_prompt,
             "messages": [{"role": "user", "content": user_message}],
