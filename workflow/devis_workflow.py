@@ -1260,9 +1260,9 @@ class DevisWorkflow:
                 
                 # En mode POC, auto-approuver
                 if validation_request.get("status") != "approved":
-                    logger.info("⏸️ Validation utilisateur requise - POC: auto-approbation")
-                    validation_request["status"] = "approved"
-                    validation_request["auto_approved"] = True
+                    logger.warning("⚠️ ATTENTION: Client non trouvé avec find_client_everywhere - Création bloquée")
+                    validation_request["status"] = "requires_user_confirmation"
+                    validation_request["requires_explicit_approval"] = True
                     
             except Exception as e:
                 logger.warning(f"⚠️ Erreur validation utilisateur: {str(e)}")
@@ -4738,83 +4738,24 @@ class DevisWorkflow:
         # Étape 1: Recherche directe
         self._track_step_start("search_client", f"🔍 Recherche du client '{client_name}'")
         
-        # Rechercher dans Salesforce
-        self._track_step_progress("client_search_progress", 30, "Consultation Salesforce...")
-        sf_results = await self.mcp_connector.search_salesforce_accounts(client_name)
-        
-        # Rechercher dans SAP
-        self._track_step_progress("client_search_progress", 60, "Consultation SAP...")
-        sap_results = await self.mcp_connector.search_sap_customers(client_name)
+        # NOUVEAU: Utiliser find_client_everywhere pour recherche exhaustive
+        self._track_step_progress("search_client", 30, "Recherche exhaustive dans toutes les bases...")
+        client_search_result = await find_client_everywhere(client_name)
         
         self._track_step_complete("client_search_progress", "Bases de données consultées")
         
-        # Analyser les résultats
-        exact_matches = []
-        fuzzy_matches = []
+        # NOUVEAU: Analyser les résultats de find_client_everywhere
+        total_found = client_search_result.get("total_found", 0)
+        logger.info(f"🔍 Recherche exhaustive terminée: {total_found} client(s) trouvé(s)")
         
-        # Traiter les résultats Salesforce
-        for result in sf_results.get("results", []):
-            similarity = self._calculate_similarity(client_name, result.get("Name", ""))
-            if similarity >= 0.9:
-                exact_matches.append({"source": "Salesforce", "data": result, "similarity": similarity})
-            elif similarity >= 0.7:
-                fuzzy_matches.append({"source": "Salesforce", "data": result, "similarity": similarity})
-        
-        # Traiter les résultats SAP
-        for result in sap_results.get("results", []):
-            similarity = self._calculate_similarity(client_name, result.get("CardName", ""))
-            if similarity >= 0.9:
-                exact_matches.append({"source": "SAP", "data": result, "similarity": similarity})
-            elif similarity >= 0.7:
-                fuzzy_matches.append({"source": "SAP", "data": result, "similarity": similarity})
-        
-        if exact_matches:
-            # Client trouvé exactement
-            self._track_step_complete("search_client", f"✅ Client '{client_name}' trouvé")
-            return {
-                "found": True,
-                "client_data": exact_matches[0]["data"],
-                "source": exact_matches[0]["source"]
-            }
-        
-        elif fuzzy_matches:
-            # Alternatives trouvées - demander validation utilisateur
-            self._track_step_start("client_alternatives", f"🔄 {len(fuzzy_matches)} client(s) similaire(s) trouvé(s)")
-            
-            # Stocker les alternatives
-            self.current_task.set_alternatives("client_alternatives", fuzzy_matches)
-            
-            # Demander validation utilisateur
-            self._track_step_start("client_validation", "⏳ Validation utilisateur requise")
-            
-            validation_data = {
-                "client_name": client_name,
-                "alternatives": fuzzy_matches,
-                "options": [
-                    {"id": "select_alternative", "label": "Sélectionner un client existant"},
-                    {"id": "create_new", "label": "Créer un nouveau client"},
-                    {"id": "retry_search", "label": "Rechercher avec un autre nom"}
-                ]
-            }
-            
-            self.current_task.require_user_validation("client_validation", "client_selection", validation_data)
-            
-            # Envoyer via WebSocket
-            await websocket_manager.send_user_interaction_required(self.task_id, {
-                "type": "client_selection",
-                "message": f"Plusieurs clients similaires à '{client_name}' ont été trouvés",
-                "data": validation_data
-            })
-            
-            return {
-                "found": False,
-                "requires_validation": True,
-                "validation_type": "client_selection",
-                "alternatives": fuzzy_matches
-            }
+        if total_found > 0:
+            # CLIENT(S) TROUVÉ(S) - Proposer sélection utilisateur
+            self._track_step_complete("search_client", f"✅ {total_found} client(s) trouvé(s) pour '{client_name}'")
+            return await self._propose_existing_clients_selection(client_name, client_search_result)
         
         else:
-            # Aucun client trouvé - proposer création
+            # AUCUN CLIENT TROUVÉ - Vérifier une dernière fois avant création
+            logger.info(f"❌ Aucun client trouvé pour '{client_name}' - Proposition de création")
             self._track_step_start("client_alternatives", "❌ Aucun client trouvé")
             
             # Rechercher des informations INSEE/Pappers
@@ -4847,7 +4788,52 @@ class DevisWorkflow:
             }
     def _sanitize_soql_string(self, value: str) -> str:
         return value.replace("'", "\\'")
+    async def _propose_existing_clients_selection(self, client_name: str, search_result: Dict[str, Any]) -> Dict[str, Any]:
         
+        """Propose à l'utilisateur de sélectionner parmi les clients existants trouvés"""
+        try:
+            # Préparer la liste des clients pour sélection
+            client_options = []
+            option_id = 1
+            
+            # Ajouter clients Salesforce
+            if search_result.get("salesforce", {}).get("found"):
+                for client_data in search_result["salesforce"]["clients"]:
+                    client_options.append({
+                        "id": f"sf_{option_id}",
+                        "label": f"{option_id}. {client_data.get('Name', 'N/A')} (Salesforce - {client_data.get('Id', 'N/A')})",
+                        "source": "salesforce",
+                        "data": client_data
+                    })
+                    option_id += 1
+            
+            # Ajouter clients SAP
+            if search_result.get("sap", {}).get("found"):
+                for client_data in search_result["sap"]["clients"]:
+                    client_options.append({
+                        "id": f"sap_{option_id}",
+                        "label": f"{option_id}. {client_data.get('CardName', 'N/A')} (SAP - {client_data.get('CardCode', 'N/A')})",
+                        "source": "sap",
+                        "data": client_data
+                    })
+                    option_id += 1
+            
+            # Retourner interface de sélection
+            return {
+                "found": False,
+                "requires_user_selection": True,
+                "selection_type": "existing_clients",
+                "message": f"J'ai trouvé {len(client_options)} client(s) existant(s) pour '{client_name}'",
+                "client_options": client_options,
+                "actions": [
+                    {"id": "select_existing", "label": "Utiliser un client existant"},
+                    {"id": "create_new", "label": "Créer un nouveau client quand même"},
+                    {"id": "cancel", "label": "Annuler la demande"}
+                ]
+            }
+        except Exception as e:
+            logger.error(f"❌ Erreur proposition sélection clients: {str(e)}")
+            return {"found": False, "error": str(e)}
     async def _create_client_automatically(self, client_name: str) -> Dict[str, Any]:
         """
         🆕 NOUVELLE MÉTHODE : Création automatique du client dans SAP et Salesforce
@@ -5001,7 +4987,12 @@ class DevisWorkflow:
         try:
             safe_client_name = self._sanitize_soql_string(client_name)
             logger.info(f"🔍 Recherche approfondie du client: {client_name}")
-
+            # NOUVEAU: Utiliser find_client_everywhere pour recherche exhaustive AVANT tout
+            comprehensive_search = await find_client_everywhere(client_name)
+            total_found = comprehensive_search.get("total_found", 0)
+            if total_found > 0:
+                logger.info(f"✅ {total_found} client(s) existant(s) trouvé(s) pour '{client_name}'")
+                return await self._propose_existing_clients_selection(client_name, comprehensive_search)
             # === ÉTAPE 1: RECHERCHE EXACTE ===
             exact_query = f"""
                 SELECT Id, Name, AccountNumber, Phone, BillingCity, BillingCountry 
@@ -5093,7 +5084,8 @@ class DevisWorkflow:
                 return await self._handle_potential_duplicates(duplicates, client_name)
 
             # === ÉTAPE 6: CRÉATION PROPOSÉE ===
-            self._track_step_progress("search_client", 95, "📩 Demande de validation utilisateur")
+            
+            self._track_step_progress("search_client", 95, "⚠️ AUCUN client trouvé - Validation requise")
             user_approval = await self._request_user_validation_for_client_creation(client_name, enrichment_data)
 
             if user_approval.get("status") == "approved":
@@ -5202,17 +5194,17 @@ class DevisWorkflow:
             
             # Pour le POC, auto-approuver si données enrichies disponibles
             if enrichment_data.get("success") and enrichment_data.get("company_data"):
-                logger.info("✅ Auto-approbation avec données enrichies")
+                logger.warning("⚠️ BLOQUAGE: find_client_everywhere n'a trouvé AUCUN client existant")
                 return {
-                    "status": "approved",
+                    "status": "requires_explicit_confirmation",
                     "method": "auto_approved_with_data",
                     "enrichment_data": enrichment_data
                 }
             
-            # Si pas de données enrichies, approuver quand même (mode POC)
-            logger.info("⚠️ Auto-approbation sans enrichissement (mode POC)")
+            # Si pas de données enrichies, on refuse la création.
+            logger.warning("⚠️ BLOQUAGE: Aucune donnée d'enrichissement ET aucun client trouvé")
             return {
-                "status": "approved", 
+                "status": "requires_explicit_confirmation",
                 "method": "auto_approved_fallback",
                 "enrichment_data": enrichment_data,
                 "note": "Création approuvée automatiquement en mode POC"
