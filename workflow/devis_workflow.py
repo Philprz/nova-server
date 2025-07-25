@@ -4597,6 +4597,7 @@ class DevisWorkflow:
             # Étape 3 : création du devis
             self._track_step_start("prepare_quote", "📋 Préparation du devis")
             quote_result = await self._create_quote_document(client_result, products_result)
+            
             # Protection critique contre quote_result None
             if quote_result is None or not isinstance(quote_result, dict):
                 logger.error("❌ _create_quote_document a retourné None ou un type invalide")
@@ -4628,8 +4629,8 @@ class DevisWorkflow:
             if products_result is None:
                 logger.error("❌ products_result est None - Création d'un objet par défaut")
                 products_result = {"products": []}
-            self._track_step_complete("prepare_quote", "✅ Devis préparé")
-
+            returned_products = quote_data.get("products") or products_result.get("products", [])
+            
             # Étape 4 : synchronisation (ex. SAP et Salesforce)
             self._track_step_start("save_to_sap", "💾 Enregistrement dans SAP")
             sap_result = await self._sync_quote_to_systems(quote_result)
@@ -5361,12 +5362,10 @@ class DevisWorkflow:
                 # 1. Recherche par code exact si disponible
                 if product_code:
                     try:
-                        code_result = await call_mcp_with_progress(
+                        code_result = await self.mcp_connector.call_mcp(
                             "sap_mcp",
-                            "sap_search",
-                            {"entity": "Items", "filters": {"ItemName": product["name"]}},
-                            "lookup_products",
-                            f"📦 Recherche {product['name']}"
+                            "sap_read",
+                            {"endpoint": f"/Items('{product_code}')"}
                         )
                         
                         if not code_result.get("error") and code_result.get("data", {}).get("ItemCode"):
@@ -5378,20 +5377,18 @@ class DevisWorkflow:
                 # 2. Recherche par nom si pas trouvé par code
                 if not product_found and product_name:
                     try:
-                        search_result = await call_mcp_with_progress(
+                        search_result = await self.mcp_connector.call_mcp(
                             "sap_mcp",
                             "sap_search",
                             {
                                 "query": product_name,
-                                "entity_type": "items",
-                                "limit": 5
-                            },
-                            "lookup_products",
-                            f"🔍 Recherche nom '{product_name}'"
+                                "entity_type": "Items",  # Note: "Items" avec majuscule
+                                "limit": 10
+                            }
                         )
                         
                         if not search_result.get("error"):
-                            items = search_result.get("data", {}).get("items", [])
+                            items = search_result.get("results", []) or search_result.get("value", [])
                             if items:
                                 product_found = items[0]  # Prendre le premier résultat
                                 logger.info(f"✅ Produit trouvé par recherche: {product_name}")
@@ -5453,22 +5450,19 @@ class DevisWorkflow:
             
         except Exception as e:
             logger.exception(f"Erreur récupération produits: {str(e)}")
+            
+            # CORRECTION: Protection garantie du format de retour
             return {
                 "status": "error",
                 "products": [],
+                "stats": {
+                    "total_requested": len(products) if products else 0,
+                    "found": 0,
+                    "not_found": len(products) if products else 0,
+                    "total_amount": 0
+                },
                 "message": f"Erreur système: {str(e)}"
             }
-
-    # 3. LIGNE ~2749 - VÉRIFIER QUE _create_quote_document EST COMPLÈTE
-    # (Cette méthode semble déjà complète dans votre fichier)
-
-    # 4. LIGNE ~2883 - VÉRIFIER QUE _sync_quote_to_systems EST COMPLÈTE  
-    # (Cette méthode semble déjà complète dans votre fichier)
-
-    # 5. LIGNE ~2473 - CORRIGER LE RETOUR FINAL DANS _process_quote_workflow
-    # Remplacer le return final par :
-
-    
 
     async def _create_quote_document(self, client_result: Dict, products_result: Dict) -> Dict[str, Any]:
         """
@@ -5554,8 +5548,8 @@ class DevisWorkflow:
             
             return {
                 "status": "success",
-                "quote_data": quote_document,
-                "message": f"Devis {quote_id} créé avec succès"
+                "quote_data": quote_document,  # s'assurer que quote_document est défini
+                "message": f"Devis {quote_id} créé avec {found_products_count}/{products_count} produits"
             }
             
         except Exception as e:
