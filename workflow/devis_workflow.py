@@ -846,9 +846,23 @@ class DevisWorkflow:
             
             from services.unified_validator import unified_validator
             client_info = await unified_validator.validate_client_complete(extracted_info.get("client"))
-    
+            # CORRECTION : Gérer les suggestions client MÊME si trouvé (choix multiple)
+            if client_info.get("suggestions") and len(client_info["suggestions"]) > 1:
+                self._track_step_progress("verify_client_info", 50, "Plusieurs clients trouvés - sélection requise")
+                return {
+                    "status": "suggestions_required",
+                    "type": "client_suggestions", 
+                    "message": f"{len(client_info['suggestions'])} clients trouvés pour '{client_name}'",
+                    "suggestions": client_info["suggestions"],
+                    "workflow_context": {
+                        "extracted_info": extracted_info,
+                        "task_id": self.task_id,
+                        "step": "client_validation"
+                    }
+                }
             # Gérer les suggestions client
             if not client_info.get("found"):
+            
                 if client_info.get("suggestions"):
                     # Il y a des suggestions, retourner pour interaction utilisateur
                     self._track_step_progress("verify_client_info", 50, "Suggestions client disponibles")
@@ -4583,6 +4597,11 @@ class DevisWorkflow:
 
             # Étape 1 : recherche/validation du client
             self._track_step_start("search_client", f"👤 Recherche du client : {client_name}")
+            client_result = await self._process_client_validation(client_name)
+            # AJOUT : Vérifier si une sélection client est requise
+            if client_result.get("status") == "suggestions_required":
+                return client_result  # Retourner immédiatement pour interaction utilisateur
+
             client_result = await self._process_client_validation(client_name)
             self._track_step_complete("search_client", f"✅ Client : {client_result.get('status', 'traité')}")
 
