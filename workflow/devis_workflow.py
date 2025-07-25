@@ -325,7 +325,8 @@ class DevisWorkflow:
         try:
            
             # Recherche via agent d'enrichissement
-            search_result = await company_search_service.search_companies(company_name)
+            search_result = await company_search_service.search_by_name(company_name, max_results=5)
+
             
             if search_result.get("success") and search_result.get("companies"):
                 company = search_result["companies"][0]  # Premier résultat
@@ -4378,23 +4379,25 @@ class DevisWorkflow:
             client_name = extracted_info.get("client", "")
             products = extracted_info.get("products", [])
 
-            # Étape 1: Recherche/Validation client
-            self._track_step_start("search_client", f"👤 Recherche du client: {client_name}")
+            # Étape 1 : recherche/validation du client
+            self._track_step_start("search_client", f"👤 Recherche du client : {client_name}")
             client_result = await self._process_client_validation(client_name)
-            self._track_step_complete("search_client", f"✅ Client: {client_result.get('status', 'traité')}")
+            self._track_step_complete("search_client", f"✅ Client : {client_result.get('status', 'traité')}")
 
-            # Étape 2: Récupération des produits
+            # Étape 2 : récupération des produits
             self._track_step_start("lookup_products", f"📦 Recherche de {len(products)} produit(s)")
-            products_result = await self._process_products_retrieval(products)
-            self._track_step_complete("lookup_products", f"✅ {len(products_result.get('products', []))} produit(s) trouvé(s)")
+            products_result = await self._search_products_parallel(products)
+            self._track_step_complete(
+                "lookup_products",
+                f"✅ {len(products_result.get('products', []))} produit(s) trouvé(s)",
+            )
 
-            # Étape 3: Création du devis
+            # Étape 3 : création du devis
             self._track_step_start("prepare_quote", "📋 Préparation du devis")
             quote_result = await self._create_quote_document(client_result, products_result)
-            
             # Vérification critique et protection contre None
             if quote_result is None or not isinstance(quote_result, dict):
-                logger.error("❌ _create_quote_document a retourné None ou invalide")
+                logger.error("❌ _create_quote_document a retourné None ou un type invalide")
                 quote_result = {
                     "status": "error",
                     "quote_data": {
@@ -4402,13 +4405,13 @@ class DevisWorkflow:
                         "client": {},
                         "products": [],
                         "totals": {"total_amount": 0},
-                        "currency": "EUR"
+                        "currency": "EUR",
                     },
-                    "error": "Erreur création document devis"
+                    "error": "Erreur création document devis",
                 }
             self._track_step_complete("prepare_quote", "✅ Devis préparé")
 
-            # Étape 4: Synchronisation
+            # Étape 4 : synchronisation (ex. SAP et Salesforce)
             self._track_step_start("save_to_sap", "💾 Enregistrement dans SAP")
             sap_result = await self._sync_quote_to_systems(quote_result)
             self._track_step_complete("save_to_sap", "✅ SAP mis à jour")
@@ -4416,29 +4419,42 @@ class DevisWorkflow:
             self._track_step_start("sync_salesforce", "☁️ Synchronisation Salesforce")
             sf_result = await self._sync_quote_to_systems(quote_result)
             self._track_step_complete("sync_salesforce", "✅ Salesforce synchronisé")
+
+            # Préparation des informations pour le retour
+            quote_data = quote_result.get("quote_data", {})
+            # Récupération sécurisée des produits : le devis peut retourner sa propre liste,
+            # sinon on utilise la liste issue de l’étape 2
+            returned_products = quote_data.get("products") or products_result.get("products", [])
+            # Calcul du montant total
+            total_amount = sum(p.get("total_price", 0) for p in returned_products)
+
             return {
                 "success": True,
-                "status": "success", 
+                "status": quote_result.get("status", "success"),
                 "type": "quote_generated",
-                "message": "✅ Devis généré avec succès !",
+                "message": "✅ Devis généré avec succès !",
                 "task_id": self.task_id,
-                
-                # Protection contre les attributs manquants
-                "quote_id": quote_result.get("quote_data", {}).get("quote_id") if quote_result and isinstance(quote_result, dict) else f"FALLBACK_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-                "client": quote_result.get("quote_data", {}).get("client", {}) if quote_result and isinstance(quote_result, dict) else {},
-                "products": quote_result.get("quote_data", {}).get("products", []) if quote_result and isinstance(quote_result, dict) else [],
-                "total_amount": quote_result.get("quote_data", {}).get("totals", {}).get("total_amount", 0) if quote_result and isinstance(quote_result, dict) else 0,
-                "currency": quote_result.get("quote_data", {}).get("currency", "EUR") if quote_result and isinstance(quote_result, dict) else "EUR",
-                
-                # Données complètes pour utilisation avancée
-                "quote_data": quote_result.get("quote_data", {}),
+                "workflow_steps": self.workflow_steps,
+
+                # Informations principales du devis
+                "quote_id": quote_data.get(
+                    "quote_id",
+                    f"FALLBACK_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                ),
+                "client": quote_data.get("client", client_result.get("client_data", {})),
+                "products": returned_products,
+                "total_amount": total_amount or quote_data.get("totals", {}).get("total_amount", 0),
+                "currency": quote_data.get("currency", "EUR"),
+
+                # Données complètes pour une utilisation avancée
+                "quote_data": quote_data,
                 "client_result": client_result,
                 "products_result": products_result,
-                "sync_result": sap_result  # ou sf_result selon le contexte
+                "sync_result": sap_result,  # ou sf_result selon le contexte
             }
 
         except Exception as e:
-            logger.error(f"❌ Erreur workflow devis: {str(e)}")
+            logger.error(f"❌ Erreur workflow devis : {str(e)}")
             raise
 
     async def _process_other_action(self, extracted_info: Dict[str, Any]) -> Dict[str, Any]:
