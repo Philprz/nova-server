@@ -334,8 +334,8 @@ class ReferentialCache:
             # Pré-charger les produits actifs SAP
             active_products = await mcp_connector.call_mcp(
                 "sap_mcp",
-                "get_items", 
-                {"active_only": True, "limit": 200}
+                "sap_read", 
+                {"endpoint": "/Items?$filter=Discontinued eq 'tNO'&$top=200", "method": "GET"}
             )
             
             if active_products.get("success"):

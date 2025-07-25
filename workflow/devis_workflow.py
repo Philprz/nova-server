@@ -325,7 +325,7 @@ class DevisWorkflow:
         try:
            
             # Recherche via agent d'enrichissement
-            search_result = await company_search_service.search_by_name(company_name, max_results=5)
+            search_result = await company_search_service.search_company(company_name, max_results=5)
 
             
             if search_result.get("success") and search_result.get("companies"):
@@ -4386,7 +4386,7 @@ class DevisWorkflow:
 
             # Étape 2 : récupération des produits
             self._track_step_start("lookup_products", f"📦 Recherche de {len(products)} produit(s)")
-            products_result = await self._search_products_parallel(products)
+            products_result = await self._process_products_retrieval(products)
             self._track_step_complete(
                 "lookup_products",
                 f"✅ {len(products_result.get('products', []))} produit(s) trouvé(s)",
