@@ -4914,8 +4914,8 @@ class DevisWorkflow:
         if total_found > 0:
             # CLIENT(S) TROUVÉ(S) - Proposer sélection utilisateur
             self._track_step_complete("search_client", f"✅ {total_found} client(s) trouvé(s) pour '{client_name}'")
-            return await self._propose_existing_clients_selection(client_name, client_search_result)
-        
+            return await self._propose_existing_clients_selection(client_search_result)
+
         else:
             # AUCUN CLIENT TROUVÉ - Vérifier une dernière fois avant création
             logger.info(f"❌ Aucun client trouvé pour '{client_name}' - Proposition de création")
@@ -4953,19 +4953,14 @@ class DevisWorkflow:
         return value.replace("'", "\\'")
     
 
-    async def _propose_existing_clients_selection(
-        client_name: str,
-        search_result: Dict[str, Any]
-    ) -> Dict[str, Any]:
+    def _propose_existing_clients_selection(self, duplicates: List[Dict]) -> Dict[str, Any]:
         """
-        Propose à l'utilisateur de sélectionner parmi les clients existants trouvés.
-        Retourne une structure standardisée pour l'interface utilisateur.
+        Propose une sélection parmi les clients existants trouvés.
         """
         try:
-            client_options: List[Dict[str, Any]] = []
+            client_options = []
             option_id = 1
 
-            # Configuration des sources et mapping de champs
             sources = {
                 'salesforce': {
                     'clients_key': 'clients',
@@ -4993,9 +4988,8 @@ class DevisWorkflow:
                 }
             }
 
-            # Construction des options à partir de chaque source
             for source, cfg in sources.items():
-                result = search_result.get(source, {})
+                result = duplicates.get(source, {})
                 clients = result.get(cfg['clients_key'], [])
                 if result.get('found') and isinstance(clients, list):
                     for client in clients:
@@ -5013,22 +5007,20 @@ class DevisWorkflow:
                         })
                         option_id += 1
 
-            # Aucun client trouvé
             if not client_options:
                 return {
                     'found': False,
                     'requires_user_selection': False,
                     'selection_type': 'existing_clients',
-                    'message': f"Aucun client existant trouvé pour '{client_name}'"
+                    'message': f"Aucun client existant trouvé."
                 }
 
-            # Réponse standardisée pour l'UI
             return {
                 'found': True,
                 'requires_user_selection': True,
                 'selection_type': 'existing_clients',
-                'message': f"J'ai trouvé {len(client_options)} client(s) existant(s) pour '{client_name}'",
-                'question': 'Quel client souhaitez-vous utiliser ?',
+                'message': f"J'ai trouvé {len(client_options)} client(s) existant(s)",
+                'question': 'Quel client souhaitez-vous utiliser ?',
                 'input_type': 'client_selection',
                 'client_options': client_options,
                 'actions': [
@@ -5037,12 +5029,9 @@ class DevisWorkflow:
                     {'id': 'cancel',       'label': 'Annuler',                    'type': 'tertiary'}
                 ],
                 'context': {
-                    'original_client_name': client_name,
-                    'search_results': search_result,
                     'total_options': len(client_options)
                 }
             }
-
         except Exception as e:
             logger.error(f"❌ Erreur proposition sélection clients: {e}")
             return {'found': False, 'error': str(e)}
