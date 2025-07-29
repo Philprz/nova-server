@@ -1100,7 +1100,7 @@ class DevisWorkflow:
             
             # Étape 3.5: Produits prêts
             self._track_step_complete("calculate_prices", "Prix finalisés")
-            self._track_step_complete("products_ready", f"{len([p for p in products_info if 'error' not in p])} produits confirmés")
+            self._track_step_complete("product_ready", f"{len([p for p in products_info if 'error' not in p])} produits confirmés")
             
             # ========== PHASE 4: CRÉATION DU DEVIS ==========
             
@@ -2989,7 +2989,7 @@ class DevisWorkflow:
                     "error": str(e)
                 })
         
-        return enriched_product
+        return enriched_products
     async def _find_similar_products(self, product_name: str) -> List[Dict[str, Any]]:
         """
         Trouve des produits similaires basés sur des mots-clés

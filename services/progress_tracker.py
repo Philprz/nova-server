@@ -110,6 +110,11 @@ class QuoteTask:
             ("product_search_progress", "🔍 Consultation du catalogue"),
             ("product_alternatives", "🔄 Analyse des alternatives"),
             ("product_validation", "✅ Sélection utilisateur requise"),
+            ("connect_catalog", "🔌 Connexion catalogue"),
+            ("lookup_products", "📦 Vérification des produits"),
+            ("get_products_info", "ℹ️ Informations produits"),
+            ("check_stock", "📊 Vérification du stock"),
+            ("calculate_prices", "💰 Calcul des prix"),
             ("product_ready", "✅ Produits confirmés")
         ],
         "create_quote": [
