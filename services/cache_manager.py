@@ -54,7 +54,7 @@ class RedisCacheManager:
         
         if not self.redis_client and memory_fallback:
             logger.info("🔄 Utilisation du cache mémoire en fallback")
-    
+
     async def get_cached_data(self, key: str) -> Optional[Dict[str, Any]]:
         """Récupère des données depuis le cache"""
         
@@ -183,7 +183,26 @@ class RedisCacheManager:
                 stats["redis_error"] = str(e)
         
         return stats
+    async def save_workflow_state(self, task_id: str, state_data: Dict) -> bool:
+        """Sauvegarde l'état d'un workflow"""
+        try:
+            key = f"workflow_state:{task_id}"
+            serialized_data = json.dumps(state_data, default=str)
+            await self.redis_client.setex(key, 3600, serialized_data)  # 1h TTL
+            return True
+        except Exception as e:
+            logger.error(f"Erreur sauvegarde état workflow {task_id}: {str(e)}")
+            return False
 
+    async def get_workflow_state(self, task_id: str) -> Dict:
+        """Récupère l'état d'un workflow"""
+        try:
+            key = f"workflow_state:{task_id}"
+            data = await self.redis_client.get(key)
+            return json.loads(data) if data else {}
+        except Exception as e:
+            logger.error(f"Erreur récupération état workflow {task_id}: {str(e)}")
+            return {}
 class ReferentialCache:
     """Cache intelligent pour accélérer la validation client/produit"""
     
