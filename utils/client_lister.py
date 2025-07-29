@@ -209,17 +209,17 @@ class ClientLister:
                         clients = d_obj[key]
                         logger.info(f"✅ Recherche SAP OData: {len(clients)} résultats (d.{key})")
                         break
-
-            # toute autre liste contenant 'odata'
+            # fallback tous les champs contenant des listes imbriquées dans le résultat     
             if not clients and isinstance(result, dict):
                 for k, v in result.items():
-                    if "odata" in str(k).lower() and isinstance(v, list) and v:
+                    if isinstance(v, list) and v and any(
+                        isinstance(item, dict) and 
+                        ('CardCode' in item or 'CardName' in item or 'Name' in item)
+                        for item in v[:1]
+                    ):
                         clients = v
-                        logger.info(f"✅ Recherche SAP OData: {len(clients)} résultats (clé: {k})")
+                        logger.info(f"✅ Recherche SAP: {len(clients)} résultats (clé détectée: {k})")
                         break
-
-            if not clients:
-                logger.info(f"⚠️ Aucun résultat SAP pour: {client_name}")
 
             return clients or []
 
