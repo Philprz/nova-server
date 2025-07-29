@@ -79,26 +79,26 @@ class ClientLister:
                 }
             )
             
-            # CORRECTION: Vérifier d'abord si 'success' est False ou 'error' existe
-            if result.get("success") is False or "error" in result:
+            # CORRECTION: Vérification explicite des erreurs uniquement
+            if result.get("error") or result.get("success") is False:
                 error_msg = result.get("error", "Erreur inconnue")
                 logger.error(f"❌ Erreur SAP explicite: {error_msg}")
                 return []
-            
-            # CORRECTION: Vérifier 'value' (format OData standard)
-            if "value" in result:
+
+            # Extraction des données dans l'ordre de priorité
+            if "value" in result and isinstance(result["value"], list):
                 clients = result["value"]
                 logger.info(f"✅ {len(clients)} clients SAP récupérés")
                 return clients
-            
-            # CORRECTION: Essayer aussi 'data' comme fallback
-            if "data" in result:
+            elif "results" in result and isinstance(result["results"], list):
+                clients = result["results"]
+                logger.info(f"✅ {len(clients)} clients SAP récupérés (via results)")
+                return clients
+            elif "data" in result and isinstance(result["data"], list):
                 clients = result["data"]
                 logger.info(f"✅ {len(clients)} clients SAP récupérés (via data)")
                 return clients
-            
-            # CORRECTION: Si résultat direct (pas encapsulé)
-            if isinstance(result, list):
+            elif isinstance(result, list):
                 logger.info(f"✅ {len(result)} clients SAP récupérés (liste directe)")
                 return result
             
@@ -175,24 +175,26 @@ class ClientLister:
             logger.debug(f"Type de réponse: {type(result)}")
             if isinstance(result, dict):
                 logger.debug(f"Clés disponibles: {list(result.keys())}")
-            if not (result.get("success") is False or "error" in result):
-                # Vérifier 'results' d'abord (format sap_search)
-                if "results" in result and result["results"]:
-                    logger.info(f"✅ Recherche SAP: {len(result['results'])} résultats")
-                    return result["results"]
-                # Puis 'value' (format OData)
-                elif "value" in result and result["value"]:
-                    logger.info(f"✅ Recherche SAP: {len(result['value'])} résultats")
-                    return result["value"]
-                # Puis 'data' comme fallback
-                elif "data" in result and result["data"]:
-                    logger.info(f"✅ Recherche SAP: {len(result['data'])} résultats")
-                    return result["data"]
-                # Résultat direct
-                elif isinstance(result, list):
-                    logger.info(f"✅ Recherche SAP: {len(result)} résultats (liste directe)")
-                    return result
             
+            # CORRECTION: Vérification explicite des erreurs uniquement
+            if result.get("error") or result.get("success") is False:
+                logger.warning(f"⚠️ Erreur SAP explicite: {result.get('error', 'Erreur inconnue')}")
+                return []
+
+            # Extraction des données dans l'ordre de priorité
+            if "results" in result and isinstance(result["results"], list):
+                logger.info(f"✅ Recherche SAP: {len(result['results'])} résultats")
+                return result["results"]
+            elif "value" in result and isinstance(result["value"], list):
+                logger.info(f"✅ Recherche SAP: {len(result['value'])} résultats")
+                return result["value"]
+            elif "data" in result and isinstance(result["data"], list):
+                logger.info(f"✅ Recherche SAP: {len(result['data'])} résultats")
+                return result["data"]
+            elif isinstance(result, list):
+                logger.info(f"✅ Recherche SAP: {len(result)} résultats (liste directe)")
+                return result
+        
             logger.info(f"⚠️ Aucun résultat SAP pour: {client_name}")
             return []
             
