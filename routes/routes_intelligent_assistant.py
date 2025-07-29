@@ -287,7 +287,28 @@ async def _handle_simple_chat(message_data: ProgressChatMessage) -> Dict[str, An
             "message": f"❌ Erreur de traitement: {str(e)}",
             "suggestions": ['Réessayer', 'Reformuler']
         }
-
+@router.post("/continue_quote")
+async def continue_quote_endpoint(request: dict):
+    """Continue le workflow après interaction utilisateur"""
+    try:
+        task_id = request.get("task_id")
+        user_input = request.get("user_input", {})
+        context = request.get("context", {})
+        
+        if not task_id:
+            raise HTTPException(status_code=400, detail="task_id requis")
+        
+        # Récupérer l'instance workflow
+        workflow = DevisWorkflow(task_id=task_id, force_production=True)
+        
+        # Continuer avec l'input utilisateur
+        result = await workflow.continue_after_user_input(user_input, context)
+        
+        return {"success": True, "data": result}
+        
+    except Exception as e:
+        logger.error(f"Erreur continue_quote: {e}")
+        return {"success": False, "error": str(e)}
 # 🆕 NOUVELLES FONCTIONS : Gestionnaires spécialisés
 
 async def _handle_product_search(extraction: Dict[str, Any]) -> Dict[str, Any]:

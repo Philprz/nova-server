@@ -5010,10 +5010,10 @@ class DevisWorkflow:
                             "name": client.get(cfg['name_field']),
                             "source": source,
                             "details": {
-                                "account_number": client.get(cfg['display_info']['account_number']),
-                                "card_code": client.get(cfg['display_info'].get('card_code', cfg['id_field'])),
-                                "phone": client.get(cfg['display_info']['phone']),
-                                "city": client.get(cfg['display_info']['city'])
+                                "account_number": client.get(cfg['display_info'].get('account_number', ''), ''),
+                                "card_code": client.get(cfg['display_info'].get('card_code', cfg['id_field']), ''),
+                                "phone": client.get(cfg['display_info'].get('phone', ''), ''),
+                                "city": client.get(cfg['display_info'].get('city', ''), '')
                             }
                         })
                         option_id += 1
