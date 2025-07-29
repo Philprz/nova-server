@@ -659,7 +659,13 @@ class DevisWorkflow:
             action_type = extracted_info.get("action_type", "DEVIS")
 
             if action_type == "DEVIS":
-                result = await self._process_quote_workflow(extracted_info)
+                try:
+                    result = await self._process_quote_workflow(extracted_info)
+                    if result.get("status") == "client_validation_required":
+                        return result
+                except Exception as e:
+                    logger.error(f"❌ Erreur process_prompt: {str(e)}")
+                    return {"success": False, "error": str(e)}
             else:
                 result = await self._process_other_action(extracted_info)
 
@@ -3510,7 +3516,108 @@ class DevisWorkflow:
             "confidence": 0.5,
             "note": "Extraction minimale - données à vérifier"
         }
+    async def _extract_intelligent_search_criteria(self, product_name: str) -> Dict[str, Any]:
+        """Extrait critères de recherche intelligents via LLM"""
+        
+        prompt = f"""
+    Analyse ce produit et extrais les critères de recherche SAP :
+    Produit: "{product_name}"
 
+    Extrais :
+    - Catégorie principale (imprimante, ordinateur, etc.)
+    - Spécifications techniques (vitesse ppm, type laser/jet, etc.)
+    - Mots-clés de recherche optimaux
+
+    Format JSON uniquement.
+    """
+        
+        try:
+            result = await self.llm_extractor.extract_quote_info(prompt)
+            search_criteria = result.get("search_criteria", {})
+            
+            return {
+                "category": search_criteria.get("category", product_name.split()[0]),
+                "specifications": search_criteria.get("specifications", {}),
+                "keywords": search_criteria.get("characteristics", [product_name])
+            }
+        except Exception as e:
+            logger.warning(f"LLM extraction failed: {e}")
+            return {"category": product_name, "keywords": [product_name]}
+
+    async def _smart_product_search(self, criteria: Dict[str, Any]) -> Dict[str, Any]:
+        """Recherche produits avec critères intelligents"""
+        
+        category = criteria.get("category", "")
+        specifications = criteria.get("specifications", {})
+        keywords = criteria.get("keywords", [])
+        
+        exact_matches = []
+        close_matches = []
+        
+        # Recherche par catégorie + spécifications
+        if "vitesse" in specifications:
+            target_speed = int(specifications["vitesse"].replace(" ppm", "").replace("ppm", ""))
+            query = f"{category} {target_speed}"
+        else:
+            query = category
+        
+        try:
+            result = await self.mcp_connector.call_mcp(
+                "sap_mcp", "sap_search", 
+                {"query": query, "entity_type": "Items", "limit": 5}
+            )
+            
+            if result.get("success"):
+                products = result.get("results", []) or result.get("value", [])
+                
+                for product in products:
+                    score = self._calculate_product_match_score(product, criteria)
+                    
+                    if score >= 0.8:
+                        exact_matches.append(product)
+                    elif score >= 0.5:
+                        close_matches.append(product)
+                        
+        except Exception as e:
+            logger.warning(f"Erreur recherche '{query}': {e}")
+        
+        return {
+            "success": len(exact_matches) > 0 or len(close_matches) > 0,
+            "exact_matches": exact_matches[:3],
+            "close_matches": close_matches[:5]
+        }
+
+    def _calculate_product_match_score(self, product: Dict, criteria: Dict) -> float:
+        """Calcule score de correspondance produit/critères"""
+        
+        score = 0.0
+        product_name = product.get("ItemName", "").lower()
+        combined_text = f"{product_name} {product.get('U_Description', '').lower()}"
+        
+        # Score catégorie
+        category = criteria.get("category", "").lower()
+        if category in combined_text:
+            score += 0.4
+        
+        # Score spécifications techniques (vitesse ppm)
+        specifications = criteria.get("specifications", {})
+        if "vitesse" in specifications:
+            target_speed = int(specifications["vitesse"].replace(" ppm", "").replace("ppm", ""))
+            
+            import re
+            speed_matches = re.findall(r'(\d+)\s*ppm', combined_text)
+            for match in speed_matches:
+                product_speed = int(match)
+                speed_diff = abs(product_speed - target_speed)
+                
+                if speed_diff == 0:
+                    score += 0.5
+                elif speed_diff <= 2:
+                    score += 0.3
+                elif speed_diff <= 5:
+                    score += 0.1
+        
+        return min(score, 1.0)
     async def _check_availability(self, products: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Vérifie la disponibilité des produits"""
         logger.info("Vérification de la disponibilité des produits")
@@ -4589,68 +4696,44 @@ class DevisWorkflow:
 
     async def _process_quote_workflow(self, extracted_info: Dict[str, Any]) -> Dict[str, Any]:
         """
-        🔧 MODIFICATION : Workflow de devis avec progression détaillée
+        🔧 REFONTE : Workflow de devis simplifié sans doublons
         """
         try:
             client_name = extracted_info.get("client", "")
             products = extracted_info.get("products", [])
 
-            # Étape 1 : recherche/validation du client
-            self._track_step_start("search_client", f"👤 Recherche du client : {client_name}")
+            # Étape 1 : recherche/validation du client
+            self._track_step_start("search_client", f"👤 Recherche du client : {client_name}")
             client_result = await self._process_client_validation(client_name)
-            # AJOUT : Vérifier si une sélection client est requise
+            # Si une interaction utilisateur est requise, on retourne immédiatement
             if client_result.get("status") == "suggestions_required":
-                return client_result  # Retourner immédiatement pour interaction utilisateur
+                return client_result
+            self._track_step_complete("search_client", f"✅ Client : {client_result.get('status')}")
 
-            client_result = await self._process_client_validation(client_name)
-            self._track_step_complete("search_client", f"✅ Client : {client_result.get('status', 'traité')}")
-
-            # Étape 2 : récupération des produits
+            # Étape 2 : récupération des produits
             self._track_step_start("lookup_products", f"📦 Recherche de {len(products)} produit(s)")
             products_result = await self._process_products_retrieval(products)
+            found = len(products_result.get('products', []))
             self._track_step_complete(
                 "lookup_products",
-                f"✅ {len(products_result.get('products', []))} produit(s) trouvé(s)",
+                f"✅ {found} produit(s) trouvé(s)",
             )
 
-            # Étape 3 : création du devis
+            # Étape 3 : création du devis
             self._track_step_start("prepare_quote", "📋 Préparation du devis")
             quote_result = await self._create_quote_document(client_result, products_result)
-            
-            # Protection critique contre quote_result None
-            if quote_result is None or not isinstance(quote_result, dict):
-                logger.error("❌ _create_quote_document a retourné None ou un type invalide")
-                quote_result = {
-                    "status": "error",
-                    "quote_data": {
-                        "quote_id": f"ERROR_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-                        "client": {},
-                        "products": [],
-                        "totals": {"total_amount": 0},
-                        "currency": "EUR",
-                    },
-                    "error": "Erreur création document devis",
-                }
+            if not isinstance(quote_result, dict):
+                logger.error("❌ _create_quote_document a retourné un résultat invalide")
+                quote_result = {"status": "error", "quote_data": {}}
 
-            # Protection supplémentaire pour quote_data
-            quote_data = quote_result.get("quote_data") if quote_result else None
-            if quote_data is None:
-                logger.error("❌ quote_data est None - Création d'un objet par défaut")
-                quote_data = {
-                    "quote_id": f"FALLBACK_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-                    "client": {},
-                    "products": [],
-                    "totals": {"total_amount": 0},
-                    "currency": "EUR",
-                }
-
-            # Protection pour products_result
-            if products_result is None:
-                logger.error("❌ products_result est None - Création d'un objet par défaut")
-                products_result = {"products": []}
+            # Extraction sécurisée de quote_data
+            quote_data = quote_result.get("quote_data") or {}
             returned_products = quote_data.get("products") or products_result.get("products", [])
-            
-            # Étape 4 : synchronisation (ex. SAP et Salesforce)
+            if not returned_products:
+                logger.warning("❌ Aucun produit valide pour le devis")
+                return {"success": False, "error": "Aucun produit valide trouvé"}
+
+            # Étape 4 : synchronisation dans les systèmes externes
             self._track_step_start("save_to_sap", "💾 Enregistrement dans SAP")
             sap_result = await self._sync_quote_to_systems(quote_result)
             self._track_step_complete("save_to_sap", "✅ SAP mis à jour")
@@ -4659,42 +4742,32 @@ class DevisWorkflow:
             sf_result = await self._sync_quote_to_systems(quote_result)
             self._track_step_complete("sync_salesforce", "✅ Salesforce synchronisé")
 
-            # Préparation des informations pour le retour
-            quote_data = quote_result.get("quote_data", {})
-            # Récupération sécurisée des produits : le devis peut retourner sa propre liste,
-            # sinon on utilise la liste issue de l’étape 2
-            returned_products = quote_data.get("products") or products_result.get("products", [])
             # Calcul du montant total
             total_amount = sum(p.get("total_price", 0) for p in returned_products)
 
+            # Résultat final
             return {
                 "success": True,
                 "status": quote_result.get("status", "success"),
                 "type": "quote_generated",
-                "message": "✅ Devis généré avec succès !",
+                "message": "✅ Devis généré avec succès !",
                 "task_id": self.task_id,
                 "workflow_steps": self.workflow_steps,
-
-                # Informations principales du devis
-                "quote_id": quote_data.get(
-                    "quote_id",
-                    f"FALLBACK_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-                ),
+                "quote_id": quote_data.get("quote_id", ""),
                 "client": quote_data.get("client", client_result.get("client_data", {})),
                 "products": returned_products,
-                "total_amount": total_amount or quote_data.get("totals", {}).get("total_amount", 0),
+                "total_amount": total_amount,
                 "currency": quote_data.get("currency", "EUR"),
-
-                # Données complètes pour une utilisation avancée
                 "quote_data": quote_data,
                 "client_result": client_result,
                 "products_result": products_result,
-                "sync_result": sap_result,  # ou sf_result selon le contexte
+                "sync_results": {"sap": sap_result, "salesforce": sf_result},
             }
 
         except Exception as e:
-            logger.error(f"❌ Erreur workflow devis : {str(e)}")
+            logger.error(f"❌ Erreur workflow devis : {e}")
             raise
+
 
     async def _process_other_action(self, extracted_info: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -5396,21 +5469,24 @@ class DevisWorkflow:
                 # 2. Recherche par nom si pas trouvé par code
                 if not product_found and product_name:
                     try:
-                        search_result = await self.mcp_connector.call_mcp(
-                            "sap_mcp",
-                            "sap_search",
-                            {
-                                "query": product_name,
-                                "entity_type": "Items",  # Note: "Items" avec majuscule
-                                "limit": 10
-                            }
-                        )
+                        # 2.1 Extraction critères intelligents via LLM
+                        search_criteria = await self._extract_intelligent_search_criteria(product_name)
                         
-                        if not search_result.get("error"):
-                            items = search_result.get("results", []) or search_result.get("value", [])
-                            if items:
-                                product_found = items[0]  # Prendre le premier résultat
-                                logger.info(f"✅ Produit trouvé par recherche: {product_name}")
+                        # 2.2 Recherche principale par critères
+                        search_result = await self._smart_product_search(search_criteria)
+                        
+                        if search_result.get("success") and search_result.get("products"):
+                            exact_matches = search_result.get("exact_matches", [])
+                            close_matches = search_result.get("close_matches", [])
+                            
+                            if exact_matches:
+                                product_found = exact_matches[0]
+                                logger.info(f"✅ Correspondance exacte: {product_name}")
+                            elif close_matches:
+                                # Proposer alternatives à l'utilisateur
+                                return await self._propose_product_alternatives(
+                                    product_name, close_matches, i, total_products
+                                )
                     except Exception as e:
                         logger.warning(f"⚠️ Erreur recherche par nom {product_name}: {e}")
                 

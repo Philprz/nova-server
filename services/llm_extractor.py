@@ -184,7 +184,35 @@ Réponds UNIQUEMENT au format JSON suivant:
             except json.JSONDecodeError:
                 logger.error("❌ OpenAI response not valid JSON")
                 raise
+    async def extract_product_search_criteria(self, product_name: str) -> Dict[str, Any]:
+        """Extrait critères de recherche intelligents pour un produit"""
+        
+        system_prompt = """
+    Tu es un assistant spécialisé dans l'identification de produits bureautiques.
+    Analyse le nom de produit et extrais les critères de recherche SAP appropriés.
 
+    Pour "Imprimante 49 ppm", extrais:
+    - Catégorie: "Imprimante" 
+    - Critères: ["laser", "49 ppm", "bureau"]
+    - Mots-clés alternatifs: ["50 ppm", "48 ppm"] (proches)
+
+    Format JSON:
+    {
+    "category": "TYPE_PRODUIT",
+    "main_keywords": ["mot1", "mot2"],
+    "technical_specs": {"vitesse": "49 ppm", "type": "laser"},
+    "alternative_keywords": ["alternatives proches"]
+    }
+    """
+        
+        user_message = f"Analyse ce produit: {product_name}"
+        
+        try:
+            response = await self._call_claude_with_system(system_prompt, user_message)
+            return json.loads(response)
+        except Exception as e:
+            logger.error(f"Erreur extraction critères: {e}")
+            return {"category": product_name, "main_keywords": [product_name]}
     def _extract_json_from_response(self, content: str) -> Dict[str, Any]:
         """Extrait et parse le JSON de la réponse LLM."""
         start_idx = content.find("{")
