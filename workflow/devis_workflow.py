@@ -209,64 +209,59 @@ class DevisWorkflow:
     # 🔧 NOUVELLE MÉTHODE PRINCIPALE AVEC VALIDATION SÉQUENTIELLE
     async def process_quote_request(self, user_prompt: str, draft_mode: bool = False) -> Dict[str, Any]:
         """
-        MÉTHODE PRINCIPALE MODIFIÉE - Version avec validation séquentielle
+        🔧 MÉTHODE PRINCIPALE REFACTORISÉE : extraction, validation, génération du devis
         """
-
         try:
+            # Mode brouillon
             self.draft_mode = draft_mode
 
             # Nettoyage préventif du cache
             await self.cache_manager.cleanup_expired()
 
-            # PHASE 1: Extraction LLM (inchangée)
+            # PHASE 1: Analyse du prompt
             self._track_step_start("parse_prompt", "🔍 Analyse de votre demande")
             extracted_info = await self._extract_info_from_prompt(user_prompt)
-
             if not extracted_info:
-                return self._build_error_response("Extraction échouée", "Impossible d'analyser votre demande")
-
+                return self._build_error_response(
+                    "Extraction échouée", "Impossible d'analyser votre demande"
+                )
             self._track_step_complete("parse_prompt", "✅ Demande analysée")
 
-            # PHASE 2: NOUVELLE VALIDATION SÉQUENTIELLE
-            self._track_step_start("sequential_validation", "🔍 Validation séquentielle en cours...")
+            # PHASE 2: Exécution du workflow de devis
+            self._track_step_start("quote_workflow", "🚀 Démarrage du workflow de devis")
+            workflow_result = await self._process_quote_workflow(extracted_info)
 
-            validation_result = await self.sequential_validator.validate_quote_request(extracted_info)
-
-            if validation_result["status"] == "ready":
-                # ✅ TOUT EST VALIDÉ - CONTINUER LE WORKFLOW
-                self._track_step_complete("sequential_validation", "✅ Validation complète réussie")
-
-                # Mettre à jour le contexte avec les données validées
-                self.context["client_info"] = {"data": validation_result["data"]["client"], "found": True}
-                self.context["products_info"] = validation_result["data"]["products"]
-
-                # Continuer avec la génération du devis
-                return await self._continue_quote_generation(validation_result["data"])
-
-            elif validation_result["status"] == "user_input_required":
-                # 🔄 INTERACTION UTILISATEUR NÉCESSAIRE
-                self._track_step_progress("sequential_validation", 50, f"En attente: {validation_result['step']}")
-
-                return {
-                    "status": "user_interaction_required",
-                    "interaction_type": validation_result["step"],
-                    "message": validation_result["message"],
-                    "question": validation_result.get("question"),
-                    "options": validation_result.get("options", []),
-                    "input_type": validation_result.get("input_type", "text"),
-                    "context": validation_result.get("context", {}),
+            # Cas : interaction utilisateur nécessaire
+            if workflow_result.get("status") == "user_interaction_required":
+                # Suivi d'étape
+                step = workflow_result.get("step")
+                if step:
+                    self._track_step_progress(
+                        "quote_workflow", 50, f"❗ En attente: {step}"
+                    )
+                # Ajout du contexte pour reprise
+                workflow_result.setdefault("workflow_context", {}).update({
                     "task_id": self.task_id,
-                    "next_step": "continue_validation"
-                }
+                    "extracted_info": extracted_info,
+                    "user_prompt": user_prompt,
+                    "draft_mode": draft_mode
+                })
+                return workflow_result
 
-            else:
-                # ❌ ERREUR DE VALIDATION
-                self._track_step_fail("sequential_validation", "Erreur de validation", validation_result.get("message"))
-                return self._build_error_response("Erreur de validation", validation_result.get("message"))
+            # Cas : workflow terminé normalement
+            self._track_step_complete("quote_workflow", "✅ Workflow de devis terminé")
+            return workflow_result
 
         except Exception as e:
-            logger.exception(f"Erreur workflow principal: {str(e)}")
-            return self._build_error_response("Erreur système", f"Erreur interne: {str(e)}")
+            logger.exception(f"Erreur workflow principal: {e}")
+            # Suivi d'erreur global
+            self._track_step_fail(
+                "quote_workflow", "❌ Erreur système", str(e)
+            )
+            return self._build_error_response(
+                "Erreur système", f"Erreur interne: {str(e)}"
+            )
+
 
     # 🆕 NOUVELLE MÉTHODE POUR CONTINUER APRÈS INTERACTION
     async def continue_after_user_input(self, user_input: Dict, context: Dict) -> Dict[str, Any]:
@@ -299,28 +294,78 @@ class DevisWorkflow:
     # 🔧 HANDLERS POUR CHAQUE TYPE D'INTERACTION
 
     async def _handle_client_selection(self, user_input: Dict, context: Dict) -> Dict[str, Any]:
-        """Gère la sélection de client par l'utilisateur"""
+        """
+        🔧 NOUVELLE: Gère la sélection de client par l'utilisateur avec continuation workflow
+        """
+        try:
+            action = user_input.get("action")
+            
+            if action == "select_existing":
+                # Vérifier les données de sélection
+                selected_client_data = user_input.get("selected_data")
+                if not selected_client_data:
+                    return self._build_error_response("Sélection invalide", "Données client manquantes")
 
-        selected_option = user_input.get("selected_option")
+                # 🔧 Caching du client
+                await self.cache_manager.cache_client(
+                    selected_client_data.get("Name"),
+                    selected_client_data
+                )
 
-        if selected_option == "new_client":
-            # Demander la création du client
-            client_name = context.get("original_client_name")
-            return await self._initiate_client_creation(client_name)
+                # 🔧 Mise à jour du contexte client
+                self.context["client_info"] = {
+                    "data": selected_client_data,
+                    "found": True
+                }
+                logger.info(f"✅ Client sélectionné: {selected_client_data.get('Name') or selected_client_data.get('CardName')}")
 
-        else:
-            # Client existant sélectionné
-            selected_client_data = user_input.get("selected_data")
+                # 🔧 CONTINUATION AUTOMATIQUE DU WORKFLOW
+                workflow_context = context.get("workflow_context", {})
+                original_products = (
+                    workflow_context.get("extracted_info", {})
+                    .get("products", [])
+                )
+                if original_products:
+                    # Lancement de la recherche produits
+                    self._track_step_start(
+                        "lookup_products", 
+                        f"📦 Recherche de {len(original_products)} produit(s)"
+                    )
+                    await self._process_products_retrieval(original_products)
 
-            if selected_client_data:
-                # Mettre en cache et continuer
-                await self.cache_manager.cache_client(selected_client_data["Name"], selected_client_data)
+                    # Poursuite du workflow après sélection client
+                    return await self._continue_workflow_after_client_selection(
+                        selected_client_data,
+                        {"extracted_info": {"products": original_products}}
+                    )
+                else:
+                    return self._build_error_response(
+                        "Workflow incomplet", 
+                        "Produits manquants pour continuer"
+                    )
 
-                self.context["client_info"] = {"data": selected_client_data, "found": True}
+            elif action == "create_new":
+                # Création d'un nouveau client
+                original_client_name = context.get("original_client_name", "")
+                return await self._initiate_client_creation(original_client_name)
 
-                # Continuer avec la validation des produits
-                original_products = context.get("original_products", [])
-                return await self._continue_product_validation(original_products)
+            elif action == "cancel":
+                # Annulation du workflow par l'utilisateur
+                return {
+                    "status": "cancelled",
+                    "message": "Demande de devis annulée par l'utilisateur"
+                }
+
+            else:
+                return self._build_error_response(
+                    "Action non reconnue", 
+                    f"Action: {action}"
+                )
+
+        except Exception as e:
+            logger.exception(f"Erreur gestion sélection client: {str(e)}")
+            return self._build_error_response("Erreur sélection client", str(e))
+
 
         return self._build_error_response("Sélection client invalide", "Données client manquantes")
     async def _search_company_enrichment(self, company_name: str) -> Dict[str, Any]:
@@ -4696,7 +4741,7 @@ class DevisWorkflow:
 
     async def _process_quote_workflow(self, extracted_info: Dict[str, Any]) -> Dict[str, Any]:
         """
-        🔧 REFONTE : Workflow de devis simplifié sans doublons
+        🔧 REFONTE : Workflow de devis avec gestion d'interruption client et statuts critiques
         """
         try:
             client_name = extracted_info.get("client", "")
@@ -4705,19 +4750,24 @@ class DevisWorkflow:
             # Étape 1 : recherche/validation du client
             self._track_step_start("search_client", f"👤 Recherche du client : {client_name}")
             client_result = await self._process_client_validation(client_name)
-            # Si une interaction utilisateur est requise, on retourne immédiatement
-            if client_result.get("status") == "suggestions_required":
+
+            # 🔧 CORRECTION CRITIQUE: Vérifier si interaction utilisateur requise
+            if client_result.get("status") == "user_interaction_required":
+                logger.info("⏸️ Workflow interrompu - Interaction utilisateur requise pour sélection client")
                 return client_result
+
+            # 🔧 NOUVEAU: Vérifier autres statuts qui nécessitent un arrêt
+            if client_result.get("status") in ["error", "cancelled"]:
+                logger.warning(f"❌ Workflow interrompu - Statut client : {client_result.get('status')}")
+                return client_result
+
             self._track_step_complete("search_client", f"✅ Client : {client_result.get('status')}")
 
             # Étape 2 : récupération des produits
             self._track_step_start("lookup_products", f"📦 Recherche de {len(products)} produit(s)")
             products_result = await self._process_products_retrieval(products)
-            found = len(products_result.get('products', []))
-            self._track_step_complete(
-                "lookup_products",
-                f"✅ {found} produit(s) trouvé(s)",
-            )
+            found = len(products_result.get("products", []))
+            self._track_step_complete("lookup_products", f"✅ {found} produit(s) trouvé(s)")
 
             # Étape 3 : création du devis
             self._track_step_start("prepare_quote", "📋 Préparation du devis")
@@ -4734,13 +4784,15 @@ class DevisWorkflow:
                 return {"success": False, "error": "Aucun produit valide trouvé"}
 
             # Étape 4 : synchronisation dans les systèmes externes
-            self._track_step_start("save_to_sap", "💾 Enregistrement dans SAP")
-            sap_result = await self._sync_quote_to_systems(quote_result)
-            self._track_step_complete("save_to_sap", "✅ SAP mis à jour")
-
-            self._track_step_start("sync_salesforce", "☁️ Synchronisation Salesforce")
-            sf_result = await self._sync_quote_to_systems(quote_result)
-            self._track_step_complete("sync_salesforce", "✅ Salesforce synchronisé")
+            # 🔧 FACTORISATION : un seul appel pour SAP et Salesforce
+            self._track_step_start("sync_external_systems", "💾 Synchronisation SAP & Salesforce")
+            sync_results = {}
+            for system in ("sap", "salesforce"):
+                key = f"sync_to_{system}"
+                self._track_step_start(key, f"{'💾' if system=='sap' else '☁️'} Enregistrement dans {system.upper()}")
+                result = await self._sync_quote_to_systems(quote_result, target=system)
+                self._track_step_complete(key, f"✅ {system.upper()} mis à jour")
+                sync_results[system] = result
 
             # Calcul du montant total
             total_amount = sum(p.get("total_price", 0) for p in returned_products)
@@ -4761,12 +4813,13 @@ class DevisWorkflow:
                 "quote_data": quote_data,
                 "client_result": client_result,
                 "products_result": products_result,
-                "sync_results": {"sap": sap_result, "salesforce": sf_result},
+                "sync_results": sync_results,
             }
 
         except Exception as e:
-            logger.error(f"❌ Erreur workflow devis : {e}")
+            logger.error(f"❌ Erreur workflow devis : {e}", exc_info=True)
             raise
+
 
 
     async def _process_other_action(self, extracted_info: Dict[str, Any]) -> Dict[str, Any]:
@@ -4899,52 +4952,101 @@ class DevisWorkflow:
     def _sanitize_soql_string(self, value: str) -> str:
         return value.replace("'", "\\'")
     
-    async def _propose_existing_clients_selection(self, client_name: str, search_result: Dict[str, Any]) -> Dict[str, Any]:
-        
-        """Propose à l'utilisateur de sélectionner parmi les clients existants trouvés"""
+
+    async def propose_existing_clients_selection(
+        client_name: str,
+        search_result: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Propose à l'utilisateur de sélectionner parmi les clients existants trouvés.
+        Retourne une structure standardisée pour l'interface utilisateur.
+        """
         try:
-            # Préparer la liste des clients pour sélection
-            client_options = []
+            client_options: List[Dict[str, Any]] = []
             option_id = 1
-            
-            # Ajouter clients Salesforce
-            if search_result.get("salesforce", {}).get("found"):
-                for client_data in search_result["salesforce"]["clients"]:
-                    client_options.append({
-                        "id": f"sf_{option_id}",
-                        "label": f"{option_id}. {client_data.get('Name', 'N/A')} (Salesforce - {client_data.get('Id', 'N/A')})",
-                        "source": "salesforce",
-                        "data": client_data
-                    })
-                    option_id += 1
-            
-            # Ajouter clients SAP
-            if search_result.get("sap", {}).get("found"):
-                for client_data in search_result["sap"]["clients"]:
-                    client_options.append({
-                        "id": f"sap_{option_id}",
-                        "label": f"{option_id}. {client_data.get('CardName', 'N/A')} (SAP - {client_data.get('CardCode', 'N/A')})",
-                        "source": "sap",
-                        "data": client_data
-                    })
-                    option_id += 1
-            
-            # Retourner interface de sélection
-            return {
-                "found": True,  # CORRECTION: True au lieu de False car clients trouvés
-                "requires_user_selection": True,
-                "selection_type": "existing_clients",
-                "message": f"J'ai trouvé {len(client_options)} client(s) existant(s) pour '{client_name}'",
-                "client_options": client_options,
-                "actions": [
-                    {"id": "select_existing", "label": "Utiliser un client existant"},
-                    {"id": "create_new", "label": "Créer un nouveau client quand même"},
-                    {"id": "cancel", "label": "Annuler la demande"}
-                ]
+
+            # Configuration des sources et mapping de champs
+            sources = {
+                'salesforce': {
+                    'clients_key': 'clients',
+                    'id_prefix': 'sf',
+                    'name_field': 'Name',
+                    'label_suffix': 'Salesforce',
+                    'display_info': {
+                        'name': 'Name',
+                        'account_number': 'AccountNumber',
+                        'city': 'BillingCity',
+                        'phone': 'Phone'
+                    }
+                },
+                'sap': {
+                    'clients_key': 'clients',
+                    'id_prefix': 'sap',
+                    'name_field': 'CardName',
+                    'label_suffix': 'SAP',
+                    'display_info': {
+                        'name': 'CardName',
+                        'card_code': 'CardCode',
+                        'city': 'BillToCity',
+                        'phone': 'Phone1'
+                    }
+                }
             }
+
+            # Construction des options à partir de chaque source
+            for source, cfg in sources.items():
+                result = search_result.get(source, {})
+                clients = result.get(cfg['clients_key'], [])
+                if result.get('found') and isinstance(clients, list):
+                    for client in clients:
+                        label = f"{option_id}. {client.get(cfg['name_field'], 'N/A')} ({cfg['label_suffix']})"
+                        display = {
+                            field: client.get(key, '')
+                            for field, key in cfg['display_info'].items()
+                        }
+                        client_options.append({
+                            'id': f"{cfg['id_prefix']}_{option_id}",
+                            'label': label,
+                            'source': source,
+                            'data': client,
+                            'display_info': display
+                        })
+                        option_id += 1
+
+            # Aucun client trouvé
+            if not client_options:
+                return {
+                    'found': False,
+                    'requires_user_selection': False,
+                    'selection_type': 'existing_clients',
+                    'message': f"Aucun client existant trouvé pour '{client_name}'"
+                }
+
+            # Réponse standardisée pour l'UI
+            return {
+                'found': True,
+                'requires_user_selection': True,
+                'selection_type': 'existing_clients',
+                'message': f"J'ai trouvé {len(client_options)} client(s) existant(s) pour '{client_name}'",
+                'question': 'Quel client souhaitez-vous utiliser ?',
+                'input_type': 'client_selection',
+                'client_options': client_options,
+                'actions': [
+                    {'id': 'select_existing', 'label': 'Utiliser un client existant', 'type': 'primary'},
+                    {'id': 'create_new',   'label': 'Créer un nouveau client',    'type': 'secondary'},
+                    {'id': 'cancel',       'label': 'Annuler',                    'type': 'tertiary'}
+                ],
+                'context': {
+                    'original_client_name': client_name,
+                    'search_results': search_result,
+                    'total_options': len(client_options)
+                }
+            }
+
         except Exception as e:
-            logger.error(f"❌ Erreur proposition sélection clients: {str(e)}")
-            return {"found": False, "error": str(e)}
+            logger.error(f"❌ Erreur proposition sélection clients: {e}")
+            return {'found': False, 'error': str(e)}
+
     async def _create_client_automatically(self, client_name: str) -> Dict[str, Any]:
         """
         🆕 NOUVELLE MÉTHODE : Création automatique du client dans SAP et Salesforce
@@ -5086,7 +5188,7 @@ class DevisWorkflow:
     async def _process_client_validation(self, client_name: str) -> Dict[str, Any]:
         """
         Validation complète du client avec recherche Salesforce, fallback SAP et enrichissement.
-        Sécurisation des requêtes SOQL contre les injections.
+        🔧 CORRIGÉ: Détection et arrêt pour interaction utilisateur
         """
         if not client_name or not client_name.strip():
             return {
@@ -5098,12 +5200,33 @@ class DevisWorkflow:
         try:
             safe_client_name = self._sanitize_soql_string(client_name)
             logger.info(f"🔍 Recherche approfondie du client: {client_name}")
-            # NOUVEAU: Utiliser find_client_everywhere pour recherche exhaustive AVANT tout
+            
+            # Utiliser find_client_everywhere pour recherche exhaustive
             comprehensive_search = await find_client_everywhere(client_name)
             total_found = comprehensive_search.get("total_found", 0)
+            
             if total_found > 0:
                 logger.info(f"✅ {total_found} client(s) existant(s) trouvé(s) pour '{client_name}'")
-                return await self._propose_existing_clients_selection(client_name, comprehensive_search)
+                
+                # 🔧 CORRECTION CRITIQUE: Détecter l'interaction utilisateur requise
+                selection_result = await self._propose_existing_clients_selection(client_name, comprehensive_search)
+                
+                # 🔧 NOUVEAU: Vérifier si interaction utilisateur requise
+                if selection_result.get("requires_user_selection"):
+                    return {
+                        "status": "user_interaction_required",
+                        "interaction_type": "client_selection",
+                        "data": selection_result,
+                        "message": selection_result.get("message"),
+                        "workflow_context": {
+                            "task_id": self.task_id,
+                            "original_client_name": client_name,
+                            "search_results": comprehensive_search
+                        }
+                    }
+                
+                # Si pas d'interaction requise, continuer normalement
+                return selection_result
             # === ÉTAPE 1: RECHERCHE EXACTE ===
             exact_query = f"""
                 SELECT Id, Name, AccountNumber, Phone, BillingCity, BillingCountry 

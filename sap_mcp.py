@@ -449,7 +449,7 @@ async def sap_read(endpoint: str, method: str = "GET", payload: Optional[Dict[st
 @mcp.tool(name="sap_search")
 async def sap_search(query: str, entity_type: str = "Items", limit: int = 5) -> dict:
     """
-    Recherche dans SAP.
+    Recherche intelligente dans SAP avec décomposition mots-clés et synonymes.
     
     Args:
         query: Texte à rechercher
@@ -460,48 +460,155 @@ async def sap_search(query: str, entity_type: str = "Items", limit: int = 5) -> 
         Un dictionnaire contenant les résultats de la recherche
     """
     try:
-        log(f"Recherche SAP: '{query}' dans {entity_type}")
+        log(f"Recherche SAP intelligente: '{query}' dans {entity_type}")
         
-        # Déterminer le bon champ pour la recherche
-        search_mappings = {
-            "Items": "ItemName",
-            "BusinessPartners": "CardName",
-            "Orders": "DocNum",
-            "Invoices": "DocNum",
-            "Quotations": "DocNum"
+        # Dictionnaire de synonymes pour recherche élargie
+        synonyms_dict = {
+            "imprimante": ["printer", "imprimante", "laser", "jet", "inkjet"],
+            "ordinateur": ["computer", "pc", "desktop", "workstation"],
+            "écran": ["monitor", "screen", "display", "écran"],
+            "clavier": ["keyboard", "clavier"],
+            "souris": ["mouse", "souris"],
+            "scanner": ["scanner", "scan", "numériseur"],
+            "réseau": ["network", "réseau", "ethernet", "wifi"],
+            "laser": ["laser"],
+            "couleur": ["color", "couleur"],
+            "noir": ["black", "noir", "monochrome"],
+            "recto-verso": ["duplex", "recto-verso", "double-sided"]
         }
         
-        search_field = search_mappings.get(entity_type, "Name")
+        # Extraction des mots-clés intelligents
+        keywords = _extract_smart_keywords(query.lower(), synonyms_dict)
         
-        # Construire la requête avec échappement des caractères spéciaux
-        escaped_query = query.replace("'", "''")  # Échapper les apostrophes
-        endpoint = f"/{entity_type}?$filter=contains({search_field},'{escaped_query}')&$top={limit}"
+        # Déterminer les champs de recherche selon l'entité
+        search_mappings = {
+            "Items": ["ItemName", "U_Description", "ItemCode"],
+            "BusinessPartners": ["CardName", "CardCode", "Phone1"],
+            "Orders": ["DocNum", "CardName"],
+            "Invoices": ["DocNum", "CardName"],
+            "Quotations": ["DocNum", "CardName"]
+        }
         
-        result = await call_sap(endpoint)
+        search_fields = search_mappings.get(entity_type, ["ItemName"])
+        all_results = []
         
-        if "error" in result:
-            return {"error": result["error"]}
+        # Recherche multi-mots-clés et multi-champs
+        for keyword in keywords[:3]:  # Limiter à 3 mots-clés pour éviter surcharge
+            escaped_keyword = keyword.replace("'", "''")
+            
+            # Construire filtre multi-champs
+            field_filters = []
+            for field in search_fields:
+                field_filters.append(f"contains(tolower({field}),'{escaped_keyword}')")
+            
+            combined_filter = " or ".join(field_filters)
+            endpoint = f"/{entity_type}?$filter=({combined_filter})&$top={limit}"
+            
+            log(f"Recherche avec mot-clé: '{keyword}' sur champs: {search_fields}")
+            
+            result = await call_sap(endpoint)
+            
+            if "error" not in result and "value" in result:
+                # Ajouter score de pertinence et éviter doublons
+                for item in result["value"]:
+                    item_id = item.get("ItemCode" if entity_type == "Items" else "CardCode")
+                    
+                    # Éviter doublons
+                    if not any(existing.get("ItemCode" if entity_type == "Items" else "CardCode") == item_id 
+                              for existing in all_results):
+                        
+                        # Calculer score de pertinence
+                        relevance_score = _calculate_relevance_score(item, keyword, search_fields)
+                        item["_relevance_score"] = relevance_score
+                        item["_matched_keyword"] = keyword
+                        
+                        all_results.append(item)
         
-        if "value" in result:
-            log(f"Recherche réussie - {len(result['value'])} résultats")
-            return {
-                "query": query,
-                "entity_type": entity_type,
-                "results": result["value"],
-                "count": len(result["value"])
-            }
-        else:
-            log("Recherche réussie - format de réponse inattendu")
-            return {
-                "query": query,
-                "entity_type": entity_type,
-                "results": [],
-                "count": 0,
-                "raw_response": result
-            }
+        # Trier par score de pertinence
+        all_results.sort(key=lambda x: x.get("_relevance_score", 0), reverse=True)
+        
+        # Limiter aux meilleurs résultats
+        final_results = all_results[:limit]
+        
+        log(f"Recherche intelligente réussie - {len(final_results)} résultats pertinents")
+        
+        return {
+            "query": query,
+            "entity_type": entity_type,
+            "keywords_used": keywords[:3],
+            "results": final_results,
+            "count": len(final_results),
+            "search_method": "intelligent_multi_keyword"
+        }
+        
     except Exception as e:
         log(f"❌ Erreur lors de la recherche SAP: {str(e)}", "ERROR")
         return {"error": str(e)}
+
+def _extract_smart_keywords(query: str, synonyms_dict: dict) -> list:
+    """
+    Extrait des mots-clés intelligents avec expansion synonymes
+    """
+    keywords = []
+    query_words = query.split()
+    
+    # Recherche directe de synonymes
+    for word in query_words:
+        if len(word) > 2:  # Ignorer mots trop courts
+            keywords.append(word)
+            
+            # Ajouter synonymes si trouvés
+            for key, synonyms in synonyms_dict.items():
+                if word in key or key in word:
+                    keywords.extend(synonyms[:2])  # Maximum 2 synonymes
+                    break
+    
+    # Détecter patterns spéciaux (ex: "20 ppm")
+    full_query = " ".join(query_words)
+    if "ppm" in full_query:
+        # Extraire la vitesse
+        import re
+        speed_match = re.search(r'(\d+)\s*ppm', full_query)
+        if speed_match:
+            keywords.append(f"{speed_match.group(1)}ppm")
+    
+    # Supprimer doublons et retourner
+    return list(dict.fromkeys(keywords))  # Preserve order, remove duplicates
+
+def _calculate_relevance_score(item: dict, keyword: str, search_fields: list) -> float:
+    """
+    Calcule un score de pertinence pour un résultat
+    """
+    score = 0.0
+    keyword_lower = keyword.lower()
+    
+    # Vérifier correspondance dans chaque champ (pondération différente)
+    field_weights = {
+        "ItemCode": 3.0,
+        "ItemName": 2.0,
+        "U_Description": 1.0,
+        "CardCode": 3.0,
+        "CardName": 2.0
+    }
+    
+    for field in search_fields:
+        field_value = str(item.get(field, "")).lower()
+        weight = field_weights.get(field, 1.0)
+        
+        if keyword_lower in field_value:
+            # Bonus si match exact au début
+            if field_value.startswith(keyword_lower):
+                score += weight * 2.0
+            else:
+                score += weight
+    
+    # Bonus pour produits en stock (si applicable)
+    if "OnHand" in item or "QuantityOnStock" in item:
+        stock = float(item.get("OnHand", item.get("QuantityOnStock", 0)))
+        if stock > 0:
+            score += 0.5
+    
+    return score
 
 @mcp.tool(name="sap_get_product_details")
 async def sap_get_product_details(item_code: str) -> dict:
