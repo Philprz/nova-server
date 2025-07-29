@@ -160,13 +160,13 @@ class ClientLister:
     async def _search_sap_by_name(self, client_name: str) -> List[Dict[str, Any]]:
         """Recherche dans SAP avec différentes variantes et diagnostics améliorés"""
         try:
+            # Utiliser sap_read avec OData filter au lieu de sap_search
             result = await self.mcp_connector.call_mcp(
                 "sap_mcp",
-                "sap_search",
+                "sap_read",
                 {
-                    "query": client_name,
-                    "entity_type": "BusinessPartners",
-                    "limit": 10
+                    "endpoint": f"/BusinessPartners?$filter=contains(CardName,'{client_name}') or startswith(CardName,'{client_name}')&$top=10",
+                    "method": "GET"
                 }
             )
 
