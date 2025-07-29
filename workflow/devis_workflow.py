@@ -294,63 +294,49 @@ class DevisWorkflow:
     # 🔧 HANDLERS POUR CHAQUE TYPE D'INTERACTION
 
     async def _handle_client_selection(self, user_input: Dict, context: Dict) -> Dict[str, Any]:
-        """
-        🔧 NOUVELLE: Gère la sélection de client par l'utilisateur avec continuation workflow
-        """
+        """🔧 Gère la sélection de client par l'utilisateur avec continuation workflow"""
         try:
             action = user_input.get("action")
-            
+
             if action == "select_existing":
-                # Vérifier les données de sélection
+                # Vérification et cache
                 selected_client_data = user_input.get("selected_data")
                 if not selected_client_data:
                     return self._build_error_response("Sélection invalide", "Données client manquantes")
-
-                # 🔧 Caching du client
                 await self.cache_manager.cache_client(
                     selected_client_data.get("Name"),
                     selected_client_data
                 )
 
-                # 🔧 Mise à jour du contexte client
-                self.context["client_info"] = {
-                    "data": selected_client_data,
-                    "found": True
-                }
-                logger.info(f"✅ Client sélectionné: {selected_client_data.get('Name') or selected_client_data.get('CardName')}")
+                # Mise à jour du contexte
+                self.context["client_info"] = {"data": selected_client_data, "found": True}
+                self.context["client_validated"] = True
+                logger.info(f"✅ Client sélectionné: {selected_client_data.get('Name','N/A')}")
 
-                # 🔧 CONTINUATION AUTOMATIQUE DU WORKFLOW
-                workflow_context = context.get("workflow_context", {})
-                original_products = (
-                    workflow_context.get("extracted_info", {})
-                    .get("products", [])
-                )
+                # Poursuite du workflow
+                workflow_ctx = context.get("workflow_context", {})
+                original_products = workflow_ctx.get("extracted_info", {}).get("products", [])
                 if original_products:
-                    # Lancement de la recherche produits
                     self._track_step_start(
-                        "lookup_products", 
+                        "lookup_products",
                         f"📦 Recherche de {len(original_products)} produit(s)"
                     )
                     await self._process_products_retrieval(original_products)
-
-                    # Poursuite du workflow après sélection client
                     return await self._continue_workflow_after_client_selection(
                         selected_client_data,
                         {"extracted_info": {"products": original_products}}
                     )
                 else:
                     return self._build_error_response(
-                        "Workflow incomplet", 
+                        "Workflow incomplet",
                         "Produits manquants pour continuer"
                     )
 
             elif action == "create_new":
-                # Création d'un nouveau client
-                original_client_name = context.get("original_client_name", "")
-                return await self._initiate_client_creation(original_client_name)
+                client_name = user_input.get("client_name", context.get("original_client_name", ""))
+                return await self._initiate_client_creation(client_name)
 
             elif action == "cancel":
-                # Annulation du workflow par l'utilisateur
                 return {
                     "status": "cancelled",
                     "message": "Demande de devis annulée par l'utilisateur"
@@ -358,16 +344,18 @@ class DevisWorkflow:
 
             else:
                 return self._build_error_response(
-                    "Action non reconnue", 
+                    "Action non reconnue",
                     f"Action: {action}"
                 )
 
         except Exception as e:
+            logger.exception(f"Erreur _handle_client_selection: {e}")
+            return self._build_error_response("Erreur sélection client", str(e))
+
             logger.exception(f"Erreur gestion sélection client: {str(e)}")
             return self._build_error_response("Erreur sélection client", str(e))
 
 
-        return self._build_error_response("Sélection client invalide", "Données client manquantes")
     async def _search_company_enrichment(self, company_name: str) -> Dict[str, Any]:
         """Enrichissement des données client via INSEE/PAPPERS"""
         try:
@@ -4710,12 +4698,11 @@ class DevisWorkflow:
             logger.exception(f"Erreur route generate_quote_v2: {str(e)}")
             raise HTTPException(status_code=500, detail=str(e))
 
-    @router_v2.post("/continue_quote")  # Route pour continuer après interaction
+    @router_v2.post("/continue_quote")
     async def continue_quote_after_interaction(request: dict):
         """
-        Continue le workflow après une interaction utilisateur
+        Continue le workflow après interaction utilisateur
         """
-
         try:
             task_id = request.get("task_id")
             user_input = request.get("user_input", {})
@@ -4724,20 +4711,33 @@ class DevisWorkflow:
             if not task_id:
                 raise HTTPException(status_code=400, detail="task_id requis")
 
-            # Récupérer l'instance du workflow (en pratique, utiliser un cache/session)
-            workflow = DevisWorkflow()  # À adapter selon votre système de session
+            # Récupérer l'instance workflow depuis le cache
+            workflow_data = await cache_manager.get_workflow_state(task_id)
+            if not workflow_data:
+                raise HTTPException(status_code=404, detail="Workflow expiré")
+
+            # Recréer l'instance et restaurer le contexte
+            workflow = DevisWorkflow()
             workflow.task_id = task_id
+            workflow.context = workflow_data.get("context", {})
 
-            result = await workflow.continue_after_user_input(user_input, context)
+            # Continuer le workflow avec le contexte restauré
+            result = await workflow.continue_after_user_input(user_input, workflow.context)
 
-            return {
-                "success": True,
-                "data": result
-            }
+            # Sauvegarder l'état mis à jour
+            await cache_manager.save_workflow_state(task_id, {
+                "context": workflow.context,
+                "last_update": datetime.now().isoformat()
+            })
 
+            return {"success": True, "data": result}
+
+        except HTTPException:
+            # Réélever les erreurs HTTP
+            raise
         except Exception as e:
-            logger.exception(f"Erreur continue_quote: {str(e)}")
-            raise HTTPException(status_code=500, detail=str(e))
+            logger.exception(f"Erreur continue_quote: {e}")
+            raise HTTPException(status_code=500, detail="Erreur interne")
 
     async def _process_quote_workflow(self, extracted_info: Dict[str, Any]) -> Dict[str, Any]:
         """

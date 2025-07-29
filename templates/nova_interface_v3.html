@@ -307,7 +307,17 @@
             chatContainer.appendChild(messageDiv);
             chatContainer.scrollTop = chatContainer.scrollHeight;
         }
-        
+        function handleWorkflowResult(workflowData) {
+            if (workflowData.status === 'user_interaction_required') {
+                handleUserInteractionRequired(workflowData);
+            } else if (workflowData.status === 'completed') {
+                addMessage('assistant', `✅ Devis généré avec succès !
+                    \nClient: ${workflowData.client?.Name || 'N/A'}
+                    \nMontant total: ${workflowData.total_amount || 'N/A'}€`);
+            } else if (workflowData.status === 'error') {
+                addMessage('system', `❌ Erreur: ${workflowData.message || 'Erreur inconnue'}`);
+            }
+        }
         // Gestion des touches
         messageInput.addEventListener('keypress', function(e) {
             if (e.key === 'Enter') {
@@ -315,6 +325,7 @@
             }
         });
         
+
         // Démarrage de la génération de devis
         async function startQuoteGeneration(prompt) {
             try {
@@ -774,14 +785,40 @@
                 return;
             }
             const selected=currentInteraction.data.client_options[parseInt(idx,10)];
-            sendUserResponse({
-                action:'select_existing',
-                selected_data:selected,
-                interaction_type:'client_selection',
-                task_id:currentInteraction.task_id
+            // CORRECTION: Utiliser fetch au lieu de sendUserResponse
+            fetch('/api/assistant/continue_quote', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    task_id: currentInteraction.task_id || currentInteraction.workflow_context?.task_id,
+                    user_input: {
+                        action: 'select_existing',
+                        selected_data: selected
+                    },
+                    context: {
+                        interaction_type: 'client_selection',
+                        workflow_context: currentInteraction.workflow_context
+                    }
+                })
+            })
+            .then(response => response.json())
+            .then(result => {
+                if (result.success) {
+                    userInteractionModal.hide();
+                    addMessage('system', `Client "${selected.name}" sélectionné. Traitement en cours...`);
+                    
+                    // Continuer le workflow si nécessaire
+                    if (result.data && result.data.status) {
+                        handleWorkflowResult(result.data);
+                    }
+                } else {
+                    showNotification('Erreur lors de la sélection', 'error');
+                }
+            })
+            .catch(error => {
+                console.error('Erreur sélection client:', error);
+                showNotification('Erreur de connexion', 'error');
             });
-            userInteractionModal.hide();
-            addMessage('system',`Client "${selected.name}" sélectionné. Continuation du traitement...`);
         }
         
         function createNewClient() {
