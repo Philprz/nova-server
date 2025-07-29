@@ -4914,7 +4914,7 @@ class DevisWorkflow:
         if total_found > 0:
             # CLIENT(S) TROUVÉ(S) - Proposer sélection utilisateur
             self._track_step_complete("search_client", f"✅ {total_found} client(s) trouvé(s) pour '{client_name}'")
-            return await self.propose_existing_clients_selection(client_name, client_search_result)
+            return await self._propose_existing_clients_selection(client_name, client_search_result)
         
         else:
             # AUCUN CLIENT TROUVÉ - Vérifier une dernière fois avant création
@@ -4953,7 +4953,7 @@ class DevisWorkflow:
         return value.replace("'", "\\'")
     
 
-    async def propose_existing_clients_selection(
+    async def _propose_existing_clients_selection(
         client_name: str,
         search_result: Dict[str, Any]
     ) -> Dict[str, Any]:
@@ -5209,7 +5209,7 @@ class DevisWorkflow:
                 logger.info(f"✅ {total_found} client(s) existant(s) trouvé(s) pour '{client_name}'")
                 
                 # 🔧 CORRECTION CRITIQUE: Détecter l'interaction utilisateur requise
-                selection_result = await self.propose_existing_clients_selection(client_name, comprehensive_search)
+                selection_result = await self._propose_existing_clients_selection(client_name, comprehensive_search)
                 
                 # 🔧 NOUVEAU: Vérifier si interaction utilisateur requise
                 if selection_result.get("requires_user_selection"):

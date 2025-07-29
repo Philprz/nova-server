@@ -171,6 +171,10 @@ class ClientLister:
             )
             
             # CORRECTION: Traitement approprié de la réponse
+            logger.debug(f"🔍 Réponse SAP brute pour {client_name}: {result}")
+            logger.debug(f"Type de réponse: {type(result)}")
+            if isinstance(result, dict):
+                logger.debug(f"Clés disponibles: {list(result.keys())}")
             if not (result.get("success") is False or "error" in result):
                 # Vérifier 'results' d'abord (format sap_search)
                 if "results" in result and result["results"]:
