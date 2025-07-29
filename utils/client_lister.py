@@ -158,7 +158,7 @@ class ClientLister:
             return []
     
     async def _search_sap_by_name(self, client_name: str) -> List[Dict[str, Any]]:
-        """Recherche dans SAP avec différentes variantes - CORRIGÉ"""
+        """Recherche dans SAP avec différentes variantes et diagnostics améliorés"""
         try:
             result = await self.mcp_connector.call_mcp(
                 "sap_mcp",
@@ -169,38 +169,64 @@ class ClientLister:
                     "limit": 10
                 }
             )
-            
-            # CORRECTION: Traitement approprié de la réponse
+
+            # diagnostics
             logger.debug(f"🔍 Réponse SAP brute pour {client_name}: {result}")
             logger.debug(f"Type de réponse: {type(result)}")
             if isinstance(result, dict):
                 logger.debug(f"Clés disponibles: {list(result.keys())}")
-            
-            # CORRECTION: Vérification explicite des erreurs uniquement
-            if result.get("error") or result.get("success") is False:
+
+            # garde-fou si None ou type inattendu
+            if result is None or not isinstance(result, (dict, list)):
+                logger.warning(f"⚠️ Résultat SAP invalide pour: {client_name}")
+                return []
+
+            # vérification explicite d’erreur
+            if isinstance(result, dict) and (result.get("error") or result.get("success") is False):
                 logger.warning(f"⚠️ Erreur SAP explicite: {result.get('error', 'Erreur inconnue')}")
                 return []
 
-            # Extraction des données dans l'ordre de priorité
-            if "results" in result and isinstance(result["results"], list):
-                logger.info(f"✅ Recherche SAP: {len(result['results'])} résultats")
-                return result["results"]
-            elif "value" in result and isinstance(result["value"], list):
-                logger.info(f"✅ Recherche SAP: {len(result['value'])} résultats")
-                return result["value"]
-            elif "data" in result and isinstance(result["data"], list):
-                logger.info(f"✅ Recherche SAP: {len(result['data'])} résultats")
-                return result["data"]
-            elif isinstance(result, list):
-                logger.info(f"✅ Recherche SAP: {len(result)} résultats (liste directe)")
-                return result
-        
-            logger.info(f"⚠️ Aucun résultat SAP pour: {client_name}")
-            return []
-            
+            # parsing adaptatif des clés possibles
+            data_keys = ["results", "value", "data", "odata.metadata"]
+            clients: List[Dict[str, Any]] = []
+
+            for key in data_keys:
+                if isinstance(result, dict) and key in result and isinstance(result[key], list) and result[key]:
+                    clients = result[key]
+                    logger.info(f"✅ Recherche SAP: {len(clients)} résultats (clé: {key})")
+                    break
+
+            # fallback liste directe
+            if not clients and isinstance(result, list):
+                clients = result
+                logger.info(f"✅ Recherche SAP: {len(clients)} résultats (liste directe)")
+
+            # OData imbriqué sous 'd'
+            if not clients and isinstance(result, dict) and isinstance(result.get("d"), dict):
+                d_obj = result["d"]
+                for key in data_keys:
+                    if key in d_obj and isinstance(d_obj[key], list) and d_obj[key]:
+                        clients = d_obj[key]
+                        logger.info(f"✅ Recherche SAP OData: {len(clients)} résultats (d.{key})")
+                        break
+
+            # toute autre liste contenant 'odata'
+            if not clients and isinstance(result, dict):
+                for k, v in result.items():
+                    if "odata" in str(k).lower() and isinstance(v, list) and v:
+                        clients = v
+                        logger.info(f"✅ Recherche SAP OData: {len(clients)} résultats (clé: {k})")
+                        break
+
+            if not clients:
+                logger.info(f"⚠️ Aucun résultat SAP pour: {client_name}")
+
+            return clients or []
+
         except Exception as e:
-            logger.error(f"❌ Erreur recherche SAP: {str(e)}")
+            logger.exception(f"❌ Erreur recherche SAP: {e}")
             return []
+
     
     async def search_client_by_name(self, client_name: str) -> Dict[str, Any]:
         """Recherche spécifique d'un client par nom dans les deux systèmes - CORRIGÉ"""

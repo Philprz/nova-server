@@ -4953,88 +4953,92 @@ class DevisWorkflow:
         return value.replace("'", "\\'")
     
 
-    def _propose_existing_clients_selection(self, duplicates: List[Dict]) -> Dict[str, Any]:
-        """
-        Propose une sélection parmi les clients existants trouvés.
-        """
+    async def _propose_existing_clients_selection(self, client_name: str, search_results: Dict[str, Any]) -> Dict[str, Any]:
+        """Propose la sélection du client avec interface utilisateur - AMÉLIORÉ"""
         try:
-            client_options = []
             option_id = 1
+            client_options: List[Dict[str, Any]] = []
 
+            # Sources configurées unifiées
             sources = {
                 'salesforce': {
-                    'clients_key': 'clients',
-                    'id_prefix': 'sf',
                     'name_field': 'Name',
-                    'label_suffix': 'Salesforce',
+                    'id_field': 'Id',
                     'display_info': {
-                        'name': 'Name',
                         'account_number': 'AccountNumber',
-                        'city': 'BillingCity',
-                        'phone': 'Phone'
+                        'phone': 'Phone',
+                        'city': 'BillingCity'
                     }
                 },
                 'sap': {
-                    'clients_key': 'clients',
-                    'id_prefix': 'sap',
                     'name_field': 'CardName',
-                    'label_suffix': 'SAP',
+                    'id_field': 'CardCode',
                     'display_info': {
-                        'name': 'CardName',
                         'card_code': 'CardCode',
-                        'city': 'BillToCity',
-                        'phone': 'Phone1'
+                        'phone': 'Phone1',
+                        'city': 'BillToCity'
                     }
                 }
             }
 
-            for source, cfg in sources.items():
-                result = duplicates.get(source, {})
-                clients = result.get(cfg['clients_key'], [])
-                if result.get('found') and isinstance(clients, list):
-                    for client in clients:
-                        label = f"{option_id}. {client.get(cfg['name_field'], 'N/A')} ({cfg['label_suffix']})"
+            total_found = search_results.get("total_found", 0)
+
+            if total_found == 1:
+                # Sélection automatique
+                for source, cfg in sources.items():
+                    clients = search_results.get(source, {}).get("clients", [])
+                    if clients:
+                        single = clients[0]
+                        return {
+                            "status": "client_found",
+                            "client_data": single,
+                            "source": source,
+                            "requires_user_selection": False
+                        }
+
+            elif total_found > 1:
+                # Construire la liste
+                for source, cfg in sources.items():
+                    for client in search_results.get(source, {}).get("clients", []):
+                        label = f"{option_id}. {client.get(cfg['name_field'], '')} ({source})"
                         display = {
                             field: client.get(key, '')
                             for field, key in cfg['display_info'].items()
                         }
                         client_options.append({
-                            'id': f"{cfg['id_prefix']}_{option_id}",
-                            'label': label,
-                            'source': source,
-                            'data': client,
-                            'display_info': display
+                            "id": client.get(cfg['id_field']),
+                            "name": client.get(cfg['name_field']),
+                            "source": source,
+                            "details": {
+                                "account_number": client.get(cfg['display_info']['account_number']),
+                                "card_code": client.get(cfg['display_info'].get('card_code', cfg['id_field'])),
+                                "phone": client.get(cfg['display_info']['phone']),
+                                "city": client.get(cfg['display_info']['city'])
+                            }
                         })
                         option_id += 1
 
-            if not client_options:
                 return {
-                    'found': False,
-                    'requires_user_selection': False,
-                    'selection_type': 'existing_clients',
-                    'message': f"Aucun client existant trouvé."
+                    "requires_user_selection": True,
+                    "interaction_type": "client_selection",
+                    "message": f"Plusieurs clients '{client_name}' trouvés. Sélectionnez le bon client :",
+                    "client_options": client_options,
+                    "total_options": len(client_options),
+                    "original_client_name": client_name,
+                    "allow_create_new": True
                 }
 
-            return {
-                'found': True,
-                'requires_user_selection': True,
-                'selection_type': 'existing_clients',
-                'message': f"J'ai trouvé {len(client_options)} client(s) existant(s)",
-                'question': 'Quel client souhaitez-vous utiliser ?',
-                'input_type': 'client_selection',
-                'client_options': client_options,
-                'actions': [
-                    {'id': 'select_existing', 'label': 'Utiliser un client existant', 'type': 'primary'},
-                    {'id': 'create_new',   'label': 'Créer un nouveau client',    'type': 'secondary'},
-                    {'id': 'cancel',       'label': 'Annuler',                    'type': 'tertiary'}
-                ],
-                'context': {
-                    'total_options': len(client_options)
+            else:
+                return {
+                    "status": "client_not_found",
+                    "requires_user_selection": False,
+                    "message": f"Client '{client_name}' introuvable."
                 }
-            }
+
         except Exception as e:
             logger.error(f"❌ Erreur proposition sélection clients: {e}")
-            return {'found': False, 'error': str(e)}
+            return {"found": False, "error": str(e)}
+
 
     async def _create_client_automatically(self, client_name: str) -> Dict[str, Any]:
         """

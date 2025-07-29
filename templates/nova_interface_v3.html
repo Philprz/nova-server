@@ -507,42 +507,84 @@
             
             userInteractionModal.show();
         }
-        
-        // Construction du contenu pour sélection client
+        // helper XSS
+        function escapeHtml(str) {
+            return String(str).replace(/[&<>"'`=\/]/g, s=>({
+                '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;','/':'&#x2F;','=':'&#x3D;','`':'&#x60;'
+            }[s]));
+        }
+        // Construction du contenu pour sélection client - COMPLET
         function buildClientSelectionContent(data) {
+            const total = data.total_options ?? data.client_options.length;
+            if (!data.client_options || total === 0) {
+                return `<div class="alert alert-warning">Aucun client trouvé</div>`;
+            }
             let html = `
                 <div class="mb-3">
-                    <p>Recherche pour: <strong>${data.client_name}</strong></p>
-                    <p>Clients similaires trouvés:</p>
+                    <p><strong>Recherche :</strong> ${escapeHtml(data.original_client_name||'N/A')}</p>
+                    <p class="text-muted">${total} client(s) trouvé(s)</p>
                 </div>
-                <div class="alternatives-list">
+                <div class="client-selection-list" style="max-height:400px;overflow-y:auto;">
             `;
-            
-            for (const alternative of data.alternatives) {
-                const clientData = alternative.data;
-                const similarity = Math.round(alternative.similarity * 100);
-                
-                html += `
-                    <div class="alternative-item" data-client-id="${clientData.Id}" onclick="selectAlternative(this)">
+            data.client_options.forEach((client,index)=>{
+                const sourceIcon = client.source==='salesforce'?'☁️':'📊';
+                const sourceLabel = client.source==='salesforce'?'Salesforce':'SAP';
+                html+=`
+                    <div class="client-option border rounded p-3 mb-2" 
+                        style="cursor:pointer;transition:all .2s;" 
+                        onclick="selectClientOption('${escapeHtml(client.id)}',${index})" 
+                        tabindex="0" 
+                        onkeydown="if(event.key==='Enter')selectClientOption('${escapeHtml(client.id)}',${index})"
+                        data-client-id="${escapeHtml(client.id)}" 
+                        data-client-index="${index}">
                         <div class="d-flex justify-content-between align-items-start">
-                            <div>
-                                <strong>${clientData.Name}</strong>
-                                <span class="badge bg-primary similarity-badge">${similarity}%</span>
+                            <div class="flex-grow-1">
+                                <h6 class="mb-1">
+                                    ${sourceIcon} <strong>${escapeHtml(client.name)}</strong>
+                                    <small class="badge bg-secondary ms-2">${sourceLabel}</small>
+                                </h6>
+                                <div class="client-details text-muted small">
+                                    ${client.details?.account_number?`<div>N° compte : ${escapeHtml(client.details.account_number)}</div>`:''}
+                                    ${client.details?.card_code?`<div>Code SAP : ${escapeHtml(client.details.card_code)}</div>`:''}
+                                    ${client.details?.phone?`<div>📞 ${escapeHtml(client.details.phone)}</div>`:''}
+                                    ${client.details?.city?`<div>📍 ${escapeHtml(client.details.city)}</div>`:''}
+                                </div>
                             </div>
-                        </div>
-                        <div class="mt-2">
-                            <small class="text-muted">
-                                ${clientData.BillingCity || ''} ${clientData.BillingCountry || ''}
-                                <br>Source: ${alternative.source}
-                            </small>
+                            <div class="selection-indicator" style="width:20px;">
+                                <i class="bi bi-circle text-muted"></i>
+                            </div>
                         </div>
                     </div>
                 `;
-            }
-            
-            html += `</div>`;
+            });
+            html+=`
+                </div>
+                <div class="mt-3 p-2 bg-light rounded">
+                    <small class="text-muted">💡 Cliquez sur un client pour le sélectionner</small>
+                </div>
+            `;
             return html;
         }
+
+        // Sélection d'un client spécifique
+        function selectClientOption(clientId,clientIndex){
+            document.querySelectorAll('.client-option').forEach(opt=>{
+                opt.classList.remove('border-primary','bg-light');
+                opt.querySelector('.selection-indicator i').className='bi bi-circle text-muted';
+            });
+            const sel=document.querySelector(`[data-client-index="${clientIndex}"]`);
+            if(sel){
+                sel.classList.add('border-primary','bg-light');
+                sel.querySelector('.selection-indicator i').className='bi bi-check-circle-fill text-primary';
+            }
+            const btn=document.getElementById('validateClientBtn');
+            if(btn){
+                btn.disabled=false;
+                btn.dataset.selectedClientId=clientId;
+                btn.dataset.selectedClientIndex=clientIndex;
+            }
+        }
+
         
         // Construction du contenu pour création client
         function buildClientCreationContent(data) {
@@ -722,23 +764,24 @@
             }
         }
         
-        // Fonctions de validation
-        function validateClientSelection() {
-            const selected = document.querySelector('.alternative-item.selected');
-            if (!selected) return;
-            
-            const clientId = selected.dataset.clientId;
-            
-            // Envoyer la réponse via WebSocket
+        // Validation de la sélection client
+        function validateClientSelection(){
+            const btn=document.getElementById('validateClientBtn');
+            const id=btn?.dataset.selectedClientId;
+            const idx=btn?.dataset.selectedClientIndex;
+            if(!id||!currentInteraction){
+                showNotification('Aucun client sélectionné','error');
+                return;
+            }
+            const selected=currentInteraction.data.client_options[parseInt(idx,10)];
             sendUserResponse({
-                response_type: 'client_validation',
-                step_id: 'client_validation',
-                selected_option: 'existing_client',
-                client_id: clientId
+                action:'select_existing',
+                selected_data:selected,
+                interaction_type:'client_selection',
+                task_id:currentInteraction.task_id
             });
-            
             userInteractionModal.hide();
-            addMessage('system', 'Client sélectionné, poursuite du traitement...');
+            addMessage('system',`Client "${selected.name}" sélectionné. Continuation du traitement...`);
         }
         
         function createNewClient() {
