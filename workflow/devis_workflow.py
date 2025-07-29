@@ -5198,8 +5198,7 @@ class DevisWorkflow:
                 logger.info(f"✅ {total_found} client(s) existant(s) trouvé(s) pour '{client_name}'")
                 
                 # 🔧 CORRECTION CRITIQUE: Détecter l'interaction utilisateur requise
-                selection_result = await self._propose_existing_clients_selection(client_name, comprehensive_search)
-                
+                selection_result = await self._propose_existing_clients_selection(comprehensive_search)
                 # 🔧 NOUVEAU: Vérifier si interaction utilisateur requise
                 if selection_result.get("requires_user_selection"):
                     return {
