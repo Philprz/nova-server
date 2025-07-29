@@ -17,6 +17,7 @@ from services.client_validator import ClientValidator
 from services.websocket_manager import websocket_manager
 from services.company_search_service import company_search_service
 
+
 from utils.client_lister import find_client_everywhere
 # Configuration sécurisée pour Windows
 if sys.platform == "win32":
@@ -5205,9 +5206,15 @@ class DevisWorkflow:
                 selection_result = await self._propose_existing_clients_selection(client_name, comprehensive_search)
                 # 🔧 NOUVEAU: Vérifier si interaction utilisateur requise
                 if selection_result.get("requires_user_selection"):
+                    # AJOUT CRITIQUE - Envoyer notification WebSocket
+                    await websocket_manager.send_user_interaction_required(
+                        self.task_id, 
+                        selection_result
+                    )
+                    
                     return {
                         "status": "user_interaction_required",
-                        "interaction_type": "client_selection",
+                        "interaction_type": "client_selection", 
                         "data": selection_result,
                         "message": selection_result.get("message"),
                         "workflow_context": {
