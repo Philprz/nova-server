@@ -310,6 +310,11 @@ class QuoteTaskResponse(BaseModel):
 
 # === ENDPOINTS PRINCIPAUX ===
 
+from fastapi import APIRouter, HTTPException, BackgroundTasks
+import asyncio
+
+router = APIRouter()
+
 @router.post("/start_quote", response_model=QuoteTaskResponse)
 async def start_quote_generation(request: StartQuoteRequest, background_tasks: BackgroundTasks):
     """
@@ -324,7 +329,7 @@ async def start_quote_generation(request: StartQuoteRequest, background_tasks: B
         
         # Lancer la génération en arrière-plan
         background_tasks.add_task(
-            _execute_quote_generation,
+            _execute_quote_generation,  # ← Correction : pas d'astérisques
             task.task_id,
             request.prompt,
             request.draft_mode
@@ -338,6 +343,47 @@ async def start_quote_generation(request: StartQuoteRequest, background_tasks: B
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erreur lors du démarrage: {str(e)}")
+
+async def _execute_quote_generation(task_id: str, prompt: str, draft_mode: bool):
+    """
+    Exécute la génération de devis en arrière-plan avec gestion d'erreurs
+    """
+    try:
+        # Attendre que le client se connecte au WebSocket
+        await asyncio.sleep(0.5)
+        
+        # Créer le workflow avec le task_id
+        workflow = EnhancedDevisWorkflow(
+            validation_enabled=True, 
+            draft_mode=draft_mode,
+            task_id=task_id  # Important : passer le task_id existant
+        )
+        
+        # Exécuter le workflow
+        workflow_result = await workflow.process_prompt(prompt, task_id=task_id)
+        
+        # Interaction utilisateur requise ?
+        if workflow_result.get("status") == "user_interaction_required":
+            logger.info(f"🔄 Interaction utilisateur requise pour tâche {task_id}")
+            await websocket_manager.send_user_interaction_required(
+                task_id,
+                workflow_result.get("data", {})
+            )
+            # Ne pas marquer comme complet, attendre l'interaction
+            return
+        
+        # Workflow terminé avec succès
+        if workflow_result.get("success"):
+            progress_tracker.complete_task(task_id, workflow_result)
+        else:
+            # Workflow terminé avec erreur
+            error_msg = workflow_result.get("error", "Erreur inconnue")
+            progress_tracker.fail_task(task_id, error_msg)
+            
+    except Exception as e:
+        logger.error(f"❌ Erreur exécution workflow: {str(e)}")
+        progress_tracker.fail_task(task_id, f"Erreur d'exécution: {str(e)}")
+
 
 @router.get("/quote_status/{task_id}")
 async def get_quote_status(task_id: str, detailed: bool = False):

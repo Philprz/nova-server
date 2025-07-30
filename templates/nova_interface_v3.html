@@ -326,8 +326,27 @@
                 
                 addMessage('system', `Génération de devis démarrée (ID: ${currentTaskId})`);
                 
-                // Connexion WebSocket
+                // D'ABORD connecter le WebSocket
                 connectWebSocket(currentTaskId);
+                
+                // ENSUITE attendre que la connexion soit établie
+                await new Promise((resolve) => {
+                    const checkConnection = setInterval(() => {
+                        if (websocket && websocket.readyState === WebSocket.OPEN) {
+                            clearInterval(checkConnection);
+                            resolve();
+                        }
+                    }, 100);
+                    
+                    // Timeout de sécurité
+                    setTimeout(() => {
+                        clearInterval(checkConnection);
+                        console.warn('⚠️ Timeout connexion WebSocket - continuation quand même');
+                        resolve();
+                    }, 5000);
+                });
+                
+                console.log('✅ WebSocket connecté, workflow peut démarrer');
                 
             } catch (error) {
                 console.error('Erreur démarrage génération:', error);

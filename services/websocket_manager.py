@@ -14,7 +14,7 @@ class WebSocketManager:
     def __init__(self):
         self.active_connections: Dict[str, Set[WebSocket]] = {}
         self.task_connections: Dict[str, Set[WebSocket]] = {}
-
+        self.pending_messages: Dict[str, List[Dict]] = {}
     async def connect(self, websocket: WebSocket, task_id: str = None):
         """Connect a WebSocket to the manager, optionally associating it with a task ID."""
         await websocket.accept()
@@ -31,6 +31,11 @@ class WebSocketManager:
             self.task_connections[task_id].add(websocket)
 
         logger.info(f"WebSocket connecté pour tâche: {task_id}")
+        # Envoyer les messages en attente pour cette tâche
+        if task_id and task_id in self.pending_messages:
+            for message in self.pending_messages[task_id]:
+                await self.send_user_interaction_required(task_id, message)
+            del self.pending_messages[task_id]
 
     def disconnect(self, websocket: WebSocket, task_id: str = None):
         """Déconnecte un WebSocket"""
@@ -77,6 +82,16 @@ class WebSocketManager:
             "type": "user_interaction_required",
             "interaction_data": interaction_data
         })
+        # Si pas de connexion, attendre et réessayer une fois
+        if task_id not in self.task_connections:
+            await asyncio.sleep(1)
+            if task_id not in self.task_connections:
+                logger.error(f"❌ PROBLÈME: Aucune connexion WebSocket trouvée pour task_id={task_id}")
+                # Sauvegarder le message pour envoi ultérieur
+                if task_id not in self.pending_messages:
+                    self.pending_messages[task_id] = []
+                self.pending_messages[task_id].append(interaction_data)
+                return
 
     async def send_step_update(self, task_id: str, step_id: str, status: str, message: str, details: dict = None):
         """Envoie une mise à jour d'étape"""
