@@ -14,7 +14,7 @@ from services.mcp_connector import MCPConnector, call_mcp_with_progress, test_mc
 from services.progress_tracker import progress_tracker, QuoteTask
 from services.suggestion_engine import SuggestionEngine
 from services.client_validator import ClientValidator
-from services. import websocket_manager
+from services.websocket_manager import websocket_manager
 from services.company_search_service import company_search_service
 
 
@@ -152,7 +152,6 @@ class DevisWorkflow:
             
             # Notification WebSocket si disponible
             try:
-                from services. import websocket_manager
                 asyncio.create_task(websocket_manager.broadcast_to_task(
                     self.current_task.task_id,
                     {
