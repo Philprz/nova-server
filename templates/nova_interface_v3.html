@@ -270,17 +270,29 @@
         // Configuration
         const WS_URL = `ws://${window.location.host}/progress/ws/`;
         const API_URL = `/progress/start_quote`;
-        
-        // Éléments DOM
-        const chatContainer = document.getElementById('chatContainer');
-        const messageInput = document.getElementById('messageInput');
-        const progressContainer = document.getElementById('progressContainer');
-        const connectionStatus = document.getElementById('connectionStatus');
-        const userInteractionModal = new bootstrap.Modal(document.getElementById('userInteractionModal'));
-        
+        console.log('📍 API_URL:', API_URL);
+        console.log('📍 WS_URL base:', WS_URL);
+        // Sélection des éléments du DOM
+        const chatContainer         = document.getElementById('chatContainer');
+        const messageInput          = document.getElementById('messageInput');
+        const progressContainer     = document.getElementById('progressContainer');
+        const connectionStatus      = document.getElementById('connectionStatus');
+        const userInteractionModal  = new bootstrap.Modal(
+        document.getElementById('userInteractionModal')
+        );
+
+        // Regrouper les booléens de présence des éléments
+        const domElementsPresent = {
+        chatContainer:       Boolean(chatContainer),
+        messageInput:        Boolean(messageInput),
+        progressContainer:   Boolean(progressContainer),
+        connectionStatus:    Boolean(connectionStatus),
+        userInteractionModal: Boolean(userInteractionModal)
+        };
         // CORRECTION: Simplifier la fonction sendMessage
         function sendMessage() {
             const message = messageInput.value.trim();
+            console.log('📝 Message saisi:', message);
             if (!message) return;
             
             // Afficher le message utilisateur
@@ -293,6 +305,7 @@
         // CORRECTION: Une seule définition propre
         async function startQuoteGeneration(prompt) {
             try {
+                console.log('📡 Envoi requête vers:', API_URL);
                 const response = await fetch(API_URL, {
                     method: 'POST',
                     headers: {
@@ -357,6 +370,8 @@
                 
         // Ajouter une gestion d'erreur WebSocket plus robuste
         function connectWebSocket(taskId) {
+            console.log('Connecting to WebSocket with taskId:', taskId);
+
             if (websocket) {
                 websocket.close();
             }
@@ -927,7 +942,7 @@
         // Initialisation
         document.addEventListener('DOMContentLoaded', function() {
             console.log('Interface NOVA v3 initialisée');
-            
+            addMessage('system', 'Interface initialisée avec logs de debug');
             // Charger l'historique au démarrage
             loadHistory();
         });
