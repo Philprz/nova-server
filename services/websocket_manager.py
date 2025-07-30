@@ -2,6 +2,8 @@
 import asyncio
 import json
 import logging
+
+from datetime import datetime
 from typing import Dict, Set
 from fastapi import WebSocket, WebSocketDisconnect
 from services.progress_tracker import progress_tracker
@@ -44,10 +46,7 @@ class WebSocketManager:
         
     async def send_task_update(self, task_id: str, message: dict):
         """Envoie une mise à jour à tous les clients suivant une tâche"""
-        # AJOUT DE LOGS DE DEBUG pour identifier le problème
-        logger.warning(f"🔍 DEBUG: Tentative envoi WebSocket pour task_id={task_id}")
-        logger.warning(f"🔍 DEBUG: task_connections keys={list(self.task_connections.keys())}")
-        logger.warning(f"🔍 DEBUG: Nombre de connexions pour cette tâche: {len(self.task_connections.get(task_id, []))}")
+        
         if task_id not in self.task_connections:
             logger.error(f"❌ PROBLÈME: Aucune connexion WebSocket trouvée pour task_id={task_id}")
             return
