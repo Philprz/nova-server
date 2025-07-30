@@ -269,6 +269,7 @@
         
         // Configuration
         const WS_URL = `ws://${window.location.host}/progress/ws/`;
+        websocket = new WebSocket(WS_URL + taskId);
         const API_URL = `/progress/start_quote`;
         
         // Éléments DOM
@@ -288,6 +289,12 @@
             messageInput.value = '';
             
             // Démarrer la génération de devis
+            // AJOUT dans la fonction startQuoteGeneration, après l'appel fetch réussi :
+            if (data.task_id) {
+                // CONNEXION WebSocket MANQUANTE - AJOUT CRITIQUE
+                connectToWebSocket(data.task_id);
+                currentTaskId = data.task_id;
+            }
             startQuoteGeneration(message);
         }
         
