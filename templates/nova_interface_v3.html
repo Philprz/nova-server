@@ -269,7 +269,6 @@
         
         // Configuration
         const WS_URL = `ws://${window.location.host}/progress/ws/`;
-        websocket = new WebSocket(WS_URL + taskId);
         const API_URL = `/progress/start_quote`;
         
         // Éléments DOM
@@ -279,7 +278,7 @@
         const connectionStatus = document.getElementById('connectionStatus');
         const userInteractionModal = new bootstrap.Modal(document.getElementById('userInteractionModal'));
         
-        // Gestion des messages
+        // CORRECTION: Simplifier la fonction sendMessage
         function sendMessage() {
             const message = messageInput.value.trim();
             if (!message) return;
@@ -289,15 +288,39 @@
             messageInput.value = '';
             
             // Démarrer la génération de devis
-            // AJOUT dans la fonction startQuoteGeneration, après l'appel fetch réussi :
-            if (data.task_id) {
-                // CONNEXION WebSocket MANQUANTE - AJOUT CRITIQUE
-                connectToWebSocket(data.task_id);
-                currentTaskId = data.task_id;
-            }
             startQuoteGeneration(message);
         }
-        
+        // CORRECTION: Une seule définition propre
+        async function startQuoteGeneration(prompt) {
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        prompt: prompt,
+                        draft_mode: false
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`Erreur HTTP: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                currentTaskId = data.task_id;
+                
+                addMessage('system', `Génération de devis démarrée (ID: ${currentTaskId})`);
+                
+                // Connexion WebSocket
+                connectWebSocket(currentTaskId);
+                
+            } catch (error) {
+                console.error('Erreur démarrage génération:', error);
+                addMessage('error', `Erreur: ${error.message}`);
+            }
+        }
         function addMessage(type, content, timestamp = null) {
             const messageDiv = document.createElement('div');
             messageDiv.className = `message ${type}`;
@@ -331,61 +354,41 @@
                 sendMessage();
             }
         });
-        
-
-        // Démarrage de la génération de devis
-        async function startQuoteGeneration(prompt) {
-            try {
-                const response = await fetch(API_URL, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        prompt: prompt,
-                        draft_mode: false
-                    })
-                });
                 
-                if (!response.ok) {
-                    throw new Error(`Erreur HTTP: ${response.status}`);
-                }
-                
-                const data = await response.json();
-                currentTaskId = data.task_id;
-                
-                addMessage('system', `Génération de devis démarrée (ID: ${currentTaskId})`);
-                
-                // Connexion WebSocket
-                connectWebSocket(currentTaskId);
-                
-            } catch (error) {
-                console.error('Erreur démarrage génération:', error);
-                addMessage('error', `Erreur: ${error.message}`);
-            }
-        }
-        
-        // Connexion WebSocket
+        // Ajouter une gestion d'erreur WebSocket plus robuste
         function connectWebSocket(taskId) {
             if (websocket) {
                 websocket.close();
             }
             
-            websocket = new WebSocket(WS_URL + taskId);
+            const wsUrl = `ws://${window.location.host}/progress/ws/${taskId}`;
+            websocket = new WebSocket(wsUrl);
             
             websocket.onopen = function() {
                 updateConnectionStatus(true);
-                console.log('WebSocket connecté');
+                console.log('WebSocket connecté pour task:', taskId);
             };
             
             websocket.onmessage = function(event) {
-                const data = JSON.parse(event.data);
-                handleWebSocketMessage(data);
+                try {
+                    const data = JSON.parse(event.data);
+                    handleWebSocketMessage(data);
+                } catch (error) {
+                    console.error('Erreur parsing message WebSocket:', error);
+                }
             };
             
-            websocket.onclose = function() {
+            websocket.onclose = function(event) {
                 updateConnectionStatus(false);
-                console.log('WebSocket déconnecté');
+                console.log('WebSocket déconnecté:', event.reason);
+                
+                // Reconnexion automatique si connexion fermée anormalement
+                if (event.code !== 1000 && currentTaskId) {
+                    setTimeout(() => {
+                        console.log('Tentative de reconnexion...');
+                        connectWebSocket(currentTaskId);
+                    }, 3000);
+                }
             };
             
             websocket.onerror = function(error) {
@@ -501,8 +504,9 @@
             }
         }
         
-        // Gestion des interactions utilisateur
+        // Gestion des interactions utilisateur - AMÉLIORATION
         function handleUserInteractionRequired(interactionData) {
+            console.log('Interaction utilisateur requise:', interactionData);
             currentInteraction = interactionData;
             
             const modalTitle = document.getElementById('modalTitle');
@@ -521,6 +525,18 @@
             } else if (interactionData.type === 'product_selection') {
                 modalBody.innerHTML = buildProductSelectionContent(interactionData.data);
                 modalFooter.innerHTML = buildProductSelectionActions();
+            } else {
+                // Gestion générique des autres types d'interaction
+                modalBody.innerHTML = `
+                    <div class="alert alert-info">
+                        <h6>Type d'interaction: ${interactionData.type}</h6>
+                        <p>${interactionData.message || 'Interaction requise'}</p>
+                        <pre class="mt-2 small">${JSON.stringify(interactionData.data, null, 2)}</pre>
+                    </div>
+                `;
+                modalFooter.innerHTML = `
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fermer</button>
+                `;
             }
             
             userInteractionModal.show();
@@ -782,7 +798,7 @@
             }
         }
         
-        // Validation de la sélection client
+        // Validation de la sélection client - CORRECTION DE L'ENDPOINT
         function validateClientSelection(){
             const btn=document.getElementById('validateClientBtn');
             const id=btn?.dataset.selectedClientId;
@@ -792,19 +808,20 @@
                 return;
             }
             const selected=currentInteraction.data.client_options[parseInt(idx,10)];
-            // CORRECTION: Utiliser fetch au lieu de sendUserResponse
-            fetch('/api/assistant/continue_quote', {
+            
+            // CORRECTION: Utiliser l'endpoint correct
+            fetch('/progress/continue_workflow', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
-                    task_id: currentInteraction.task_id || currentInteraction.workflow_context?.task_id,
+                    task_id: currentTaskId,
                     user_input: {
                         action: 'select_existing',
                         selected_data: selected
                     },
                     context: {
                         interaction_type: 'client_selection',
-                        workflow_context: currentInteraction.workflow_context
+                        step_id: currentInteraction.step_id || 'client_validation'
                     }
                 })
             })
@@ -813,21 +830,19 @@
                 if (result.success) {
                     userInteractionModal.hide();
                     addMessage('system', `Client "${selected.name}" sélectionné. Traitement en cours...`);
-                    
-                    // Continuer le workflow si nécessaire
-                    if (result.data && result.data.status) {
-                        handleWorkflowResult(result.data);
-                    }
                 } else {
-                    showNotification('Erreur lors de la sélection', 'error');
+                    addMessage('error', `Erreur: ${result.message || 'Erreur inconnue'}`);
                 }
             })
             .catch(error => {
                 console.error('Erreur sélection client:', error);
-                showNotification('Erreur de connexion', 'error');
+                addMessage('error', 'Erreur de connexion');
             });
         }
-        
+        // Fonction utilitaire pour afficher les notifications
+        function showNotification(message, type = 'info') {
+            addMessage(type === 'error' ? 'error' : 'system', message);
+        }
         function createNewClient() {
             sendUserResponse({
                 response_type: 'client_validation',
