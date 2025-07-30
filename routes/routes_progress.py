@@ -6,7 +6,7 @@ Routes API pour le suivi de progression des générations de devis
 
 from fastapi import APIRouter, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
-from services. import websocket_manager
+from services.websocket_manager import websocket_manager
 from services.progress_tracker import progress_tracker, TaskStatus
 from workflow.devis_workflow import DevisWorkflow
 from typing import Dict, Any, List, Optional
