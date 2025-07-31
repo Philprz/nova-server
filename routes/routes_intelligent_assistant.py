@@ -114,6 +114,28 @@ async def create_quote_workflow(request: QuoteRequest):
     Résout l'erreur 422 avec validation correcte
     """
     try:
+                # CORRECTION CRITIQUE : Vérifier la connexion WebSocket AVANT de démarrer le workflow
+        task_id = request.task_id
+        if not task_id:
+            # Générer un task_id temporaire si non fourni
+            task_id = f"quote_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{secrets.token_hex(4)}"
+        
+        # Attendre qu'une connexion WebSocket soit établie (timeout 10s)
+        connection_timeout = 10
+        start_wait = time.time()
+        while time.time() - start_wait < connection_timeout:
+            if websocket_manager.task_connections.get(task_id):
+                logger.info(f"✅ Connexion WebSocket confirmée pour {task_id}")
+                break
+            await asyncio.sleep(0.5)
+        else:
+            return WorkflowCreateQuoteResponse(
+                success=False,
+                status="error", 
+                error="Connexion WebSocket requise",
+                message="Veuillez vous connecter au WebSocket avant de créer un devis"
+            )
+
         # Log de debug
         logger.info(f"📝 Requête reçue: {request.message}")
         logger.info(f"⚙️ Paramètres: draft={request.draft_mode}, prod={request.force_production}")
