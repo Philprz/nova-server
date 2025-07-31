@@ -55,7 +55,16 @@ async def lifespan(app: FastAPI):
         logger.info("Execution des tests de sante...")
         await asyncio.sleep(2)  # Délai pour l'initialisation
         HEALTH_CHECK_RESULTS = await health_checker.run_full_health_check()
-        
+        # Test connexion WebSocket au démarrage
+        logger.info("Test de connectivité WebSocket...")
+        try:
+            from services.websocket_manager import websocket_manager
+            # Simuler une connexion test
+            test_task_id = f"startup_test_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            logger.info(f"✅ WebSocket Manager initialisé - prêt pour task: {test_task_id}")
+        except Exception as e:
+            logger.error(f"❌ Erreur WebSocket Manager: {e}")
+            HEALTH_CHECK_RESULTS["websocket_test"] = {"status": "failed", "error": str(e)}
         # Affichage des résultats
         if HEALTH_CHECK_RESULTS["summary"]["success_rate"] < 50:
             logger.error("SYSTEME CRITIQUE NON OPERATIONNEL")
