@@ -51,15 +51,53 @@ class ProgressChatResponse(BaseModel):
     use_polling: bool = False  # 🆕 NOUVEAU : Indique si utiliser polling
 # ✅ CLASSE MANQUANTE - QuoteRequest pour compatibilité JavaScript
 class QuoteRequest(BaseModel):
-    prompt: str = Field(..., description="Message utilisateur", min_length=1)
+    # Champs principaux - l'un des deux est requis
+    prompt: Optional[str] = Field(None, description="Message utilisateur")
+    message: Optional[str] = Field(None, description="Message utilisateur (alias)")
+    
+    # Champs optionnels
     draft_mode: bool = Field(False, description="Mode brouillon")
     task_id: Optional[str] = Field(None, description="Task ID pré-généré côté client")
+    websocket_task_id: Optional[str] = Field(None, description="Task ID WebSocket pré-connecté")
     
-    @validator('prompt')
-    def validate_prompt(cls, v):
-        if not v or not v.strip():
+    @validator('message', pre=True, always=True)
+    def set_message_from_prompt(cls, v, values):
+        # Si message n'est pas fourni, utiliser prompt
+        if v is None and 'prompt' in values:
+            return values['prompt']
+        return v
+    
+    @validator('prompt', pre=True, always=True)  
+    def set_prompt_from_message(cls, v, values):
+        # Si prompt n'est pas fourni, utiliser message
+        if v is None and 'message' in values:
+            return values['message']
+        return v
+        
+    @validator('task_id', pre=True, always=True)
+    def set_task_id_from_websocket(cls, v, values):
+        # Si task_id n'est pas fourni, utiliser websocket_task_id
+        if v is None and 'websocket_task_id' in values:
+            return values['websocket_task_id']
+        return v
+    
+    @root_validator
+    def validate_message_fields(cls, values):
+        prompt = values.get('prompt')
+        message = values.get('message') 
+        
+        # Au moins un des deux doit être fourni
+        if not prompt and not message:
+            raise ValueError('Prompt ou message requis')
+            
+        # Utiliser prompt en priorité
+        final_message = prompt or message
+        if not final_message or not final_message.strip():
             raise ValueError('Message vide non autorisé')
-        return v.strip()
+            
+        values['prompt'] = final_message.strip()
+        values['message'] = final_message.strip()
+        return values
 # ✅ MODÈLES CORRIGÉS avec validation Field
 class WorkflowCreateQuoteRequest(BaseModel):
     """Modèle validé pour la création de devis"""
