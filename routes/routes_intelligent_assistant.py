@@ -49,7 +49,17 @@ class ProgressChatResponse(BaseModel):
     response: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
     use_polling: bool = False  # 🆕 NOUVEAU : Indique si utiliser polling
-
+# ✅ CLASSE MANQUANTE - QuoteRequest pour compatibilité JavaScript
+class QuoteRequest(BaseModel):
+    prompt: str = Field(..., description="Message utilisateur", min_length=1)
+    draft_mode: bool = Field(False, description="Mode brouillon")
+    task_id: Optional[str] = Field(None, description="Task ID pré-généré côté client")
+    
+    @validator('prompt')
+    def validate_prompt(cls, v):
+        if not v or not v.strip():
+            raise ValueError('Message vide non autorisé')
+        return v.strip()
 # ✅ MODÈLES CORRIGÉS avec validation Field
 class WorkflowCreateQuoteRequest(BaseModel):
     """Modèle validé pour la création de devis"""
@@ -79,7 +89,7 @@ class WorkflowCreateQuoteResponse(BaseModel):
 
 # ✅ ENDPOINT CORRIGÉ
 @router.post("/workflow/create_quote", response_model=WorkflowCreateQuoteResponse)
-async def create_quote_workflow(request: WorkflowCreateQuoteRequest):
+async def create_quote_workflow(request: QuoteRequest):
     """
     Endpoint pour créer un devis via workflow
     Résout l'erreur 422 avec validation correcte
@@ -88,7 +98,7 @@ async def create_quote_workflow(request: WorkflowCreateQuoteRequest):
         # Log de debug
         logger.info(f"📝 Requête reçue: {request.message}")
         logger.info(f"⚙️ Paramètres: draft={request.draft_mode}, prod={request.force_production}")
-        websocket_task_id = request.websocket_task_id
+        websocket_task_id = request.task_id
         # Import du workflow
         from workflow.devis_workflow import DevisWorkflow
         
@@ -204,59 +214,76 @@ async def chat_with_nova_with_progress(
             }
         )
 # 🔧 MODICATION: routes/routes_assistant.py
-# Ajout gestion websocket_task_id
+
 @router.post("/workflow/create_quote")
-async def create_quote_workflow(request: WorkflowCreateQuoteRequest):
+async def create_quote_workflow(
+    request: QuoteRequest,
+    background_tasks: BackgroundTasks
+):
     """Créer un workflow de devis avec WebSocket pré-connecté"""
     try:
-        # 🔧 NOUVEAU: Récupérer task_id pré-connecté si fourni
-        websocket_task_id = request.websocket_task_id if hasattr(request, 'websocket_task_id') else None
-        
-        if websocket_task_id:
-            logger.info(f"🔗 Utilisation WebSocket pré-connecté: {websocket_task_id}")
-            # Vérifier que la connexion existe vraiment
-            if websocket_task_id in websocket_manager.task_connections:
-                task_id = websocket_task_id
-                logger.info(f"✅ WebSocket trouvé et réutilisé: {task_id}")
-            else:
-                logger.warning(f"⚠️ WebSocket pré-connecté non trouvé, création nouveau task_id")
-                task_id = f"quote_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
+        # 1. Récupération du task_id pré-généré si fourni et valide
+        client_task_id = getattr(request, "task_id", None)
+        if client_task_id and client_task_id in websocket_manager.task_connections:
+            task_id = client_task_id
+            logger.info(f"🔗 Réutilisation WS pré-connecté : {task_id}")
         else:
-            # Génération task_id classique
-            task_id = f"quote_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
-        
-        # Initialiser le suivi avec le bon task_id
+            if client_task_id:
+                logger.warning("⚠️ Task ID client invalide ; génération d'un nouveau")
+            # 2. Génération d’un nouveau task_id
+            task_id = f"quote_{datetime.now():%Y%m%d_%H%M%S}_{secrets.token_hex(4)}"
+            logger.info(f"📌 Task ID généré : {task_id}")
+
+        # 3. Initialisation du suivi de progression
         progress_tracker.start_task(
-            task_id, 
+            task_id,
             "Génération de devis",
             estimated_duration=120
         )
-        
-        # 🔧 NOUVEAU: Notifier WebSocket du task_id final
-        if websocket_task_id and websocket_task_id != task_id:
-            await websocket_manager.send_task_update(websocket_task_id, {
+
+        # 4. Attente que la connexion WebSocket soit établie
+        await _wait_for_websocket_connection(task_id)
+
+        # 5. Notification si l’ID a changé
+        if client_task_id and client_task_id != task_id:
+            await websocket_manager.send_task_update(client_task_id, {
                 "type": "task_id_updated",
                 "new_task_id": task_id,
                 "message": "Task ID mis à jour"
             })
-        
-        # Démarrer le workflow en arrière-plan
+
+        # 6. Lancement du workflow en arrière-plan
         background_tasks.add_task(
             run_quote_workflow_background,
             task_id,
             request.message
         )
-        
+
         return {
             "success": True,
             "task_id": task_id,
             "message": "Workflow de devis démarré",
             "websocket_url": f"/progress/ws/{task_id}"
         }
-        
     except Exception as e:
-        logger.error(f"Erreur création workflow: {e}")
+        logger.error(f"Erreur création workflow : {e}")
         raise HTTPException(status_code=500, detail=str(e))
+    
+# Ajouter cette fonction après la définition de create_quote_workflow
+async def _wait_for_websocket_connection(task_id: str, timeout: int = 15):
+    """Attend qu'une connexion WebSocket soit établie pour le task_id"""
+    import time
+    from services.websocket_manager import websocket_manager
+    
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        if websocket_manager.task_connections.get(task_id):
+            logger.info(f"✅ Connexion WebSocket confirmée pour {task_id}")
+            return True
+        await asyncio.sleep(0.5)
+    
+    logger.warning(f"⚠️ Timeout attente WebSocket pour {task_id}")
+    return False
 # 🆕 NOUVELLE FONCTION : Exécution avec progression
 async def _execute_quote_with_progress(
     task_id: str, 
