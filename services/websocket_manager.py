@@ -106,7 +106,7 @@ class WebSocketManager:
         }
 
         # Envoyer immédiatement si connexion existante
-        connections = self.task_connections.get(task_id, [])
+        connections = self.task_connections.get(task_id) or self.active_connections.get("all", [])
         if connections:
             try:
                 await self.send_task_update(task_id, message)
@@ -187,6 +187,21 @@ class WebSocketManager:
             "message": message,
             "details": details or {}
         })
+    async def broadcast_to_task(self, task_id: str, message: dict) -> None:
+        """Envoie un message à toutes les connexions de la tâche ou en broadcast général"""
+        if self.task_connections.get(task_id):
+            await self.send_task_update(task_id, message)
+        else:
+            for websocket in self.active_connections.get("all", []):
+                try:
+                    await websocket.send_text(json.dumps({
+                        "task_id": task_id,
+                        **message,
+                        "timestamp": datetime.now().isoformat()
+                    }))
+                except Exception as e:
+                    logger.error(f"Erreur envoi broadcast: {e}")
+
 
 # Instance globale
 websocket_manager = WebSocketManager()
