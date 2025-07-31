@@ -6,7 +6,7 @@ API conversationnelle qui transforme NOVA en collègue intelligent
 capable de comprendre les demandes en langage naturel et proposer
 des solutions proactives.
 """
-
+import time
 from fastapi import APIRouter, HTTPException, Request, BackgroundTasks
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field, validator, model_validator
@@ -33,7 +33,8 @@ from workflow.devis_workflow import DevisWorkflow
 # Import des routes existantes pour réutiliser la logique
 import asyncio
 import httpx
-
+import secrets
+from services.websocket_manager import websocket_manager
 # 🔧 MODIFICATION : Ajouter le modèle pour la progression
 class ProgressChatMessage(BaseModel):
     """Message de chat avec support progression"""
@@ -249,6 +250,10 @@ async def create_quote_workflow(
                 logger.warning("⚠️ Task ID client invalide ; génération d'un nouveau")
             # 2. Génération d’un nouveau task_id
             task_id = f"quote_{datetime.now():%Y%m%d_%H%M%S}_{secrets.token_hex(4)}"
+            # Transférer la connexion WebSocket si nécessaire
+            if client_task_id and client_task_id != task_id:
+                await websocket_manager.transfer_connection(client_task_id, task_id)
+                logger.info(f"🔄 Connexion transférée de {client_task_id} vers {task_id}")
             logger.info(f"📌 Task ID généré : {task_id}")
 
         # 3. Initialisation du suivi de progression
@@ -289,8 +294,7 @@ async def create_quote_workflow(
 # Ajouter cette fonction après la définition de create_quote_workflow
 async def _wait_for_websocket_connection(task_id: str, timeout: int = 15):
     """Attend qu'une connexion WebSocket soit établie pour le task_id"""
-    import time
-    from services.websocket_manager import websocket_manager
+    
     
     start_time = time.time()
     while time.time() - start_time < timeout:

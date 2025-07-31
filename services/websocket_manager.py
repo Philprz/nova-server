@@ -3,8 +3,8 @@ import asyncio
 import json
 import logging
 
-from datetime import datetime
-from typing import Dict, Set
+from datetime import datetime, timezone
+from typing import Dict, Set, List
 from fastapi import WebSocket, WebSocketDisconnect
 from services.progress_tracker import progress_tracker
 
@@ -97,7 +97,6 @@ class WebSocketManager:
 
     async def send_user_interaction_required(self, task_id: str, interaction_data: dict) -> None:
         """Envoie demande d'interaction avec gestion robuste"""
-        from datetime import datetime
 
         logger.info(f"🎯 Demande interaction pour task_id: {task_id}")
         message = {
@@ -144,8 +143,8 @@ class WebSocketManager:
             from services.progress_tracker import progress_tracker
             task = progress_tracker.get_task(task_id)
             if task:
-                task.add_step("websocket_timeout", "❌ Timeout connexion WebSocket", "error", 
-                             details={"retry_count": 6, "total_wait_time": "60s"})
+                progress_tracker.update_step(task_id, "websocket_timeout", 
+                        "error", "❌ Timeout connexion WebSocket", {"retry_count": 6, "total_wait_time": "60s"})
         except Exception as e:
             logger.error(f"Erreur notification échec: {e}")
     
