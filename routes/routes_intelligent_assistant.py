@@ -1927,7 +1927,14 @@ async def generate_quote_endpoint(request: GenerateQuoteRequest):
 
         # Exécuter le workflow avec le message complet
         workflow_result = await workflow.process_prompt(user_message)
-
+        # Si interaction utilisateur requise, retourner directement les données
+        if workflow_result.get("status") == "user_interaction_required":
+            return {
+                "success": False,
+                "requires_interaction": True,
+                "interaction_data": workflow_result,
+                "task_id": workflow.task_id
+            }
         if workflow_result.get('success'):
             # Extraire les données pour le format frontend
             client_data = workflow_result.get('client', {})
