@@ -121,7 +121,7 @@ class WebSocketManager:
         logger.warning(f"⏳ Aucune connexion active pour {task_id}, mise en attente")
         self.pending_messages.setdefault(task_id, []).append(message)
 
-        # Retry automatique avec backoff simple (jusqu’à 30 s)
+        # Retry automatique avec backoff simple (jusqu'à 30 s)
         delay = 5
         for retry in range(1, 7):
             await asyncio.sleep(delay)
@@ -130,6 +130,7 @@ class WebSocketManager:
                 for pending in self.pending_messages.pop(task_id, []):
                     try:
                         await self.send_task_update(task_id, pending)
+                        logger.info(f"✅ Message envoyé au retry {retry}: {pending.get('type', 'unknown')}")
                     except Exception as e:
                         logger.error(f"❌ Échec envoi au retry {retry} pour {task_id}: {e}")
                 return
@@ -137,6 +138,16 @@ class WebSocketManager:
             delay = min(delay * 1.5, 10)  # cap pour éviter trop long
 
         logger.error(f"❌ ÉCHEC FINAL: Impossible d'envoyer interaction après 6 tentatives")
+        
+        # Nouveau : Notifier l'échec à l'utilisateur via un autre canal si possible
+        try:
+            from services.progress_tracker import progress_tracker
+            task = progress_tracker.get_task(task_id)
+            if task:
+                task.add_step("websocket_timeout", "❌ Timeout connexion WebSocket", "error", 
+                             details={"retry_count": 6, "total_wait_time": "60s"})
+        except Exception as e:
+            logger.error(f"Erreur notification échec: {e}")
     
     async def transfer_connection(self, old_task_id: str, new_task_id: str):
             """🔧 NOUVEAU: Transférer connexion d'un task_id à un autre"""

@@ -297,8 +297,17 @@
             
             console.log('🔗 Pré-établissement WebSocket avec task_id:', tempTaskId);
             
-            const wsUrl = `ws://${window.location.host}/progress/ws/${tempTaskId}`;
+            const wsUrl = `ws://${window.location.host}/progress/ws/${taskId}`;
             websocket = new WebSocket(wsUrl);
+            
+            // Ajouter timeout de connexion
+            const connectionTimeout = setTimeout(() => {
+                if (websocket.readyState !== WebSocket.OPEN) {
+                    console.error('❌ Timeout connexion WebSocket après 10s');
+                    websocket.close();
+                    updateConnectionStatus(false);
+                }
+            }, 10000);
             
             return new Promise((resolve, reject) => {
                 const timeout = setTimeout(() => {
@@ -306,10 +315,16 @@
                 }, 10000);
                 
                 websocket.onopen = function() {
-                    clearTimeout(timeout);
-                    console.log('✅ WebSocket pré-connecté:', tempTaskId);
+                    clearTimeout(connectionTimeout);
                     updateConnectionStatus(true);
-                    resolve(tempTaskId);
+                    console.log('✅ WebSocket connecté pour task:', taskId);
+                    
+                    // Confirmer connexion auprès du serveur
+                    websocket.send(JSON.stringify({
+                        type: 'connection_confirm',
+                        task_id: taskId,
+                        timestamp: new Date().toISOString()
+                    }));
                 };
                 
                 websocket.onerror = function(error) {
@@ -1111,9 +1126,47 @@
         document.addEventListener('DOMContentLoaded', function() {
             console.log('Interface NOVA v3 initialisée');
             addMessage('system', 'Interface initialisée avec logs de debug');
+            
+            // Test de connectivité WebSocket au démarrage
+            testWebSocketConnectivity();
+            
             // Charger l'historique au démarrage
             loadHistory();
         });
+        
+        // Nouvelle fonction de test de connectivité
+        async function testWebSocketConnectivity() {
+            try {
+                addMessage('system', '🔧 Test de connectivité WebSocket...');
+                const testTaskId = `connectivity_test_${Date.now()}`;
+                const testWs = new WebSocket(`ws://${window.location.host}/progress/ws/${testTaskId}`);
+                
+                testWs.onopen = function() {
+                    console.log('✅ Test WebSocket réussi');
+                    addMessage('system', '✅ Connectivité WebSocket confirmée');
+                    testWs.close();
+                    updateConnectionStatus(true);
+                };
+                
+                testWs.onerror = function(error) {
+                    console.error('❌ Test WebSocket échoué:', error);
+                    addMessage('error', '❌ Problème de connectivité WebSocket détecté');
+                    updateConnectionStatus(false);
+                };
+                
+                // Timeout de sécurité
+                setTimeout(() => {
+                    if (testWs.readyState !== WebSocket.OPEN) {
+                        testWs.close();
+                        addMessage('error', '⚠️ Timeout test WebSocket - vérifiez la connectivité');
+                    }
+                }, 5000);
+                
+            } catch (error) {
+                console.error('Erreur test connectivité:', error);
+                addMessage('error', 'Erreur lors du test de connectivité');
+            }
+        }
         
         // Chargement de l'historique
         async function loadHistory() {
