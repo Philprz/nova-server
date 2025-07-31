@@ -50,6 +50,7 @@ class ProgressChatResponse(BaseModel):
     error: Optional[str] = None
     use_polling: bool = False  # 🆕 NOUVEAU : Indique si utiliser polling
 # ✅ CLASSE MANQUANTE - QuoteRequest pour compatibilité JavaScript
+
 class QuoteRequest(BaseModel):
     # Champs principaux - l'un des deux est requis
     prompt: Optional[str] = Field(None, description="Message utilisateur")
@@ -59,6 +60,8 @@ class QuoteRequest(BaseModel):
     draft_mode: bool = Field(False, description="Mode brouillon")
     task_id: Optional[str] = Field(None, description="Task ID pré-généré côté client")
     websocket_task_id: Optional[str] = Field(None, description="Task ID WebSocket pré-connecté")
+    force_production: Optional[bool] = Field(False, description="Force le mode production")
+    
     def __init__(self, **data):
         # Logique de compatibilité dans le constructeur
         if 'websocket_task_id' in data and not data.get('task_id'):
