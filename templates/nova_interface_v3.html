@@ -290,6 +290,101 @@
         userInteractionModal: Boolean(userInteractionModal)
         };
         // CORRECTION: Simplifier la fonction sendMessage
+        // 🔧 NOUVELLE FONCTION : Pré-établir connexion WebSocket
+        async function establishWebSocketFirst() {
+            // Générer un task_id temporaire pour établir la connexion
+            const tempTaskId = `quote_${new Date().toISOString().replace(/[-:]/g, '').replace(/\..+/, '')}_${Math.random().toString(36).substr(2, 8)}`;
+            
+            console.log('🔗 Pré-établissement WebSocket avec task_id:', tempTaskId);
+            
+            const wsUrl = `ws://${window.location.host}/progress/ws/${tempTaskId}`;
+            websocket = new WebSocket(wsUrl);
+            
+            return new Promise((resolve, reject) => {
+                const timeout = setTimeout(() => {
+                    reject(new Error('Timeout connexion WebSocket'));
+                }, 10000);
+                
+                websocket.onopen = function() {
+                    clearTimeout(timeout);
+                    console.log('✅ WebSocket pré-connecté:', tempTaskId);
+                    updateConnectionStatus(true);
+                    resolve(tempTaskId);
+                };
+                
+                websocket.onerror = function(error) {
+                    clearTimeout(timeout);
+                    console.error('❌ Erreur pré-connexion WebSocket:', error);
+                    updateConnectionStatus(false);
+                    reject(error);
+                };
+                
+                websocket.onmessage = function(event) {
+                    try {
+                        const data = JSON.parse(event.data);
+                        handleWebSocketMessage(data);
+                    } catch (error) {
+                        console.error('Erreur parsing message WebSocket:', error);
+                    }
+                };
+                
+                websocket.onclose = function(event) {
+                    updateConnectionStatus(false);
+                    console.log('WebSocket fermé:', event.reason);
+                };
+            });
+        }
+        🔧 FONCTION MODIFIÉE : Démarrage workflow avec WebSocket pré-connecté
+        async function startWorkflow() {
+            const input = messageInput.value.trim();
+            if (!input) return;
+
+            try {
+                // 1. ÉTAPE CRITIQUE : Pré-établir WebSocket AVANT le workflow
+                addMessage('system', '🔗 Établissement connexion temps réel...');
+                const preTaskId = await establishWebSocketFirst();
+                
+                // 2. MAINTENANT démarrer le workflow avec WebSocket déjà connecté
+                addMessage('user', input);
+                messageInput.value = '';
+                
+                addMessage('system', '⚙️ Démarrage analyse workflow...');
+                
+                const response = await fetch('/api/assistant/workflow/create_quote', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        prompt: input,
+                        websocket_task_id: preTaskId // 🔧 NOUVEAU : Passer le task_id pré-connecté
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Erreur HTTP: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                currentTaskId = data.task_id;
+                
+                // 3. Si le backend a créé un nouveau task_id, reconnecter
+                if (currentTaskId !== preTaskId) {
+                    console.log('🔄 Reconnexion WebSocket vers nouveau task_id:', currentTaskId);
+                    websocket.close();
+                    await new Promise(resolve => setTimeout(resolve, 500)); // Délai sécurité
+                    connectWebSocket(currentTaskId);
+                }
+                
+                addMessage('system', `✅ Workflow démarré (ID: ${currentTaskId})`);
+                
+            } catch (error) {
+                console.error('Erreur démarrage workflow:', error);
+                addMessage('error', `❌ Erreur: ${error.message}`);
+                if (websocket) {
+                    websocket.close();
+                }
+            }
         function sendMessage() {
             const message = messageInput.value.trim();
             console.log('📝 Message saisi:', message);
@@ -537,44 +632,91 @@
                 }
             }
         }
-        
-        // Gestion des interactions utilisateur - AMÉLIORATION
-        function handleUserInteractionRequired(interactionData) {
-            console.log('Interaction utilisateur requise:', interactionData);
-            currentInteraction = interactionData;
+        // 🔧 NOUVELLES FONCTIONS : Gestion sélection client
+        function selectClient(element) {
+            // Désélectionner tous les autres
+            document.querySelectorAll('.client-option').forEach(el => {
+                el.classList.remove('border-primary', 'bg-light');
+                el.style.backgroundColor = '';
+            });
             
+            // Sélectionner celui-ci
+            element.classList.add('border-primary', 'bg-light');
+            element.style.backgroundColor = '#f8f9fa';
+            
+            // Activer le bouton de confirmation
+            document.getElementById('confirmClientBtn').disabled = false;
+            
+            // Stocker la sélection
+            window.selectedClientData = {
+                id: element.dataset.clientId,
+                source: element.dataset.source,
+                element: element
+            };
+        }
+
+        function confirmClientSelection() {
+            if (!window.selectedClientData) {
+                return;
+            }
+            
+            const response = {
+                response_type: 'client_validation',
+                step_id: 'client_selection',
+                selected_client: {
+                    id: window.selectedClientData.id,
+                    source: window.selectedClientData.source
+                }
+            };
+            
+            sendUserResponse(response);
+            
+            const modal = bootstrap.Modal.getInstance(document.getElementById('userInteractionModal'));
+            modal.hide();
+            
+            addMessage('system', `✅ Client sélectionné, poursuite du traitement...`);
+        }
+        function handleUserInteractionRequired(interactionData) {
+            console.log('🎯 Interaction utilisateur requise:', interactionData);
+            currentInteraction = interactionData;
+
+            const modal = new bootstrap.Modal(document.getElementById('userInteractionModal'));
             const modalTitle = document.getElementById('modalTitle');
             const modalBody = document.getElementById('modalBody');
             const modalFooter = document.getElementById('modalFooter');
-            
-            modalTitle.textContent = interactionData.message || 'Validation requise';
-            
-            // Construire le contenu selon le type d'interaction
-            if (interactionData.type === 'client_selection') {
+
+            // Détermine le type d’interaction (compatibilité ancienne/propre)
+            const type = interactionData.type || interactionData.interaction_type;
+            modalTitle.textContent = interactionData.message || {
+                client_selection: 'Sélection du client',
+                client_creation: 'Créer un client',
+                product_selection: 'Sélection du produit'
+            }[type] || 'Validation requise';
+
+            // Contenu et actions modulaires
+            if (type === 'client_selection') {
                 modalBody.innerHTML = buildClientSelectionContent(interactionData.data);
                 modalFooter.innerHTML = buildClientSelectionActions();
-            } else if (interactionData.type === 'client_creation') {
+            } else if (type === 'client_creation') {
                 modalBody.innerHTML = buildClientCreationContent(interactionData.data);
                 modalFooter.innerHTML = buildClientCreationActions();
-            } else if (interactionData.type === 'product_selection') {
+            } else if (type === 'product_selection') {
                 modalBody.innerHTML = buildProductSelectionContent(interactionData.data);
                 modalFooter.innerHTML = buildProductSelectionActions();
             } else {
-                // Gestion générique des autres types d'interaction
                 modalBody.innerHTML = `
                     <div class="alert alert-info">
-                        <h6>Type d'interaction: ${interactionData.type}</h6>
+                        <h6>Type: ${type}</h6>
                         <p>${interactionData.message || 'Interaction requise'}</p>
                         <pre class="mt-2 small">${JSON.stringify(interactionData.data, null, 2)}</pre>
-                    </div>
-                `;
+                    </div>`;
                 modalFooter.innerHTML = `
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fermer</button>
-                `;
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fermer</button>`;
             }
-            
-            userInteractionModal.show();
+
+            modal.show();
         }
+
         // helper XSS
         function escapeHtml(str) {
             return String(str).replace(/[&<>"'`=\/]/g, s=>({
@@ -948,13 +1090,20 @@
             addMessage('system', 'Sélection annulée');
         }
         
-        // Envoi de réponse utilisateur
+        // 🔧 FONCTION AMÉLIORÉE : Envoi réponse utilisateur
         function sendUserResponse(responseData) {
+            console.log('📤 Envoi réponse utilisateur:', responseData);
+            
             if (websocket && websocket.readyState === WebSocket.OPEN) {
                 websocket.send(JSON.stringify({
                     type: 'user_response',
-                    data: responseData
+                    data: responseData,
+                    task_id: currentTaskId
                 }));
+                console.log('✅ Réponse utilisateur envoyée');
+            } else {
+                console.error('❌ WebSocket non connecté pour envoi réponse');
+                addMessage('error', 'Erreur de connexion - impossible d\'envoyer la réponse');
             }
         }
         
