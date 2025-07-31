@@ -316,14 +316,16 @@
                 websocket.onopen = function() {
                     clearTimeout(connectionTimeout);
                     updateConnectionStatus(true);
-                    console.log('✅ WebSocket connecté pour task:', taskId);
+                    console.log('✅ WebSocket pré-connecté pour task:', tempTaskId);
                     
                     // Confirmer connexion auprès du serveur
                     websocket.send(JSON.stringify({
                         type: 'connection_confirm',
-                        task_id: taskId,
+                        task_id: tempTaskId,
                         timestamp: new Date().toISOString()
                     }));
+                    
+                    resolve(tempTaskId); // RETOURNER LE TASK_ID
                 };
                 
                 websocket.onerror = function(error) {
@@ -348,7 +350,6 @@
                 };
             });
         }
-        🔧 FONCTION MODIFIÉE : Démarrage workflow avec WebSocket pré-connecté
         async function startWorkflow() {
             const input = messageInput.value.trim();
             if (!input) return;
@@ -357,7 +358,11 @@
                 // 1. ÉTAPE CRITIQUE : Pré-établir WebSocket AVANT le workflow
                 addMessage('system', '🔗 Établissement connexion temps réel...');
                 const preTaskId = await establishWebSocketFirst();
+                if (!preTaskId) {
+                    throw new Error('Impossible d\'établir la connexion WebSocket');
+                }
                 
+                console.log('📌 WebSocket pré-connecté avec task_id:', preTaskId);
                 // 2. MAINTENANT démarrer le workflow avec WebSocket déjà connecté
                 addMessage('user', input);
                 messageInput.value = '';
@@ -460,69 +465,78 @@
         }
         // NOUVELLE FONCTION: Connexion WebSocket garantie AVANT requête
         function connectWebSocketFirst(taskId) {
-            return new Promise((resolve, reject) => {
-                console.log('🔗 Connexion WebSocket pré-établie pour:', taskId);
+        return new Promise((resolve, reject) => {
+            console.log('🔗 Connexion WebSocket pré-établie pour:', taskId);
 
-                if (websocket) {
-                    websocket.close();
-                }
-                
-                const wsUrl = `ws://${window.location.host}/progress/ws/${taskId}`;
-                websocket = new WebSocket(wsUrl);
-                
-                // Timeout de sécurité 10s
-                const connectionTimeout = setTimeout(() => {
-                    console.error('❌ Timeout connexion WebSocket après 10s');
-                    websocket.close();
-                    updateConnectionStatus(false);
-                    reject(new Error('Timeout connexion WebSocket'));
-                }, 10000);
-                
-                websocket.onopen = function() {
-                    clearTimeout(connectionTimeout);
-                    updateConnectionStatus(true);
-                    console.log('✅ WebSocket pré-connecté pour task:', taskId);
-                    
-                    // Confirmer connexion auprès du serveur
-                    websocket.send(JSON.stringify({
-                        type: 'connection_confirm',
-                        task_id: taskId,
-                        timestamp: new Date().toISOString()
-                    }));
-                    
-                    resolve();
-                };
-                
-                websocket.onerror = function(error) {
-                    clearTimeout(connectionTimeout);
-                    console.error('❌ Erreur pré-connexion WebSocket:', error);
-                    updateConnectionStatus(false);
-                    reject(error);
-                };
-                
-                websocket.onmessage = function(event) {
-                    try {
-                        const data = JSON.parse(event.data);
-                        handleWebSocketMessage(data);
-                    } catch (error) {
-                        console.error('Erreur parsing message WebSocket:', error);
-                    }
-                };
-                
-                websocket.onclose = function(event) {
-                    updateConnectionStatus(false);
-                    console.log('WebSocket fermé:', event.reason);
-                    
-                    // Reconnexion automatique si fermé anormalement
-                    if (event.code !== 1000 && currentTaskId) {
-                        setTimeout(() => {
-                            console.log('Tentative de reconnexion...');
-                            connectWebSocketFirst(currentTaskId).catch(console.error);
-                        }, 3000);
-                    }
-                };
-            });
+            // Ferme la précédente connexion si elle existe
+            if (window.websocket) {
+            window.websocket.close();
+            }
+
+            // Construit l'URL en utilisant le bon taskId
+            const wsUrl = `ws://${window.location.host}/progress/ws/${taskId}`;
+            window.websocket = new WebSocket(wsUrl);
+            // Sauvegarde pour la reconnexion en cas de fermeture anormale
+            window.currentTaskId = taskId;
+
+            // Timeout de sécurité (10s)
+            const connectionTimeout = setTimeout(() => {
+            console.error('❌ Timeout connexion WebSocket après 10s');
+            window.websocket.close();
+            updateConnectionStatus(false);
+            reject(new Error('Timeout connexion WebSocket'));
+            }, 10000);
+
+            // À l'ouverture de la connexion
+            window.websocket.onopen = () => {
+            clearTimeout(connectionTimeout);
+            updateConnectionStatus(true);
+            console.log('✅ WebSocket connecté pour task:', taskId);
+
+            // Confirme la connexion au serveur
+            window.websocket.send(JSON.stringify({
+                type: 'connection_confirm',
+                task_id: taskId,
+                timestamp: new Date().toISOString(),
+            }));
+
+            resolve(taskId);
+            };
+
+            // Gestion des erreurs
+            window.websocket.onerror = (error) => {
+            clearTimeout(connectionTimeout);
+            console.error('❌ Erreur connexion WebSocket:', error);
+            updateConnectionStatus(false);
+            reject(error);
+            };
+
+            // Réception des messages
+            window.websocket.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                handleWebSocketMessage(data);
+            } catch (err) {
+                console.error('Erreur parsing message WebSocket:', err);
+            }
+            };
+
+            // Fermeture de la connexion
+            window.websocket.onclose = (event) => {
+            updateConnectionStatus(false);
+            console.log('WebSocket fermé:', event.reason);
+
+            // Reconnexion automatique si fermeture anormale
+            if (event.code !== 1000 && window.currentTaskId) {
+                setTimeout(() => {
+                console.log('🔄 Tentative de reconnexion...');
+                connectWebSocketFirst(window.currentTaskId).catch(console.error);
+                }, 3000);
+            }
+            };
+        });
         }
+
 
 
         function addMessage(type, content, timestamp = null) {
@@ -571,7 +585,15 @@
                 case 'step_update':
                     updateStepDisplay(data.step_id, data.status, data.message, data.details);
                     break;
-                    
+
+                case 'task_id_updated':
+                    console.log('🔄 Task ID mis à jour:', data.old_task_id, '→', data.new_task_id);
+                    if (currentTaskId === data.old_task_id) {
+                        currentTaskId = data.new_task_id;
+                        addMessage('system', `🔄 ID de suivi mis à jour: ${data.new_task_id}`);
+                    }
+                break;
+
                 case 'task_update':
                     updateProgressDisplay(data);
                     break;
