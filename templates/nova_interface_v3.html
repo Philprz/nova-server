@@ -308,7 +308,15 @@
                 });
                 
                 const data = await response.json();
-                
+                // Gérer le cas d'interaction requise
+                if (data.requires_interaction) {
+                    currentTaskId = data.task_id;
+                    // Afficher directement le modal de sélection
+                    handleUserInteractionRequired(data.interaction_data);
+                    // Connecter WebSocket pour la suite
+                    await connectWebSocketFirst(data.task_id);
+                    return;
+                }
                 // 2. Connecter WebSocket AVEC le task_id du serveur
                 if (data.success && data.task_id) {
                     currentTaskId = data.task_id;

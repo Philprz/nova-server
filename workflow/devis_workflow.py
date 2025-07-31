@@ -4937,11 +4937,11 @@ class DevisWorkflow:
             
             self.current_task.require_user_validation("client_validation", "client_creation", validation_data)
             
-            await websocket_manager.send_user_interaction_required(self.task_id, {
-                "type": "client_creation",
-                "message": f"Client '{client_name}' non trouvé - Création requise",
-                "data": validation_data
-            })
+            # DÉSACTIVÉ - Retour synchrone utilisé
+            # await websocket_manager.send_user_interaction_required(
+            #     self.task_id, 
+            #     selection_result
+            # )
             
             return {
                 "found": False,
