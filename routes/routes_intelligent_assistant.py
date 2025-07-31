@@ -485,6 +485,27 @@ class ChatResponse(BaseModel):
     conversation_id: Optional[int] = None
     error: Optional[str] = None
 
+# ✅ CLASSE MANQUANTE - AssistantRequest
+class AssistantRequest(BaseModel):
+    """Requête générique pour l'assistant intelligent"""
+    message: str = Field(..., description="Message de l'utilisateur")
+    context: Optional[Dict[str, Any]] = Field(None, description="Contexte de conversation")
+    session_id: Optional[str] = Field(None, description="ID de session")
+    
+    @validator('message')
+    def validate_message(cls, v):
+        if not v or not v.strip():
+            raise ValueError('Message vide non autorisé')
+        return v.strip()
+
+class AssistantResponse(BaseModel):
+    """Réponse de l'assistant intelligent"""
+    success: bool
+    message: str
+    response_type: str
+    data: Optional[Dict[str, Any]] = None
+    suggestions: Optional[List[str]] = None
+    error: Optional[str] = None
 # Router pour l'assistant intelligent
 # router = APIRouter(prefix="/api/assistant", tags=["Assistant Intelligent"])  # Déjà défini plus haut
 
