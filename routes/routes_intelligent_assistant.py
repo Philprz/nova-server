@@ -9,7 +9,7 @@ des solutions proactives.
 
 from fastapi import APIRouter, HTTPException, Request, BackgroundTasks
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel, Field, validator, root_validator
+from pydantic import BaseModel, Field, validator, model_validator
 from typing import Dict, Any, List, Optional
 import logging
 from datetime import datetime
@@ -74,50 +74,7 @@ class QuoteRequest(BaseModel):
             
         super().__init__(**data)
     
-    @validator('prompt')
-    def validate_prompt(cls, v):
-        if v and not v.strip():
-            raise ValueError('Message vide non autorisé')
-        return v.strip() if v else v
     
-    @validator('message', pre=True, always=True)
-    def set_message_from_prompt(cls, v, values):
-        # Si message n'est pas fourni, utiliser prompt
-        if v is None and 'prompt' in values:
-            return values['prompt']
-        return v
-    
-    @validator('prompt', pre=True, always=True)  
-    def set_prompt_from_message(cls, v, values):
-        # Si prompt n'est pas fourni, utiliser message
-        if v is None and 'message' in values:
-            return values['message']
-        return v
-        
-    @validator('task_id', pre=True, always=True)
-    def set_task_id_from_websocket(cls, v, values):
-        # Si task_id n'est pas fourni, utiliser websocket_task_id
-        if v is None and 'websocket_task_id' in values:
-            return values['websocket_task_id']
-        return v
-    
-    @root_validator
-    def validate_message_fields(cls, values):
-        prompt = values.get('prompt')
-        message = values.get('message') 
-        
-        # Au moins un des deux doit être fourni
-        if not prompt and not message:
-            raise ValueError('Prompt ou message requis')
-            
-        # Utiliser prompt en priorité
-        final_message = prompt or message
-        if not final_message or not final_message.strip():
-            raise ValueError('Message vide non autorisé')
-            
-        values['prompt'] = final_message.strip()
-        values['message'] = final_message.strip()
-        return values
 # ✅ MODÈLES CORRIGÉS avec validation Field
 class WorkflowCreateQuoteRequest(BaseModel):
     """Modèle validé pour la création de devis"""
