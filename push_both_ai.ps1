@@ -672,7 +672,7 @@ if ($status) {
         Write-Host "========================================" -ForegroundColor "DarkGray"
         
         Write-Host "`nUtiliser ce message? (O/n) " -NoNewline -ForegroundColor "Yellow"
-        $response = Read-Host
+        $response = "O"#Read-Host
         
         if ($response -eq "" -or $response -eq "O" -or $response -eq "o") {
             $CommitMessage = $suggestion
