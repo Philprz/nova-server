@@ -9,7 +9,7 @@ des solutions proactives.
 
 from fastapi import APIRouter, HTTPException, Request, BackgroundTasks
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, validator, root_validator
 from typing import Dict, Any, List, Optional
 import logging
 from datetime import datetime
@@ -59,6 +59,26 @@ class QuoteRequest(BaseModel):
     draft_mode: bool = Field(False, description="Mode brouillon")
     task_id: Optional[str] = Field(None, description="Task ID pré-généré côté client")
     websocket_task_id: Optional[str] = Field(None, description="Task ID WebSocket pré-connecté")
+    def __init__(self, **data):
+        # Logique de compatibilité dans le constructeur
+        if 'websocket_task_id' in data and not data.get('task_id'):
+            data['task_id'] = data['websocket_task_id']
+            
+        # Assurer qu'on a au moins prompt ou message
+        if data.get('prompt') and not data.get('message'):
+            data['message'] = data['prompt']
+        elif data.get('message') and not data.get('prompt'):
+            data['prompt'] = data['message']
+        elif not data.get('prompt') and not data.get('message'):
+            raise ValueError('Prompt ou message requis')
+            
+        super().__init__(**data)
+    
+    @validator('prompt')
+    def validate_prompt(cls, v):
+        if v and not v.strip():
+            raise ValueError('Message vide non autorisé')
+        return v.strip() if v else v
     
     @validator('message', pre=True, always=True)
     def set_message_from_prompt(cls, v, values):
