@@ -213,7 +213,6 @@ async def chat_with_nova_with_progress(
                 "suggestions": ['Réessayer', 'Reformuler', 'Contacter le support']
             }
         )
-# 🔧 MODICATION: routes/routes_assistant.py
 
 @router.post("/workflow/create_quote")
 async def create_quote_workflow(
@@ -256,7 +255,7 @@ async def create_quote_workflow(
         background_tasks.add_task(
             run_quote_workflow_background,
             task_id,
-            request.message
+            request.prompt
         )
 
         return {
