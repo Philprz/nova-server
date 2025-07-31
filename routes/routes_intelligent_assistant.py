@@ -206,7 +206,7 @@ async def chat_with_nova_with_progress(
 # 🔧 MODICATION: routes/routes_assistant.py
 # Ajout gestion websocket_task_id
 @router.post("/workflow/create_quote")
-async def create_quote_workflow(request: AssistantRequest):
+async def create_quote_workflow(request: WorkflowCreateQuoteRequest):
     """Créer un workflow de devis avec WebSocket pré-connecté"""
     try:
         # 🔧 NOUVEAU: Récupérer task_id pré-connecté si fourni
@@ -244,7 +244,7 @@ async def create_quote_workflow(request: AssistantRequest):
         background_tasks.add_task(
             run_quote_workflow_background,
             task_id,
-            request.prompt
+            request.message
         )
         
         return {
