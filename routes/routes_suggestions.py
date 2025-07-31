@@ -28,5 +28,5 @@ async def apply_product_choices(request: Dict[str, Any]):
             request.get("workflow_context")
         )
         return result
-    except Exception(e):
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

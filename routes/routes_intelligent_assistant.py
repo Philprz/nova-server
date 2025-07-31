@@ -491,6 +491,7 @@ class AssistantRequest(BaseModel):
     message: str = Field(..., description="Message de l'utilisateur")
     context: Optional[Dict[str, Any]] = Field(None, description="Contexte de conversation")
     session_id: Optional[str] = Field(None, description="ID de session")
+    draft_mode: Optional[bool] = Field(False, description="Mode brouillon")
     
     @validator('message')
     def validate_message(cls, v):
@@ -502,10 +503,11 @@ class AssistantResponse(BaseModel):
     """Réponse de l'assistant intelligent"""
     success: bool
     message: str
-    response_type: str
+    response_type: str = "text"
     data: Optional[Dict[str, Any]] = None
     suggestions: Optional[List[str]] = None
     error: Optional[str] = None
+    conversation_id: Optional[str] = None
 # Router pour l'assistant intelligent
 # router = APIRouter(prefix="/api/assistant", tags=["Assistant Intelligent"])  # Déjà défini plus haut
 
