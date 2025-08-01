@@ -151,7 +151,9 @@ async def create_quote_workflow(
         background_tasks.add_task(
             _execute_quote_with_progress,
             task_id,
-            request.prompt or request.message
+            request.prompt or request.message,
+            True,  # draft_mode par défaut
+            []      # conversation_history par défaut
         )
 
         # 5. Réponse IMMÉDIATE (pas d'attente WebSocket)
@@ -263,31 +265,34 @@ async def _wait_for_websocket_connection(task_id: str, timeout: int = 15):
 async def _execute_quote_with_progress(
     task_id: str, 
     message: str, 
-    draft_mode: bool,
-    conversation_history: list
+    draft_mode: bool = False,
+    conversation_history: list = None
 ):
     """
     Exécute la génération de devis avec tracking de progression
     """
+    conversation_history = conversation_history or []
+
     try:
         logger.info(f"🔄 Démarrage génération avec progression - Task: {task_id}")
         
-        # Créer le workflow avec le task_id existant
         workflow = DevisWorkflow(
             validation_enabled=True, 
             draft_mode=draft_mode,
-            task_id=task_id  # 🔧 IMPORTANT : Passer le task_id existant
+            task_id=task_id
         )
         
-        # Exécuter le workflow (il gère automatiquement le tracking)
-        result = await workflow.process_prompt(message, task_id=task_id)
+        # L'historique sera géré différemment si nécessaire
+        result = await workflow.process_prompt(
+            message,
+            task_id=task_id
+        )
         
-        # Le workflow gère automatiquement la completion de la tâche
         logger.info(f"✅ Génération terminée avec succès - Task: {task_id}")
-        
+        return result
+
     except Exception as e:
         logger.error(f"❌ Erreur génération avec progression: {str(e)}", exc_info=True)
-        # En cas d'erreur, marquer la tâche comme échouée
         progress_tracker.fail_task(task_id, f"Erreur d'exécution: {str(e)}")
 
 # 🔧 MODIFICATION : Fonction pour chat simple (sans progression)
