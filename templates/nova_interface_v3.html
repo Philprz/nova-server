@@ -334,7 +334,7 @@
                         progressInterval = setInterval(async () => {
                             try {
                                 const pollTaskId = currentTaskId || taskId;
-                                const response = await fetch(`/progress/task/${pollTaskId}`);
+                                const response = await fetch(`/task/${pollTaskId}`);
                                 if (response.ok) {
                                     const progress = await response.json();
                                     updateProgressDisplay(progress);
