@@ -117,37 +117,43 @@ async def create_quote_workflow(
     Répond IMMÉDIATEMENT - pas d'attente bloquante.
     """
     try:
-        # 1. Gestion intelligente du task_id
-        client_task_id = getattr(request, "task_id", None)
-        if client_task_id and client_task_id in websocket_manager.task_connections:
-            task_id = client_task_id
+        # 1. TOUJOURS utiliser le task_id fourni par le client
+        task_id = request.task_id or request.websocket_task_id
+        if not task_id:
+            # Génération seulement si aucun fourni
+            task_id = f"quote_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{secrets.token_hex(4)}"
+        logger.info(f"🔑 Task ID utilisé: {task_id} (fourni par client: {bool(request.task_id)})")
+
+        # 2. Gestion intelligente des connexions WebSocket via le MCP
+        if task_id in websocket_manager.task_connections:
             logger.info(f"🔗 Réutilisation WS pré-connecté : {task_id}")
         else:
-            # Générer nouveau task_id
-            task_id = f"quote_{datetime.now():%Y%m%d_%H%M%S}_{secrets.token_hex(4)}"
-            
-            # Transfert intelligent si nécessaire
-            if client_task_id:
+            # Si une ancienne connexion existe sous un autre ID, la transférer
+            client_task_id = getattr(request, "task_id", None)
+            if client_task_id and client_task_id in websocket_manager.task_connections:
                 await websocket_manager.transfer_connection(client_task_id, task_id)
                 logger.info(f"🔄 Connexion transférée de {client_task_id} vers {task_id}")
-            
-            logger.info(f"📌 Task ID généré : {task_id}")
+            logger.info(f"📌 Nouvelle connexion WebSocket pour le task_id : {task_id}")
 
-        # 2. Initialisation du tracking (sans attente bloquante)
+        # 3. Initialisation du tracking (sans attente bloquante)
         task = progress_tracker.create_task(
             user_prompt="Génération de devis",
             draft_mode=False
         )
-        task_id = task.task_id  # Utiliser le task_id généré par le tracker
-        # 3. Notification transfert si nécessaire (non-bloquante)
-        if client_task_id and client_task_id != task_id:
-            await websocket_manager.send_task_update(client_task_id, {
-                "type": "task_id_updated", 
-                "new_task_id": task_id,
-                "message": "Task ID mis à jour"
-            })
 
-        # 4. Lancement workflow en arrière-plan (IMMÉDIAT)
+        # 4. Notification de mise à jour du task_id si transféré
+        original_id = getattr(request, "task_id", None)
+        if original_id and original_id != task_id:
+            await websocket_manager.send_task_update(
+                original_id,
+                {
+                    "type": "task_id_updated",
+                    "new_task_id": task_id,
+                    "message": "Task ID mis à jour"
+                }
+            )
+
+        # 5. Lancement du workflow en arrière-plan (IMMÉDIAT)
         background_tasks.add_task(
             _execute_quote_with_progress,
             task_id,
@@ -156,15 +162,15 @@ async def create_quote_workflow(
             []      # conversation_history par défaut
         )
 
-        # 5. Réponse IMMÉDIATE (pas d'attente WebSocket)
+        # 6. Réponse IMMÉDIATE (pas d'attente WebSocket)
         return WorkflowCreateQuoteResponse(
             success=True,
             task_id=task_id,
             status="started",
             message="🚀 Workflow démarré - suivez via WebSocket",
-            websocket_url=f"/ws/ws/{task_id}"  # URL correcte
+            websocket_url=f"/ws/ws/{task_id}"
         )
-        
+
     except Exception as e:
         logger.error(f"❌ Erreur création workflow : {e}")
         return WorkflowCreateQuoteResponse(

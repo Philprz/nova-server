@@ -16,6 +16,8 @@ class WebSocketManager:
         self.task_connections: Dict[str, Set[WebSocket]] = {}
         self.pending_messages: Dict[str, List[Dict]] = {}
         self.connection_metadata: Dict[str, Dict] = {}  # 🔧 NOUVEAU
+        self.pending_messages: Dict[str, List[dict]] = {}
+        self.retry_tasks: Dict[str, asyncio.Task] = {}
         
     async def connect(self, websocket: WebSocket, task_id: str = None):
         """Connect WebSocket avec métadonnées améliorées"""
@@ -104,7 +106,17 @@ class WebSocketManager:
             "interaction_data": interaction_data,
             "timestamp": datetime.now().isoformat()
         }
-
+        # Attendre la connexion si nécessaire
+        if task_id not in self.task_connections or not self.task_connections[task_id]:
+            logger.warning(f"⚠️ Pas de connexion active pour {task_id}, attente...")
+            # Stocker le message pour envoi différé
+            self.pending_messages.setdefault(task_id, []).append({
+            "type": "user_interaction_required",
+            "interaction_data": interaction_data,
+            "timestamp": datetime.now().isoformat()
+            })
+            await self._schedule_retry(task_id)
+            return
         # Envoyer immédiatement si connexion existante
         connections = self.task_connections.get(task_id) or self.active_connections.get("all", [])
         if connections:
@@ -146,7 +158,24 @@ class WebSocketManager:
                 task.fail_step("websocket_timeout", "❌ Timeout connexion WebSocket")
         except Exception as e:
             logger.error(f"Erreur notification échec: {e}")
+    async def _schedule_retry(self, task_id: str, max_wait: int = 60):
+        """Programme des tentatives de renvoi des messages en attente"""
+        if task_id in self.retry_tasks:
+            return
+    async def retry_loop():
+        start_time = time.time()
+        while time.time() - start_time < max_wait:
+            if task_id in self.task_connections and self.task_connections[task_id]:
+                # Envoyer tous les messages en attente
+                if task_id in self.pending_messages:
+                    for msg in self.pending_messages[task_id]:
+                        await self.send_task_update(task_id, msg)
+                    del self.pending_messages[task_id]
+                break
+            await asyncio.sleep(1)
     
+    self.retry_tasks[task_id] = asyncio.create_task(retry_loop())
+        
     async def transfer_connection(self, old_task_id: str, new_task_id: str):
             """🔧 NOUVEAU: Transférer connexion d'un task_id à un autre"""
             if old_task_id in self.task_connections:

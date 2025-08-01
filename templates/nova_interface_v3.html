@@ -301,14 +301,18 @@
                 const taskId = `quote_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
                 addMessage('system', '🔗 Connexion WebSocket...');
                 await connectWebSocketFirst(taskId);
+
                 addMessage('system', '✅ WebSocket connecté, traitement...');
-                
+                // Sauvegarder le taskId pour les requêtes futures
+                currentTaskId = taskId;
+                window.currentTaskId = taskId;
                 const response = await fetch('/api/assistant/workflow/create_quote', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({
                         prompt: message,
-                        task_id: taskId,
+                        task_id: taskId,  // IMPORTANT: envoyer le même task_id
+                        websocket_task_id: taskId,  // Doublon pour compatibilité
                         draft_mode: false
                     })
                 });
@@ -323,7 +327,23 @@
                         // TODO: Implémenter subscribe quand serveur ready
                         // window.websocket.send(JSON.stringify({ action: 'subscribe', task_id: currentTaskId }));
                     }
+                    
                     addMessage('system', `🔄 Interaction requise (ID: ${currentTaskId || taskId})`);
+                    // Démarrer le polling de progression
+                    if (!progressInterval) {
+                        progressInterval = setInterval(async () => {
+                            try {
+                                const pollTaskId = currentTaskId || taskId;
+                                const response = await fetch(`/progress/task/${pollTaskId}`);
+                                if (response.ok) {
+                                    const progress = await response.json();
+                                    updateProgressDisplay(progress);
+                                }
+                            } catch (error) {
+                                console.error('Erreur polling:', error);
+                            }
+                        }, 1000);
+                    }
                     handleUserInteractionRequired(data.interaction_data);
                     return;
                 }
