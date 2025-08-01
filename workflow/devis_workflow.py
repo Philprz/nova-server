@@ -65,7 +65,6 @@ class DevisWorkflow:
         self.force_production = force_production
         self.task_id = task_id  # Accepter un task_id prédéfini
         self.current_task = None
-        self.mcp_connector = None
         self.context = {}
         self.workflow_steps = []
 
@@ -5842,13 +5841,18 @@ class DevisWorkflow:
                 "error": f"Exception: {str(e)}"
             }
     
-    async def _sync_quote_to_systems(self, quote_result: Dict) -> Dict[str, Any]:
+    async def _sync_quote_to_systems(self, quote_result: Dict, target: str = None) -> Dict[str, Any]:
         """
         Synchronisation vers SAP/Salesforce - VERSION PRODUCTION
         """
         try:
             quote_data = quote_result.get("quote_data", {})
-            
+            # Gestion du paramètre target pour synchronisation spécifique
+            if target and target not in ("sap", "salesforce"):
+                return {
+                "status": "error",
+                "message": f"Target '{target}' non supporté. Utilisez 'sap' ou 'salesforce'"
+                }
             if not quote_data:
                 return {
                     "status": "error",
