@@ -15,7 +15,7 @@ import logging
 from datetime import datetime
 import re
 import json
-from routes.routes_progress import _execute_quote_with_progress
+
 # Configuration du router FastAPI
 router = APIRouter(tags=["Assistant Intelligent"])
 # Import du système de progression
