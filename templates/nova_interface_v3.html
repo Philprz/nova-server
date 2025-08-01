@@ -268,7 +268,7 @@
         let currentInteraction = null;
         
         // Configuration
-        const WS_URL = `ws://${window.location.host}/progress/ws/`;
+        const WS_URL = `ws://${window.location.host}/ws/ws/`;
         const API_URL = `/progress/start_quote`;
         console.log('📍 API_URL:', API_URL);
         console.log('📍 WS_URL base:', WS_URL);
@@ -297,12 +297,19 @@
             messageInput.value = '';
             
             try {
-                // 1. Envoyer la requête SANS task_id
+                // 1. Générer un task_id AVANT la requête
+                const taskId = `quote_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+                // 2. Se connecter au WebSocket AVANT d'envoyer la requête
+                await connectWebSocketFirst(taskId);
+
+                // 3. Envoyer la requête AVEC le task_id
                 const response = await fetch('/api/assistant/workflow/create_quote', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({
                         prompt: message,
+                        task_id: taskId,  // Passer le task_id pré-généré
                         draft_mode: false
                     })
                 });
@@ -340,7 +347,7 @@
             }
 
             // Construit l'URL en utilisant le bon taskId
-            const wsUrl = `ws://${window.location.host}/progress/ws/${taskId}`;
+            const wsUrl = `ws://${window.location.host}/ws/ws/${taskId}`;
             window.websocket = new WebSocket(wsUrl);
             // Sauvegarde pour la reconnexion en cas de fermeture anormale
             window.currentTaskId = taskId;
@@ -906,8 +913,8 @@
             }
             const selected=currentInteraction.data.client_options[parseInt(idx,10)];
             
-            // CORRECTION: Utiliser l'endpoint correct
-            fetch('/progress/continue_workflow', {
+            // CORRECTION: Utiliser l'endpoint continue_quote existant
+            fetch('/api/assistant/continue_quote', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
@@ -922,6 +929,7 @@
                     }
                 })
             })
+
             .then(response => response.json())
             .then(result => {
                 if (result.success) {
@@ -1045,7 +1053,7 @@
             try {
                 addMessage('system', '🔧 Test de connectivité WebSocket...');
                 const testTaskId = `connectivity_test_${Date.now()}`;
-                const testWs = new WebSocket(`ws://${window.location.host}/progress/ws/${testTaskId}`);
+                const testWs = new WebSocket(`ws://${window.location.host}/ws/ws/${testTaskId}`);
                 
                 testWs.onopen = function() {
                     console.log('✅ Test WebSocket réussi');
