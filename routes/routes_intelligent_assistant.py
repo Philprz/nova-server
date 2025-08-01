@@ -269,12 +269,7 @@ async def _wait_for_websocket_connection(task_id: str, timeout: int = 15):
     logger.warning(f"⚠️ Timeout attente WebSocket pour {task_id}")
     return False
 # 🆕 NOUVELLE FONCTION : Exécution avec progression
-async def _execute_quote_with_progress(
-    task_id: str, 
-    message: str, 
-    draft_mode: bool = False,
-    conversation_history: list = None
-):
+async def _execute_quote_with_progress(task_id: str, message: str, draft_mode: bool = False, conversation_history: list = None):
     """
     Exécute la génération de devis avec tracking de progression
     """
