@@ -289,79 +289,79 @@
         connectionStatus:    Boolean(connectionStatus),
         userInteractionModal: Boolean(userInteractionModal)
         };
-        async function sendMessage() {
-            const message = messageInput.value.trim();
+        
+        async function sendMessage(userInput) {
+            const message = userInput.trim();
             if (!message) return;
-            
-            addMessage('user', message);
-            messageInput.value = '';
-            
-            try {
-                // 🔧 SOLUTION PÉRENNE : WebSocket-first obligatoire
-                const taskId = `quote_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-                addMessage('system', '🔗 Connexion WebSocket...');
-                await connectWebSocketFirst(taskId);
 
-                addMessage('system', '✅ WebSocket connecté, traitement...');
-                // Sauvegarder le taskId pour les requêtes futures
-                currentTaskId = taskId;
-                window.currentTaskId = taskId;
-                const response = await fetch('/api/assistant/workflow/create_quote', {
+            // Affiche le message utilisateur
+            addMessage('user', message);
+
+            try {
+                // 🔧 Génération d'un taskId unique et lisible
+                const taskId = `quote_${new Date().toISOString().replace(/[-:.]/g, '').slice(0, 15)}_${Math.random().toString(36).substr(2, 8)}`;
+                addMessage('system', '🔗 Connexion WebSocket...');
+
+                // Établir la connexion WebSocket avant d'envoyer la requête
+                await connectWebSocketFirst(taskId);
+                addMessage('system', '✅ WebSocket connecté, envoi de la requête...');
+
+                // Envoi de la requête au nouveau endpoint
+                const response = await fetch('/intelligent-assistant/quote-generation', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        prompt: message,
-                        task_id: taskId,  // IMPORTANT: envoyer le même task_id
-                        websocket_task_id: taskId,  // Doublon pour compatibilité
-                        draft_mode: false
+                        message: message,
+                        task_id: taskId,
+                        draft_mode: document.getElementById('draftMode')?.checked || false
                     })
                 });
-                
+
                 const data = await response.json();
-                
+
+                // Gestion des interactions demandées par le serveur
                 if (data.requires_interaction) {
-                    // 🔧 TRANSFERT intelligent sans reconnexion
+                    // Si le serveur fournit un nouveau task_id
                     if (data.task_id && data.task_id !== taskId) {
                         currentTaskId = data.task_id;
                         addMessage('system', `🔄 Task ID transféré: ${currentTaskId}`);
-                        // TODO: Implémenter subscribe quand serveur ready
-                        // window.websocket.send(JSON.stringify({ action: 'subscribe', task_id: currentTaskId }));
                     }
-                    
                     addMessage('system', `🔄 Interaction requise (ID: ${currentTaskId || taskId})`);
-                    // Démarrer le polling de progression
+
+                    // Démarrer le polling de progression si nécessaire
                     if (!progressInterval) {
                         progressInterval = setInterval(async () => {
                             try {
-                                const pollTaskId = currentTaskId || taskId;
-                                const response = await fetch(`/task/${pollTaskId}`);
-                                if (response.ok) {
-                                    const progress = await response.json();
+                                const pollId = currentTaskId || taskId;
+                                const res = await fetch(`/task/${pollId}`);
+                                if (res.ok) {
+                                    const progress = await res.json();
                                     updateProgressDisplay(progress);
                                 }
-                            } catch (error) {
-                                console.error('Erreur polling:', error);
+                            } catch (err) {
+                                console.error('Erreur polling:', err);
                             }
                         }, 1000);
                     }
+
                     handleUserInteractionRequired(data.interaction_data);
                     return;
                 }
-                
+
+                // Si tout s'est bien passé
                 if (data.success) {
                     currentTaskId = data.task_id || taskId;
                     addMessage('system', `✅ Workflow démarré (ID: ${currentTaskId})`);
-                    // TODO: Subscribe system when server supports it
-                    // window.websocket.send(JSON.stringify({ action: 'subscribe', task_id: currentTaskId }));
                 } else {
                     addMessage('error', `❌ Erreur: ${data.error || data.message}`);
                 }
-                
+
             } catch (error) {
                 console.error('Erreur sendMessage:', error);
                 addMessage('error', `❌ Erreur: ${error.message}`);
             }
         }
+
         // NOUVELLE FONCTION: Connexion WebSocket garantie AVANT requête
         function connectWebSocketFirst(taskId) {
         return new Promise((resolve, reject) => {

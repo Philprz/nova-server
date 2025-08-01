@@ -70,6 +70,7 @@ async def get_task_progress(task_id: str):
     """
     Récupère le statut de progression d'une tâche
     """
+    logger.info(f"Recherche de la tâche {task_id} dans progress_tracker")
     try:
         # Rechercher d'abord dans les tâches actives
         task = progress_tracker.get_task(task_id)
