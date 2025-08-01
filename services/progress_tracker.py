@@ -466,7 +466,12 @@ class ProgressTracker:
             logger.info(f"🧹 {len(abandoned_tasks)} tâches abandonnées nettoyées")
 
         return len(abandoned_tasks)
-
+    def get_task_from_history(self, task_id: str) -> Optional[Dict[str, Any]]:
+        """Récupère une tâche depuis l'historique"""
+        for completed_task in self.completed_tasks:
+            if completed_task.get("task_id") == task_id:
+                return completed_task
+        return None
 # Instance globale du tracker
 progress_tracker = ProgressTracker()
 

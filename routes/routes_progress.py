@@ -69,16 +69,25 @@ async def get_task_progress(task_id: str):
     Récupère le statut de progression d'une tâche
     """
     try:
+        # Rechercher d'abord dans les tâches actives
         task = progress_tracker.get_task(task_id)
-        if not task:
-            raise HTTPException(status_code=404, detail=f"Tâche {task_id} non trouvée")
+        if task:
+            progress_data = task.get_overall_progress()
+            return TaskProgressResponse(**progress_data)
         
-        progress = task.get_overall_progress()
-        return TaskProgressResponse(**progress)
+        # Rechercher dans l'historique si pas trouvé
+        historical_task = progress_tracker.get_task_from_history(task_id)
+        if historical_task:
+            return TaskProgressResponse(**historical_task)
         
+        # Si vraiment pas trouvé
+        raise HTTPException(status_code=404, detail=f"Tâche {task_id} non trouvée")
+        
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Erreur récupération progression {task_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Erreur: {str(e)}")
 
 @router.get("/task/{task_id}/detailed")
 async def get_task_detailed_progress(task_id: str):
