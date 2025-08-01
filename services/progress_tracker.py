@@ -334,7 +334,7 @@ class ProgressTracker:
         self.completed_tasks: List[Dict[str, Any]] = []
         self.max_completed_history = 50  # Garder les 50 dernières tâches
     
-    def create_task(self, user_prompt: str = "", draft_mode: bool = False) -> QuoteTask:
+    def create_task(self, user_prompt: str = "", draft_mode: bool = False, task_id: str | None = None) -> QuoteTask:
         """Crée une nouvelle tâche de génération de devis"""
         task = QuoteTask(task_id=task_id, user_prompt=user_prompt, draft_mode=draft_mode)
         self.active_tasks[task.task_id] = task
