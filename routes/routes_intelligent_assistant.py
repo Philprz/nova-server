@@ -105,7 +105,8 @@ class WorkflowCreateQuoteResponse(BaseModel):
     quote_id: Optional[str] = None
     error: Optional[str] = None
     message: Optional[str] = None
-
+    interaction_data: Optional[Dict[str, Any]] = None  # 🆕 NOUVEAU champ
+    
 # ✅ ENDPOINT CORRIGÉ
 @router.post("/workflow/create_quote", response_model=WorkflowCreateQuoteResponse)
 async def create_quote_workflow(
@@ -1151,8 +1152,18 @@ async def start_quote_workflow(message_data: ChatMessage):
         
         # Exécuter le workflow complet
         result = await workflow.process_prompt(message)
+        # 🔧 CORRECTION: Gestion interaction utilisateur requise
+        if result.get("status") == "user_interaction_required":
+            logger.info(f"🎯 Interaction utilisateur requise - Task: {task_id}")
+            return WorkflowCreateQuoteResponse(
+                success=False,
+                status="user_interaction_required", 
+                task_id=task_id,
+                interaction_data=result,  # Inclure les données d'interaction
+                message="Interaction utilisateur requise"
+            )
         workflow_status = result.get('workflow_status', 'completed')
-
+        
         # Analyser les résultats pour créer une réponse intelligente
         response = {
             'success': result.get('success', False),
