@@ -134,6 +134,7 @@ app.include_router(quote_router, prefix="/api/assistant", tags=["Quote"])
 app.include_router(client_router, prefix="/api/assistant", tags=["Client"])
 app.include_router(client_listing_router, prefix="/api/clients", tags=["Client Listing"])
 app.include_router(websocket_router, prefix="/ws", tags=["WebSocket"])
+
 # Route pour servir l'interface IT Spirit
 @app.get('/interface/itspirit', response_class=HTMLResponse)
 async def itspirit_interface():

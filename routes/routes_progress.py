@@ -4,6 +4,7 @@ Routes API pour le suivi de progression des générations de devis
 À intégrer dans main.py avec : app.include_router(progress_router, prefix="/progress", tags=["progress"])
 """
 
+from csv import QUOTE_ALL
 from fastapi import APIRouter, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from services.websocket_manager import websocket_manager
@@ -321,8 +322,6 @@ class QuoteTaskResponse(BaseModel):
 
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 import asyncio
-
-router = APIRouter()
 
 @router.post("/start_quote", response_model=QuoteTaskResponse)
 async def start_quote_generation(request: StartQuoteRequest, background_tasks: BackgroundTasks):
