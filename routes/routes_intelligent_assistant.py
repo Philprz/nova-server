@@ -108,78 +108,69 @@ class WorkflowCreateQuoteResponse(BaseModel):
 
 # ✅ ENDPOINT CORRIGÉ
 @router.post("/workflow/create_quote", response_model=WorkflowCreateQuoteResponse)
-async def create_quote_workflow(request: QuoteRequest):
+async def create_quote_workflow(
+    request: QuoteRequest,
+    background_tasks: BackgroundTasks
+):
     """
-    Endpoint pour créer un devis via workflow
-    Résout l'erreur 422 avec validation correcte
+    Créer un workflow de devis avec WebSocket intelligent.
+    Répond IMMÉDIATEMENT - pas d'attente bloquante.
     """
     try:
-                # CORRECTION CRITIQUE : Vérifier la connexion WebSocket AVANT de démarrer le workflow
-        task_id = request.task_id
-        if not task_id:
-            # Générer un task_id temporaire si non fourni
-            task_id = f"quote_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{secrets.token_hex(4)}"
-        
-        # Attendre qu'une connexion WebSocket soit établie (timeout 10s)
-        connection_timeout = 10
-        start_wait = time.time()
-        while time.time() - start_wait < connection_timeout:
-            if websocket_manager.task_connections.get(task_id):
-                logger.info(f"✅ Connexion WebSocket confirmée pour {task_id}")
-                break
-            await asyncio.sleep(0.5)
+        # 1. Gestion intelligente du task_id
+        client_task_id = getattr(request, "task_id", None)
+        if client_task_id and client_task_id in websocket_manager.task_connections:
+            task_id = client_task_id
+            logger.info(f"🔗 Réutilisation WS pré-connecté : {task_id}")
         else:
-            return WorkflowCreateQuoteResponse(
-                success=False,
-                status="error", 
-                error="Connexion WebSocket requise",
-                message="Veuillez vous connecter au WebSocket avant de créer un devis"
-            )
+            # Générer nouveau task_id
+            task_id = f"quote_{datetime.now():%Y%m%d_%H%M%S}_{secrets.token_hex(4)}"
+            
+            # Transfert intelligent si nécessaire
+            if client_task_id:
+                await websocket_manager.transfer_connection(client_task_id, task_id)
+                logger.info(f"🔄 Connexion transférée de {client_task_id} vers {task_id}")
+            
+            logger.info(f"📌 Task ID généré : {task_id}")
 
-        # Log de debug
-        logger.info(f"📝 Requête reçue: {request.message}")
-        logger.info(f"⚙️ Paramètres: draft={request.draft_mode}, prod={request.force_production}")
-        websocket_task_id = request.task_id
-        # Import du workflow
-        from workflow.devis_workflow import DevisWorkflow
-        
-        # Initialisation
-        workflow = DevisWorkflow(
-            validation_enabled=True,
-            draft_mode=request.draft_mode,
-            force_production=request.force_production
+        # 2. Initialisation du tracking (sans attente bloquante)
+        progress_tracker.start_task(
+            task_id,
+            "Génération de devis",
+            estimated_duration=120
+        )
+
+        # 3. Notification transfert si nécessaire (non-bloquante)
+        if client_task_id and client_task_id != task_id:
+            await websocket_manager.send_task_update(client_task_id, {
+                "type": "task_id_updated", 
+                "new_task_id": task_id,
+                "message": "Task ID mis à jour"
+            })
+
+        # 4. Lancement workflow en arrière-plan (IMMÉDIAT)
+        background_tasks.add_task(
+            run_quote_workflow_background,
+            task_id,
+            request.prompt or request.message
+        )
+
+        # 5. Réponse IMMÉDIATE (pas d'attente WebSocket)
+        return WorkflowCreateQuoteResponse(
+            success=True,
+            task_id=task_id,
+            status="started",
+            message="🚀 Workflow démarré - suivez via WebSocket",
+            websocket_url=f"/ws/ws/{task_id}"  # URL correcte
         )
         
-        # ⚠️ IMPORTANT: Utiliser process_prompt (pas process_quote_request)
-        result = await workflow.process_prompt(request.message)
-        
-        # Formater la réponse
-        if result.get("success"):
-            return WorkflowCreateQuoteResponse(
-                success=True,
-                status="completed",
-                task_id=result.get("task_id"),
-                client=result.get("client"),
-                products=result.get("products"),
-                total_amount=result.get("total_amount"),
-                quote_id=result.get("quote_id"),
-                message=result.get("message")
-            )
-        else:
-            return WorkflowCreateQuoteResponse(
-                success=False,
-                status="error",
-                error=result.get("error", "Erreur inconnue"),
-                message=result.get("message")
-            )
-            
     except Exception as e:
-        logger.error(f"❌ Erreur workflow: {str(e)}")
+        logger.error(f"❌ Erreur création workflow : {e}")
         return WorkflowCreateQuoteResponse(
             success=False,
             status="error",
             error=str(e),
-            message=f"Erreur lors du traitement: {str(e)}"
+            message="Erreur lors du démarrage du workflow"
         )
 # 🔧 MODIFICATION : Fonction chat_with_nova modifiée
 @router.post("/chat")
@@ -254,64 +245,6 @@ async def chat_with_nova_with_progress(
                 "suggestions": ['Réessayer', 'Reformuler', 'Contacter le support']
             }
         )
-
-@router.post("/workflow/create_quote")
-async def create_quote_workflow(
-    request: QuoteRequest,
-    background_tasks: BackgroundTasks
-):
-    """Créer un workflow de devis avec WebSocket pré-connecté"""
-    try:
-        # 1. Récupération du task_id pré-généré si fourni et valide
-        client_task_id = getattr(request, "task_id", None)
-        if client_task_id and client_task_id in websocket_manager.task_connections:
-            task_id = client_task_id
-            logger.info(f"🔗 Réutilisation WS pré-connecté : {task_id}")
-        else:
-            if client_task_id:
-                logger.warning("⚠️ Task ID client invalide ; génération d'un nouveau")
-            # 2. Génération d’un nouveau task_id
-            task_id = f"quote_{datetime.now():%Y%m%d_%H%M%S}_{secrets.token_hex(4)}"
-            # Transférer la connexion WebSocket si nécessaire
-            if client_task_id and client_task_id != task_id:
-                await websocket_manager.transfer_connection(client_task_id, task_id)
-                logger.info(f"🔄 Connexion transférée de {client_task_id} vers {task_id}")
-            logger.info(f"📌 Task ID généré : {task_id}")
-
-        # 3. Initialisation du suivi de progression
-        progress_tracker.start_task(
-            task_id,
-            "Génération de devis",
-            estimated_duration=120
-        )
-
-        # 4. Attente que la connexion WebSocket soit établie
-        await _wait_for_websocket_connection(task_id)
-
-        # 5. Notification si l’ID a changé
-        if client_task_id and client_task_id != task_id:
-            await websocket_manager.send_task_update(client_task_id, {
-                "type": "task_id_updated",
-                "new_task_id": task_id,
-                "message": "Task ID mis à jour"
-            })
-
-        # 6. Lancement du workflow en arrière-plan
-        background_tasks.add_task(
-            run_quote_workflow_background,
-            task_id,
-            request.prompt
-        )
-
-        return {
-            "success": True,
-            "task_id": task_id,
-            "message": "Workflow de devis démarré",
-            "websocket_url": f"/progress/ws/{task_id}"
-        }
-    except Exception as e:
-        logger.error(f"Erreur création workflow : {e}")
-        raise HTTPException(status_code=500, detail=str(e))
     
 # Ajouter cette fonction après la définition de create_quote_workflow
 async def _wait_for_websocket_connection(task_id: str, timeout: int = 15):
