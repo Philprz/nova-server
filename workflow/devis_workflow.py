@@ -63,6 +63,9 @@ class DevisWorkflow:
         self.validation_enabled = validation_enabled
         self.draft_mode = draft_mode
         self.force_production = force_production
+        self.task_id = task_id  # Accepter un task_id prédéfini
+        self.current_task = None
+        self.mcp_connector = None
         self.context = {}
         self.workflow_steps = []
 
@@ -126,11 +129,20 @@ class DevisWorkflow:
         
     def _initialize_task_tracking(self, prompt: str) -> str:
         """Initialise le tracking de progression pour cette génération"""
-        self.current_task = progress_tracker.create_task(
-            user_prompt=prompt,
-            draft_mode=self.draft_mode
-        )
-        self.task_id = self.current_task.task_id
+        if self.task_id:
+            # Utiliser le task_id prédéfini
+            self.current_task = progress_tracker.create_task(
+                user_prompt=prompt,
+                draft_mode=self.draft_mode,
+                task_id=self.task_id
+            )
+        else:
+            # Créer un nouveau task_id si non fourni
+            self.current_task = progress_tracker.create_task(
+                user_prompt=prompt,
+                draft_mode=self.draft_mode
+            )
+            self.task_id = self.current_task.task_id
         # Conserver une référence globale pour les WebSockets
         progress_tracker._current_task = self.current_task
         logger.info(f"Tracking initialisé pour la tâche: {self.task_id}")
