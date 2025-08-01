@@ -670,7 +670,7 @@ class DevisWorkflow:
 
             # Si pas de task existante, en créer une nouvelle
             if not self.current_task:
-                self.task_id = self._initialize_task_tracking(prompt)
+                self.task_id = self._initialize_task_tracking(user_prompt)
 
             logger.info(f"=== DÉMARRAGE WORKFLOW - Tâche {self.task_id} ===")
 
@@ -678,7 +678,7 @@ class DevisWorkflow:
             self._track_step_start("parse_prompt", "🔍 Analyse de votre demande")
 
             # Extraction des informations (code existant adapté)
-            extracted_info = await self.llm_extractor.extract_quote_info(prompt)
+            extracted_info = await self.llm_extractor.extract_quote_info(user_prompt)
             if not extracted_info:
                 raise ValueError("Extraction des informations échouée")
             self._track_step_progress("parse_prompt", 100, "✅ Demande analysée")
