@@ -177,9 +177,7 @@ class WebSocketManager:
                 await asyncio.sleep(1)
 
         self.retry_tasks[task_id] = asyncio.create_task(retry_loop())
-    
-    self.retry_tasks[task_id] = asyncio.create_task(retry_loop())
-        
+
     async def transfer_connection(self, old_task_id: str, new_task_id: str):
             """🔧 NOUVEAU: Transférer connexion d'un task_id à un autre"""
             if old_task_id in self.task_connections:
