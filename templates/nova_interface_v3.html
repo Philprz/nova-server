@@ -665,20 +665,20 @@
 
             // Contenu et actions modulaires
             if (type === 'client_selection') {
-                modalBody.innerHTML = buildClientSelectionContent(interactionData.data);
+                modalBody.innerHTML = buildClientSelectionContent(interactionData);
                 modalFooter.innerHTML = buildClientSelectionActions();
             } else if (type === 'client_creation') {
-                modalBody.innerHTML = buildClientCreationContent(interactionData.data);
+                modalBody.innerHTML = buildClientCreationContent(interactionData);
                 modalFooter.innerHTML = buildClientCreationActions();
             } else if (type === 'product_selection') {
-                modalBody.innerHTML = buildProductSelectionContent(interactionData.data);
+                modalBody.innerHTML = buildProductSelectionContent(interactionData);
                 modalFooter.innerHTML = buildProductSelectionActions();
             } else {
                 modalBody.innerHTML = `
                     <div class="alert alert-info">
                         <h6>Type: ${type}</h6>
                         <p>${interactionData.message || 'Interaction requise'}</p>
-                        <pre class="mt-2 small">${JSON.stringify(interactionData.data, null, 2)}</pre>
+                        <pre class="mt-2 small">${JSON.stringify(interactionData, null, 2)}</pre>
                     </div>`;
                 modalFooter.innerHTML = `
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fermer</button>`;
