@@ -16,8 +16,9 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # Configuration du router
+# Le préfixe est appliqué lors de l'enregistrement dans main.py.
+# Ne pas définir de préfixe ici pour éviter un doublon dans les routes.
 router = APIRouter(
-    prefix="/progress",
     tags=["Progress"]
 )
 
