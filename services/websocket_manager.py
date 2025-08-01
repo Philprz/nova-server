@@ -110,6 +110,11 @@ class WebSocketManager:
         # Attendre la connexion si nécessaire
         if task_id not in self.task_connections or not self.task_connections[task_id]:
             logger.warning(f"⚠️ Pas de connexion active pour {task_id}, attente...")
+            # Stocker le message pour livraison différée
+            if task_id not in self.pending_messages:
+                self.pending_messages[task_id] = []
+            self.pending_messages[task_id].append(message)
+            logger.info(f"📦 Message stocké pour livraison différée: {task_id}")
             # Stocker le message pour envoi différé
             self.pending_messages.setdefault(task_id, []).append({
             "type": "user_interaction_required",

@@ -633,3 +633,96 @@ async def handle_user_response(task_id: str, response_data: dict):
     elif response_type == "product_selection":
         # Traiter la sélection produit
         await handle_product_selection(task_id, step_id, response_data)
+
+async def handle_client_validation(task_id: str, step_id: str, response_data: dict):
+    """Traite la validation client par l'utilisateur"""
+    try:
+        logger.info(f"🎯 Traitement validation client: {task_id}/{step_id}")
+        
+        # Récupérer la tâche
+        task = progress_tracker.get_task(task_id)
+        if not task:
+            logger.error(f"❌ Tâche {task_id} introuvable")
+            return
+        
+        # Extraire les données de réponse
+        selected_option = response_data.get("selected_option")
+        client_data = response_data.get("client_data", {})
+        
+        # Créer instance workflow pour continuer le traitement
+        from workflow.devis_workflow import DevisWorkflow
+        workflow = DevisWorkflow(task_id=task_id, force_production=True)
+        
+        # Traiter selon le type de sélection
+        if selected_option == "select_existing":
+            # Client existant sélectionné
+            logger.info(f"✅ Client sélectionné: {client_data.get('Name', 'Inconnu')}")
+            continuation_result = await workflow.continue_with_selected_client(client_data)
+            
+        elif selected_option == "create_new":
+            # Création nouveau client
+            client_name = response_data.get("client_name", "")
+            logger.info(f"✅ Création client demandée: {client_name}")
+            continuation_result = await workflow.continue_with_new_client(client_name)
+            
+        else:
+            logger.error(f"❌ Option non reconnue: {selected_option}")
+            return
+            
+        # Notifier le résultat via WebSocket
+        await websocket_manager.send_task_update(task_id, {
+            "type": "client_validation_processed",
+            "step_id": step_id,
+            "result": continuation_result
+        })
+        
+        # Marquer l'étape comme complétée
+        task.complete_user_validation(step_id, response_data)
+        
+    except Exception as e:
+        logger.exception(f"❌ Erreur validation client {task_id}: {str(e)}")
+        await websocket_manager.send_task_update(task_id, {
+            "type": "validation_error",
+            "step_id": step_id,
+            "error": str(e)
+        })
+
+async def handle_product_selection(task_id: str, step_id: str, response_data: dict):
+    """Traite la sélection produit par l'utilisateur"""
+    try:
+        logger.info(f"🛍️ Traitement sélection produit: {task_id}/{step_id}")
+        
+        # Récupérer la tâche
+        task = progress_tracker.get_task(task_id)
+        if not task:
+            logger.error(f"❌ Tâche {task_id} introuvable")
+            return
+            
+        # Extraire les sélections produits
+        selected_products = response_data.get("selected_products", [])
+        
+        # Créer instance workflow
+        from workflow.devis_workflow import DevisWorkflow
+        workflow = DevisWorkflow(task_id=task_id, force_production=True)
+        
+        # Continuer avec les produits sélectionnés
+        continuation_result = await workflow.continue_with_products(selected_products)
+        
+        # Notifier via WebSocket
+        await websocket_manager.send_task_update(task_id, {
+            "type": "product_selection_processed", 
+            "step_id": step_id,
+            "result": continuation_result,
+            "selected_count": len(selected_products)
+        })
+        
+        # Marquer complété
+        task.complete_user_validation(step_id, response_data)
+        
+    except Exception as e:
+        logger.exception(f"❌ Erreur sélection produit {task_id}: {str(e)}")
+        await websocket_manager.send_task_update(task_id, {
+            "type": "validation_error",
+            "step_id": step_id, 
+            "error": str(e)
+        })
