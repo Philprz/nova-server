@@ -2,6 +2,7 @@
 import asyncio
 import json
 import logging
+import time
 
 from datetime import datetime, timezone
 from typing import Dict, Set, List
@@ -162,17 +163,20 @@ class WebSocketManager:
         """Programme des tentatives de renvoi des messages en attente"""
         if task_id in self.retry_tasks:
             return
-    async def retry_loop():
-        start_time = time.time()
-        while time.time() - start_time < max_wait:
-            if task_id in self.task_connections and self.task_connections[task_id]:
-                # Envoyer tous les messages en attente
-                if task_id in self.pending_messages:
-                    for msg in self.pending_messages[task_id]:
-                        await self.send_task_update(task_id, msg)
-                    del self.pending_messages[task_id]
-                break
-            await asyncio.sleep(1)
+
+        async def retry_loop():
+            start_time = time.time()
+            while time.time() - start_time < max_wait:
+                if task_id in self.task_connections and self.task_connections[task_id]:
+                    # Envoyer tous les messages en attente
+                    if task_id in self.pending_messages:
+                        for msg in self.pending_messages[task_id]:
+                            await self.send_task_update(task_id, msg)
+                        del self.pending_messages[task_id]
+                    break
+                await asyncio.sleep(1)
+
+        self.retry_tasks[task_id] = asyncio.create_task(retry_loop())
     
     self.retry_tasks[task_id] = asyncio.create_task(retry_loop())
         
