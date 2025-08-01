@@ -134,12 +134,11 @@ async def create_quote_workflow(
             logger.info(f"📌 Task ID généré : {task_id}")
 
         # 2. Initialisation du tracking (sans attente bloquante)
-        progress_tracker.start_task(
-            task_id,
-            "Génération de devis",
-            estimated_duration=120
+        task = progress_tracker.create_task(
+            user_prompt="Génération de devis",
+            draft_mode=False
         )
-
+        task_id = task.task_id  # Utiliser le task_id généré par le tracker
         # 3. Notification transfert si nécessaire (non-bloquante)
         if client_task_id and client_task_id != task_id:
             await websocket_manager.send_task_update(client_task_id, {
