@@ -297,42 +297,48 @@
             messageInput.value = '';
             
             try {
-                // 1. Générer un task_id AVANT la requête
+                // 🔧 SOLUTION PÉRENNE : WebSocket-first obligatoire
                 const taskId = `quote_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-
-                // 2. Se connecter au WebSocket AVANT d'envoyer la requête
+                addMessage('system', '🔗 Connexion WebSocket...');
                 await connectWebSocketFirst(taskId);
-
-                // 3. Envoyer la requête AVEC le task_id
+                addMessage('system', '✅ WebSocket connecté, traitement...');
+                
                 const response = await fetch('/api/assistant/workflow/create_quote', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({
                         prompt: message,
-                        task_id: taskId,  // Passer le task_id pré-généré
+                        task_id: taskId,
                         draft_mode: false
                     })
                 });
                 
                 const data = await response.json();
-                // Gérer le cas d'interaction requise
+                
                 if (data.requires_interaction) {
-                    currentTaskId = data.task_id;
-                    // Afficher directement le modal de sélection
+                    // 🔧 TRANSFERT intelligent sans reconnexion
+                    if (data.task_id && data.task_id !== taskId) {
+                        currentTaskId = data.task_id;
+                        addMessage('system', `🔄 Task ID transféré: ${currentTaskId}`);
+                        // TODO: Implémenter subscribe quand serveur ready
+                        // window.websocket.send(JSON.stringify({ action: 'subscribe', task_id: currentTaskId }));
+                    }
+                    addMessage('system', `🔄 Interaction requise (ID: ${currentTaskId || taskId})`);
                     handleUserInteractionRequired(data.interaction_data);
-                    // Connecter WebSocket pour la suite
-                    await connectWebSocketFirst(data.task_id);
                     return;
                 }
-                // 2. Connecter WebSocket AVEC le task_id du serveur
-                if (data.success && data.task_id) {
-                    currentTaskId = data.task_id;
-                    await connectWebSocketFirst(data.task_id);
-                    addMessage('system', `✅ Workflow démarré (ID: ${data.task_id})`);
+                
+                if (data.success) {
+                    currentTaskId = data.task_id || taskId;
+                    addMessage('system', `✅ Workflow démarré (ID: ${currentTaskId})`);
+                    // TODO: Subscribe system when server supports it
+                    // window.websocket.send(JSON.stringify({ action: 'subscribe', task_id: currentTaskId }));
+                } else {
+                    addMessage('error', `❌ Erreur: ${data.error || data.message}`);
                 }
                 
             } catch (error) {
-                console.error('Erreur:', error);
+                console.error('Erreur sendMessage:', error);
                 addMessage('error', `❌ Erreur: ${error.message}`);
             }
         }
