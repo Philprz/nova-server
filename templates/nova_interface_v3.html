@@ -319,6 +319,14 @@
 
                 const data = await response.json();
 
+                // Vérifier d'abord si c'est une interaction utilisateur requise
+                if (data.status === 'user_interaction_required' && data.interaction_data) {
+                    console.log('🎯 Interaction utilisateur détectée dans réponse initiale');
+                    currentTaskId = data.task_id || taskId;
+                    handleUserInteractionRequired(data.interaction_data);
+                    return;
+                }
+
                 // Gestion des interactions demandées par le serveur
                 if (data.requires_interaction) {
                     // Si le serveur fournit un nouveau task_id
@@ -352,6 +360,14 @@
                 if (data.success) {
                     currentTaskId = data.task_id || taskId;
                     addMessage('system', `✅ Workflow démarré (ID: ${currentTaskId})`);
+                } else if (data.status === 'user_interaction_required') {
+                    // Gestion directe si pas de WebSocket
+                    currentTaskId = data.task_id || taskId;
+                    if (data.interaction_data) {
+                        handleUserInteractionRequired(data.interaction_data);
+                    } else {
+                        addMessage('system', '⏳ En attente d\'interaction utilisateur...');
+                    }
                 } else {
                     addMessage('error', `❌ Erreur: ${data.error || data.message}`);
                 }
