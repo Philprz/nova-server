@@ -138,13 +138,12 @@ class WebSocketManager:
 
         logger.error(f"❌ ÉCHEC FINAL: Impossible d'envoyer interaction après 6 tentatives")
         
-        # Nouveau : Notifier l'échec à l'utilisateur via un autre canal si possible
+        # Notifier l'échec à l'utilisateur via un autre canal si possible
         try:
             from services.progress_tracker import progress_tracker
             task = progress_tracker.get_task(task_id)
             if task:
-                progress_tracker.update_step(task_id, "websocket_timeout", 
-                        "error", "❌ Timeout connexion WebSocket", {"retry_count": 6, "total_wait_time": "60s"})
+                task.fail_step("websocket_timeout", "❌ Timeout connexion WebSocket")
         except Exception as e:
             logger.error(f"Erreur notification échec: {e}")
     

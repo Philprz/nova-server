@@ -131,6 +131,8 @@ class DevisWorkflow:
             draft_mode=self.draft_mode
         )
         self.task_id = self.current_task.task_id
+        # Conserver une référence globale pour les WebSockets
+        progress_tracker._current_task = self.current_task
         logger.info(f"Tracking initialisé pour la tâche: {self.task_id}")
         return self.task_id
     
