@@ -4921,7 +4921,7 @@ class DevisWorkflow:
         if total_found > 0:
             # CLIENT(S) TROUVÉ(S) - Proposer sélection utilisateur
             self._track_step_complete("search_client", f"✅ {total_found} client(s) trouvé(s) pour '{client_name}'")
-            return await self._propose_existing_clients_selection(client_search_result)
+            return await self._propose_existing_clients_selection(client_name, client_search_result)
 
         else:
             # AUCUN CLIENT TROUVÉ - Vérifier une dernière fois avant création

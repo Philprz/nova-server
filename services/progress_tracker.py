@@ -336,7 +336,7 @@ class ProgressTracker:
     
     def create_task(self, user_prompt: str = "", draft_mode: bool = False) -> QuoteTask:
         """Crée une nouvelle tâche de génération de devis"""
-        task = QuoteTask(user_prompt=user_prompt, draft_mode=draft_mode)
+        task = QuoteTask(task_id=task_id, user_prompt=user_prompt, draft_mode=draft_mode)
         self.active_tasks[task.task_id] = task
         logger.info(f"Nouvelle tâche créée: {task.task_id}")
         return task

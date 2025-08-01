@@ -138,9 +138,10 @@ async def create_quote_workflow(
         # 3. Initialisation du tracking (sans attente bloquante)
         task = progress_tracker.create_task(
             user_prompt="Génération de devis",
-            draft_mode=False
+            draft_mode=False,
+            task_id=task_id
         )
-
+        task_id = task.task_id
         # 4. Notification de mise à jour du task_id si transféré
         original_id = getattr(request, "task_id", None)
         if original_id and original_id != task_id:
