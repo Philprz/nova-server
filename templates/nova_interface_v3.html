@@ -268,7 +268,7 @@
         let currentInteraction = null;
         
         // Configuration
-        const WS_URL = `ws://${window.location.host}/ws/ws/`;
+        const WS_URL = `ws://${window.location.host}/progress/ws/`;
         const API_URL = `/progress/start_quote`;
         console.log('📍 API_URL:', API_URL);
         console.log('📍 WS_URL base:', WS_URL);
@@ -373,7 +373,7 @@
             }
 
             // Construit l'URL en utilisant le bon taskId
-            const wsUrl = `ws://${window.location.host}/ws/ws/${taskId}`;
+            const wsUrl = `ws://${window.location.host}/progress/ws/${taskId}`;
             window.websocket = new WebSocket(wsUrl);
             // Sauvegarde pour la reconnexion en cas de fermeture anormale
             window.currentTaskId = taskId;
@@ -1079,7 +1079,7 @@
             try {
                 addMessage('system', '🔧 Test de connectivité WebSocket...');
                 const testTaskId = `connectivity_test_${Date.now()}`;
-                const testWs = new WebSocket(`ws://${window.location.host}/ws/ws/${testTaskId}`);
+                const testWs = new WebSocket(`ws://${window.location.host}/progress/ws/${testTaskId}`);
                 
                 testWs.onopen = function() {
                     console.log('✅ Test WebSocket réussi');
