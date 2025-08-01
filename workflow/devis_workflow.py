@@ -74,15 +74,19 @@ class DevisWorkflow:
             logger.info("🔥 MODE PRODUCTION FORCÉ - Pas de fallback démo")
 
         if task_id:
-            # Utiliser le task_id fourni
             self.task_id = task_id
             self.current_task = progress_tracker.get_task(task_id)
             if self.current_task:
                 logger.info(f"✅ Tâche récupérée: {task_id}")
             else:
-                logger.warning(f"⚠️ Tâche {task_id} introuvable - Création nouvelle tâche")
-                self.current_task = None
-                self.task_id = None
+                # Ici, tu dois forcer la création explicite AVEC ce même ID
+                logger.warning(f"⚠️ Tâche {task_id} introuvable - création explicite avec l'ID existant")
+                self.current_task = progress_tracker.create_task(
+                    user_prompt="Génération de devis (créée via fallback)",
+                    draft_mode=self.draft_mode,
+                    task_id=self.task_id  # <-- garder explicitement le même ID
+                )
+
         else:
             self.current_task = None
             self.task_id = None
@@ -4770,7 +4774,7 @@ class DevisWorkflow:
             client_result = await self._process_client_validation(client_name)
 
             # 🔧 CORRECTION CRITIQUE: Vérifier si interaction utilisateur requise
-            if client_result.get("status") == "user_interaction_required":
+            if client_result.get("status") in ["user_interaction_required", "client_selection_required"]:
                 logger.info("⏸️ Workflow interrompu - Interaction utilisateur requise pour sélection client")
                 return client_result
 
