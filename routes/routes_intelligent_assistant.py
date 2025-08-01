@@ -1489,10 +1489,8 @@ async def client_creation_workflow_endpoint(request: Dict[str, Any]):
     """
     try:
         logger.info("🚀 Démarrage workflow création client")
-
         result = await client_creation_workflow.process_client_creation_request(request)
         return result
-
     except Exception as e:
         logger.error(f"Erreur workflow création client: {e}")
         return {
@@ -1500,6 +1498,8 @@ async def client_creation_workflow_endpoint(request: Dict[str, Any]):
             "error": str(e),
             "message": "Erreur dans le workflow de création"
         }
+@router.post('/client/workflow/choice')
+async def client_workflow_choice_endpoint(choice_data: Dict[str, Any]):
     """
     🔧 GESTION DES CHOIX UTILISATEUR DEPUIS L'INTERFACE
     """
@@ -1513,19 +1513,21 @@ async def client_creation_workflow_endpoint(request: Dict[str, Any]):
         # Récupérer le contexte du workflow
         workflow_context = await get_workflow_context(task_id)
 
+        workflow = DevisWorkflow(task_id=task_id, force_production=True)
+
         if choice_type == "client_choice":
             # Choix client depuis les suggestions
-            workflow = DevisWorkflow(task_id=task_id, force_production=True)
             result = await workflow.handle_client_suggestions(choice_data, workflow_context)
 
         elif choice_type == "product_choice":
             # Choix produit depuis les alternatives
-            workflow = DevisWorkflow(task_id=task_id, force_production=True)
-            result = await workflow.apply_product_suggestions(choice_data.get("products", []), workflow_context)
+            result = await workflow.apply_product_suggestions(
+                choice_data.get("products", []),
+                workflow_context
+            )
 
         elif choice_type == "create_client":
             # Déclenchement création client
-            workflow = DevisWorkflow(task_id=task_id, force_production=True)
             result = await workflow._handle_new_client_creation(
                 choice_data.get("client_name", ""),
                 workflow_context
@@ -1539,6 +1541,7 @@ async def client_creation_workflow_endpoint(request: Dict[str, Any]):
     except Exception as e:
         logger.error(f"Erreur gestion choix utilisateur: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 # Modèles pour la création de client
 class ClientCreationRequest(BaseModel):
@@ -1884,11 +1887,13 @@ async def generate_quote_endpoint(request: GenerateQuoteRequest):
         # Utiliser la logique existante du workflow
         from workflow.devis_workflow import DevisWorkflow
 
-        # Mode draft ou production selon la demande
+        # Créer le workflow avec task_id fixe pour éviter la double génération
+        task_id = f"quote_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{secrets.token_hex(4)}"
         workflow = DevisWorkflow(
             validation_enabled=True,
             draft_mode=request.draft_mode,
-            force_production=request.force_production  # Utiliser le paramètre de la requête
+            force_production=request.force_production,
+            task_id=task_id  # Forcer l'utilisation d'un task_id cohérent
         )
 
         # Exécuter le workflow avec le message complet
@@ -1899,7 +1904,7 @@ async def generate_quote_endpoint(request: GenerateQuoteRequest):
                 "success": False,
                 "requires_interaction": True,
                 "interaction_data": workflow_result,
-                "task_id": workflow.task_id
+                "task_id": task_id
             }
         if workflow_result.get('success'):
             # Extraire les données pour le format frontend
