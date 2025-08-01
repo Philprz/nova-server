@@ -1848,7 +1848,27 @@ async def continue_workflow_with_choice(request: Request):
     elif choice_type == "product_selected":
         product_choices = data.get("products")
         return await workflow.apply_product_choices(product_choices, context)
+@router.post("/assistant/workflow/select_client")
+async def select_client_and_continue(request: Request):
+    """Sélection client et continuation workflow - SANS WebSocket"""
+    data = await request.json()
+    task_id = data.get("task_id")
+    selected_client = data.get("selected_client")
+    workflow_context = data.get("workflow_context", {})
+    if not task_id or not selected_client:
+        raise HTTPException(status_code=400, detail="task_id et selected_client requis")
 
+    workflow = DevisWorkflow(task_id=task_id, force_production=True)
+
+    # Traitement direct avec client sélectionné
+    user_input = {
+        "action": "select_existing",
+        "selected_data": selected_client
+    }
+
+    result = await workflow.continue_after_user_input(user_input, workflow_context)
+
+    return {"success": True, "result": result, "task_id": task_id}
 # Modèle pour la compatibilité avec le frontend existant
 class GenerateQuoteRequest(BaseModel):
     message: str

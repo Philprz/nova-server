@@ -5038,13 +5038,15 @@ class DevisWorkflow:
                         option_id += 1
 
                 return {
-                    "requires_user_selection": True,
+                    "status": "client_selection_required",
+                    "requires_user_selection": False,
                     "interaction_type": "client_selection",
                     "message": f"Plusieurs clients '{client_name}' trouvés. Sélectionnez le bon client :",
                     "client_options": client_options,
                     "total_options": len(client_options),
                     "original_client_name": client_name,
-                    "allow_create_new": True
+                    "allow_create_new": True,
+                    "task_id": self.task_id
                 }
 
             else:
@@ -5222,25 +5224,7 @@ class DevisWorkflow:
                 
                 # 🔧 CORRECTION CRITIQUE: Détecter l'interaction utilisateur requise
                 selection_result = await self._propose_existing_clients_selection(client_name, comprehensive_search)
-                # 🔧 NOUVEAU: Vérifier si interaction utilisateur requise
-                if selection_result.get("requires_user_selection"):
-                    # AJOUT CRITIQUE - Envoyer notification WebSocket
-                    await websocket_manager.send_user_interaction_required(
-                        self.task_id, 
-                        selection_result
-                    )
-                    
-                    return {
-                        "status": "user_interaction_required",
-                        "interaction_type": "client_selection", 
-                        "data": selection_result,
-                        "message": selection_result.get("message"),
-                        "workflow_context": {
-                            "task_id": self.task_id,
-                            "original_client_name": client_name,
-                            "search_results": comprehensive_search
-                        }
-                    }
+                
                 
                 # Si pas d'interaction requise, continuer normalement
                 return selection_result
