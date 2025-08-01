@@ -34,7 +34,24 @@ logging.basicConfig(
     )
 
 logger = logging.getLogger(__name__)
-
+async def initialize_server():
+    """Initialise le serveur de manière asynchrone"""
+    try:
+        websocket_manager = WebSocketManager()
+        
+        # Démarrer retry_loop en arrière-plan
+        retry_task = asyncio.create_task(websocket_manager.retry_loop())
+        
+        # Autres initialisations asynchrones...
+        
+        logger.info("Serveur démarré avec succès")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Erreur lors du démarrage du serveur: {e}")
+        logger.error(f"Type d'erreur: {type(e).__name__}")
+        return False
+    
 def print_banner():
     """Affichage de la bannière NOVA"""
     banner = """
