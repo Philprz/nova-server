@@ -725,10 +725,14 @@ class DevisWorkflow:
                 result = await self._process_other_action(extracted_info)
 
 
-            # Marquer la tâche comme terminée avec le résultat
+            # 🔧 CORRECTION : Ne marquer comme terminée QUE si workflow réellement terminé
             if self.current_task:
-                progress_tracker.complete_task(self.task_id, result)
-            
+                if result.get("status") == "user_interaction_required":
+                    # Laisser la tâche en attente d'interaction - ne pas la terminer
+                    logger.info(f"⏸️ Tâche {self.task_id} en attente d'interaction utilisateur")
+                else:
+                    # Workflow terminé normalement
+                    progress_tracker.complete_task(self.task_id, result)
             return result
             
         except Exception as e:
@@ -4777,7 +4781,10 @@ class DevisWorkflow:
             if client_result.get("status") in ["user_interaction_required", "client_selection_required"]:
                 logger.info("⏸️ Workflow interrompu - Interaction utilisateur requise pour sélection client")
                 return client_result
-
+                # 🔧 AJOUT : Marquer explicitement que la tâche attend une interaction
+                if self.current_task:
+                    self.current_task.set_waiting_for_user_input("Sélection client requise")
+                return client_result
             # 🔧 NOUVEAU: Vérifier autres statuts qui nécessitent un arrêt
             if client_result.get("status") in ["error", "cancelled"]:
                 logger.warning(f"❌ Workflow interrompu - Statut client : {client_result.get('status')}")
