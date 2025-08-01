@@ -652,11 +652,16 @@ class DevisWorkflow:
             logger.exception(f"Erreur création opportunité Salesforce: {str(e)}")
             return {"success": False, "error": str(e)}
 
-    async def process_prompt(self, prompt: str, task_id: Optional[str] = None) -> Dict[str, Any]:
+    async def process_prompt(self, user_prompt: str, task_id: str = None) -> Dict[str, Any]:
+        """IMPORTANT: Utiliser le task_id fourni, ne jamais le régénérer"""
         """
         Traite un prompt avec tracking de progression
         """
+        if task_id:
+            self.task_id = task_id
+            logger.info(f"✅ Utilisation du task_id fourni: {task_id}")
         extracted_info: Optional[Dict[str, Any]] = None
+        """Process le prompt utilisateur via LLM et workflow"""
         try:
             # 🔧 MODIFICATION : Utiliser le task_id fourni si disponible
             if task_id and not self.task_id:
