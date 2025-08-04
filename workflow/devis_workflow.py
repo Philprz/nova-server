@@ -5052,7 +5052,7 @@ class DevisWorkflow:
                 }
 
                 self.current_task.require_user_validation("client_selection", "client_selection", validation_data)
-                logger.info(f"🔍 DEBUG WORKFLOW: client_result = {json.dumps(client_result if 'client_result' in locals() else 'NOT_FOUND', indent=2, default=str)}")
+                logger.info(f"🔍 DEBUG WORKFLOW: selection_result = {json.dumps({'status': 'user_interaction_required', 'client_options_count': len(client_options)}, indent=2, default=str)}")
                 logger.info(f"🔍 DEBUG WORKFLOW: interaction_data présent = {'interaction_data' in locals()}")
                 return {
                     "status": "user_interaction_required",
