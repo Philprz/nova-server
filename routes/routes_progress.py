@@ -229,18 +229,24 @@ async def get_task_validation(task_id: str):
     """Récupère validation en attente pour affichage interface"""
     task = progress_tracker.get_task(task_id)
     if not task:
+        # Chercher dans l'historique aussi
+        historical_task = progress_tracker.get_task_from_history(task_id)
+        if historical_task and historical_task.get("validation_data"):
+            return {
+                "has_validation": True,
+                "validation_data": historical_task["validation_data"]
+            }
         raise HTTPException(status_code=404, detail="Tâche introuvable")
     
-    validation = task.get_pending_validation()
-    if not validation:
-        return {"has_validation": False}
+    if task.validation_data:
+        pending_validations = {k: v for k, v in task.validation_data.items() if v.get("status") == "pending"}
+        if pending_validations:
+            return {
+                "has_validation": True,
+                "validation_data": pending_validations
+            }
     
-    return {
-        "has_validation": True,
-        "validation_type": validation.get("validation_type"),
-        "step_id": validation.get("step_id"), 
-        "data": validation.get("data", {})
-    }
+    return {"has_validation": False}
 
 @router.post("/task/{task_id}/validation/{step_id}")
 async def submit_validation(task_id: str, step_id: str, user_response: Dict[str, Any]):
