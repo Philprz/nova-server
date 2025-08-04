@@ -366,13 +366,16 @@ async def _execute_quote_generation(task_id: str, prompt: str, draft_mode: bool)
         
         # Exécuter le workflow
         workflow_result = await workflow.process_prompt(prompt, task_id=task_id)
-        
+        logger.info(f"🔍 DEBUG: Envoi interaction WebSocket - Data: {workflow_result.get('interaction_data', 'MISSING')}")
         # Interaction utilisateur requise ?
         if workflow_result.get("status") == "user_interaction_required":
             logger.info(f"🔄 Interaction utilisateur requise pour tâche {task_id}")
+            logger.info(f"🔍 DEBUG ROUTE: workflow_result keys = {list(workflow_result.keys())}")
+            logger.info(f"🔍 DEBUG ROUTE: interaction_data = {workflow_result.get('interaction_data', 'MISSING')}")
+            logger.info(f"🔍 DEBUG ROUTE: WebSocket connections pour {task_id} = {len(websocket_manager.task_connections.get(task_id, []))}")
             await websocket_manager.send_user_interaction_required(
-                task_id,
-                workflow_result.get("data", {})
+            task_id,
+            workflow_result.get("interaction_data", workflow_result)
             )
             # Ne pas marquer comme complet, attendre l'interaction
             return

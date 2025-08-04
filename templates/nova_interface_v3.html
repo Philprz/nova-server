@@ -490,6 +490,7 @@
                 
         // Gestion des messages WebSocket
         function handleWebSocketMessage(data) {
+
             console.log('Message WebSocket reçu:', data);
             
             switch(data.type) {
@@ -519,7 +520,12 @@
                     
                 default:
                     console.log('Type de message non géré:', data.type);
+                console.log('🔍 DEBUG WS: Message reçu =', JSON.stringify(data, null, 2));
+                if (data.type === 'user_interaction_required') {
+                    console.log('🔍 DEBUG WS: interaction_data =', data.interaction_data);
+                }
             }
+            
         }
         
         // Mise à jour du statut de connexion
