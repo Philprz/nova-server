@@ -631,6 +631,30 @@
         let enrichmentData = null;
         let websocket = null;
         let reconnectInterval = null;
+
+        // Fonction de génération d'UUID compatible avec tous les navigateurs
+        function generateUUID() {
+            // Vérifier si crypto.randomUUID est disponible (navigateurs modernes)
+            if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+                return crypto.randomUUID();
+            }
+
+            // Fallback pour les navigateurs plus anciens
+            if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+                return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                    const r = (crypto.getRandomValues(new Uint8Array(1))[0] & 15) >> (c === 'x' ? 0 : 2);
+                    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+                    return v.toString(16);
+                });
+            }
+
+            // Fallback ultime pour les très anciens navigateurs
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                const r = Math.random() * 16 | 0;
+                const v = c === 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
         // Gestion des messages
         function addMessage(content, type = 'assistant') {
             const messagesContainer = document.getElementById('chatMessages');
@@ -863,17 +887,13 @@
             try {
                 showTyping();
 
-                const response = await fetch('/api/assistant/workflow/create_quote', {
+                const response = await fetch('/api/assistant/chat', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'X-Request-ID': crypto.randomUUID() // Pour traçabilité
+                        'X-Request-ID': generateUUID() // Pour traçabilité
                     },
-                    body: JSON.stringify({
-                        message: message,
-                        draft_mode: false,
-                        timestamp: new Date().toISOString()
-                    })
+                    body: JSON.stringify({ message: message })
                 });
 
                 if (!response.ok) {
