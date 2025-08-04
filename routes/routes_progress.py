@@ -225,33 +225,22 @@ async def websocket_progress(websocket: WebSocket, task_id: str):
 # =============================================
 
 @router.get("/task/{task_id}/validation")
-async def get_pending_validation(task_id: str):
-    """
-    Récupère les validations en attente pour une tâche
-    """
-    try:
-        task = progress_tracker.get_task(task_id)
-        if not task:
-            raise HTTPException(status_code=404, detail=f"Tâche {task_id} non trouvée")
-        
-        pending_validations = []
-        for step_id, validation_data in task.validation_data.items():
-            if validation_data.get("status") == "pending":
-                pending_validations.append({
-                    "step_id": step_id,
-                    "type": validation_data["type"],
-                    "data": validation_data["data"],
-                    "timestamp": validation_data["timestamp"]
-                })
-        
-        return {
-            "task_id": task_id,
-            "pending_validations": pending_validations
-        }
-        
-    except Exception as e:
-        logger.error(f"Erreur récupération validations {task_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+async def get_task_validation(task_id: str):
+    """Récupère validation en attente pour affichage interface"""
+    task = progress_tracker.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Tâche introuvable")
+    
+    validation = task.get_pending_validation()
+    if not validation:
+        return {"has_validation": False}
+    
+    return {
+        "has_validation": True,
+        "validation_type": validation.get("validation_type"),
+        "step_id": validation.get("step_id"), 
+        "data": validation.get("data", {})
+    }
 
 @router.post("/task/{task_id}/validation/{step_id}")
 async def submit_validation(task_id: str, step_id: str, user_response: Dict[str, Any]):

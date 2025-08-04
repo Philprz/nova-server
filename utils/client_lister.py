@@ -261,7 +261,10 @@ class ClientLister:
                 "clients": sap_clients,
                 "count": len(sap_clients)
             }
-            result["total_found"] += len(sap_clients)
+            # Déduplication des clients avant calcul du total
+        deduplicated_results = self._deduplicate_clients(sf_clients, sap_clients)
+        result["deduplicated_clients"] = deduplicated_results
+        result["total_found"] = len(deduplicated_results)
         
         logger.info(f"✅ Recherche terminée: {result['total_found']} clients trouvés")
         return result
@@ -288,7 +291,50 @@ class ClientLister:
         }
         
         return summary
-
+    def _deduplicate_clients(self, sf_clients: List[Dict], sap_clients: List[Dict]) -> List[Dict]:
+        """Déduplique les clients basé sur la similarité des noms"""
+        from difflib import SequenceMatcher
+        
+        unique_clients = []
+        used_sap_indices = set()
+        
+        # Traiter clients Salesforce
+        for sf_client in sf_clients:
+            sf_name = sf_client.get('Name', '').strip().upper()
+            
+            # Chercher correspondance SAP
+            best_match_idx = None
+            best_similarity = 0
+            
+            for idx, sap_client in enumerate(sap_clients):
+                if idx in used_sap_indices:
+                    continue
+                    
+                sap_name = sap_client.get('CardName', '').strip().upper()
+                similarity = SequenceMatcher(None, sf_name, sap_name).ratio()
+                
+                if similarity > 0.85 and similarity > best_similarity:
+                    best_similarity = similarity
+                    best_match_idx = idx
+            
+            # Fusionner si correspondance trouvée
+            if best_match_idx is not None:
+                used_sap_indices.add(best_match_idx)
+                unique_clients.append({
+                    **sf_client,
+                    'sap_data': sap_clients[best_match_idx],
+                    'source': 'both',
+                    'match_score': best_similarity
+                })
+            else:
+                unique_clients.append({**sf_client, 'source': 'salesforce'})
+        
+        # Ajouter clients SAP non correspondus
+        for idx, sap_client in enumerate(sap_clients):
+            if idx not in used_sap_indices:
+                unique_clients.append({**sap_client, 'source': 'sap'})
+        
+        return unique_clients
 # Instance globale
 client_lister = ClientLister()
 
