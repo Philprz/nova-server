@@ -394,6 +394,18 @@
                 }, 10000);
 
                 window.websocket.onopen = () => {
+                // Ping périodique pour maintenir la connexion
+                const pingInterval = setInterval(() => {
+                if (window.websocket.readyState === WebSocket.OPEN) {
+                    window.websocket.send(JSON.stringify({
+                    type: 'ping',
+                    task_id: taskId,
+                    timestamp: new Date().toISOString()
+                }));
+                } else {
+                    clearInterval(pingInterval);
+                }
+                }, 10000); // Ping toutes les 10 secondes
                 clearTimeout(connectionTimeout);
                 updateConnectionStatus(true);
                 console.log('✅ WebSocket connecté pour task:', taskId);
