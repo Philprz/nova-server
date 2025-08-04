@@ -264,6 +264,7 @@
     <script>
         // Variables globales
         let currentTaskId = null;
+        let validationInterval = null;
         let websocket = null;
         let currentInteraction = null;
         
@@ -302,8 +303,6 @@
 
             try {
                 addMessage('system', '🔗 Connexion WebSocket...');
-
-                // Envoi de la requête au serveur
                 const response = await fetch('/api/assistant/workflow/create_quote', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -351,7 +350,7 @@
                 // Si la requête initiale réussit
                 if (data.success) {
                     addMessage('system', `✅ Workflow démarré (ID: ${currentTaskId})`);
-
+                    startValidationPolling(currentTaskId);
                     // Établir la connexion WebSocket si nécessaire
                     if (!window.websocket || window.websocket.readyState !== WebSocket.OPEN) {
                         await connectWebSocketFirst(currentTaskId);
@@ -369,7 +368,7 @@
         }
 
 
-        // NOUVELLE FONCTION: Connexion WebSocket garantie AVANT requête
+        // Connexion WebSocket garantie AVANT requête
         function connectWebSocketFirst(taskId) {
             return new Promise((resolve, reject) => {
                 console.log('🔗 Connexion WebSocket pré-établie pour:', taskId);
@@ -696,7 +695,31 @@
 
             modal.show();
         }
-
+        function startValidationPolling(taskId) {
+            // Arrête tout polling existant
+            if (validationInterval) {
+                clearInterval(validationInterval);
+            }
+            validationInterval = setInterval(async () => {
+                try {
+                    const res = await fetch(`/progress/task/${taskId}/validation`);
+                    if (res.ok) {
+                        const data = await res.json();
+                        if (data.has_validation) {
+                            const validations = Object.values(data.validation_data || {});
+                            if (validations.length > 0) {
+                                const validation = validations[0];
+                                // Déclenche l’interface utilisateur avec les données de validation
+                                handleUserInteractionRequired(validation.data || validation);
+                                clearInterval(validationInterval);
+                            }
+                        }
+                    }
+                } catch (error) {
+                    console.error('Erreur polling validation:', error);
+                }
+            }, 2000);
+        }
         // helper XSS
         function escapeHtml(str) {
             return String(str).replace(/[&<>"'`=\/]/g, s=>({
