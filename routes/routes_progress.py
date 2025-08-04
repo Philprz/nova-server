@@ -206,10 +206,17 @@ async def websocket_progress(websocket: WebSocket, task_id: str):
             try:
                 # Recevoir les messages du client (ping/pong)
                 message = await websocket.receive_json()
-                
                 if message.get("type") == "ping":
                     await websocket.send_json({"type": "pong"})
-                    
+                elif message.get("type") == "connection_confirm":
+                    # Confirmer l'enregistrement de la connexion
+                    await websocket.send_json({
+                    "type": "connection_confirmed",
+                    "task_id": task_id,
+                    "timestamp": datetime.now().isoformat(),
+                    "message": "Connexion WebSocket confirmée côté serveur"
+                    })
+                    logger.info(f"✅ Connexion confirmée pour task: {task_id}")
             except WebSocketDisconnect:
                 break
                 
@@ -582,39 +589,6 @@ async def get_progress_stats():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erreur: {str(e)}")
 
-@router.websocket("/ws/{task_id}")
-async def websocket_endpoint(websocket: WebSocket, task_id: str):
-    """WebSocket endpoint pour suivi temps réel d'une tâche"""
-    await websocket_manager.connect(websocket, task_id)
-    
-    try:
-        # Envoyer l'état initial
-        task = progress_tracker.get_task(task_id)
-        if task:
-            await websocket.send_text(json.dumps({
-                "type": "initial_state",
-                "task_id": task_id,
-                "data": task.get_detailed_progress()
-            }))
-        
-        # Maintenir la connexion ouverte
-        while True:
-            try:
-                # Recevoir les messages du client (validations utilisateur)
-                data = await websocket.receive_text()
-                message = json.loads(data)
-                
-                if message.get("type") == "user_response":
-                    await handle_user_response(task_id, message.get("data", {}))
-                    
-            except WebSocketDisconnect:
-                break
-            except Exception as e:
-                logger.error(f"Erreur WebSocket: {e}")
-                break
-                
-    finally:
-        websocket_manager.disconnect(websocket, task_id)
         
 async def handle_user_response(task_id: str, response_data: dict):
     """Traite une réponse utilisateur"""

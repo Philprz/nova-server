@@ -380,76 +380,89 @@
 
         // NOUVELLE FONCTION: Connexion WebSocket garantie AVANT requête
         function connectWebSocketFirst(taskId) {
-        return new Promise((resolve, reject) => {
-            console.log('🔗 Connexion WebSocket pré-établie pour:', taskId);
+            return new Promise((resolve, reject) => {
+                console.log('🔗 Connexion WebSocket pré-établie pour:', taskId);
 
-            // Ferme la précédente connexion si elle existe
-            if (window.websocket) {
-            window.websocket.close();
-            }
+                // Ferme la précédente connexion si elle existe
+                if (window.websocket) {
+                window.websocket.close();
+                }
 
-            // Construit l'URL en utilisant le bon taskId
-            const wsUrl = `ws://${window.location.host}/progress/ws/${taskId}`;
-            window.websocket = new WebSocket(wsUrl);
-            // Sauvegarde pour la reconnexion en cas de fermeture anormale
-            window.currentTaskId = taskId;
+                // Construit l'URL en utilisant le bon taskId
+                const wsUrl = `ws://${window.location.host}/progress/ws/${taskId}`;
+                window.websocket = new WebSocket(wsUrl);
+                window.currentTaskId = taskId;
 
-            // Timeout de sécurité (10s)
-            const connectionTimeout = setTimeout(() => {
-            console.error('❌ Timeout connexion WebSocket après 10s');
-            window.websocket.close();
-            updateConnectionStatus(false);
-            reject(new Error('Timeout connexion WebSocket'));
-            }, 10000);
+                let serverConfirmationReceived = false;
 
-            // À l'ouverture de la connexion
-            window.websocket.onopen = () => {
-            clearTimeout(connectionTimeout);
-            updateConnectionStatus(true);
-            console.log('✅ WebSocket connecté pour task:', taskId);
+                // Timeout de sécurité pour la connexion initiale (10s)
+                const connectionTimeout = setTimeout(() => {
+                console.error('❌ Timeout connexion WebSocket après 10s');
+                window.websocket.close();
+                updateConnectionStatus(false);
+                reject(new Error('Timeout connexion WebSocket'));
+                }, 10000);
 
-            // Confirme la connexion au serveur
-            window.websocket.send(JSON.stringify({
-                type: 'connection_confirm',
-                task_id: taskId,
-                timestamp: new Date().toISOString(),
-            }));
+                window.websocket.onopen = () => {
+                clearTimeout(connectionTimeout);
+                updateConnectionStatus(true);
+                console.log('✅ WebSocket connecté pour task:', taskId);
 
-            resolve(taskId);
-            };
+                // Envoie la confirmation au serveur
+                window.websocket.send(JSON.stringify({
+                    type: 'connection_confirm',
+                    task_id: taskId,
+                    timestamp: new Date().toISOString(),
+                }));
 
-            // Gestion des erreurs
-            window.websocket.onerror = (error) => {
-            clearTimeout(connectionTimeout);
-            console.error('❌ Erreur connexion WebSocket:', error);
-            updateConnectionStatus(false);
-            reject(error);
-            };
+                // Attente confirmation serveur (5s)
+                const confirmationTimeout = setTimeout(() => {
+                    if (!serverConfirmationReceived) {
+                    console.error('❌ Timeout confirmation serveur après 5s');
+                    window.websocket.close();
+                    updateConnectionStatus(false);
+                    reject(new Error('Timeout confirmation serveur'));
+                    }
+                }, 5000);
 
-            // Réception des messages
-            window.websocket.onmessage = (event) => {
-            try {
-                const data = JSON.parse(event.data);
-                handleWebSocketMessage(data);
-            } catch (err) {
-                console.error('Erreur parsing message WebSocket:', err);
-            }
-            };
+                window.websocket.onmessage = (event) => {
+                    try {
+                    const data = JSON.parse(event.data);
 
-            // Fermeture de la connexion
-            window.websocket.onclose = (event) => {
-            updateConnectionStatus(false);
-            console.log('WebSocket fermé:', event.reason);
+                    if (data.type === 'connection_confirmed' && data.task_id === taskId) {
+                        clearTimeout(confirmationTimeout);
+                        serverConfirmationReceived = true;
+                        console.log('✅ Confirmation serveur reçue pour task:', taskId);
+                        resolve(taskId);
+                        return;
+                    }
 
-            // Reconnexion automatique si fermeture anormale
-            if (event.code !== 1000 && window.currentTaskId) {
-                setTimeout(() => {
-                console.log('🔄 Tentative de reconnexion...');
-                connectWebSocketFirst(window.currentTaskId).catch(console.error);
-                }, 3000);
-            }
-            };
-        });
+                    // Autres messages traités ici
+                    handleWebSocketMessage(data);
+
+                    } catch (error) {
+                    console.error('Erreur traitement message WebSocket:', error);
+                    }
+                };
+                };
+
+                window.websocket.onclose = (event) => {
+                updateConnectionStatus(false);
+                console.log('WebSocket fermé:', event.reason);
+
+                // Reconnexion automatique si fermeture anormale
+                if (event.code !== 1000 && window.currentTaskId) {
+                    setTimeout(() => {
+                    console.log('🔄 Tentative de reconnexion...');
+                    connectWebSocketFirst(window.currentTaskId).catch(console.error);
+                    }, 3000);
+                }
+                };
+
+                window.websocket.onerror = (event) => {
+                console.error('Erreur WebSocket:', event);
+                };
+            });
         }
 
 
