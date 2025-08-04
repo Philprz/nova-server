@@ -1,20 +1,11 @@
 <!DOCTYPE html>
-<html lang="fr" role="document">
+<html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <meta name="description" content="NOVA – Assistant Commercial Intelligent, génération automatique de devis.">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>NOVA - Assistant Commercial Intelligent</title>
-    <link
-        href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css"
-        rel="stylesheet"
-        crossorigin="anonymous"
-    >
-    <link
-        href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-icons/1.10.0/font/bootstrap-icons.min.css"
-        rel="stylesheet"
-        crossorigin="anonymous"
-    >
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-icons/1.10.0/font/bootstrap-icons.min.css" rel="stylesheet">
     <style>
         :root {
             --primary-blue: #02B9FD;
@@ -478,7 +469,7 @@
     </style>
 </head>
 <body>
-    <div class="connection-status disconnected" id="connectionStatus" role="status" aria-live="polite">
+    <div class="connection-status" id="connectionStatus">
         <i class="bi bi-wifi"></i> Connexion...
     </div>
 
@@ -486,12 +477,7 @@
         <div class="header">
             <div style="display: flex; align-items: center; gap: 20px;">
                 <div style="flex: 1;">
-                    <a
-                        href="https://www.it-spirit.fr"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        style="text-decoration: none; color: inherit;"
-                    >
+                    <a href="https://www.it-spirit.fr" target="_blank" style="text-decoration: none; color: inherit;">
                         <img src="/static/Logo.png" alt="IT Spirit" style="height: 60px; margin-bottom: 8px;">
                         <div style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 8px; font-style: italic;">
                             L'esprit humain au coeur de la technologie
@@ -506,7 +492,7 @@
         </div>
 
         <div class="chat-container">
-            <div class="chat-messages" id="chatMessages" role="log" aria-live="polite">
+            <div class="chat-messages" id="chatMessages">
                 <div class="welcome-message">
                     <div class="welcome-title">Bonjour ! Je suis NOVA</div>
                     <div class="welcome-subtitle">
@@ -569,9 +555,8 @@
                     rows="1"
                     onkeypress="handleKeyPress(event)"
                     oninput="handleInput()"
-                    aria-label="Message"
                 ></textarea>
-                <button id="sendButton" class="send-button" onclick="sendMessage()" disabled aria-label="Envoyer">
+                <button id="sendButton" class="send-button" onclick="sendMessage()" disabled>
                     <i class="bi bi-send"></i>
                 </button>
             </div>
@@ -672,7 +657,7 @@
                         );
                     }
                 } catch (error) {
-                    console.error('Erreur suivi progression :', error);
+                    console.error('Erreur suivi progression:', error);
                 }
             }, 1000);
         }
