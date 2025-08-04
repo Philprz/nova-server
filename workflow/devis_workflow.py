@@ -4779,11 +4779,11 @@ class DevisWorkflow:
 
             # 🔧 CORRECTION CRITIQUE: Vérifier si interaction utilisateur requise
             if client_result.get("status") in ["user_interaction_required", "client_selection_required"]:
-                logger.info("⏸️ Workflow interrompu - Interaction utilisateur requise pour sélection client")
-                return client_result
-                # 🔧 AJOUT : Marquer explicitement que la tâche attend une interaction
+                # Marquer la tâche comme en attente d'interaction
                 if self.current_task:
-                    self.current_task.set_waiting_for_user_input("Sélection client requise")
+                    self.current_task.status = TaskStatus.PENDING
+                    self.current_task.require_user_validation("client_selection", "client_selection", client_result)
+                logger.info("⏸️ Workflow interrompu - Interaction utilisateur requise pour sélection client")
                 return client_result
             # 🔧 NOUVEAU: Vérifier autres statuts qui nécessitent un arrêt
             if client_result.get("status") in ["error", "cancelled"]:
@@ -5047,18 +5047,19 @@ class DevisWorkflow:
                         })
                         option_id += 1
 
-                # Enregistrer validation requise
+                # Enregistrer la validation utilisateur requise
                 validation_data = {
                     "client_options": client_options,
                     "total_options": len(client_options),
                     "original_client_name": client_name,
-                    "allow_create_new": True
+                    "allow_create_new": True,
+                    "interaction_type": "client_selection"
                 }
 
-                self.current_task.require_user_validation("client_validation", "client_selection", validation_data)
+                self.current_task.require_user_validation("client_selection", "client_selection", validation_data)
 
                 return {
-                    "status": "client_selection_required",
+                    "status": "user_interaction_required",
                     "requires_user_selection": True,
                     "validation_pending": True,
                     "task_id": self.task_id,
