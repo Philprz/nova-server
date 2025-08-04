@@ -195,26 +195,26 @@ class WebSocketManager:
             self.pending_messages.setdefault(task_id, []).append(message)
             self._schedule_retry(task_id)
 
+    async def _attempt_reconnection(self, task_id: str) -> None:
+        """Tentative de reconnexion immédiate pour une tâche"""
+        logger.info(f"🔄 Tentative de reconnexion pour {task_id}")
+
+        # Vérifier si la tâche existe toujours
+        task = progress_tracker.get_task(task_id)
+        if task and task.status.name in ['RUNNING', 'PENDING']:
+            # Notifier le frontend qu'une reconnexion est nécessaire
+            await self.broadcast_to_task(task_id, {
+                "type": "reconnection_required",
+                "task_id": task_id,
+                "message": "Reconnexion WebSocket requise"
+            }, wait=False)
+
     def _schedule_retry(self, task_id: str) -> None:
         """
         Planifie les tentatives de renvoi des messages en attente.
         """
-        async def _attempt_reconnection(task_id: str) -> None:
-            """Tentative de reconnexion immédiate pour une tâche"""
-            logger.info(f"🔄 Tentative de reconnexion pour {task_id}")
-
-            # Vérifier si la tâche existe toujours
-            task = progress_tracker.get_task(task_id)
-            if task and task.status.name in ['RUNNING', 'PENDING']:
-                # Notifier le frontend qu'une reconnexion est nécessaire
-                await self.broadcast_to_task(task_id, {
-                    "type": "reconnection_required",
-                    "task_id": task_id,
-                    "message": "Reconnexion WebSocket requise"
-                }, wait=False)
-
         # Lance la tâche de reconnexion asynchrone
-        asyncio.create_task(_attempt_reconnection(task_id))
+        asyncio.create_task(self._attempt_reconnection(task_id))
 
 
     async def _retry_pending(self, task_id: str) -> None:
