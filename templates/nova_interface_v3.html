@@ -507,12 +507,24 @@
         function handleWebSocketMessage(data) {
 
             console.log('Message WebSocket reçu:', data);
-            
+
+            // 🔧 DEBUG AMÉLIORÉ pour interaction client
+            if (data.type === 'user_interaction_required') {
+                console.log('🎯 Détection interaction utilisateur:', data);
+                console.log('🎯 Type d\'interaction:', data.interaction_data?.interaction_type);
+                if (data.interaction_data?.client_options) {
+                    console.log('🎯 Nombre de clients:', data.interaction_data.client_options.length);
+                    data.interaction_data.client_options.forEach((client, index) => {
+                        console.log(`🎯 Client ${index + 1}:`, client.name, `(${client.source})`);
+                    });
+                }
+            }
+
             switch(data.type) {
                 case 'initial_state':
                     updateProgressDisplay(data.data);
                     break;
-                    
+
                 case 'step_update':
                     updateStepDisplay(data.step_id, data.status, data.message, data.details);
                     break;
@@ -528,11 +540,18 @@
                 case 'task_update':
                     updateProgressDisplay(data);
                     break;
-                    
+
                 case 'user_interaction_required':
-                    handleUserInteractionRequired(data.interaction_data);
+                    console.log('🎯 Traitement interaction utilisateur...');
+                    if (data.interaction_data) {
+                        console.log('🎯 Données d\'interaction présentes, ouverture modal...');
+                        handleUserInteractionRequired(data.interaction_data);
+                    } else {
+                        console.error('❌ Pas de données d\'interaction dans le message WebSocket');
+                        console.error('❌ Structure du message:', JSON.stringify(data, null, 2));
+                    }
                     break;
-                    
+
                 default:
                     console.log('Type de message non géré:', data.type);
                 console.log('🔍 DEBUG WS: Message reçu =', JSON.stringify(data, null, 2));
@@ -540,7 +559,7 @@
                     console.log('🔍 DEBUG WS: interaction_data =', data.interaction_data);
                 }
             }
-            
+
         }
         
         // Mise à jour du statut de connexion

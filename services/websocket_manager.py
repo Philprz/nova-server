@@ -172,12 +172,25 @@ class WebSocketManager:
         :param interaction_data: données pour l'interaction utilisateur
         """
         logger.info(f"🎯 Demande interaction pour task_id: {task_id}")
+
+        # 🔧 DEBUG AMÉLIORÉ: Log des données d'interaction
+        logger.info(f"📊 Type d'interaction: {interaction_data.get('interaction_type', 'non_spécifié')}")
+        if interaction_data.get('client_options'):
+            logger.info(f"📊 Nombre de clients: {len(interaction_data.get('client_options', []))}")
+            for i, client in enumerate(interaction_data.get('client_options', [])):
+                logger.info(f"📊 Client {i+1}: {client.get('name')} ({client.get('source')})")
+        else:
+            logger.warning(f"⚠️ Pas de client_options dans interaction_data: {json.dumps(interaction_data, indent=2, default=str)}")
+
         message = {
             "type": "user_interaction_required",
             "task_id": task_id,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "interaction_data": interaction_data,
         }
+
+        logger.info(f"📨 Message WebSocket préparé: {json.dumps(message, indent=2, default=str)}")
+
         # Si pas de connexions, stocker et planifier retry
         if not self.task_connections.get(task_id):
             logger.warning(f"⚠️ Pas de connexion active pour {task_id}, message stocké")
@@ -188,6 +201,7 @@ class WebSocketManager:
             return
         # Tenter envoi immédiat
         try:
+            logger.info(f"🔗 Connexions actives pour {task_id}: {len(self.task_connections.get(task_id, []))}")
             await self.send_task_update(task_id, message)
             logger.info(f"✅ Interaction envoyée immédiatement pour {task_id}")
         except Exception as e:
