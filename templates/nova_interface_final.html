@@ -22,7 +22,7 @@
             --accent-color: #E220FB;
             --success-color: #2DFE83;
             --warning-color: #FD5202;
-            
+
             --bg-primary: #ffffff;
             --bg-secondary: #f8f9fa;
             --bg-tertiary: #e9ecef;
@@ -36,6 +36,57 @@
             margin: 0;
             padding: 0;
             box-sizing: border-box;
+        }
+
+        .client-selection-container {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-top: 12px;
+        }
+
+        .client-selection-button {
+            background-color: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 12px;
+            text-align: left;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .client-selection-button:hover {
+            background-color: var(--bg-primary);
+            border-color: var(--primary-blue);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.05);
+        }
+
+        .client-selection-button strong {
+            font-weight: 600;
+            color: var(--primary-blue);
+        }
+
+        .client-selection-button small {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-top: 4px;
+        }
+
+        .client-selection-button.create-new {
+            color: var(--success-color);
+            border-style: dashed;
+            align-items: center;
+            flex-direction: row;
+            gap: 8px;
+        }
+
+        .client-selection-button.create-new:hover {
+            color: white;
+            background-color: var(--success-color);
+            border-color: var(--success-color);
         }
 
         body {
@@ -631,6 +682,9 @@
         let enrichmentData = null;
         let websocket = null;
         let reconnectInterval = null;
+        let clientSelectionMode = false;
+        let availableClients = [];
+        let originalClientName = '';
 
         // Fonction de génération d'UUID compatible avec tous les navigateurs
         function generateUUID() {
@@ -691,6 +745,118 @@
         function handleSuggestionClick(suggestion) {
             document.getElementById('chatInput').value = suggestion;
             sendMessage();
+        }
+
+        function addClientSelection(clients, originalClientName) {
+            clientSelectionMode = true;
+            availableClients = clients;
+
+            const messagesContainer = document.getElementById('chatMessages');
+
+            // Message d'explication
+            addMessage(`Plusieurs clients correspondent à "${originalClientName}". Veuillez sélectionner :`, 'system');
+
+            // Créer les boutons de sélection
+            const selectionDiv = document.createElement('div');
+            selectionDiv.className = 'client-selection-container';
+
+            clients.forEach((client, index) => {
+                const button = document.createElement('button');
+                button.className = 'client-selection-button';
+                button.innerHTML = `
+                    <strong>${client.name}</strong>
+                    <small>Source: ${client.source || 'Inconnue'} | ID: ${client.id || 'N/A'}</small>
+                `;
+                button.onclick = () => selectClient(client, index);
+                selectionDiv.appendChild(button);
+            });
+
+            // Bouton pour créer un nouveau client
+            const newClientButton = document.createElement('button');
+            newClientButton.className = 'client-selection-button create-new';
+            newClientButton.innerHTML = `
+                <i class="bi bi-plus-circle"></i> Créer un nouveau client "${originalClientName}"
+            `;
+            newClientButton.onclick = () => createNewClient(originalClientName);
+            selectionDiv.appendChild(newClientButton);
+
+            messagesContainer.appendChild(selectionDiv);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+
+        function selectClient(client, index) {
+            clientSelectionMode = false;
+            availableClients = [];
+
+            addMessage(`Vous avez sélectionné : ${client.name}`, 'user');
+
+            // Envoyer la sélection au serveur
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                const response = {
+                    type: "user_response",
+                    task_id: currentTaskId,
+                    data: {
+                        response_type: "client_selection",
+                        action: "select_existing",
+                        client_id: client.id,
+                        client_name: client.name,
+                        selected_index: index
+                    }
+                };
+                console.log("📤 Sélection client:", response);
+                websocket.send(JSON.stringify(response));
+            } else {
+                // Fallback si pas de WebSocket
+                continueWithSelectedClient(client);
+            }
+        }
+
+        function createNewClient(clientName) {
+            clientSelectionMode = false;
+            availableClients = [];
+
+            addMessage(`Vous avez choisi de créer un nouveau client : "${clientName}"`, 'user');
+
+            // Envoyer la demande de création au serveur
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                const response = {
+                    type: "user_response",
+                    task_id: currentTaskId,
+                    data: {
+                        response_type: "client_selection",
+                        action: "create_new",
+                        client_name: clientName
+                    }
+                };
+                console.log("📤 Création nouveau client:", response);
+                websocket.send(JSON.stringify(response));
+            } else {
+                // Fallback si pas de WebSocket
+                continueWithNewClient(clientName);
+            }
+        }
+
+        function continueWithSelectedClient(client) {
+            addMessage(`Reprise du traitement avec le client : ${client.name}`, 'system');
+            showProgress();
+        }
+
+        function continueWithNewClient(clientName) {
+            addMessage(`Création du nouveau client "${clientName}" en cours...`, 'system');
+            showProgress();
+        }
+
+        function handleUserInteraction(data) {
+            console.log("🤝 Interaction utilisateur requise:", data);
+
+            if (data.interaction_type === 'client_selection') {
+                const clients = data.options || data.clients || [];
+                const originalName = data.original_client_name || data.client_name || '';
+                addClientSelection(clients, originalName);
+            } else {
+                addMessage(`Interaction requise: ${data.interaction_type}`, 'system');
+                console.warn("Type d'interaction non géré:", data);
+            }
         }
 
         // Gestion progression
@@ -884,20 +1050,23 @@
                 errorDiv.style.display = 'none';
             }
 
-            try {
-                showTyping();
+            showTyping();
 
-                const response = await fetch('/api/assistant/chat', {
+            try {
+                const response = await fetch('/api/assistant/workflow/create_quote', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                         'X-Request-ID': generateUUID() // Pour traçabilité
                     },
-                    body: JSON.stringify({ message: message })
+                    body: JSON.stringify({
+                        message: message,
+                        draft_mode: false
+                    })
                 });
 
                 if (!response.ok) {
-                    throw new Error(`Erreur HTTP: ${response.status} - ${response.statusText}`);
+                    throw new Error(`Erreur HTTP: ${response.status}`);
                 }
 
                 const result = await response.json();
@@ -905,31 +1074,15 @@
 
                 if (result.task_id) {
                     currentTaskId = result.task_id;
-                    connectWebSocket(result.task_id);
-
-                    if (result.response) {
-                        handleDirectResponse(result);
-                    } else {
-                        showProgress();
-                        await trackProgress(result.task_id);
-                    }
-                } else if (result.error) {
-                    throw new Error(result.error);
+                    showProgress();
+                    trackProgress(result.task_id);
                 } else {
-                    addMessage('Réponse inattendue du serveur', 'system');
+                    handleDirectResponse(result);
                 }
             } catch (error) {
-                console.error('Erreur sendMessage:', error);
                 hideTyping();
-                addMessage(`Erreur: ${error.message}`, 'system');
-
-                // Réactiver l'interface si nécessaire
-                if (error.message.includes('réseau') || error.message.includes('HTTP')) {
-                    addMessage('Tentative de reconnexion...', 'system');
-                    setTimeout(() => {
-                        checkConnection();
-                    }, 3000);
-                }
+                addMessage(`Erreur de connexion: ${error.message}`, 'system');
+                console.error('Erreur sendMessage:', error);
             } finally {
                 isProcessing = false;
                 updateSendButton();
@@ -939,7 +1092,7 @@
         function handleDirectResponse(result) {
             if (result.status === 'client_creation_required') {
                 addMessage(`Client "${result.client_name}" non trouvé. Recherche d'informations...`, 'system');
-                
+
                 setTimeout(() => {
                     const enrichedData = {
                         name: result.client_name,
@@ -950,11 +1103,15 @@
                             sector: 'Services informatiques'
                         }
                     };
-                    
+
                     addMessage(`Données enrichies trouvées automatiquement:`, 'system');
                     showEnrichment(enrichedData);
                 }, 1500);
-                
+
+            } else if (result.status === 'client_selection_required') {
+                const clients = result.clients || [];
+                const originalName = result.original_client_name || result.client_name || '';
+                addClientSelection(clients, originalName);
             } else if (result.status === 'success') {
                 handleTaskComplete(result);
             } else {
@@ -1124,55 +1281,62 @@ const message = input.value.trim();
         // Connexion WebSocket
         function connectWebSocket(taskId) {
             if (websocket && websocket.readyState === WebSocket.OPEN) {
-                console.log("WebSocket déjà connecté");
+                console.log("🌐 WebSocket déjà connecté.");
                 return;
             }
 
-            const wsUrl = `ws://${window.location.host}/ws/ws/${taskId}`;
-            console.log("🔌 Connexion WebSocket:", wsUrl);
-            
+            const wsUrl = `ws://${window.location.host}/api/assistant/ws/${taskId}`;
+            console.log(`🔌 Tentative de connexion à ${wsUrl}`);
+
             websocket = new WebSocket(wsUrl);
-            currentTaskId = taskId;
 
-            websocket.onopen = function(event) {
-                console.log("✅ WebSocket connecté pour task:", taskId);
-                
-                // Envoyer confirmation de connexion
-                websocket.send(JSON.stringify({
-                    type: "connection_confirm",
-                    task_id: taskId,
-                    timestamp: new Date().toISOString()
-                }));
-
-                // Arrêter les tentatives de reconnexion
-                if (reconnectInterval) {
-                    clearInterval(reconnectInterval);
-                    reconnectInterval = null;
-                }
+            websocket.onopen = () => {
+                console.log("✅ WebSocket connecté !");
+                hideProgress();
+                addMessage("Connexion établie. En attente d'instructions...", 'system');
+                if(reconnectInterval) clearInterval(reconnectInterval);
             };
 
-            websocket.onmessage = function(event) {
-                try {
-                    const message = JSON.parse(event.data);
-                    console.log("📨 Message WebSocket reçu:", message);
-                    
-                    if (message.type === "user_interaction_required") {
-                        handleUserInteraction(message);
-                    } else if (message.type === "task_complete") {
-                        handleTaskComplete(message);
+            websocket.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                console.log("📥 Message reçu:", data);
+
+                if (data.type === 'progress') {
+                    if (!document.getElementById('progressContainer').classList.contains('active')) {
+                        showProgress();
                     }
-                } catch (error) {
-                    console.error("❌ Erreur parsing WebSocket:", error);
+                    updateProgress(data.progress, data.message, data.step);
+                } else if (data.type === 'interaction_required') {
+                    handleUserInteraction(data.data);
+                } else if (data.type === 'client_selection_required') {
+                    hideProgress();
+                    const clients = data.clients || [];
+                    const originalName = data.original_client_name || '';
+                    addClientSelection(clients, originalName);
+                } else if (data.type === 'completion') {
+                    handleTaskComplete(data.data);
+                    websocket.close();
+                } else if (data.type === 'error') {
+                    handleTaskError(data.error);
+                    websocket.close();
+                } else if (data.type === 'log') {
+                    addMessage(`[LOG] ${data.message}`, 'system');
+                } else if (data.type === 'message') {
+                    addMessage(data.message, 'system');
                 }
             };
 
-            websocket.onclose = function(event) {
-                console.log("🔌 WebSocket fermé, code:", event.code);
-                attemptReconnection(taskId);
+            websocket.onclose = (event) => {
+                console.warn(`🔌 WebSocket déconnecté. Code: ${event.code}, Raison: ${event.reason}`);
+                if (event.code !== 1000) {
+                    addMessage("La connexion a été perdue. Tentative de reconnexion...", 'system');
+                    attemptReconnection(taskId);
+                }
             };
 
-            websocket.onerror = function(error) {
+            websocket.onerror = (error) => {
                 console.error("❌ Erreur WebSocket:", error);
+                addMessage("Une erreur de connexion est survenue.", 'system');
             };
         }
 
@@ -1197,129 +1361,71 @@ const message = input.value.trim();
             }, 3000);
         }
 
-        // Gestion des interactions utilisateur
-        function handleUserInteraction(message) {
-            console.log("🎯 Interaction utilisateur requise:", message.interaction_data);
-            
-            if (message.interaction_data.type === "client_selection") {
-                showClientSelection(message.interaction_data);
+        function handleUserInteraction(data) {
+            if (data.interaction_type === 'client_selection') {
+                showClientSelection(data);
+            } else {
+                addMessage(`Interaction non gérée: ${data.interaction_type}`, 'system');
             }
         }
 
-        // Affichage sélection client
         function showClientSelection(data) {
-            const chatMessages = document.getElementById('chatMessages');
-            
+            clientSelectionMode = true;
+            availableClients = data.options || [];
+            originalClientName = data.original_client_name || '';
+            const totalOptions = data.total_options || availableClients.length;
+
+            let message = `Plusieurs clients correspondent à votre recherche pour "${originalClientName}". Veuillez en sélectionner un :`;
+            if (totalOptions > clients.length) {
+                message += ` (${clients.length} options affichées sur ${totalOptions} au total)`;
+            }
+
+            addMessage(message, 'system');
+
             const selectionHtml = `
-                <div class="message system" id="client-selection-${currentTaskId}">
-                    <h4>🎯 Sélection Client Requise</h4>
-                    <p>Plusieurs clients correspondent à "${data.original_client_name}". Veuillez sélectionner :</p>
-                    
-                    <div class="client-options" style="max-height: 300px; overflow-y: auto; margin: 16px 0;">
-                        ${data.client_options.map((client, index) => `
-                            <div class="client-option" 
-                                 style="border: 1px solid var(--border-color); 
-                                        border-radius: 6px; 
-                                        padding: 12px; 
-                                        margin: 8px 0; 
-                                        cursor: pointer; 
-                                        transition: all 0.2s ease;
-                                        background: var(--bg-secondary);"
-                                 onclick="selectClient('${client.id}', '${client.source}', this)"
-                                 onmouseover="this.style.borderColor='var(--primary-blue)'"
-                                 onmouseout="this.style.borderColor='var(--border-color)'">
-                                
-                                <div style="display: flex; justify-content: space-between; align-items: center;">
-                                    <div>
-                                        <strong>${client.name}</strong>
-                                        <span style="background: ${client.source === 'salesforce' ? '#0070f3' : '#ff6b6b'}; 
-                                                     color: white; 
-                                                     padding: 2px 8px; 
-                                                     border-radius: 12px; 
-                                                     font-size: 0.7rem; 
-                                                     margin-left: 8px;">
-                                            ${client.source.toUpperCase()}
-                                        </span>
-                                    </div>
-                                    <div style="text-align: right; font-size: 0.8rem; color: var(--text-secondary);">
-                                        ID: ${client.id}
-                                    </div>
-                                </div>
-                                
-                                ${client.details.phone || client.details.city ? `
-                                    <div style="margin-top: 8px; font-size: 0.8rem; color: var(--text-secondary);">
-                                        ${client.details.phone ? `📞 ${client.details.phone}` : ''}
-                                        ${client.details.city ? `📍 ${client.details.city}` : ''}
-                                    </div>
-                                ` : ''}
-                            </div>
-                        `).join('')}
-                    </div>
-                    
+                <div class="client-selection-container">
+                    ${clients.map(client => `
+                        <button class="client-selection-button" onclick="selectClient('${client.id}', '${client.name}')">
+                            <strong>${client.name}</strong>
+                            <small>Source: ${client.source} | ID: ${client.details.card_code || 'N/A'}</small>
+                        </button>
+                    `).join('')}
                     ${data.allow_create_new ? `
-                        <div class="validation-actions">
-                            <button class="btn-secondary" onclick="createNewClient('${data.original_client_name}')">
-                                ➕ Créer nouveau client
-                            </button>
-                        </div>
+                        <button class="client-selection-button create-new" onclick="createNewClient('${originalName}')">
+                            <i class="bi bi-plus-circle"></i> Créer un nouveau client "${originalName}"
+                        </button>
                     ` : ''}
                 </div>
             `;
-            
-            chatMessages.insertAdjacentHTML('beforeend', selectionHtml);
-            chatMessages.scrollTop = chatMessages.scrollHeight;
+            addMessage(selectionHtml, 'html');
         }
 
-        // Sélection d'un client
-        function selectClient(clientId, source, element) {
-            // Marquer visuellement la sélection
-            document.querySelectorAll('.client-option').forEach(option => {
-                option.style.background = 'var(--bg-secondary)';
-                option.style.borderColor = 'var(--border-color)';
-            });
-            
-            element.style.background = 'var(--primary-blue)';
-            element.style.color = 'white';
-            element.style.borderColor = 'var(--primary-blue)';
-            
-            // Envoyer la sélection via WebSocket
+        function selectClient(clientId, clientName) {
             if (websocket && websocket.readyState === WebSocket.OPEN) {
                 const response = {
                     type: "user_response",
                     task_id: currentTaskId,
                     data: {
                         response_type: "client_validation",
-                        selected_client: {
-                            id: clientId,
-                            source: source
-                        }
+                        action: "select_existing",
+                        client_id: clientId
                     }
                 };
-                
-                console.log("📤 Envoi sélection client:", response);
+                console.log("📤 Sélection client:", response);
                 websocket.send(JSON.stringify(response));
-                
-                // Masquer l'interface de sélection
-                setTimeout(() => {
-                    const selectionElement = document.getElementById(`client-selection-${currentTaskId}`);
-                    if (selectionElement) {
-                        selectionElement.style.opacity = '0.5';
-                        selectionElement.innerHTML = `
-                            <p>✅ Client sélectionné : ${clientId} (${source})</p>
-                            <p>⏳ Traitement en cours...</p>
-                        `;
-                    }
-                }, 500);
-            } else {
-                console.error("❌ WebSocket non connecté pour envoi sélection");
+                addMessage(`Vous avez sélectionné : ${clientName}`, 'user');
+
+                // Reset selection mode
+                clientSelectionMode = false;
+                availableClients = [];
+                originalClientName = '';
             }
         }
 
-        // Création nouveau client
         function createNewClient(clientName) {
             if (websocket && websocket.readyState === WebSocket.OPEN) {
                 const response = {
-                    type: "user_response", 
+                    type: "user_response",
                     task_id: currentTaskId,
                     data: {
                         response_type: "client_validation",
@@ -1327,9 +1433,9 @@ const message = input.value.trim();
                         client_name: clientName
                     }
                 };
-                
                 console.log("📤 Création nouveau client:", response);
                 websocket.send(JSON.stringify(response));
+                addMessage(`Vous avez choisi de créer un nouveau client pour : "${clientName}"`, 'user');
             }
         }
         // Initialisation avec validation du formulaire
