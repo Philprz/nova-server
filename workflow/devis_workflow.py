@@ -11,12 +11,12 @@ from typing import Dict, List, Any, Optional
 
 from services.llm_extractor import LLMExtractor
 from services.mcp_connector import MCPConnector, call_mcp_with_progress, test_mcp_connections_with_progress
-from services.progress_tracker import progress_tracker, QuoteTask
+from services.progress_tracker import progress_tracker, QuoteTask, TaskStatus
+
 from services.suggestion_engine import SuggestionEngine
 from services.client_validator import ClientValidator
 from services.websocket_manager import websocket_manager
 from services.company_search_service import company_search_service
-
 
 from utils.client_lister import find_client_everywhere
 # Configuration sécurisée pour Windows
