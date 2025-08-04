@@ -5029,11 +5029,6 @@ class DevisWorkflow:
                 # Construire la liste
                 for source, cfg in sources.items():
                     for client in search_results.get(source, {}).get("clients", []):
-                        label = f"{option_id}. {client.get(cfg['name_field'], '')} ({source})"
-                        display = {
-                            field: client.get(key, '')
-                            for field, key in cfg['display_info'].items()
-                        }
                         client_options.append({
                             "id": client.get(cfg['id_field']),
                             "name": client.get(cfg['name_field']),
@@ -5047,7 +5042,6 @@ class DevisWorkflow:
                         })
                         option_id += 1
 
-                # Enregistrer la validation utilisateur requise
                 validation_data = {
                     "client_options": client_options,
                     "total_options": len(client_options),
@@ -5065,13 +5059,20 @@ class DevisWorkflow:
                     "task_id": self.task_id,
                     "message": f"Sélection client requise - {len(client_options)} options disponibles",
                     "interaction_type": "client_selection",
-                    "type": "client_selection",
+                    "interaction_data": {
+                        "type": "client_selection",
+                        "interaction_type": "client_selection",
+                        "client_options": client_options,
+                        "total_options": len(client_options),
+                        "original_client_name": client_name,
+                        "allow_create_new": True,
+                        "message": f"Sélection client requise - {len(client_options)} options disponibles"
+                    },
                     "client_options": client_options,
                     "total_options": len(client_options),
                     "original_client_name": client_name,
                     "allow_create_new": True
-                    }
-                
+                }
 
             else:
                 return {
@@ -5082,7 +5083,8 @@ class DevisWorkflow:
 
         except Exception as e:
             logger.error(f"❌ Erreur proposition sélection clients: {e}")
-            return {"found": False, "error": str(e)}
+            return {"status": "error", "found": False, "error": str(e)}
+
 
 
     async def _create_client_automatically(self, client_name: str) -> Dict[str, Any]:
