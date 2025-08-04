@@ -17,7 +17,6 @@ from services.suggestion_engine import SuggestionEngine
 from services.client_validator import ClientValidator
 from services.websocket_manager import websocket_manager
 from services.company_search_service import company_search_service
-
 from utils.client_lister import find_client_everywhere
 # Configuration sécurisée pour Windows
 if sys.platform == "win32":
@@ -4784,6 +4783,8 @@ class DevisWorkflow:
                     self.current_task.status = TaskStatus.PENDING
                     self.current_task.require_user_validation("client_selection", "client_selection", client_result)
                 logger.info("⏸️ Workflow interrompu - Interaction utilisateur requise pour sélection client")
+                # 🔧 CORRECTION CRITIQUE: Envoyer interaction via WebSocket
+                await websocket_manager.send_user_interaction_required(self.task_id, client_result.get("interaction_data", client_result))
                 return client_result
             # 🔧 NOUVEAU: Vérifier autres statuts qui nécessitent un arrêt
             if client_result.get("status") in ["error", "cancelled"]:
@@ -5051,7 +5052,8 @@ class DevisWorkflow:
                 }
 
                 self.current_task.require_user_validation("client_selection", "client_selection", validation_data)
-
+                logger.info(f"🔍 DEBUG WORKFLOW: client_result = {json.dumps(client_result if 'client_result' in locals() else 'NOT_FOUND', indent=2, default=str)}")
+                logger.info(f"🔍 DEBUG WORKFLOW: interaction_data présent = {'interaction_data' in locals()}")
                 return {
                     "status": "user_interaction_required",
                     "requires_user_selection": True,
