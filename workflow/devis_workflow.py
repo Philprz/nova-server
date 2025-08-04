@@ -5047,16 +5047,22 @@ class DevisWorkflow:
                         })
                         option_id += 1
 
-                return {
-                    "status": "client_selection_required",
-                    "requires_user_selection": False,
-                    "interaction_type": "client_selection",
-                    "message": f"Plusieurs clients '{client_name}' trouvés. Sélectionnez le bon client :",
+                # Enregistrer validation requise
+                validation_data = {
                     "client_options": client_options,
                     "total_options": len(client_options),
                     "original_client_name": client_name,
-                    "allow_create_new": True,
-                    "task_id": self.task_id
+                    "allow_create_new": True
+                }
+
+                self.current_task.require_user_validation("client_validation", "client_selection", validation_data)
+
+                return {
+                    "status": "client_selection_required",
+                    "requires_user_selection": True,
+                    "validation_pending": True,
+                    "task_id": self.task_id,
+                    "message": f"Sélection client requise - {len(client_options)} options disponibles"
                 }
 
             else:
