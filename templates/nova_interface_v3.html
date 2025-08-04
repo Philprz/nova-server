@@ -300,7 +300,15 @@
 
             // Génère un taskId unique et lisible
             const taskId = `quote_${new Date().toISOString().replace(/[-:.]/g, '').slice(0, 15)}_${Math.random().toString(36).substr(2, 8)}`;
-
+            currentTaskId = taskId;
+            // Établir OBLIGATOIREMENT la connexion WebSocket AVANT la requête
+            try {
+                await connectWebSocketFirst(currentTaskId);
+                addMessage('system', '🔗 WebSocket connecté');
+            } catch (error) {
+                addMessage('error', `❌ Impossible de connecter WebSocket: ${error.message}`);
+                return;
+            }
             try {
                 addMessage('system', '🔗 Connexion WebSocket...');
                 const response = await fetch('/api/assistant/workflow/create_quote', {
@@ -379,7 +387,7 @@
                 }
 
                 // Construit l'URL en utilisant le bon taskId
-                const wsUrl = `ws://${window.location.host}/ws/task/${taskId}`;
+                const wsUrl = `ws://${window.location.host}/progress/ws/${taskId}`;
                 window.websocket = new WebSocket(wsUrl);
                 window.currentTaskId = taskId;
 
@@ -843,7 +851,7 @@
                 return;
             }
 
-            const client = currentInteraction.client_options[selectedClientIndex];
+            const client = currentInteraction.client_options[parseInt(selectedClientIndex, 10)];
 
             const response = {
                 response_type: 'client_validation',
