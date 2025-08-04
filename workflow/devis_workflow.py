@@ -4783,8 +4783,20 @@ class DevisWorkflow:
                     self.current_task.status = TaskStatus.PENDING
                     self.current_task.require_user_validation("client_selection", "client_selection", client_result)
                 logger.info("⏸️ Workflow interrompu - Interaction utilisateur requise pour sélection client")
-                # 🔧 CORRECTION CRITIQUE: Envoyer interaction via WebSocket
-                await websocket_manager.send_user_interaction_required(self.task_id, client_result.get("interaction_data", client_result))
+                # 🔧 CORRECTION CRITIQUE: Envoyer interaction via WebSocket avec debug amélioré
+                interaction_data = client_result.get("interaction_data", client_result)
+
+                # Debug des données
+                if not interaction_data.get("client_options"):
+                    logger.error("❌ ERREUR: Pas de client_options dans interaction_data")
+                    logger.error(f"❌ Structure reçue: {json.dumps(interaction_data, indent=2, default=str)}")
+                else:
+                    logger.info(f"✅ {len(interaction_data.get('client_options', []))} clients prêts pour sélection")
+                    for i, client in enumerate(interaction_data.get('client_options', [])):
+                        logger.info(f"Client {i+1}: {client.get('name')} ({client.get('source')}) - ID: {client.get('id')}")
+
+                logger.info(f"📨 Envoi WebSocket pour tâche {self.task_id}")
+                await websocket_manager.send_user_interaction_required(self.task_id, interaction_data)
                 return client_result
             # 🔧 NOUVEAU: Vérifier autres statuts qui nécessitent un arrêt
             if client_result.get("status") in ["error", "cancelled"]:
