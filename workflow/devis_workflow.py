@@ -5063,8 +5063,15 @@ class DevisWorkflow:
                     "requires_user_selection": True,
                     "validation_pending": True,
                     "task_id": self.task_id,
-                    "message": f"Sélection client requise - {len(client_options)} options disponibles"
-                }
+                    "message": f"Sélection client requise - {len(client_options)} options disponibles",
+                    "interaction_type": "client_selection",
+                    "type": "client_selection",
+                    "client_options": client_options,
+                    "total_options": len(client_options),
+                    "original_client_name": client_name,
+                    "allow_create_new": True
+                    }
+                
 
             else:
                 return {
