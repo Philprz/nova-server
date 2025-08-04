@@ -584,7 +584,8 @@
         let isProcessing = false;
         let progressInterval = null;
         let enrichmentData = null;
-
+        let websocket = null;
+        let reconnectInterval = null;
         // Gestion des messages
         function addMessage(content, type = 'assistant') {
             const messagesContainer = document.getElementById('chatMessages');
