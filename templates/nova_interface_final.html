@@ -1121,7 +1121,28 @@
             input.focus();
             checkConnection();
             setInterval(checkConnection, 30000);
-            
+        // Écouter les soumissions de formulaire pour extraire task_id
+            document.addEventListener('submit', function(e) {
+                if (e.target.closest('.input-container')) {
+                    // Extraire task_id de la réponse pour connecter WebSocket
+                    setTimeout(() => {
+                        const messagesContainer = document.getElementById('chatMessages');
+                        if (messagesContainer) {
+                            // Chercher un task_id dans les messages récents
+                            const lastMessages = messagesContainer.querySelectorAll('.message');
+                            if (lastMessages.length > 0) {
+                                const lastMessage = lastMessages[lastMessages.length - 1];
+                                const taskIdMatch = lastMessage.textContent.match(/quote_\d{8}_\d{6}_\w+/);
+                                if (taskIdMatch) {
+                                    const taskId = taskIdMatch[0];
+                                    console.log("🎯 Task ID détecté:", taskId);
+                                    connectWebSocket(taskId);
+                                }
+                            }
+                        }
+                    }, 1000);
+                }
+            });    
     </script>
 </body>
 </html>
