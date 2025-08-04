@@ -377,8 +377,50 @@
 
         .validation-actions {
             display: flex;
-            gap: 8px;
-            margin-top: 12px;
+            gap: 12px;
+            margin-top: 16px;
+        }
+
+        .validation-error {
+            color: var(--warning-color);
+            font-size: 0.875rem;
+            margin-top: 8px;
+            padding: 8px 12px;
+            background-color: rgba(253, 82, 2, 0.1);
+            border: 1px solid var(--warning-color);
+            border-radius: 4px;
+            display: none;
+            animation: slideIn 0.3s ease-out;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .send-button:disabled {
+            opacity: 0.6 !important;
+            cursor: not-allowed !important;
+            pointer-events: none;
+        }
+
+        .chat-input:invalid {
+            border-color: var(--warning-color);
+            box-shadow: 0 0 0 2px rgba(253, 82, 2, 0.1);
+        }
+
+        .chat-input:valid {
+            border-color: var(--success-color);
+        }
+
+        .input-container {
+            position: relative;
         }
 
         .btn-primary {
@@ -561,20 +603,23 @@
                 </div>
             </div>
 
-            <div class="input-container">
-                <textarea 
-                    id="chatInput" 
-                    class="chat-input" 
+            <form id="chatForm" class="input-container" onsubmit="handleFormSubmit(event)">
+                <textarea
+                    id="chatInput"
+                    class="chat-input"
                     placeholder="Exemple : Créer un devis pour 12 imprimantes 50ppm pour RONDOT..."
                     rows="1"
                     onkeypress="handleKeyPress(event)"
                     oninput="handleInput()"
                     aria-label="Message"
+                    required
+                    minlength="3"
+                    maxlength="1000"
                 ></textarea>
-                <button id="sendButton" class="send-button" onclick="sendMessage()" disabled aria-label="Envoyer">
+                <button id="sendButton" type="submit" class="send-button" disabled aria-label="Envoyer">
                     <i class="bi bi-send"></i>
                 </button>
-            </div>
+            </form>
         </div>
     </div>
 
@@ -725,13 +770,23 @@
             document.getElementById('enrichmentPanel').classList.remove('active');
         }
 
+        // Validation enrichissement avec vérifications supplémentaires
         async function validateEnrichment() {
-            if (!enrichmentData) return;
-            
+            if (!enrichmentData) {
+                showValidationError('Aucune donnée d\'enrichissement disponible');
+                return;
+            }
+
+            // Vérifier les données minimales requises
+            if (!enrichmentData.name && (!enrichmentData.company_info || !enrichmentData.company_info.name)) {
+                showValidationError('Nom du client requis pour la validation');
+                return;
+            }
+
             try {
                 showTyping();
                 hideEnrichment();
-                
+
                 const response = await fetch('/api/assistant/workflow/create_client', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -740,19 +795,25 @@
                         validated: true
                     })
                 });
-                
+
+                if (!response.ok) {
+                    throw new Error(`Erreur HTTP: ${response.status}`);
+                }
+
                 const result = await response.json();
                 hideTyping();
-                
+
                 if (result.success) {
-                    addMessage(`Client "${enrichmentData.name}" créé avec succès. Numéro: ${result.client_id}`, 'system');
+                    const clientName = enrichmentData.name || enrichmentData.company_info?.name || 'Client';
+                    addMessage(`Client "${clientName}" créé avec succès. Numéro: ${result.client_id}`, 'system');
                     continuePreviousWorkflow();
                 } else {
-                    addMessage(`Erreur lors de la création du client: ${result.error}`, 'system');
+                    addMessage(`Erreur lors de la création du client: ${result.error || 'Erreur inconnue'}`, 'system');
                 }
             } catch (error) {
                 hideTyping();
-                addMessage(`Erreur de connexion: ${error.message}`, 'system');
+                addMessage(`Erreur de connexion lors de la validation: ${error.message}`, 'system');
+                console.error('Erreur validateEnrichment:', error);
             }
         }
 
@@ -772,43 +833,87 @@
         async function sendMessage() {
             const input = document.getElementById('chatInput');
             const message = input.value.trim();
-            
+
+            // Double vérification avant envoi
             if (!message || isProcessing) return;
-            
+
+            // Validation supplémentaire
+            if (message.length < 3) {
+                showValidationError('Le message doit contenir au moins 3 caractères');
+                return;
+            }
+
+            if (message.length > 1000) {
+                showValidationError('Le message ne peut pas dépasser 1000 caractères');
+                return;
+            }
+
             isProcessing = true;
             addMessage(message, 'user');
             input.value = '';
             updateSendButton();
-            
-            showTyping();
-            
+            autoResize();
+
+            // Masquer toute erreur de validation
+            const errorDiv = document.getElementById('validationError');
+            if (errorDiv) {
+                errorDiv.style.display = 'none';
+            }
+
             try {
+                showTyping();
+
                 const response = await fetch('/api/assistant/workflow/create_quote', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Request-ID': crypto.randomUUID() // Pour traçabilité
+                    },
                     body: JSON.stringify({
                         message: message,
-                        draft_mode: false
+                        draft_mode: false,
+                        timestamp: new Date().toISOString()
                     })
                 });
-                
+
+                if (!response.ok) {
+                    throw new Error(`Erreur HTTP: ${response.status} - ${response.statusText}`);
+                }
+
                 const result = await response.json();
                 hideTyping();
-                
+
                 if (result.task_id) {
                     currentTaskId = result.task_id;
-                    connectWebSocket(result.task_id);                    
-                    showProgress();
-                    await trackProgress(result.task_id);
+                    connectWebSocket(result.task_id);
+
+                    if (result.response) {
+                        handleDirectResponse(result);
+                    } else {
+                        showProgress();
+                        await trackProgress(result.task_id);
+                    }
+                } else if (result.error) {
+                    throw new Error(result.error);
                 } else {
-                    handleDirectResponse(result);
+                    addMessage('Réponse inattendue du serveur', 'system');
                 }
             } catch (error) {
+                console.error('Erreur sendMessage:', error);
                 hideTyping();
-                addMessage(`Erreur de connexion: ${error.message}`, 'system');
+                addMessage(`Erreur: ${error.message}`, 'system');
+
+                // Réactiver l'interface si nécessaire
+                if (error.message.includes('réseau') || error.message.includes('HTTP')) {
+                    addMessage('Tentative de reconnexion...', 'system');
+                    setTimeout(() => {
+                        checkConnection();
+                    }, 3000);
+                }
+            } finally {
+                isProcessing = false;
+                updateSendButton();
             }
-            
-            isProcessing = false;
         }
 
         function handleDirectResponse(result) {
@@ -859,23 +964,114 @@
             addMessage('Reprise de la génération du devis...', 'system');
         }
 
-        // Gestion entrées
-        function handleInput() {
-            updateSendButton();
-            autoResize();
+        // Gestion entrées et formulaire
+        function handleFormSubmit(event) {
+            event.preventDefault();
+            
+        const input = document.getElementById('chatInput');
+const message = input.value.trim();
+        
+            // Validation côté client
+                if (!message) {
+                showValidationError('Veuillez saisir un message');
+            return false;
         }
 
+        if (message.length < 3) {
+            showValidationError('Le message doit contenir au moins 3 caractères');
+            return false;
+        }
+        
+        if (message.length > 1000) {
+        showValidationError('Le message ne peut pas dépasser 1000 caractères');
+        return false;
+        }
+        
+        if (isProcessing) {
+        showValidationError('Traitement en cours, veuillez patienter...');
+        return false;
+        }
+        
+        // Si validation OK, envoyer le message
+        sendMessage();
+        return false;
+        }
+        
+        function showValidationError(message) {
+        // Créer ou mettre à jour le message d'erreur
+        let errorDiv = document.getElementById('validationError');
+        if (!errorDiv) {
+        errorDiv = document.createElement('div');
+        errorDiv.id = 'validationError';
+        errorDiv.className = 'validation-error';
+        errorDiv.style.cssText = `
+        color: var(--warning-color);
+        font-size: 0.875rem;
+        margin-top: 8px;
+        padding: 8px 12px;
+        background-color: rgba(253, 82, 2, 0.1);
+        border: 1px solid var(--warning-color);
+        border-radius: 4px;
+        display: none;
+        `;
+        document.getElementById('chatForm').appendChild(errorDiv);
+        }
+        
+        errorDiv.textContent = message;
+        errorDiv.style.display = 'block';
+        
+        // Masquer l'erreur après 3 secondes
+        setTimeout(() => {
+        errorDiv.style.display = 'none';
+        }, 3000);
+        }
+        
+        function handleInput() {
+        updateSendButton();
+        autoResize();
+        
+        // Masquer l'erreur de validation si elle existe
+        const errorDiv = document.getElementById('validationError');
+        if (errorDiv) {
+        errorDiv.style.display = 'none';
+        }
+        }
+        
         function handleKeyPress(event) {
             if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault();
-                sendMessage();
+
+                // Déclencher la validation du formulaire
+                const form = document.getElementById('chatForm');
+                if (form.checkValidity()) {
+                    sendMessage();
+                } else {
+                    // Afficher les erreurs de validation HTML5
+                    form.reportValidity();
+                }
             }
         }
 
         function updateSendButton() {
             const input = document.getElementById('chatInput');
             const button = document.getElementById('sendButton');
-            button.disabled = !input.value.trim() || isProcessing;
+            const message = input.value.trim();
+
+            // Désactiver le bouton si :
+            // - Pas de message ou message trop court
+            // - Message trop long
+            // - Traitement en cours
+            const isValid = message.length >= 3 && message.length <= 1000 && !isProcessing;
+            button.disabled = !isValid;
+
+            // Mettre à jour l'apparence du bouton
+            if (isValid) {
+                button.style.opacity = '1';
+                button.style.cursor = 'pointer';
+            } else {
+                button.style.opacity = '0.6';
+                button.style.cursor = 'not-allowed';
+            }
         }
 
         function autoResize() {
@@ -1116,14 +1312,42 @@
                 websocket.send(JSON.stringify(response));
             }
         }
-        // Initialisation modifiée
+        // Initialisation avec validation du formulaire
         document.addEventListener('DOMContentLoaded', function() {
             const input = document.getElementById('chatInput');
+            const form = document.getElementById('chatForm');
+
+            // Focus sur l'input
             input.focus();
+
+            // Vérification de la connexion
             checkConnection();
             setInterval(checkConnection, 30000);
-        // Écouter les soumissions de formulaire pour extraire task_id
+
+            // Validation du formulaire en temps réel
+            form.addEventListener('input', function(e) {
+                if (e.target.id === 'chatInput') {
+                    const message = e.target.value.trim();
+
+                    // Validation en temps réel
+                    if (message.length > 1000) {
+                        showValidationError('Message trop long (maximum 1000 caractères)');
+                    } else {
+                        const errorDiv = document.getElementById('validationError');
+                        if (errorDiv) {
+                            errorDiv.style.display = 'none';
+                        }
+                    }
+                }
+            });
+
+            // Écouter les soumissions de formulaire pour extraire task_id
             document.addEventListener('submit', function(e) {
+                if (e.target.id === 'chatForm') {
+                    // Le handleFormSubmit s'occupe déjà de la validation
+                    return;
+                }
+
                 if (e.target.closest('.input-container')) {
                     // Extraire task_id de la réponse pour connecter WebSocket
                     setTimeout(() => {
@@ -1143,7 +1367,8 @@
                         }
                     }, 1000);
                 }
-            });    
+            });
+        });
     </script>
 </body>
 </html>
