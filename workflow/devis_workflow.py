@@ -959,12 +959,18 @@ class DevisWorkflow:
             if not client_info.get("found") and self.validation_enabled:
                 self._track_step_progress("verify_client_info", 50, "Client non trouvé, création en cours...")
                 validation_result = await self._handle_client_not_found_with_validation(
-                    extracted_info.get("client"), 
+                    extracted_info.get("client"),
                     extracted_info  # ✅ Passer le contexte complet pour continuation
                 )
-                
+
+                # Ajout de log détaillé avant envoi à websocket (dans _handle_client_not_found_with_validation)
+                # Cette fonction doit inclure le logging demandé, ex:
+                # logger.info(f"▶️ [WORKFLOW] Demande de validation utilisateur pour le client '{client_name}'")
+                # logger.debug(f"🔍 [WORKFLOW] Données d'interaction préparées: {json.dumps(interaction_data, indent=2, ensure_ascii=False)}")
+                # ...
+
                 if validation_result.get("client_created"):
-                    client_info = validation_result["client_info"] 
+                    client_info = validation_result["client_info"]
                     self.context["client_info"] = client_info
                     self.context["client_validation"] = validation_result["validation_details"]
                     self._track_step_progress("verify_client_info", 90, "Nouveau client créé")

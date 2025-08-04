@@ -379,7 +379,7 @@
                 }
 
                 // Construit l'URL en utilisant le bon taskId
-                const wsUrl = `ws://${window.location.host}/progress/ws/${taskId}`;
+                const wsUrl = `ws://${window.location.host}/ws/task/${taskId}`;
                 window.websocket = new WebSocket(wsUrl);
                 window.currentTaskId = taskId;
 
@@ -687,7 +687,7 @@
             addMessage('system', `✅ Client sélectionné, poursuite du traitement...`);
         }
         function handleUserInteractionRequired(interactionData) {
-            console.log('🎯 Interaction utilisateur requise:', interactionData);
+            console.log('🎯 [FRONTEND] Interaction utilisateur requise:', interactionData);
             currentInteraction = interactionData;
 
             const modal = new bootstrap.Modal(document.getElementById('userInteractionModal'));
@@ -697,6 +697,16 @@
 
             // Détermine le type d’interaction (compatibilité ancienne/propre)
             const type = interactionData.type || interactionData.interaction_type;
+            console.log('🎯 [FRONTEND] Type d\'interaction détecté:', type);
+
+            // Log détaillé pour selection client
+            if (type === 'client_selection' && interactionData.client_options) {
+                console.log('🎯 [FRONTEND] Données client_options reçues:', interactionData.client_options);
+                interactionData.client_options.forEach((client, idx) => {
+                    console.log(`🎯 [FRONTEND] Client #${idx + 1}: ID=${client.id}, Name=${client.name}, Source=${client.source}`, client);
+                });
+            }
+
             modalTitle.textContent = interactionData.message || {
                 client_selection: 'Sélection du client',
                 client_creation: 'Créer un client',
@@ -705,6 +715,7 @@
 
             // Contenu et actions modulaires
             if (type === 'client_selection') {
+                console.log('🎯 [FRONTEND] Construction du contenu pour la sélection de client avec les données:', interactionData);
                 modalBody.innerHTML = buildClientSelectionContent(interactionData);
                 modalFooter.innerHTML = buildClientSelectionActions();
             } else if (type === 'client_creation') {
@@ -759,9 +770,11 @@
         }
         // Construction du contenu pour sélection client - COMPLET
         function buildClientSelectionContent(data) {
-            const total = data.total_options ?? data.client_options.length;
+            console.log('🎯 [FRONTEND] buildClientSelectionContent a reçu les données:', data);
+            const total = data.total_options ?? (data.client_options ? data.client_options.length : 0);
             if (!data.client_options || total === 0) {
-                return `<div class="alert alert-warning">Aucun client trouvé</div>`;
+                console.warn('🎯 [FRONTEND] Aucune option client à afficher.');
+                return `<div class="alert alert-warning">Aucun client trouvé à afficher.</div>`;
             }
             let html = `
                 <div class="mb-3">
@@ -771,15 +784,16 @@
                 <div class="client-selection-list" style="max-height:400px;overflow-y:auto;">
             `;
             data.client_options.forEach((client,index)=>{
+                console.log(`🎯 [FRONTEND] Affichage du client ${index + 1}:`, client);
                 const sourceIcon = client.source==='salesforce'?'☁️':'📊';
                 const sourceLabel = client.source==='salesforce'?'Salesforce':'SAP';
                 html+=`
-                    <div class="client-option border rounded p-3 mb-2" 
-                        style="cursor:pointer;transition:all .2s;" 
-                        onclick="selectClientOption('${escapeHtml(client.id)}',${index})" 
-                        tabindex="0" 
+                    <div class="client-option border rounded p-3 mb-2"
+                        style="cursor:pointer;transition:all .2s;"
+                        onclick="selectClientOption('${escapeHtml(client.id)}',${index})"
+                        tabindex="0"
                         onkeydown="if(event.key==='Enter')selectClientOption('${escapeHtml(client.id)}',${index})"
-                        data-client-id="${escapeHtml(client.id)}" 
+                        data-client-id="${escapeHtml(client.id)}"
                         data-client-index="${index}">
                         <div class="d-flex justify-content-between align-items-start">
                             <div class="flex-grow-1">
@@ -810,6 +824,47 @@
             return html;
         }
 
+        function buildClientSelectionActions() {
+            return `
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+                <button type="button" class="btn btn-primary" id="validateClientBtn" onclick="validateClientSelection()" disabled>Valider</button>
+            `;
+        }
+
+        function validateClientSelection() {
+            const btn = document.getElementById('validateClientBtn');
+            if (!btn || btn.disabled) return;
+
+            const selectedClientId = btn.dataset.selectedClientId;
+            const selectedClientIndex = btn.dataset.selectedClientIndex;
+
+            if (!selectedClientId) {
+                console.error('Aucun ID client sélectionné.');
+                return;
+            }
+
+            const client = currentInteraction.client_options[selectedClientIndex];
+
+            const response = {
+                response_type: 'client_validation',
+                step_id: currentInteraction.step_id || 'client_selection',
+                selected_client: {
+                    id: client.id,
+                    name: client.name,
+                    source: client.source,
+                    details: client.details
+                }
+            };
+
+            console.log('Envoi de la réponse de validation client:', response);
+            sendUserResponse(response);
+
+            const modal = bootstrap.Modal.getInstance(document.getElementById('userInteractionModal'));
+            modal.hide();
+
+            addMessage('system', `✅ Client "${client.name}" sélectionné, poursuite du traitement...`);
+        }
+
         // Sélection d'un client spécifique
         function selectClientOption(clientId,clientIndex){
             document.querySelectorAll('.client-option').forEach(opt=>{
@@ -820,6 +875,13 @@
             if(sel){
                 sel.classList.add('border-primary','bg-light');
                 sel.querySelector('.selection-indicator i').className='bi bi-check-circle-fill text-primary';
+                // Enable validate button and store selection data
+                const validateBtn = document.getElementById('validateClientBtn');
+                if (validateBtn) {
+                    validateBtn.disabled = false;
+                    validateBtn.dataset.selectedClientId = clientId;
+                    validateBtn.dataset.selectedClientIndex = clientIndex;
+                }
             }
             const btn=document.getElementById('validateClientBtn');
             if(btn){

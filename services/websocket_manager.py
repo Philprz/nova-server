@@ -109,6 +109,9 @@ class WebSocketManager:
                 await asyncio.sleep(RETRY_INTERVAL)
 
         sockets = list(self.task_connections.get(task_id) or self.active_connections.get("all", []))
+        logger.info(f"🔍 DEBUG BROADCAST: task_id={task_id}")
+        logger.info(f"🔍 DEBUG BROADCAST: task_connections keys={list(self.task_connections.keys())}")
+        logger.info(f"🔍 DEBUG BROADCAST: sockets pour {task_id}={len(sockets)}")        
         if not sockets:
             logger.warning("Aucune socket disponible pour broadcast", extra={"task_id": task_id})
             return
@@ -172,7 +175,10 @@ class WebSocketManager:
         :param interaction_data: données pour l'interaction utilisateur
         """
         logger.info(f"🎯 Demande interaction pour task_id: {task_id}")
-
+        # 🔧 DEBUG CONNEXIONS: État actuel du gestionnaire
+        logger.info(f"🔗 DEBUG CONNEXIONS TOTALES: {len(self.active_connections.get('all', []))}")
+        logger.info(f"🔗 DEBUG TASK_CONNECTIONS: {list(self.task_connections.keys())}")
+        logger.info(f"🔗 DEBUG CONNEXIONS pour {task_id}: {len(self.task_connections.get(task_id, []))}")
         # 🔧 DEBUG AMÉLIORÉ: Log des données d'interaction
         logger.info(f"📊 Type d'interaction: {interaction_data.get('interaction_type', 'non_spécifié')}")
         if interaction_data.get('client_options'):
@@ -322,6 +328,8 @@ class WebSocketManager:
         if task_id in self.pending_messages:
             self.pending_messages.pop(task_id, None)
             logger.info(f"🧹 Messages en attente nettoyés pour {task_id}")
+            
 
 # Instance globale
 websocket_manager = WebSocketManager()
+
