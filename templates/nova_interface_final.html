@@ -796,6 +796,7 @@
                 
                 if (result.task_id) {
                     currentTaskId = result.task_id;
+                    connectWebSocket(result.task_id);                    
                     showProgress();
                     await trackProgress(result.task_id);
                 } else {
@@ -902,14 +903,229 @@
                 statusEl.innerHTML = '<i class="bi bi-wifi-off"></i> Erreur';
             }
         }
+        // Variables globales pour WebSocket et interactions
+        let websocket = null;
+        let currentTaskId = null;
+        let reconnectInterval = null;
 
-        // Initialisation
+        // Connexion WebSocket
+        function connectWebSocket(taskId) {
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                console.log("WebSocket déjà connecté");
+                return;
+            }
+
+            const wsUrl = `ws://${window.location.host}/ws/ws/${taskId}`;
+            console.log("🔌 Connexion WebSocket:", wsUrl);
+            
+            websocket = new WebSocket(wsUrl);
+            currentTaskId = taskId;
+
+            websocket.onopen = function(event) {
+                console.log("✅ WebSocket connecté pour task:", taskId);
+                
+                // Envoyer confirmation de connexion
+                websocket.send(JSON.stringify({
+                    type: "connection_confirm",
+                    task_id: taskId,
+                    timestamp: new Date().toISOString()
+                }));
+
+                // Arrêter les tentatives de reconnexion
+                if (reconnectInterval) {
+                    clearInterval(reconnectInterval);
+                    reconnectInterval = null;
+                }
+            };
+
+            websocket.onmessage = function(event) {
+                try {
+                    const message = JSON.parse(event.data);
+                    console.log("📨 Message WebSocket reçu:", message);
+                    
+                    if (message.type === "user_interaction_required") {
+                        handleUserInteraction(message);
+                    } else if (message.type === "task_complete") {
+                        handleTaskComplete(message);
+                    }
+                } catch (error) {
+                    console.error("❌ Erreur parsing WebSocket:", error);
+                }
+            };
+
+            websocket.onclose = function(event) {
+                console.log("🔌 WebSocket fermé, code:", event.code);
+                attemptReconnection(taskId);
+            };
+
+            websocket.onerror = function(error) {
+                console.error("❌ Erreur WebSocket:", error);
+            };
+        }
+
+        function attemptReconnection(taskId) {
+            if (reconnectInterval) return;
+            
+            let attempts = 0;
+            const maxAttempts = 5;
+            
+            reconnectInterval = setInterval(() => {
+                attempts++;
+                console.log(`🔄 Tentative reconnexion ${attempts}/${maxAttempts}`);
+                
+                if (attempts >= maxAttempts) {
+                    clearInterval(reconnectInterval);
+                    reconnectInterval = null;
+                    console.log("❌ Abandon reconnexion WebSocket");
+                    return;
+                }
+                
+                connectWebSocket(taskId);
+            }, 3000);
+        }
+
+        // Gestion des interactions utilisateur
+        function handleUserInteraction(message) {
+            console.log("🎯 Interaction utilisateur requise:", message.interaction_data);
+            
+            if (message.interaction_data.type === "client_selection") {
+                showClientSelection(message.interaction_data);
+            }
+        }
+
+        // Affichage sélection client
+        function showClientSelection(data) {
+            const chatMessages = document.getElementById('chatMessages');
+            
+            const selectionHtml = `
+                <div class="message system" id="client-selection-${currentTaskId}">
+                    <h4>🎯 Sélection Client Requise</h4>
+                    <p>Plusieurs clients correspondent à "${data.original_client_name}". Veuillez sélectionner :</p>
+                    
+                    <div class="client-options" style="max-height: 300px; overflow-y: auto; margin: 16px 0;">
+                        ${data.client_options.map((client, index) => `
+                            <div class="client-option" 
+                                 style="border: 1px solid var(--border-color); 
+                                        border-radius: 6px; 
+                                        padding: 12px; 
+                                        margin: 8px 0; 
+                                        cursor: pointer; 
+                                        transition: all 0.2s ease;
+                                        background: var(--bg-secondary);"
+                                 onclick="selectClient('${client.id}', '${client.source}', this)"
+                                 onmouseover="this.style.borderColor='var(--primary-blue)'"
+                                 onmouseout="this.style.borderColor='var(--border-color)'">
+                                
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <div>
+                                        <strong>${client.name}</strong>
+                                        <span style="background: ${client.source === 'salesforce' ? '#0070f3' : '#ff6b6b'}; 
+                                                     color: white; 
+                                                     padding: 2px 8px; 
+                                                     border-radius: 12px; 
+                                                     font-size: 0.7rem; 
+                                                     margin-left: 8px;">
+                                            ${client.source.toUpperCase()}
+                                        </span>
+                                    </div>
+                                    <div style="text-align: right; font-size: 0.8rem; color: var(--text-secondary);">
+                                        ID: ${client.id}
+                                    </div>
+                                </div>
+                                
+                                ${client.details.phone || client.details.city ? `
+                                    <div style="margin-top: 8px; font-size: 0.8rem; color: var(--text-secondary);">
+                                        ${client.details.phone ? `📞 ${client.details.phone}` : ''}
+                                        ${client.details.city ? `📍 ${client.details.city}` : ''}
+                                    </div>
+                                ` : ''}
+                            </div>
+                        `).join('')}
+                    </div>
+                    
+                    ${data.allow_create_new ? `
+                        <div class="validation-actions">
+                            <button class="btn-secondary" onclick="createNewClient('${data.original_client_name}')">
+                                ➕ Créer nouveau client
+                            </button>
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+            
+            chatMessages.insertAdjacentHTML('beforeend', selectionHtml);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        // Sélection d'un client
+        function selectClient(clientId, source, element) {
+            // Marquer visuellement la sélection
+            document.querySelectorAll('.client-option').forEach(option => {
+                option.style.background = 'var(--bg-secondary)';
+                option.style.borderColor = 'var(--border-color)';
+            });
+            
+            element.style.background = 'var(--primary-blue)';
+            element.style.color = 'white';
+            element.style.borderColor = 'var(--primary-blue)';
+            
+            // Envoyer la sélection via WebSocket
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                const response = {
+                    type: "user_response",
+                    task_id: currentTaskId,
+                    data: {
+                        response_type: "client_validation",
+                        selected_client: {
+                            id: clientId,
+                            source: source
+                        }
+                    }
+                };
+                
+                console.log("📤 Envoi sélection client:", response);
+                websocket.send(JSON.stringify(response));
+                
+                // Masquer l'interface de sélection
+                setTimeout(() => {
+                    const selectionElement = document.getElementById(`client-selection-${currentTaskId}`);
+                    if (selectionElement) {
+                        selectionElement.style.opacity = '0.5';
+                        selectionElement.innerHTML = `
+                            <p>✅ Client sélectionné : ${clientId} (${source})</p>
+                            <p>⏳ Traitement en cours...</p>
+                        `;
+                    }
+                }, 500);
+            } else {
+                console.error("❌ WebSocket non connecté pour envoi sélection");
+            }
+        }
+
+        // Création nouveau client
+        function createNewClient(clientName) {
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                const response = {
+                    type: "user_response", 
+                    task_id: currentTaskId,
+                    data: {
+                        response_type: "client_validation",
+                        action: "create_new",
+                        client_name: clientName
+                    }
+                };
+                
+                console.log("📤 Création nouveau client:", response);
+                websocket.send(JSON.stringify(response));
+            }
+        }
+        // Initialisation modifiée
         document.addEventListener('DOMContentLoaded', function() {
             const input = document.getElementById('chatInput');
             input.focus();
             checkConnection();
             setInterval(checkConnection, 30000);
-        });
+            
     </script>
 </body>
 </html>
