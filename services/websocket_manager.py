@@ -11,7 +11,7 @@ from prometheus_client import Counter, Histogram
 from services.progress_tracker import progress_tracker
 
 # Constants
-DEFAULT_TIMEOUT = 5.0
+DEFAULT_TIMEOUT = 30.0
 RETRY_INTERVAL = 0.1
 MAX_RETRIES = 6
 INITIAL_DELAY = 5.0
@@ -182,6 +182,8 @@ class WebSocketManager:
         if not self.task_connections.get(task_id):
             logger.warning(f"⚠️ Pas de connexion active pour {task_id}, message stocké")
             self.pending_messages.setdefault(task_id, []).append(message)
+            # Tentative immédiate de reconnexion
+            await self._attempt_reconnection(task_id)
             self._schedule_retry(task_id)
             return
         # Tenter envoi immédiat
@@ -197,13 +199,30 @@ class WebSocketManager:
         """
         Planifie les tentatives de renvoi des messages en attente.
         """
-        asyncio.create_task(self._retry_pending(task_id))
+        async def _attempt_reconnection(task_id: str) -> None:
+            """Tentative de reconnexion immédiate pour une tâche"""
+            logger.info(f"🔄 Tentative de reconnexion pour {task_id}")
+
+            # Vérifier si la tâche existe toujours
+            task = progress_tracker.get_task(task_id)
+            if task and task.status.name in ['RUNNING', 'PENDING']:
+                # Notifier le frontend qu'une reconnexion est nécessaire
+                await self.broadcast_to_task(task_id, {
+                    "type": "reconnection_required",
+                    "task_id": task_id,
+                    "message": "Reconnexion WebSocket requise"
+                }, wait=False)
+
+        # Lance la tâche de reconnexion asynchrone
+        asyncio.create_task(_attempt_reconnection(task_id))
+
 
     async def _retry_pending(self, task_id: str) -> None:
         """
         Tente d'envoyer les messages stockés avec back-off jusqu'à échec ou succès.
         """
         delay = INITIAL_DELAY
+        delay = 2.0  # Démarrer avec un délai plus court
         for retry in range(1, MAX_RETRIES + 1):
             await asyncio.sleep(delay)
             sockets = self.task_connections.get(task_id)
@@ -220,8 +239,10 @@ class WebSocketManager:
                             f"❌ Échec au retry {retry} pour {task_id}: {e}"
                         )
                 return
+            delay = min(delay * 1.2, 15)  # Progression plus douce, maximum plus élevé
             logger.info(f"⏳ Retry {retry}/{MAX_RETRIES} après {delay:.1f}s – pas encore connecté")
-            delay = min(delay * 1.5, 10)
+            
+            
         logger.error(f"❌ ÉCHEC FINAL: Impossible d'envoyer {task_id} après {MAX_RETRIES} tentatives")
         # Notification d'échec
         try:

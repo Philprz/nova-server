@@ -246,6 +246,16 @@ async def get_task_validation(task_id: str):
         raise HTTPException(status_code=404, detail="Tâche introuvable")
     
     if task.validation_data:
+        # Vérifier aussi les messages WebSocket en attente
+        pending_ws_messages = websocket_manager.pending_messages.get(task_id, [])
+        interaction_messages = [msg for msg in pending_ws_messages if msg.get("type") == "user_interaction_required"]
+        if interaction_messages:
+            latest_interaction = interaction_messages[-1]
+            return {
+                "has_validation": True,
+                "validation_data": latest_interaction.get("interaction_data"),
+                "message": "Interaction récupérée depuis WebSocket en attente"
+            }
         pending_validations = {k: v for k, v in task.validation_data.items() if v.get("status") == "pending"}
         if pending_validations:
             return {
