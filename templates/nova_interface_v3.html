@@ -297,21 +297,18 @@
             // Affiche le message utilisateur
             addMessage('user', message);
 
+            // Génère un taskId unique et lisible
+            const taskId = `quote_${new Date().toISOString().replace(/[-:.]/g, '').slice(0, 15)}_${Math.random().toString(36).substr(2, 8)}`;
+
             try {
-                // 🔧 Génération d'un taskId unique et lisible
-                const taskId = `quote_${new Date().toISOString().replace(/[-:.]/g, '').slice(0, 15)}_${Math.random().toString(36).substr(2, 8)}`;
                 addMessage('system', '🔗 Connexion WebSocket...');
 
-                // Établir la connexion WebSocket avant d'envoyer la requête
-                await connectWebSocketFirst(taskId);
-                addMessage('system', '✅ WebSocket connecté, envoi de la requête...');
-
-                // Envoi de la requête au nouveau endpoint
+                // Envoi de la requête au serveur
                 const response = await fetch('/api/assistant/workflow/create_quote', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        message: message,
+                        message,
                         task_id: taskId,
                         draft_mode: document.getElementById('draftMode')?.checked || false
                     })
@@ -319,29 +316,24 @@
 
                 const data = await response.json();
 
-                // Vérifier d'abord si c'est une interaction utilisateur requise
+                // Détermine le taskId courant
+                currentTaskId = data.task_id || taskId;
+
+                // Cas où une interaction utilisateur est immédiatement requise
                 if (data.status === 'user_interaction_required' && data.interaction_data) {
-                    console.log('🎯 Interaction utilisateur détectée dans réponse initiale');
-                    currentTaskId = data.task_id || taskId;
+                    console.log('🎯 Interaction utilisateur détectée');
                     handleUserInteractionRequired(data.interaction_data);
                     return;
                 }
 
-                // Gestion des interactions demandées par le serveur
+                // Cas où le serveur indique explicitement qu'une interaction est requise
                 if (data.requires_interaction) {
-                    // Si le serveur fournit un nouveau task_id
-                    if (data.task_id && data.task_id !== taskId) {
-                        currentTaskId = data.task_id;
-                        addMessage('system', `🔄 Task ID transféré: ${currentTaskId}`);
-                    }
-                    addMessage('system', `🔄 Interaction requise (ID: ${currentTaskId || taskId})`);
+                    addMessage('system', `🔄 Interaction requise (ID: ${currentTaskId})`);
 
-                    // Démarrer le polling de progression si nécessaire
                     if (!progressInterval) {
                         progressInterval = setInterval(async () => {
                             try {
-                                const pollId = currentTaskId || taskId;
-                                const res = await fetch(`/task/${pollId}`);
+                                const res = await fetch(`/task/${currentTaskId}`);
                                 if (res.ok) {
                                     const progress = await res.json();
                                     updateProgressDisplay(progress);
@@ -356,20 +348,18 @@
                     return;
                 }
 
-                // Si tout s'est bien passé
+                // Si la requête initiale réussit
                 if (data.success) {
-                    currentTaskId = data.task_id || taskId;
                     addMessage('system', `✅ Workflow démarré (ID: ${currentTaskId})`);
-                } else if (data.status === 'user_interaction_required') {
-                    // Gestion directe si pas de WebSocket
-                    currentTaskId = data.task_id || taskId;
-                    if (data.interaction_data) {
-                        handleUserInteractionRequired(data.interaction_data);
-                    } else {
-                        addMessage('system', '⏳ En attente d\'interaction utilisateur...');
+
+                    // Établir la connexion WebSocket si nécessaire
+                    if (!window.websocket || window.websocket.readyState !== WebSocket.OPEN) {
+                        await connectWebSocketFirst(currentTaskId);
+                        addMessage('system', '✅ WebSocket connecté');
                     }
                 } else {
-                    addMessage('error', `❌ Erreur: ${data.error || data.message}`);
+                    // Gestion des autres cas d'erreurs explicites du serveur
+                    addMessage('error', `❌ Erreur: ${data.error || data.message || 'Une erreur inconnue s\'est produite'}`);
                 }
 
             } catch (error) {
@@ -377,6 +367,7 @@
                 addMessage('error', `❌ Erreur: ${error.message}`);
             }
         }
+
 
         // NOUVELLE FONCTION: Connexion WebSocket garantie AVANT requête
         function connectWebSocketFirst(taskId) {
