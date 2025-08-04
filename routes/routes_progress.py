@@ -227,6 +227,51 @@ async def websocket_progress(websocket: WebSocket, task_id: str):
         websocket_manager.disconnect(websocket, task_id)
         logger.info(f"Client déconnecté du WebSocket pour tâche {task_id}")
 
+async def handle_user_response_task(task_id: str, response_data: dict):
+    """Traite réponses utilisateur pour les tâches"""
+    try:
+        logger.info(f"🎯 Traitement réponse utilisateur task {task_id}: {response_data}")
+        
+        response_type = response_data.get("response_type")
+        if response_type == "client_validation":
+            await handle_client_selection_task(task_id, response_data)
+            
+    except Exception as e:
+        logger.error(f"❌ Erreur traitement réponse task {task_id}: {e}")
+
+async def handle_client_selection_task(task_id: str, response_data: dict):
+    """Traite sélection client pour les tâches"""
+    from workflow.devis_workflow import DevisWorkflow
+    
+    selected_client = response_data.get("selected_client")
+    if selected_client:
+        workflow = DevisWorkflow(task_id=task_id, force_production=True)
+        user_input = {
+            "action": "select_existing", 
+            "selected_data": selected_client
+        }
+        result = await workflow.continue_after_user_input(user_input, {})
+        logger.info(f"✅ Client task sélectionné pour {task_id}")
+        
+@router.websocket("/ws/task/{task_id}")
+async def websocket_task_endpoint(websocket: WebSocket, task_id: str):
+    """Endpoint WebSocket spécifique par task_id pour sélection client"""
+    await websocket_manager.connect(websocket, task_id)
+    logger.info(f"🔗 Connexion WebSocket task pour {task_id}")
+    
+    try:
+        while True:
+            data = await websocket.receive_text()
+            message = json.loads(data)
+            logger.info(f"📨 Message reçu pour {task_id}: {message}")
+            
+            if message.get("type") == "user_response":
+                response_data = message.get("data", {})
+                await handle_user_response_task(task_id, response_data)
+                
+    except WebSocketDisconnect:
+        logger.info(f"🔌 Déconnexion WebSocket task {task_id}")
+        websocket_manager.disconnect(websocket, task_id)
 # =============================================
 # ENDPOINTS DE VALIDATION UTILISATEUR
 # =============================================
