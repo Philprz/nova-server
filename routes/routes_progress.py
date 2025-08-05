@@ -76,14 +76,26 @@ async def get_task_progress(task_id: str):
         if task:
             progress_data = task.get_overall_progress()
             return TaskProgressResponse(**progress_data)
+        # Attendre brièvement si tâche en cours de création
+        import asyncio
+        if not task:
+            await asyncio.sleep(0.5)  # Attendre 500ms
+            task = progress_tracker.get_task(task_id)
         
         # Rechercher dans l'historique si pas trouvé
         historical_task = progress_tracker.get_task_from_history(task_id)
         if historical_task:
             return TaskProgressResponse(**historical_task)
         
-        # Si vraiment pas trouvé
-        raise HTTPException(status_code=404, detail=f"Tâche {task_id} non trouvée")
+        # Dernier essai après délai plus long pour tâches en création
+        if not task and not historical_task:
+            await asyncio.sleep(1.0)  # Attendre 1 seconde
+            task = progress_tracker.get_task(task_id)
+        if task:
+            progress_data = task.get_overall_progress()
+            return TaskProgressResponse(**progress_data)
+        # Si vraiment pas trouvé après tous les essais
+        raise HTTPException(status_code=404, detail=f"Tâche {task_id} non trouvée après délais d'attente")
         
     except HTTPException:
         raise
@@ -270,7 +282,7 @@ async def websocket_task_endpoint(websocket: WebSocket, task_id: str):
                 
     except WebSocketDisconnect:
         logger.info(f"🔌 Déconnexion WebSocket task {task_id}")
-        websocket_manager.disconnect(websocket, task_id)
+        await websocket_manager.disconnect(websocket, task_id)
 # =============================================
 # ENDPOINTS DE VALIDATION UTILISATEUR
 # =============================================

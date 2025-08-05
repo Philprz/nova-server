@@ -1037,13 +1037,16 @@
                 showValidationError('Le message ne peut pas dépasser 1000 caractères');
                 return;
             }
-
+            // Ajouter le message à l'interface
             isProcessing = true;
             addMessage(message, 'user');
             input.value = '';
             updateSendButton();
             autoResize();
-
+            // Générer task_id et connecter WebSocket AVANT l'envoi
+            currentTaskId = 'quote_' + new Date().toISOString().slice(0,19).replace(/[-:]/g,'').replace('T','') + '' + Math.random().toString(36).substr(2, 8);
+            console.log("🎯 Task ID généré:", currentTaskId);
+            connectWebSocket(currentTaskId);
             // Masquer toute erreur de validation
             const errorDiv = document.getElementById('validationError');
             if (errorDiv) {
@@ -1308,6 +1311,12 @@ const message = input.value.trim();
                     updateProgress(data.progress, data.message, data.step);
                 } else if (data.type === 'interaction_required') {
                     handleUserInteraction(data.data);
+                } else if (data.type === 'user_interaction_required') {
+                    console.log("🤝 Interaction utilisateur détectée:", data.interaction_data);
+                    if (data.interaction_data && data.interaction_data.interaction_type === 'client_selection') {
+                    hideProgress();
+                    showClientSelection(data.interaction_data);
+                    }  
                 } else if (data.type === 'client_selection_required') {
                     hideProgress();
                     const clients = data.clients || [];
@@ -1373,8 +1382,8 @@ const message = input.value.trim();
             clientSelectionMode = true;
             availableClients = data.options || [];
             originalClientName = data.original_client_name || '';
+            const totalOptions = data.total_options || availableClients = data.client_options || data.options || data.clients || [];
             const totalOptions = data.total_options || availableClients.length;
-
             let message = `Plusieurs clients correspondent à votre recherche pour "${originalClientName}". Veuillez en sélectionner un :`;
             if (totalOptions > clients.length) {
                 message += ` (${clients.length} options affichées sur ${totalOptions} au total)`;
@@ -1384,7 +1393,7 @@ const message = input.value.trim();
 
             const selectionHtml = `
                 <div class="client-selection-container">
-                    ${clients.map(client => `
+                    ${availableClients.map(client => `
                         <button class="client-selection-button" onclick="selectClient('${client.id}', '${client.name}')">
                             <strong>${client.name}</strong>
                             <small>Source: ${client.source} | ID: ${client.details.card_code || 'N/A'}</small>

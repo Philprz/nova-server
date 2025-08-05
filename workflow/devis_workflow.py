@@ -4803,6 +4803,10 @@ class DevisWorkflow:
 
                 logger.info(f"📨 Envoi WebSocket pour tâche {self.task_id}")
                 await websocket_manager.send_user_interaction_required(self.task_id, interaction_data)
+                # Attendre que la connexion WebSocket soit établie
+                await asyncio.sleep(2.0)  # Délai pour établir la connexion
+                await websocket_manager.send_user_interaction_required(self.task_id, interaction_data)
+                logger.info(f"⏸️ Tâche {self.task_id} en attente d'interaction utilisateur")
                 return client_result
             # 🔧 NOUVEAU: Vérifier autres statuts qui nécessitent un arrêt
             if client_result.get("status") in ["error", "cancelled"]:
