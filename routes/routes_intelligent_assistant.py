@@ -181,6 +181,62 @@ async def create_quote_workflow(
             error=str(e),
             message="Erreur lors du démarrage du workflow"
         )
+        
+@router.websocket("/ws/assistant/{task_id}")
+async def websocket_endpoint(websocket: WebSocket, task_id: str):
+    logger.info(f"🔌 WebSocket - Tentative de connexion pour {task_id}")
+    try:
+        await websocket_manager.connect(websocket, task_id)
+        logger.info(f"✅ WebSocket - Connexion établie pour {task_id}")
+        
+        while True:
+            # Ping/pong pour maintenir la connexion
+            try:
+                data = await websocket.receive_text()
+                logger.debug(f"📥 WebSocket - Message reçu de {task_id}: {data}")
+                
+                # Echo pour vérifier la connexion
+                await websocket.send_text(json.dumps({
+                    "type": "pong",
+                    "task_id": task_id,
+                    "timestamp": datetime.utcnow().isoformat()
+                }))
+            except WebSocketDisconnect:
+                logger.warning(f"⚠️ WebSocket - Client déconnecté: {task_id}")
+                break
+            except Exception as e:
+                logger.error(f"❌ WebSocket - Erreur: {str(e)}")
+                break
+                
+    except Exception as e:
+        logger.error(f"❌ WebSocket - Erreur connexion {task_id}: {str(e)}")
+    finally:
+        await websocket_manager.disconnect(websocket, task_id)
+        logger.info(f"🔌 WebSocket - Déconnexion complète pour {task_id}")
+@router.get("/api/assistant/workflow/pending-interaction/{task_id}")
+async def get_pending_interaction(task_id: str):
+    """Récupère les interactions en attente pour un task_id"""
+    # Vérifier dans websocket_manager.pending_messages
+    if task_id in websocket_manager.pending_messages:
+        messages = websocket_manager.pending_messages[task_id]
+        if messages:
+            # Retourner le premier message en attente
+            message = messages[0]
+            logger.info(f"📨 Interaction en attente trouvée pour {task_id}")
+            return JSONResponse(content=message)
+    
+    # Vérifier aussi dans progress_tracker
+    task_info = progress_tracker.get_task(task_id)
+    if task_info and task_info.get("status") == "user_interaction_required":
+        logger.info(f"📋 Tâche en attente d'interaction: {task_id}")
+        return JSONResponse(content={
+            "type": "user_interaction_required",
+            "task_id": task_id,
+            "interaction_data": task_info.get("interaction_data", {})
+        })
+    
+    return JSONResponse(content={"status": "no_interaction_pending"})
+
 # 🔧 MODIFICATION : Fonction chat_with_nova modifiée
 @router.post("/chat")
 async def chat_with_nova_with_progress(
