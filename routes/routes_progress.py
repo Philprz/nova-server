@@ -4,7 +4,6 @@ Routes API pour le suivi de progression des générations de devis
 À intégrer dans main.py avec : app.include_router(progress_router, prefix="/progress", tags=["progress"])
 """
 
-from csv import QUOTE_ALL
 from fastapi import APIRouter, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from services.websocket_manager import websocket_manager
@@ -420,7 +419,7 @@ async def _execute_quote_generation(task_id: str, prompt: str, draft_mode: bool)
         await asyncio.sleep(0.5)
         
         # Créer le workflow avec le task_id
-        workflow = EnhancedDevisWorkflow(
+        workflow = DevisWorkflow(
             validation_enabled=True, 
             draft_mode=draft_mode,
             task_id=task_id  # Important : passer le task_id existant
