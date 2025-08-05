@@ -305,12 +305,15 @@ async def _handle_simple_chat(message_data: ProgressChatMessage) -> Dict[str, An
     """
     try:
         # Importer les modules nécessaires
-        from services.llm_extractor import llm_extractor
-        from intelligence.suggestion_engine import SuggestionEngine
-        
+        from services.llm_extractor import get_llm_extractor
+        from services.suggestion_engine import SuggestionEngine
+
         message = message_data.message
         logger.info(f"💬 Chat simple: {message[:50]}...")
-        
+
+        # Obtenir l'instance de l'extracteur
+        llm_extractor = get_llm_extractor()
+
         # Analyser le type de demande
         extraction = await llm_extractor.extract_quote_info(message)
         
