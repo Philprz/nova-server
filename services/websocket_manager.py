@@ -188,7 +188,7 @@ class WebSocketManager:
         if interaction_data.get('client_options'):
             logger.info(f"📊 Nombre de clients: {len(interaction_data.get('client_options', []))}")
             for i, client in enumerate(interaction_data.get('client_options', [])):
-                logger.info(f"📊 Client {i1}: {client.get('name')} ({client.get('source')})")
+                logger.info(f"📊 Client {i+1}: {client.get('name')} ({client.get('source')})")
         else:
             logger.warning(f"⚠️ Pas de client_options dans interaction_data: {json.dumps(interaction_data, indent=2, default=str)}")
 

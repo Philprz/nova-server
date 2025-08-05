@@ -125,7 +125,7 @@ class QuoteTask:
         ]
     }
     def __init__(self, task_id: str = None, user_prompt: str = "", draft_mode: bool = False):
-        self.task_id = task_id or f"quote_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:8]}"
+        self.task_id = task_id if task_id else f"quote_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:8]}"
         self.user_prompt = user_prompt
         self.draft_mode = draft_mode
         self.status = TaskStatus.PENDING
@@ -334,7 +334,7 @@ class ProgressTracker:
         self.completed_tasks: List[Dict[str, Any]] = []
         self.max_completed_history = 50  # Garder les 50 dernières tâches
     
-    def create_task(self, user_prompt: str = "", draft_mode: bool = False, task_id: str | None = None) -> QuoteTask:
+    def create_task(self, user_prompt: str = "", draft_mode: bool = False, task_id: str = None) -> QuoteTask:
         """Crée une nouvelle tâche de génération de devis"""
         task = QuoteTask(task_id=task_id, user_prompt=user_prompt, draft_mode=draft_mode)
         self.active_tasks[task.task_id] = task
