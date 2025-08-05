@@ -696,7 +696,7 @@
             // Fallback pour les navigateurs plus anciens
             if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
                 return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-                    const r = (crypto.getRandomValues(new Uint8Array(1))[0] & 15) >> (c === 'x' ? 0 : 2);
+                    const r = crypto.getRandomValues(new Uint8Array(1))[0] & 15;
                     const v = c === 'x' ? r : (r & 0x3 | 0x8);
                     return v.toString(16);
                 });
@@ -1022,75 +1022,79 @@
 
         async function sendMessage() {
             const input = document.getElementById('chatInput');
-            const message = input.value.trim();
+            const errorDiv = document.getElementById('validationError');
+            const message = (input?.value || '').trim();
 
-            // Double vérification avant envoi
-            if (!message || isProcessing) return;
-
-            // Validation supplémentaire
+            // Garde-fous
+            if (isProcessing) return;
+            if (!message) {
+                showValidationError('Le message est vide');
+                return;
+            }
             if (message.length < 3) {
                 showValidationError('Le message doit contenir au moins 3 caractères');
                 return;
             }
-
             if (message.length > 1000) {
                 showValidationError('Le message ne peut pas dépasser 1000 caractères');
                 return;
             }
-            // Ajouter le message à l'interface
+
+            // Mise à jour UI avant l'appel réseau
             isProcessing = true;
+            if (errorDiv) errorDiv.style.display = 'none';
             addMessage(message, 'user');
-            input.value = '';
+            if (input) input.value = '';
             updateSendButton();
             autoResize();
-            // Générer task_id et connecter WebSocket AVANT l'envoi
-            currentTaskId = 'quote_' + new Date().toISOString().slice(0,19).replace(/[-:]/g,'').replace('T','') + '' + Math.random().toString(36).substr(2, 8);
-            console.log("🎯 Task ID généré:", currentTaskId);
-            connectWebSocket(currentTaskId);
-            // Masquer toute erreur de validation
-            const errorDiv = document.getElementById('validationError');
-            if (errorDiv) {
-                errorDiv.style.display = 'none';
-            }
-
             showTyping();
 
             try {
-                const response = await fetch('/api/assistant/workflow/create_quote', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-Request-ID': generateUUID() // Pour traçabilité
-                    },
-                    body: JSON.stringify({
-                        message: message,
-                        draft_mode: false
-                    })
+                const resp = await fetch('/api/assistant/workflow/create_quote', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Request-ID': generateUUID(), // traçabilité
+                },
+                body: JSON.stringify({ message, draft_mode: false }),
                 });
 
-                if (!response.ok) {
-                    throw new Error(`Erreur HTTP: ${response.status}`);
+                // Gestion des erreurs HTTP (non-200)
+                if (!resp.ok) {
+                let details = '';
+                try {
+                    const errJson = await resp.json();
+                    details = errJson?.error || JSON.stringify(errJson);
+                } catch {
+                    details = await resp.text();
+                }
+                throw new Error(`HTTP ${resp.status} — ${details}`);
                 }
 
-                const result = await response.json();
+                const result = await resp.json();
                 hideTyping();
 
-                if (result.task_id) {
-                    currentTaskId = result.task_id;
-                    showProgress();
-                    trackProgress(result.task_id);
+                if (result?.task_id) {
+                currentTaskId = result.task_id;
+                showProgress();
+                // Se connecter APRÈS réception du task_id
+                connectWebSocket(result.task_id);
+                await trackProgress(result.task_id);
                 } else {
-                    handleDirectResponse(result);
+                handleDirectResponse(result);
                 }
             } catch (error) {
                 hideTyping();
-                addMessage(`Erreur de connexion: ${error.message}`, 'system');
+                addMessage(`Erreur de connexion : ${error.message}`, 'system');
                 console.error('Erreur sendMessage:', error);
+                isProcessing = false;  // IMPORTANT : remettre le flag à false
             } finally {
                 isProcessing = false;
                 updateSendButton();
+                input?.focus();
             }
         }
+
 
         function handleDirectResponse(result) {
             if (result.status === 'client_creation_required') {
@@ -1288,9 +1292,9 @@ const message = input.value.trim();
                 return;
             }
 
-            const wsUrl = `ws://${window.location.host}/api/assistant/ws/${taskId}`;
+            const wsUrl = ${wsProtocol}://${window.location.host}/api/assistant/ws/${taskId};
             console.log(`🔌 Tentative de connexion à ${wsUrl}`);
-
+            const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
             websocket = new WebSocket(wsUrl);
 
             websocket.onopen = () => {
@@ -1316,6 +1320,7 @@ const message = input.value.trim();
                     if (data.interaction_data && data.interaction_data.interaction_type === 'client_selection') {
                     hideProgress();
                     showClientSelection(data.interaction_data);
+                    { const opts = data.interaction_data.options || data.interaction_data.clients || []; const name = data.interaction_data.original_client_name || data.interaction_data.client_name || ''; addClientSelection(opts, name); }
                     }  
                 } else if (data.type === 'client_selection_required') {
                     hideProgress();
@@ -1370,83 +1375,6 @@ const message = input.value.trim();
             }, 3000);
         }
 
-        function handleUserInteraction(data) {
-            if (data.interaction_type === 'client_selection') {
-                showClientSelection(data);
-            } else {
-                addMessage(`Interaction non gérée: ${data.interaction_type}`, 'system');
-            }
-        }
-
-        function showClientSelection(data) {
-            clientSelectionMode = true;
-            availableClients = data.options || [];
-            originalClientName = data.original_client_name || '';
-            const totalOptions = data.total_options || availableClients = data.client_options || data.options || data.clients || [];
-            const totalOptions = data.total_options || availableClients.length;
-            let message = `Plusieurs clients correspondent à votre recherche pour "${originalClientName}". Veuillez en sélectionner un :`;
-            if (totalOptions > clients.length) {
-                message += ` (${clients.length} options affichées sur ${totalOptions} au total)`;
-            }
-
-            addMessage(message, 'system');
-
-            const selectionHtml = `
-                <div class="client-selection-container">
-                    ${availableClients.map(client => `
-                        <button class="client-selection-button" onclick="selectClient('${client.id}', '${client.name}')">
-                            <strong>${client.name}</strong>
-                            <small>Source: ${client.source} | ID: ${client.details.card_code || 'N/A'}</small>
-                        </button>
-                    `).join('')}
-                    ${data.allow_create_new ? `
-                        <button class="client-selection-button create-new" onclick="createNewClient('${originalName}')">
-                            <i class="bi bi-plus-circle"></i> Créer un nouveau client "${originalName}"
-                        </button>
-                    ` : ''}
-                </div>
-            `;
-            addMessage(selectionHtml, 'html');
-        }
-
-        function selectClient(clientId, clientName) {
-            if (websocket && websocket.readyState === WebSocket.OPEN) {
-                const response = {
-                    type: "user_response",
-                    task_id: currentTaskId,
-                    data: {
-                        response_type: "client_validation",
-                        action: "select_existing",
-                        client_id: clientId
-                    }
-                };
-                console.log("📤 Sélection client:", response);
-                websocket.send(JSON.stringify(response));
-                addMessage(`Vous avez sélectionné : ${clientName}`, 'user');
-
-                // Reset selection mode
-                clientSelectionMode = false;
-                availableClients = [];
-                originalClientName = '';
-            }
-        }
-
-        function createNewClient(clientName) {
-            if (websocket && websocket.readyState === WebSocket.OPEN) {
-                const response = {
-                    type: "user_response",
-                    task_id: currentTaskId,
-                    data: {
-                        response_type: "client_validation",
-                        action: "create_new",
-                        client_name: clientName
-                    }
-                };
-                console.log("📤 Création nouveau client:", response);
-                websocket.send(JSON.stringify(response));
-                addMessage(`Vous avez choisi de créer un nouveau client pour : "${clientName}"`, 'user');
-            }
-        }
         // Initialisation avec validation du formulaire
         document.addEventListener('DOMContentLoaded', function() {
             const input = document.getElementById('chatInput');
