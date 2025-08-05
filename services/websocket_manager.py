@@ -205,6 +205,11 @@ class WebSocketManager:
         if not self.task_connections.get(task_id):
             logger.warning(f"⚠️ Pas de connexion active pour {task_id}, message stocké")
             self.pending_messages.setdefault(task_id, []).append(message)
+            # Vérifier si la tâche existe dans le progress_tracker
+            task = progress_tracker.get_task(task_id)
+            if not task:
+                logger.error(f"❌ Tâche {task_id} inexistante dans progress_tracker")
+                return
             # Tentative immédiate de reconnexion
             await self._attempt_reconnection(task_id)
             self._schedule_retry(task_id)
