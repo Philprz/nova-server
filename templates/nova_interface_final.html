@@ -1088,7 +1088,6 @@
                 hideTyping();
                 addMessage(`Erreur de connexion : ${error.message}`, 'system');
                 console.error('Erreur sendMessage:', error);
-                isProcessing = false;  // IMPORTANT : remettre le flag à false
             } finally {
                 isProcessing = false;
                 updateSendButton();
@@ -1153,73 +1152,73 @@
         function handleFormSubmit(event) {
             event.preventDefault();
             
-        const input = document.getElementById('chatInput');
-const message = input.value.trim();
-        
-            // Validation côté client
-                if (!message) {
-                showValidationError('Veuillez saisir un message');
-            return false;
-        }
+            const input = document.getElementById('chatInput');
+            const message = input.value.trim();
+            
+                // Validation côté client
+                    if (!message) {
+                    showValidationError('Veuillez saisir un message');
+                return false;
+            }
 
-        if (message.length < 3) {
-            showValidationError('Le message doit contenir au moins 3 caractères');
+            if (message.length < 3) {
+                showValidationError('Le message doit contenir au moins 3 caractères');
+                return false;
+            }
+            
+            if (message.length > 1000) {
+                showValidationError('Le message ne peut pas dépasser 1000 caractères');
+                return false;
+            }
+            
+            if (isProcessing) {
+                showValidationError('Traitement en cours, veuillez patienter...');
+                return false;
+            }
+            
+            // Si validation OK, envoyer le message
+            await sendMessage();
             return false;
-        }
-        
-        if (message.length > 1000) {
-        showValidationError('Le message ne peut pas dépasser 1000 caractères');
-        return false;
-        }
-        
-        if (isProcessing) {
-        showValidationError('Traitement en cours, veuillez patienter...');
-        return false;
-        }
-        
-        // Si validation OK, envoyer le message
-        sendMessage();
-        return false;
         }
         
         function showValidationError(message) {
-        // Créer ou mettre à jour le message d'erreur
-        let errorDiv = document.getElementById('validationError');
-        if (!errorDiv) {
-        errorDiv = document.createElement('div');
-        errorDiv.id = 'validationError';
-        errorDiv.className = 'validation-error';
-        errorDiv.style.cssText = `
-        color: var(--warning-color);
-        font-size: 0.875rem;
-        margin-top: 8px;
-        padding: 8px 12px;
-        background-color: rgba(253, 82, 2, 0.1);
-        border: 1px solid var(--warning-color);
-        border-radius: 4px;
-        display: none;
-        `;
-        document.getElementById('chatForm').appendChild(errorDiv);
-        }
-        
-        errorDiv.textContent = message;
-        errorDiv.style.display = 'block';
-        
-        // Masquer l'erreur après 3 secondes
-        setTimeout(() => {
-        errorDiv.style.display = 'none';
-        }, 3000);
+            // Créer ou mettre à jour le message d'erreur
+            let errorDiv = document.getElementById('validationError');
+            if (!errorDiv) {
+            errorDiv = document.createElement('div');
+            errorDiv.id = 'validationError';
+            errorDiv.className = 'validation-error';
+            errorDiv.style.cssText = `
+            color: var(--warning-color);
+            font-size: 0.875rem;
+            margin-top: 8px;
+            padding: 8px 12px;
+            background-color: rgba(253, 82, 2, 0.1);
+            border: 1px solid var(--warning-color);
+            border-radius: 4px;
+            display: none;
+            `;
+            document.getElementById('chatForm').appendChild(errorDiv);
+            }
+            
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+            
+            // Masquer l'erreur après 3 secondes
+            setTimeout(() => {
+            errorDiv.style.display = 'none';
+            }, 3000);
         }
         
         function handleInput() {
-        updateSendButton();
-        autoResize();
+            updateSendButton();
+            autoResize();
         
-        // Masquer l'erreur de validation si elle existe
-        const errorDiv = document.getElementById('validationError');
-        if (errorDiv) {
-        errorDiv.style.display = 'none';
-        }
+            // Masquer l'erreur de validation si elle existe
+            const errorDiv = document.getElementById('validationError');
+            if (errorDiv) {
+            errorDiv.style.display = 'none';
+            }
         }
         
         function handleKeyPress(event) {

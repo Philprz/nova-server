@@ -51,7 +51,6 @@ class ProgressChatResponse(BaseModel):
     response: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
     use_polling: bool = False  # 🆕 NOUVEAU : Indique si utiliser polling
-# ✅ CLASSE MANQUANTE - QuoteRequest pour compatibilité JavaScript
 
 class QuoteRequest(BaseModel):
     # Champs principaux - l'un des deux est requis
@@ -62,22 +61,38 @@ class QuoteRequest(BaseModel):
     draft_mode: bool = Field(False, description="Mode brouillon")
     task_id: Optional[str] = Field(None, description="Task ID pré-généré côté client")
     websocket_task_id: Optional[str] = Field(None, description="Task ID WebSocket pré-connecté")
-    force_production: Optional[bool] = Field(False, description="Force le mode production")
+    force_production: bool = Field(False, description="Force le mode production")
     
     def __init__(self, **data):
-        # Logique de compatibilité dans le constructeur
         if 'websocket_task_id' in data and not data.get('task_id'):
             data['task_id'] = data['websocket_task_id']
-            
-        # Assurer qu'on a au moins prompt ou message
-        if data.get('prompt') and not data.get('message'):
-            data['message'] = data['prompt']
-        elif data.get('message') and not data.get('prompt'):
-            data['prompt'] = data['message']
-        elif not data.get('prompt') and not data.get('message'):
-            raise ValueError('Prompt ou message requis')
-            
         super().__init__(**data)
+
+    @model_validator(mode='before')
+    @classmethod
+    def validate_message_fields(cls, values: Any) -> Any:
+        # Pydantic peut passer autre chose qu'un dict (ex: déjà une instance)
+        if not isinstance(values, dict):
+            return values
+
+        # Copie websocket_task_id -> task_id si manquant
+        if values.get('websocket_task_id') and not values.get('task_id'):
+            values['task_id'] = values['websocket_task_id']
+
+        # Exiger au moins l'un des deux: prompt ou message
+        prompt = values.get('prompt')
+        message = values.get('message')
+        if not prompt and not message:
+            raise ValueError('Prompt ou message requis')
+
+        # Normaliser: dupliquer l'un vers l'autre si nécessaire
+        if prompt and not message:
+            values['message'] = prompt
+        elif message and not prompt:
+            values['prompt'] = message
+
+        return values
+
     
     
 # ✅ MODÈLES CORRIGÉS avec validation Field
