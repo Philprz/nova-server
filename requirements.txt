@@ -12,8 +12,9 @@ aiofiles==23.2.1
 python-multipart==0.0.6
 structlog==23.2.0
 prometheus-client==0.16.0
+tenacity==8.2.2
 # Modules optionnels
-# psycopg2-binary==2.9.9
-# sqlalchemy==2.0.23
-# pytest==7.4.3
-# pytest-asyncio==0.21.1
+psycopg2-binary==2.9.9
+sqlalchemy==2.0.23
+pytest==7.4.3
+pytest-asyncio==0.21.1
