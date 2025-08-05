@@ -135,6 +135,12 @@ app.include_router(client_router, prefix="/api/assistant", tags=["Client"])
 app.include_router(client_listing_router, prefix="/api/clients", tags=["Client Listing"])
 app.include_router(websocket_router, prefix="/ws", tags=["WebSocket"])
 
+# Route temporaire de débogage
+@app.get('/api/assistant/interface')
+async def get_assistant_interface():
+    """Interface principale de l'assistant"""
+    return await itspirit_interface()
+
 # Route pour servir l'interface IT Spirit
 @app.get('/interface/itspirit', response_class=HTMLResponse)
 async def itspirit_interface():
