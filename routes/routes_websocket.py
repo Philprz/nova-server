@@ -30,4 +30,5 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                     }))
     
     except WebSocketDisconnect:
-        websocket_manager.disconnect(client_id)
+        # la méthode est async et attend (websocket, task_id)
+        await websocket_manager.disconnect(websocket, client_id)

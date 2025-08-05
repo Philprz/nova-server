@@ -214,11 +214,21 @@ def start_nova_server():
             logger.error("Le fichier main.py contenant l'application FastAPI est requis")
             return False
                 
-        from main import app  # Correction: Import de l'app FastAPI
+        # CORRECTION: Import conditionnel pour éviter les erreurs d'import circulaire
+        try:
+            from main import app  # Import de l'app FastAPI
+        except NameError as ne:
+            if 'WebSocket' in str(ne):
+                logger.error("Erreur d'import WebSocket - Correction requise dans les annotations de type")
+                logger.error("Solution temporaire: Redémarrage requis après correction des imports")
+                return False
+            else:
+                raise ne
+                
         import uvicorn
         logger.info("Lancement de NOVA sur http://localhost:8000")
         logger.info("Documentation: http://localhost:8000/docs")
-        logger.info("Interface: http://localhost:8000/api/assistant/interface")
+        logger.info("Interface: http://localhost:8000/interface/itspirit")
         logger.info("Santé: http://localhost:8000/health")
         
         # Correction: Configuration simplifiée pour éviter les conflits I/O

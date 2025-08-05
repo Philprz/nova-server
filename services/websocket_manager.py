@@ -1,3 +1,6 @@
+# main.py
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
@@ -50,11 +53,12 @@ class WebSocketManager:
     """
 
     def __init__(self) -> None:
-        self.active_connections: Dict[str, Set[WebSocket]] = {}
-        self.task_connections: Dict[str, Set[WebSocket]] = {}
+        # 'all' regroupe toutes les connexions actives
+        self.active_connections: Dict[str, Set["WebSocket"]] = {"all": set()}
+        self.task_connections: Dict[str, Set["WebSocket"]] = {}
         self.pending_messages: Dict[str, List[dict]] = {}
 
-    async def connect(self, websocket: WebSocket, task_id: str = None) -> None:
+    async def connect(self, websocket: "WebSocket", task_id: str = None) -> None:
         """
         Accepte une connexion WebSocket et l'enregistre.
 
@@ -63,11 +67,10 @@ class WebSocketManager:
         """
         await websocket.accept()
         logger.info(f"🔌 WebSocket ACCEPTÉ pour task_id: {task_id}")
-        if task_id not in self.task_connections:
-            self.task_connections[task_id] = []
-        
-        self.task_connections[task_id].append(websocket)
-        self.active_connections.add(websocket)
+        # Enregistre la connexion
+        self.active_connections.setdefault("all", set()).add(websocket)
+        if task_id:
+            self.task_connections.setdefault(task_id, set()).add(websocket)
         
         # Nouveau log
         logger.info(f"✅ WebSocket AJOUTÉ - Total connexions: {len(self.active_connections)}, Pour {task_id}: {len(self.task_connections[task_id])}")
@@ -75,22 +78,14 @@ class WebSocketManager:
         # Vérifier les messages en attente
         if task_id in self.pending_messages:
             logger.info(f"📨 {len(self.pending_messages[task_id])} messages en attente pour {task_id}")
-        self.active_connections.setdefault("all", set()).add(websocket)
-        if task_id:
-            self.task_connections.setdefault(task_id, set()).add(websocket)
         logger.info("WebSocket connecté", extra={"task_id": task_id})
 
-    async def disconnect(self, websocket: WebSocket, task_id: str):
-        """Déconnecte un WebSocket"""
-        # Nouveau log
-        logger.info(f"🔌 WebSocket DÉCONNEXION demandée pour {task_id}")
-        
-        if task_id in self.task_connections:
-            if websocket in self.task_connections[task_id]:
-                self.task_connections[task_id].remove(websocket)
-                # Nouveau log
-                logger.info(f"✅ WebSocket RETIRÉ de {task_id}")
-
+    async def disconnect(self, websocket: "WebSocket", task_id: str):
+        conns = self.task_connections.get(task_id)
+        if conns and websocket in conns:
+            conns.discard(websocket)
+            logger.info(f"✅ WebSocket RETIRÉ de {task_id}")
+        self.active_connections.get("all", set()).discard(websocket)        
     async def broadcast_to_task(
         self,
         task_id: str,
@@ -193,7 +188,7 @@ class WebSocketManager:
         if interaction_data.get('client_options'):
             logger.info(f"📊 Nombre de clients: {len(interaction_data.get('client_options', []))}")
             for i, client in enumerate(interaction_data.get('client_options', [])):
-                logger.info(f"📊 Client {i+1}: {client.get('name')} ({client.get('source')})")
+                logger.info(f"📊 Client {i1}: {client.get('name')} ({client.get('source')})")
         else:
             logger.warning(f"⚠️ Pas de client_options dans interaction_data: {json.dumps(interaction_data, indent=2, default=str)}")
 
@@ -239,11 +234,9 @@ class WebSocketManager:
             }, wait=False)
 
     def _schedule_retry(self, task_id: str) -> None:
-        """
-        Planifie les tentatives de renvoi des messages en attente.
-        """
-        # Lance la tâche de reconnexion asynchrone
+        # Requiert une reconnexion côté client ET tente périodiquement d'envoyer les messages en attente
         asyncio.create_task(self._attempt_reconnection(task_id))
+        asyncio.create_task(self._retry_pending(task_id))
 
 
     async def _retry_pending(self, task_id: str) -> None:
