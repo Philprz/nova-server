@@ -1149,30 +1149,36 @@
         }
 
         // Gestion entrées et formulaire
-        function handleFormSubmit(event) {
+        async function handleFormSubmit(event) {
             event.preventDefault();
             
             const input = document.getElementById('chatInput');
             const message = input.value.trim();
             
-                // Validation côté client
-                    if (!message) {
-                    showValidationError('Veuillez saisir un message');
-                return false;
+            // Validation côté client
+            if (!message) {
+                Situation = templates/nova_interface_final.html / script / handleFormSubmit / validation message vide
+            if (!message) {
+                showValidationError('Veuillez saisir un message');
+                Situation = templates/nova_interface_final.html / script / handleFormSubmit / structure validation
+            return false;
             }
 
             if (message.length < 3) {
                 showValidationError('Le message doit contenir au moins 3 caractères');
+                Situation = templates/nova_interface_final.html / script / handleFormSubmit / validation longueur
                 return false;
             }
             
             if (message.length > 1000) {
                 showValidationError('Le message ne peut pas dépasser 1000 caractères');
+                Situation = templates/nova_interface_final.html / script / handleFormSubmit / validation longueur max
                 return false;
             }
             
             if (isProcessing) {
                 showValidationError('Traitement en cours, veuillez patienter...');
+                Situation = templates/nova_interface_final.html / script / handleFormSubmit / validation processing
                 return false;
             }
             
@@ -1292,7 +1298,7 @@
                 return;
             }
             const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-            const wsUrl = ${wsProtocol}://${window.location.host}/api/assistant/ws/${taskId};
+            const wsUrl = ${wsProtocol}://${window.location.host}/ws/${taskId};
             console.log(`🔌 Tentative de connexion à ${wsUrl}`);
             websocket = new WebSocket(wsUrl);
 
