@@ -1292,7 +1292,7 @@
                 return;
             }
             const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-            const wsUrl = ${wsProtocol}://${window.location.host}/ws/${taskId};
+            const const wsUrl = `${wsProtocol}://${window.location.host}/ws/${taskId}`;
             console.log(`🔌 Tentative de connexion à ${wsUrl}`);
             websocket = new WebSocket(wsUrl);
 
@@ -1424,7 +1424,24 @@
                     }, 1000);
                 }
             });
+
+        // Initialisation au chargement de la page
+        document.addEventListener('DOMContentLoaded', function() {
+            const input = document.getElementById('chatInput');
+            const form = document.getElementById('chatForm');
+            
+            if (input) {
+                input.addEventListener('keydown', handleKeyPress);
+                input.focus();
+            }
+            
+            // Vérification de la connexion
+            checkConnection();
+            setInterval(checkConnection, 30000);
+            
+            updateSendButton();
         });
+
     </script>
 </body>
 </html>
