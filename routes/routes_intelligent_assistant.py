@@ -6,9 +6,10 @@ API conversationnelle qui transforme NOVA en collègue intelligent
 capable de comprendre les demandes en langage naturel et proposer
 des solutions proactives.
 """
+from __future__ import annotations  # optionnel mais recommandé
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Request, BackgroundTasks
 import time
-from fastapi import APIRouter, HTTPException, Request, BackgroundTasks
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field, validator, model_validator
 from typing import Dict, Any, List, Optional
 import logging
@@ -107,80 +108,47 @@ class WorkflowCreateQuoteResponse(BaseModel):
     message: Optional[str] = None
     interaction_data: Optional[Dict[str, Any]] = None  # 🆕 NOUVEAU champ
     
-# ✅ ENDPOINT CORRIGÉ
 @router.post("/workflow/create_quote", response_model=WorkflowCreateQuoteResponse)
-async def create_quote_workflow(
+async def start_quote_workflow(
     request: QuoteRequest,
     background_tasks: BackgroundTasks
-):
+) -> WorkflowCreateQuoteResponse:
     """
-    Créer un workflow de devis avec WebSocket intelligent.
-    Répond IMMÉDIATEMENT - pas d'attente bloquante.
+    Exécute le workflow de création de devis en arrière-plan.
     """
     try:
-        # 1. TOUJOURS utiliser le task_id fourni par le client
-        task_id = request.task_id or request.websocket_task_id
-        if not task_id:
-            # Génération seulement si aucun fourni
-            task_id = f"quote_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{secrets.token_hex(4)}"
-        logger.info(f"🔑 Task ID utilisé: {task_id} (fourni par client: {bool(request.task_id)})")
+        # 1. Génération de task_id si nécessaire
+        task_id = request.task_id or f"quote_{datetime.now():%Y%m%d_%H%M%S}_{secrets.token_hex(4)}"
+        logger.info(f"🔑 Démarrage du DevisWorkflow pour task_id={task_id}")
 
-        # 2. Gestion intelligente des connexions WebSocket via le MCP
-        if task_id in websocket_manager.task_connections:
-            logger.info(f"🔗 Réutilisation WS pré-connecté : {task_id}")
-        else:
-            # Si une ancienne connexion existe sous un autre ID, la transférer
-            client_task_id = getattr(request, "task_id", None)
-            if client_task_id and client_task_id in websocket_manager.task_connections:
-                await websocket_manager.transfer_connection(client_task_id, task_id)
-                logger.info(f"🔄 Connexion transférée de {client_task_id} vers {task_id}")
-            logger.info(f"📌 Nouvelle connexion WebSocket pour le task_id : {task_id}")
+        # 2. Instanciation du workflow
+        from workflow.devis_workflow import DevisWorkflow
+        workflow = DevisWorkflow(validation_enabled=True, draft_mode=True, force_production=True)
 
-        # 3. Initialisation du tracking (sans attente bloquante)
-        task = progress_tracker.create_task(
-            user_prompt="Génération de devis",
-            draft_mode=False,
-            task_id=task_id
-        )
-        task_id = task.task_id
-        # 4. Notification de mise à jour du task_id si transféré
-        original_id = getattr(request, "task_id", None)
-        if original_id and original_id != task_id:
-            await websocket_manager.send_task_update(
-                original_id,
-                {
-                    "type": "task_id_updated",
-                    "new_task_id": task_id,
-                    "message": "Task ID mis à jour"
-                }
-            )
+        # 3. Lancement en arrière-plan
+        background_tasks.add_task(workflow.process_prompt, request.message, task_id)
 
-        # 5. Lancement du workflow en arrière-plan (IMMÉDIAT)
-        background_tasks.add_task(
-            _execute_quote_with_progress,
-            task_id,
-            request.prompt or request.message,
-            True,  # draft_mode par défaut
-            []      # conversation_history par défaut
-        )
-
-        # 6. Réponse IMMÉDIATE (pas d'attente WebSocket)
+        # 4. Réponse immédiate typée
         return WorkflowCreateQuoteResponse(
             success=True,
             task_id=task_id,
             status="started",
-            message="🚀 Workflow démarré - suivez via WebSocket",
-            websocket_url=f"/ws/ws/{task_id}"
+            message="🚀 Workflow démarré en arrière-plan",
+            websocket_url=f"/ws/assistant/{task_id}"
         )
 
+    except ImportError as e:
+        logger.error(f"Erreur import workflow: {e}")
+        raise HTTPException(status_code=500, detail="Workflow de devis non disponible")
     except Exception as e:
-        logger.error(f"❌ Erreur création workflow : {e}")
+        logger.error(f"❌ Erreur exécution workflow: {e}")
         return WorkflowCreateQuoteResponse(
             success=False,
+            task_id=task_id,
             status="error",
-            error=str(e),
-            message="Erreur lors du démarrage du workflow"
+            message=f"**Erreur technique**\n\n{e}"
         )
+
         
 @router.websocket("/ws/assistant/{task_id}")
 async def websocket_endpoint(websocket: WebSocket, task_id: str):
@@ -1194,126 +1162,6 @@ async def clear_conversation():
         'success': True,
         'message': 'Historique effacé'
     }
-
-@router.post('/workflow/create_quote')
-async def start_quote_workflow(message_data: ChatMessage):
-    """Exécute le workflow de création de devis avec le message utilisateur"""
-    try:
-        from workflow.devis_workflow import DevisWorkflow
-        import json
-        
-        # Créer une instance du workflow
-        workflow = DevisWorkflow(validation_enabled=True, draft_mode=True, force_production=True)  # Mode draft pour éviter la création immédiate
-        
-        # Analyser le message pour extraire les informations
-        message = message_data.message
-        logger.info(f"Exécution du workflow pour: {message}")
-        
-        # Exécuter le workflow complet
-        result = await workflow.process_prompt(message)
-        # 🔧 CORRECTION: Gestion interaction utilisateur requise
-        if result.get("status") == "user_interaction_required":
-            logger.info(f"🎯 Interaction utilisateur requise - Task: {task_id}")
-            return WorkflowCreateQuoteResponse(
-                success=False,
-                status="user_interaction_required", 
-                task_id=task_id,
-                interaction_data=result,  # Inclure les données d'interaction
-                message="Interaction utilisateur requise"
-            )
-        workflow_status = result.get('workflow_status', 'completed')
-        
-        # Analyser les résultats pour créer une réponse intelligente
-        response = {
-            'success': result.get('success', False),
-            'workflow_status': workflow_status,
-            'message': '',
-            'quote_data': result,
-            'quick_actions': [],
-            'warnings': [],
-            'suggestions': []
-        }
-        
-        # Construire le message de réponse
-        if result.get('success'):
-            response['message'] = "**Analyse de devis terminée**\n\n"
-            
-            # Informations client
-            client_name = result.get('client_name', 'Client non identifié')
-            response['message'] += f"**Client :** {client_name}\n"
-            
-            # Gestion des doublons
-            duplicates = result.get('duplicate_analysis', {})
-            if duplicates.get('action_required'):
-                recent_count = len(duplicates.get('recent_quotes', []))
-                draft_count = len(duplicates.get('draft_quotes', []))
-                
-                if recent_count > 0:
-                    response['warnings'].append(f"{recent_count} devis récent(s) trouvé(s)")
-                    response['message'] += f"⚠️ **{recent_count} devis récent(s)** trouvé(s) pour ce client\n"
-                    
-                if draft_count > 0:
-                    response['warnings'].append(f"{draft_count} devis brouillon(s) existant(s)")
-                    response['message'] += f"📝 **{draft_count} devis brouillon(s)** existant(s)\n"
-                
-                response['message'] += "\n**Actions recommandées :**\n"
-                response['quick_actions'].extend([
-                    {'action': 'view_duplicates', 'label': 'Voir les doublons', 'type': 'info'},
-                    {'action': 'create_new', 'label': 'Créer nouveau devis', 'type': 'primary'},
-                    {'action': 'update_existing', 'label': 'Modifier un existant', 'type': 'secondary'}
-                ])
-            else:
-                response['message'] += "✅ **Aucun doublon détecté**\n"
-                response['quick_actions'].append(
-                    {'action': 'create_quote', 'label': 'Créer le devis', 'type': 'primary'}
-                )
-            
-            # Aperçu du devis
-            quote_preview = result.get('quote_preview', {})
-            if quote_preview:
-                total = quote_preview.get('total_amount', 0)
-                currency = quote_preview.get('currency', 'EUR')
-                response['message'] += f"\n**Montant estimé :** {total} {currency}\n"
-                
-                products = quote_preview.get('products', [])
-                if products:
-                    response['message'] += f"**Produits :** {len(products)} article(s)\n"
-            
-            # Actions rapides générales
-            response['quick_actions'].extend([
-                {'action': 'open_classic', 'label': 'Interface classique', 'type': 'secondary'},
-                {'action': 'export_pdf', 'label': 'Exporter PDF', 'type': 'info'}
-            ])
-            
-        else:
-            if workflow_status in ["waiting_for_input", "configuring_quantities"]:
-                response['message'] = result.get('message', '')
-                response['quick_actions'] = result.get('quick_actions', [])
-                response['suggestions'] = result.get('suggestions', []) if isinstance(result.get('suggestions'), list) else result.get('suggestions', {}).get('examples', [])
-            else:
-                response['success'] = False
-                response['message'] = f"**Erreur lors de l'analyse**\n\n{result.get('error', 'Erreur inconnue')}"
-                response['quick_actions'] = [
-                    {'action': 'retry', 'label': 'Réessayer', 'type': 'primary'},
-                    {'action': 'manual_entry', 'label': 'Saisie manuelle', 'type': 'secondary'}
-                ]
-        
-        return response
-        
-    except ImportError as e:
-        logger.error(f"Erreur import workflow: {e}")
-        raise HTTPException(status_code=500, detail="Workflow de devis non disponible")
-    except Exception as e:
-        logger.error(f"Erreur exécution workflow: {e}")
-        return {
-            'success': False,
-            'message': f"**Erreur technique**\n\n{str(e)}",
-            'workflow_status': 'error',
-            'quick_actions': [
-                {'action': 'retry', 'label': 'Réessayer', 'type': 'primary'},
-                {'action': 'contact_support', 'label': 'Contacter le support', 'type': 'info'}
-            ]
-        }
 
 # Route pour servir l'interface intelligente
 @router.get('/interface', response_class=HTMLResponse)
