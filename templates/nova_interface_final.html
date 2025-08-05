@@ -661,6 +661,7 @@
                     placeholder="Exemple : Créer un devis pour 12 imprimantes 50ppm pour RONDOT..."
                     rows="1"
                     onkeypress="handleKeyPress(event)"
+                    onkeydown="handleKeyPress(event)"
                     oninput="handleInput()"
                     aria-label="Message"
                     required
@@ -1291,10 +1292,9 @@ const message = input.value.trim();
                 console.log("🌐 WebSocket déjà connecté.");
                 return;
             }
-
+            const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
             const wsUrl = ${wsProtocol}://${window.location.host}/api/assistant/ws/${taskId};
             console.log(`🔌 Tentative de connexion à ${wsUrl}`);
-            const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
             websocket = new WebSocket(wsUrl);
 
             websocket.onopen = () => {
@@ -1319,7 +1319,7 @@ const message = input.value.trim();
                     console.log("🤝 Interaction utilisateur détectée:", data.interaction_data);
                     if (data.interaction_data && data.interaction_data.interaction_type === 'client_selection') {
                     hideProgress();
-                    showClientSelection(data.interaction_data);
+                    
                     { const opts = data.interaction_data.options || data.interaction_data.clients || []; const name = data.interaction_data.original_client_name || data.interaction_data.client_name || ''; addClientSelection(opts, name); }
                     }  
                 } else if (data.type === 'client_selection_required') {
