@@ -1,588 +1,163 @@
+# NOVA - Assistant Commercial Intelligent
 
--# 📋 Projet NOVA - POC Intelligence Commerciale
--
--> **🔄 Dernière mise à jour : 11/07/2025 - Accès Externe Configuré + Assistant Intelligent Complet**
--
--## 🎯 **Statut Actuel : ASSISTANT INTELLIGENT ACCESSIBLE PUBLIQUEMENT**
--
--NOVA est maintenant un **assistant commercial intelligent complet** avec interface conversationnelle moderne, **accessible publiquement via Internet**, workflow de devis automatisé, et capacités avancées de suggestion, validation et gestion des doublons.
--
--### 🌟 **NOUVELLE FONCTIONNALITÉ MAJEURE : ACCÈS PUBLIC CONFIGURÉ**
--- ✅ **Accès Internet Public** : Interface accessible via `http://178.33.233.120:8000/api/assistant/interface`
--- ✅ **Pare-feu Windows Configuré** : Port 8000 ouvert pour accès externe
--- ✅ **Configuration Serveur Validée** : uvicorn en écoute sur 0.0.0.0:8000
--- ✅ **Tests de Connectivité** : Validation complète de l'accès public
--
--### 🌟 **FONCTIONNALITÉS INTELLIGENTES OPÉRATIONNELLES**
--- ✅ **Interface Conversationnelle** : Interface moderne accessible publiquement
--- ✅ **Workflow de Devis Intégré** : Création de devis via langage naturel
--- ✅ **Actions Rapides Intelligentes** : Boutons contextuels pour guider l'utilisateur
--- ✅ **Gestion Interactive des Doublons** : Détection et résolution en temps réel
--- ✅ **Mode Draft** : Validation utilisateur avant création définitive
--
-----
--
--## 🚀 **Nouvelles Fonctionnalités Majeures**
--
--### 1. **🤖 Assistant Intelligent Conversationnel**
--- ✅ **Interface Moderne** : Interface web conversationnelle intuitive
--- ✅ **Traitement Langage Naturel** : Compréhension des demandes en français
--- ✅ **Workflow de Devis Automatisé** : Création de devis via conversation
--- ✅ **Actions Rapides Contextuelles** : Boutons intelligents selon la situation
--- ✅ **Gestion Interactive des Doublons** : Résolution en temps réel
--- ✅ **Mode Draft Sécurisé** : Validation avant création définitive
--- ✅ **Historique de Conversation** : Mémoire des échanges utilisateur
--- ✅ **Suggestions Proactives** : Propositions intelligentes d'actions
--
--### 2. **🧠 Moteur d'Intelligence (SuggestionEngine)**
--- ✅ **Principe révolutionnaire** : "NOVA ne dit jamais juste 'Non trouvé' - il propose TOUJOURS une solution"
--- ✅ **Correspondance floue** : Algorithmes multi-niveaux avec fuzzywuzzy
--- ✅ **Types de suggestions** : CLIENT_MATCH, PRODUCT_MATCH, ACTION_SUGGESTION, CORRECTION, ALTERNATIVE
--- ✅ **Niveaux de confiance** : HIGH (>90%), MEDIUM (70-90%), LOW (50-70%), VERY_LOW (<50%)
--- ✅ **Conversations intelligentes** : Prompts adaptatifs selon le contexte
--
--### 3. **🔍 Validateur Client Avancé (ClientValidator)**
--- ✅ **Validation SIRET** : Intégration API INSEE pour vérification entreprises
--- ✅ **Contrôle doublons** : Détection intelligente avec scoring de similarité
--- ✅ **Normalisation données** : Standardisation automatique des informations
--- ✅ **Validation email** : Contrôle syntaxique et domaine avec email-validator
--- ✅ **Cache HTTP** : Optimisation des appels API avec requests-cache
--- ✅ **API Adresse Gouv** : Validation et normalisation des adresses françaises
--
--### 4. **📋 Gestion Intelligente des Doublons**
--- ✅ **Détection automatique** : Analyse des devis existants avant création
--- ✅ **Classification avancée** : recent_quotes, similar_quotes, draft_quotes
--- ✅ **Interface utilisateur** : Gestion interactive des conflits
--- ✅ **Historique complet** : Tracking des actions utilisateur
--
--### 5. **⚙️ Scripts d'Automatisation PowerShell**
--- ✅ **start_nova.ps1** : Démarrage complet avec vérifications et bannière
--- ✅ **push_both.ps1** : Push automatique dual-repository avec interface graphique
--- ✅ **Diagnostic intégré** : Tests de santé des dépendances et services
--
--### 6. **📚 Documentation Technique Complète**
--- ✅ **GUIDE_TECHNIQUE_COMPLET.md** : Architecture détaillée avec diagrammes Mermaid
--- ✅ **MANUEL_UTILISATEUR.md** : Guide utilisateur complet (16KB)
--- ✅ **SCENARIOS_DEMONSTRATION.md** : Scénarios de test détaillés (27KB)
--- ✅ **GUIDE_CREATION_CLIENT.md** : Processus de création client
--
-----
--
--## 🧪 **Tests et Validations Avancés**
--
--### **Test de Gestion des Doublons (27/06/2025)**
-+# NOVA - Intelligent Quote Middleware
-+# NOVA - Middleware de devis intelligent
-+
-+## Overview / Vue d'ensemble
-+
-+**English**
-+NOVA is a FastAPI middleware that coordinates the Claude LLM with Salesforce and SAP Business One. It extracts quote requests written in natural language, validates customer data and triggers CRM/ERP actions.
-+
-+**Français**
-+NOVA est un intergiciel construit avec FastAPI qui orchestre Claude, Salesforce et SAP Business One. Il analyse les demandes de devis en langage naturel, valide les informations clients et déclenche les actions CRM/ERP.
-+
-+## Architecture
-+```mermaid
-+graph TB
-+    User[👤 Commercial] --> Interface[🖥️ Interface FastAPI]
-+    Interface --> Workflow[⚙️ DevisWorkflow]
-+    Workflow --> Claude[🤖 Claude API]
-+    Workflow --> Validator[✅ ClientValidator]
-+    Workflow --> MCP[🔌 MCP Connector]
-+    MCP --> SF[📊 Salesforce MCP]
-+    MCP --> SAP[🏭 SAP MCP]
-+    SF --> SalesforceAPI[☁️ Salesforce API]
-+    SAP --> SAPAPI[🗄️ SAP B1 REST API]
-+```
-+
-+## Main modules / Modules principaux
-+- **services/llm_extractor.py** – Claude prompt analysis and JSON extraction.
-+- **services/mcp_connector.py** – communication layer with Salesforce and SAP.
-+- **services/suggestion_engine.py** – generates contextual suggestions.
-+- **workflow/devis_workflow.py** – coordinates extraction, validation and MCP calls.
-+- **services/module_loader.py** – loads optional modules and dynamic routes.
-+
-+## Testing / Tests
-+Integration scenarios are implemented in `tests/test_integration_workflow.py`. Pytest configuration and markers are defined in `tests/pytest.ini`. An optional helper `tests/setup_tests.sh` can create a skeleton test suite.
-+
-+Install dependencies:
- ```bash
--python tests/test_devis_generique.py "faire un devis pour Edge Communications"
-+pip install -r requirements.txt
-+# install test utilities
-+pip install pytest pytest-asyncio pytest-mock pytest-cov pytest-timeout
- ```
- 
--### **Résultats de la Détection Intelligente :**
--- **Statut** : `warning` - Doublons détectés
--- **Client** : Edge Communications (CD451796)
--- **Doublons trouvés** : 4 devis brouillons existants
--- **Montants détectés** : 23 920€ (devis similaires)
--- **Dates** : Du 11/06/2025 au 12/06/2025
--- **Action** : Interface utilisateur pour choix de l'action
--
--### **Capacités de Suggestion Validées :**
--- **Correspondance floue** : Clients avec noms similaires (>70% similarité)
--- **Alternatives produits** : Suggestions basées sur références partielles
--- **Actions contextuelles** : Création, modification, ou réutilisation
--- **Conversations adaptatives** : Prompts personnalisés selon le niveau de confiance
--
-----
--
--## 🧪 **Tests Assistant Intelligent (01/07/2025)**
--
--### **Test d'Intégration Complet**
-+Run the tests:
- ```bash
--python test_workflow_demo.py
--```
--
--**Résultats :**
--- **Workflow API** : ✅ Opérationnel
--- **Interface Web** : ✅ Accessible (43,085 caractères)
--- **Actions Rapides** : ✅ 2 actions disponibles (Réessayer, Saisie manuelle)
--- **Mode Draft** : ✅ Planification interactive
--
-----
--
--## 🌐 **Accès à l'Application**
--
--### **🔗 URLs d'Accès Direct**
--
--#### **🌍 Accès Public (Réseau Internet)**
--- **Interface Principale :** `http://178.33.233.120:8000/api/assistant/interface`
--- **API Santé :** `http://178.33.233.120:8000/health`
--- **Documentation API :** `http://178.33.233.120:8000/docs`
--
--#### **🏠 Accès Local (Sur le serveur)**
--- **Interface Principale :** `http://localhost:8000/api/assistant/interface`
--- **API Santé :** `http://localhost:8000/health`
--- **Documentation API :** `http://localhost:8000/docs`
--
--### **🎮 Démo et Tests**
--- **Interface de Démo :** `http://178.33.233.120:8000/static/nova_interface.html`
--- **Test Workflow :** `http://178.33.233.120:8000/static/demo_devis.html`
--
-----
--
--## 🔧 **Informations Techniques**
--
--### **Environnement de Production**
--- **OS :** Windows Server OVH 2019
--- **IP Publique :** 178.33.233.120
--- **Python :** 3.9+ avec venv actif
--- **PostgreSQL :** Version 17 sur port 5432
--- **Répertoire :** `C:\Users\PPZ\NOVA-SERVER`
--
--### **Ports et Services**
--- **Port Principal :** 8000 (ouvert au public)
--- **Base de Données :** 5432 (local uniquement)
--- **Pare-feu :** Configuré pour accès externe
--
--### **Démarrage des Services**
--```powershell
--# Démarrage automatisé
--.\start_nova.ps1
--
--# Démarrage manuel
--uvicorn main:app --reload --host 0.0.0.0 --port 8000
--```
--
-----
--
--## 🤖 **Fonctionnalités de l'Assistant NOVA**
--
--### **📋 Génération de Devis**
--- ✅ Requêtes en langage naturel
--- ✅ Extraction automatique des besoins clients
--- ✅ Récupération des données produits SAP
--- ✅ Intégration Salesforce
--- ✅ Gestion des ruptures de stock avec alternatives
--
--### **👥 Gestion des Clients**
--- ✅ Recherche intelligente de clients existants
--- ✅ Création de nouveaux clients avec validation
--- ✅ Validation enrichie (INSEE, adresses gouvernementales)
--- ✅ Détection et résolution des doublons
--
--### **📦 Catalogue Produits**
--- ✅ Consultation du catalogue SAP
--- ✅ Vérification des stocks en temps réel
--- ✅ Suggestions de produits alternatifs
--- ✅ Calculs de prix automatiques
--
--### **🧠 Intelligence Artificielle**
--- ✅ Chat conversationnel avec Claude
--- ✅ Compréhension du langage naturel
--- ✅ Suggestions contextuelles
--- ✅ Apprentissage des préférences utilisateur
--
-----
--
--## 📊 **APIs Principales**
--
--### **🤖 Assistant Intelligent**
--| Endpoint | Méthode | Description |
--|----------|---------|-------------|
--| `/api/assistant/interface` | GET | Interface conversationnelle |
--| `/api/assistant/chat` | POST | Chat avec l'assistant |
--| `/api/assistant/workflow/create_quote` | POST | Workflow de création de devis |
--| `/api/assistant/conversation/history` | GET | Historique des conversations |
--
--### **🔧 APIs Techniques**
--| Endpoint | Méthode | Description |
--|----------|---------|-------------|
--| `/health` | GET | Contrôle de santé |
--| `/docs` | GET | Documentation Swagger |
--| `/sync/test_connections` | GET | Test des connexions |
--| `/suggestions/client` | POST | Suggestions de clients |
--| `/suggestions/product` | POST | Suggestions de produits |
--
-----
--
--## ⚡ **Démarrage Rapide**
--
--### **1. Pour les Utilisateurs**
--1. 🌐 Accédez à : `http://178.33.233.120:8000/api/assistant/interface`
--2. 💬 Tapez votre demande en français : *"Créer un devis pour 100 référence A00025 pour le client Edge Communications"*
--3. ✅ NOVA traite automatiquement la demande et génère le devis
--
--### **2. Pour les Développeurs**
--```bash
--# Test via API
--curl -X POST "http://178.33.233.120:8000/api/assistant/chat" \
--  -H "Content-Type: application/json" \
--  -d '{"message": "Bonjour NOVA, je veux créer un devis"}'
--```
--
--### **3. Pour les Administrateurs**
--```powershell
--# Vérification de l'état
--Invoke-RestMethod -Uri "http://localhost:8000/health"
--
--# Redémarrage si nécessaire
--.\start_nova.ps1
--```
--
-----
--
--## 🔒 **Sécurité et Configuration**
--
-----
--
--## 📊 **Métriques et Capacités Avancées**
--
--| Composant | Performance | Nouvelles Capacités | Statut |
--|-----------|-------------|---------------------|--------|
--| **SuggestionEngine** | <500ms | Correspondance floue multi-algorithmes | ✅ Révolutionnaire |
--| **ClientValidator** | <2s | Validation SIRET + INSEE API | ✅ Professionnel |
--| **Détection Doublons** | <1s | Classification intelligente | ✅ Intelligent |
--| **Workflow Complet** | 10-15s | Gestion interactive des conflits | ✅ Robuste |
--| **Scripts PowerShell** | <30s | Démarrage automatisé complet | ✅ Opérationnel |
--| **Documentation** | 85KB+ | Guides techniques complets | ✅ Professionnel |
--
--### **🏗️ Architecture Technique**
--
--```
--                ┌─────────────────────────────────────────────────────┐
--                │                🎯 NOVA ASSISTANT IA                │
--                │             Interface Conversationnelle            │
--                └─────────────────┬───────────────────────────────────┘
--                                  │
--                ┌─────────────────┴───────────────────────────────────┐
--                │              🧠 COUCHE INTELLIGENCE               │
--                ├─────────────────┬─────────────────┬─────────────────┤
--                │ SuggestionEngine│ ClientValidator │ DuplicateEngine │
--                │ (Correspondance │  (SIRET + API)  │ (Classification)│
--                │     floue)      │                 │                 │
--                └─────────────────┴─────────────────┴─────────────────┘
--                                  │
--                ┌─────────────────┴───────────────────────────────────┐
--                │              🔌 COUCHE INTÉGRATION                │
--                ├─────────────────┬─────────────────┬─────────────────┤
--                │   Claude API    │   MCP Servers   │ PostgreSQL      │
--                │  (Extraction)   │   (SF + SAP)    │(Persistence)    │
--                └─────────────────┴─────────────────┴─────────────────┘
--                                  │                        │
--                                  ▼                        ▼
--                       ┌─────────────────┐    ┌─────────────────┐
--                       │   Salesforce    │    │  SAP Business   │
--                       │      API        │    │      One        │
--                       └─────────────────┘    └─────────────────┘
--```
--
-----
--
--## 🎯 **Roadmap Évolutive - Assistant IA Commercial**
--
--### **Phase 1 : Intelligence Avancée (Semaines 6-7) ✅ COMPLÉTÉE**
--1. ✅ **SuggestionEngine** : Moteur d'intelligence avec correspondance floue
--2. ✅ **ClientValidator** : Validation enrichie avec APIs externes
--3. ✅ **Gestion Doublons** : Détection et résolution intelligente
--4. ✅ **Scripts Automatisation** : Démarrage et déploiement simplifiés
--
--### **Phase 2 : Interface Utilisateur Enrichie (Semaine 8)**
--1. **Dashboard Analytics** : Métriques temps réel des suggestions
--2. **Interface Doublons** : UI graphique pour résolution des conflits
--3. **Historique Intelligent** : Tracking des décisions utilisateur
--4. **Mobile Responsive** : Adaptation tablettes/smartphones
--
--### **Phase 3 : IA Prédictive (Semaine 9)**
--1. **Machine Learning** : Apprentissage des préférences utilisateur
--2. **Prédiction Besoins** : Suggestions proactives basées sur l'historique
--3. **Analytics Avancées** : Reporting automatique des performances
--4. **API Externes** : Intégration données économiques (INSEE, etc.)
--
--### **Phase 4 : Production Industrielle (Semaine 10)**
--1. **Tests Charge** : Validation 100+ utilisateurs simultanés
--2. **Sécurité Renforcée** : Audit complet + chiffrement données
--3. **Monitoring Avancé** : Alertes proactives et métriques détaillées
--4. **Formation Utilisateurs** : Guides interactifs et vidéos
--
-----
--
--## 💡 **Points d'Attention pour Continuité**
--
--### **🎯 Fonctionnalités Révolutionnaires Opérationnelles :**
--- **SuggestionEngine** : Intelligence artificielle pour suggestions contextuelles
--- **ClientValidator** : Validation enrichie avec APIs gouvernementales
--- **Gestion Doublons** : Détection et résolution intelligente des conflits
--- **Scripts PowerShell** : Automatisation complète du déploiement
--- **Documentation Technique** : Guides complets avec diagrammes Mermaid
--- **Architecture MCP** : Communication robuste entre systèmes
--- **Tracking Avancé** : Suivi détaillé des tâches et performances
--
--### **🔒 Composants Critiques Stabilisés :**
--- **Configuration Alembic** : Base de données synchronisée
--- **Sessions SAP** : Gestion cookies et authentification
--- **Appels MCP** : Structure de communication validée
--- **APIs Externes** : INSEE, Adresse Gouv, email-validator
--- **Cache HTTP** : Optimisation des requêtes répétitives
--
--### **🚀 Optimisations Futures Identifiées :**
--- **Cache Redis** : Métadonnées SAP et suggestions fréquentes
--- **Pool Connexions** : PostgreSQL haute performance
--- **Parallélisation** : Appels simultanés SF/SAP/Claude
--- **Compression** : Optimisation bande passante API
--- **Machine Learning** : Apprentissage des patterns utilisateur
--
-----
--
--## 🎉 **Évolution Majeure Accomplie - Assistant IA Commercial**
--
--**NOVA a évolué d'un simple POC vers un véritable assistant commercial intelligent avec des capacités d'IA avancées.**
--
--### **🔄 Transformation Technique Réalisée :**
--1. **Architecture Hybride** : Passage d'un POC simple vers une architecture multi-couches sophistiquée
--2. **Intelligence Artificielle** : Intégration de capacités d'IA conversationnelle et prédictive
--3. **Robustesse Opérationnelle** : Gestion des erreurs, doublons et validation avancée
--4. **Expérience Utilisateur** : Interface moderne et workflow conversationnel intuitif
--5. **Accès Public** : Configuration réseau pour démonstration externe
--
--### **📈 Résultats Mesurables :**
--- **Précision** : 95%+ de réussite dans la génération de devis
--- **Performance** : <15 secondes pour un workflow complet
--- **Intelligence** : Suggestions avec 90%+ de pertinence
--- **Robustesse** : Gestion des cas d'exception et alternatives
--- **Facilité** : Interface utilisateur intuitive sans formation
--
-----
--
--## 🔧 **Informations Techniques Essentielles**
--
--### **Environnement de Production**
--- **OS :** Windows Server OVH 2019
--- **IP Publique :** 178.33.233.120
--- **Python :** 3.9+ avec venv actif
--- **PostgreSQL :** Version 17 sur port 5432
--- **Répertoire :** `C:\Users\PPZ\NOVA-SERVER`
--
--### **Configuration Réseau**
--- **Port Principal :** 8000 (ouvert au public via pare-feu Windows)
--- **Base de Données :** 5432 (accès local uniquement)
--- **Pare-feu :** Règle "NOVA API Port 8000" active
--- **Serveur :** uvicorn en écoute sur 0.0.0.0:8000
--```env
--DATABASE_URL=postgresql://nova_user:spirit@localhost:5432/nova_mcp
--ANTHROPIC_API_KEY=sk-ant-api03-...
--SALESFORCE_USERNAME=...
--SAP_REST_BASE_URL=https://51.91.130.136:50000/b1s/v1
--PRICE_ENGINE_URL=https://price-engine.example.com/api
--INSEE_API_KEY=... # Validation SIRET
--EMAIL_VALIDATION_ENABLED=true
--CACHE_ENABLED=true
-+pytest                # all tests
-+pytest -m integration # only integration tests
- ```
--
--### **Accès Sécurisé**
--- 🔐 Pare-feu Windows configuré (port 8000)
--- 🛡️ Authentification SAP et Salesforce
--- 🔑 API Keys sécurisées
--- 📊 Monitoring des accès
--
-----
--
--## 📈 **Performance et Monitoring**
--
--### **Métriques Clés**
--- **Temps de génération :** < 2 minutes par devis
--- **Taux de succès :** > 95%
--- **Disponibilité :** 99.9%
--- **Précision client :** > 98%
--
--### **Surveillance**
--- 🔍 Health checks automatiques
--- 📊 Logs détaillés
--- ⚡ Alertes en cas de dysfonctionnement
--- 📈 Métriques de performance
--
-----
--
--## 🛠️ **Architecture Technique**
--
--### **Composants Principaux**
--- **🤖 Claude LLM :** Intelligence artificielle conversationnelle
--- **🔗 MCP Connector :** Orchestration des flux de données
--- **💾 PostgreSQL :** Base de données centralisée
--- **⚡ FastAPI :** API REST haute performance
--- **🌐 Interface Web :** Interface utilisateur responsive
--
--### **Intégrations**
--- **Salesforce :** CRM et gestion des comptes clients
--- **SAP Business One :** ERP et catalogue produits
--- **INSEE API :** Validation des entreprises françaises
--- **Adresse Gouv :** Validation des adresses
--
-----
--
--## 📚 **Documentation Complète**
--
--### **Guides Disponibles**
--- 📖 **Guide Utilisateur :** `MANUEL_UTILISATEUR.md`
--- 🔧 **Guide Technique :** `GUIDE_TECHNIQUE_COMPLET.md`
--- 📋 **Planification :** `Planification_POC.md`
--- 🧪 **Tests :** `process_test_nova.md`
--
--### **Scripts de Test**
--- `test_interface_complete.py` - Test complet de l'interface
--- `test_workflow_demo.py` - Démonstration du workflow
--- `test_final.py` - Tests finaux de validation
--
-----
--
--## 🎯 **Roadmap et Évolutions**
--
--### **✅ Phase 1 : POC Fonctionnel (Terminée)**
--- Assistant intelligent opérationnel
--- Intégrations Salesforce/SAP/Claude
--- Interface web accessible publiquement
--- Documentation complète
--
--### **🔄 Phase 2 : Optimisations (En cours)**
--- Cache Redis pour les performances
--- Monitoring avancé
--- Tests de charge
--- Sécurité renforcée
--
--### **🚀 Phase 3 : Production (Planifiée)**
--- Composant Salesforce Lightning
--- Application mobile
--- Machine Learning avancé
--- Déploiement multi-environnements
--
-----
--
--## 📞 **Support et Contact**
--
--### **👤 Responsable Projet**
--**Philippe PEREZ** - Développeur Principal  
--- 📧 Email : [contact]
--- 🏢 Projet : POC LLM Salesforce/SAP
--- ⏰ Disponibilité : 2 jours/semaine
--
--### **🔧 Support Technique**
--**Bruno CHARNAL** - Support Technique  
--- ⏰ Disponibilité : 1/2 journée/semaine
--
--### **🆘 Urgences**
--- 🌐 Interface non accessible : Vérifier `http://178.33.233.120:8000/health`
--- 🔧 Problème technique : Consulter `GUIDE_TECHNIQUE_COMPLET.md`
--- 📱 Support : Contacter l'équipe projet
--
-----
--
--## ✅ **Status Global**
--
--| Composant | Status | Version | Dernière Vérification |
--|-----------|--------|---------|----------------------|
--| 🤖 Assistant IA | ✅ Opérationnel | 1.0.0 | 04/07/2025 |
--| 🌐 Interface Web | ✅ Publique | 1.0.0 | 04/07/2025 |
--| 🔗 Intégrations | ✅ Stables | 1.0.0 | 04/07/2025 |
--| 💾 Base de Données | ✅ Synchronisée | 1.0.0 | 04/07/2025 |
--| 📊 Documentation | ✅ Complète | 1.0.0 | 04/07/2025 |
--
-----
--
-----
--
--## 📚 **Documentation Complète**
--
--### **Guides Disponibles**
--- 📖 **Guide Utilisateur :** `MANUEL_UTILISATEUR.md` (16KB)
--- 🔧 **Guide Technique :** `GUIDE_TECHNIQUE_COMPLET.md` (Architecture détaillée)
--- 📋 **Planification :** `Planification_POC.md`
--- 🧪 **Tests :** `process_test_nova.md`
--- 👥 **Création Client :** `GUIDE_CREATION_CLIENT.md`
--- 🎬 **Scénarios Démo :** `SCENARIOS_DEMONSTRATION.md` (27KB)
--
--### **Scripts de Test et Validation**
--- `test_interface_complete.py` - Test complet de l'interface
--- `test_workflow_demo.py` - Démonstration du workflow
--- `test_final.py` - Tests finaux de validation
--- `test_suggestion_integration.py` - Validation SuggestionEngine
--- `test_devis_generique.py` - Test génération devis
--
-----
--
--## 📞 **Support et Contact**
--
--### **👤 Responsable Projet**
--**Philippe PEREZ** - Développeur Principal  
--- 🏢 Projet : POC LLM Salesforce/SAP
--- ⏰ Disponibilité : 2 jours/semaine
--
--### **🔧 Support Technique**
--**Bruno CHARNAL** - Support Technique  
--- ⏰ Disponibilité : 1/2 journée/semaine
--
--### **🆘 Dépannage Rapide**
--- 🌐 Interface non accessible : Vérifier `http://178.33.233.120:8000/health`
--- 🔧 Problème technique : Consulter `GUIDE_TECHNIQUE_COMPLET.md`
--- 🔄 Redémarrage serveur : `.\start_nova.ps1`
--
-----
--
--## ✅ **Status Global**
--
--| Composant | Status | Version | Dernière Vérification |
--|-----------|--------|---------|----------------------|
--| 🤖 Assistant IA | ✅ Opérationnel | 1.0.0 | 04/07/2025 |
--| 🌐 Interface Web | ✅ Publique | 1.0.0 | 04/07/2025 |
--| 🔗 Intégrations | ✅ Stables | 1.0.0 | 04/07/2025 |
--| 💾 Base de Données | ✅ Synchronisée | 1.0.0 | 04/07/2025 |
--| 📊 Documentation | ✅ Complète | 1.0.0 | 04/07/2025 |
--| 🧠 IA Avancée | ✅ Active | 1.0.0 | 04/07/2025 |
--| 🔒 Sécurité | 🔄 En cours | 1.0.0 | À sécuriser |
--
-----
--
--**🎉 NOVA - Assistant Commercial Intelligent : OPÉRATIONNEL ET ACCESSIBLE PUBLIQUEMENT !**
--
--**🔗 Accès Direct :** `http://178.33.233.120:8000/api/assistant/interface`
--
--**💡 Prochaine Étape :** Sécurisation de l'accès public (HTTPS, authentification, restrictions IP)
- 
-EOF
-)
+**Statut : ðŸŸ¢ OPÃ‰RATIONNEL** | **Version : 1.0.0** | **DerniÃ¨re MAJ : 05/08/2025**
+
+## ðŸš€ AccÃ¨s Direct
+
+- **Interface Principal :** http://178.33.233.120:8000/api/assistant/interface
+- **API SantÃ© :** http://178.33.233.120:8000/health
+- **Documentation :** http://178.33.233.120:8000/docs
+
+## ðŸ“‹ Vue d'Ensemble
+
+NOVA est un assistant commercial intelligent qui coordonne Claude LLM avec Salesforce et SAP Business One. Il analyse les demandes de devis en langage naturel et automatise les processus CRM/ERP.
+
+### FonctionnalitÃ©s ClÃ©s
+
+- âœ… **GÃ©nÃ©ration de devis** via conversation naturelle
+- âœ… **Validation client** avec APIs INSEE et Adresse Gouv
+- âœ… **Detection doublons** intelligente
+- âœ… **Suggestions contextuelles** avec correspondance floue
+- âœ… **Interface web** responsive et moderne
+
+## ðŸ—ï¸ Architecture
+
+```
+Interface Web â†’ FastAPI â†’ Claude LLM
+                      â†“
+              PostgreSQL + MCP Connector
+                      â†“
+              Salesforce â†” SAP Business One
+```
+
+### Composants Techniques
+
+| Composant | Statut | Description |
+|-----------|---------|-------------|
+| **Claude API** | âœ… | Traitement langage naturel |
+| **PostgreSQL** | âœ… | Base de donnÃ©es (port 5432) |
+| **MCP Connector** | âœ… | Orchestration SF/SAP |
+| **SuggestionEngine** | âœ… | IA suggestions contextuelles |
+| **ClientValidator** | âœ… | Validation SIRET + adresses |
+
+## âš¡ DÃ©marrage Rapide
+
+### Utilisateurs
+```
+1. AccÃ©dez Ã  : http://178.33.233.120:8000/api/assistant/interface
+2. Tapez : "CrÃ©er un devis pour 100 rÃ©f A00025 pour Edge Communications"
+3. NOVA traite automatiquement la demande
+```
+
+### DÃ©veloppeurs
+```bash
+# Test API
+curl -X POST "http://178.33.233.120:8000/api/assistant/chat" \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Bonjour NOVA"}'
+```
+
+### Administrateurs
+```powershell
+# DÃ©marrage
+.\start_nova.ps1
+
+# VÃ©rification
+Invoke-RestMethod -Uri "http://localhost:8000/health"
+```
+
+## ðŸ“¡ APIs Principales
+
+### Assistant
+- `GET /api/assistant/interface` - Interface conversationnelle
+- `POST /api/assistant/chat` - Chat avec l'assistant
+- `POST /api/assistant/workflow/create_quote` - Workflow devis
+
+### Technique
+- `GET /health` - ContrÃ´le santÃ©
+- `GET /docs` - Documentation Swagger
+- `POST /suggestions/client` - Suggestions clients
+
+## ðŸ”§ Configuration
+
+### Environnement
+- **OS :** Windows Server 2019 (OVH)
+- **IP :** 178.33.233.120
+- **Python :** 3.9+ avec venv
+- **RÃ©pertoire :** `C:\Users\PPZ\NOVA-SERVER`
+
+### Variables ClÃ©s
+```env
+DATABASE_URL=postgresql://nova_user:***@localhost:5432/nova_mcp
+ANTHROPIC_API_KEY=sk-ant-api03-***
+SAP_REST_BASE_URL=https://51.91.130.136:50000/b1s/v1
+INSEE_API_KEY=***
+```
+
+## ðŸ§ª Tests
+
+```bash
+# Installation dÃ©pendances
+pip install -r requirements.txt
+pip install pytest pytest-asyncio pytest-mock
+
+# ExÃ©cution tests
+pytest                # Tous les tests
+pytest -m integration # Tests d'intÃ©gration seulement
+
+# Tests manuels
+python tests/test_workflow_demo.py
+```
+
+## ðŸ“Š Performance
+
+- **Temps gÃ©nÃ©ration :** < 2 minutes par devis
+- **Taux succÃ¨s :** > 95%
+- **DisponibilitÃ© :** 99.9%
+- **PrÃ©cision client :** > 98%
+
+## ðŸ“š Documentation
+
+- **Guide Utilisateur :** `MANUEL_UTILISATEUR.md`
+- **Guide Technique :** `GUIDE_TECHNIQUE_COMPLET.md`
+- **ScÃ©narios Test :** `SCENARIOS_DEMONSTRATION.md`
+
+## ðŸ†˜ Support
+
+### Ã‰quipe
+- **Philippe PEREZ** - Chef de projet IA (2j/semaine)
+- **Bruno CHARNAL** - Support technique (0.5j/semaine)
+
+### DÃ©pannage
+- Interface inaccessible â†’ VÃ©rifier health endpoint
+- ProblÃ¨me technique â†’ Consulter guide technique
+- RedÃ©marrage â†’ `.\start_nova.ps1`
+
+## ðŸ—ºï¸ Roadmap
+
+### âœ… Phase 1 - POC (TerminÃ©e)
+- Assistant intelligent opÃ©rationnel
+- IntÃ©grations SF/SAP/Claude
+- Interface publique
+
+### ðŸ”„ Phase 2 - Optimisation (En cours)
+- Cache Redis
+- Monitoring avancÃ©
+- Tests charge
+
+### ðŸ“‹ Phase 3 - Production (PlanifiÃ©e)
+- SÃ©curitÃ© renforcÃ©e
+- Application mobile
+- Machine Learning avancÃ©
+
+## ðŸ”’ SÃ©curitÃ©
+
+- Pare-feu Windows configurÃ© (port 8000)
+- API Keys sÃ©curisÃ©es
+- Authentification SAP/SF
+- **TODO :** HTTPS + authentification utilisateur
+
+---
+
+**ðŸŒŸ NOVA est opÃ©rationnel et accessible publiquement !**
+**Prochaine Ã©tape :** SÃ©curisation accÃ¨s public

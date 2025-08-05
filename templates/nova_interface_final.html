@@ -1150,40 +1150,33 @@
         // Gestion entrées et formulaire
         async function handleFormSubmit(event) {
             event.preventDefault();
-            
+
             const input = document.getElementById('chatInput');
             const message = input.value.trim();
-            
+
             // Validation côté client
             if (!message) {
-                Situation = templates/nova_interface_final.html / script / handleFormSubmit / validation message vide
-            if (!message) {
                 showValidationError('Veuillez saisir un message');
-                Situation = templates/nova_interface_final.html / script / handleFormSubmit / structure validation
-            return false;
+                return false;
             }
 
             if (message.length < 3) {
                 showValidationError('Le message doit contenir au moins 3 caractères');
-                Situation = templates/nova_interface_final.html / script / handleFormSubmit / validation longueur
                 return false;
             }
-            
+
             if (message.length > 1000) {
                 showValidationError('Le message ne peut pas dépasser 1000 caractères');
-                Situation = templates/nova_interface_final.html / script / handleFormSubmit / validation longueur max
                 return false;
             }
-            
+
             if (isProcessing) {
                 showValidationError('Traitement en cours, veuillez patienter...');
-                Situation = templates/nova_interface_final.html / script / handleFormSubmit / validation processing
                 return false;
             }
-            
+
             // Si validation OK, envoyer le message
             await sendMessage();
-            
         }
         
         function showValidationError(message) {
