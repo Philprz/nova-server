@@ -661,7 +661,6 @@
                     class="chat-input"
                     placeholder="Exemple : Créer un devis pour 12 imprimantes 50ppm pour RONDOT..."
                     rows="1"
-                    onkeydown="handleKeyPress(event)"
                     oninput="handleInput()"
                     aria-label="Message"
                     required
@@ -1227,12 +1226,22 @@
             }
         }
         
+        // Fonction de gestion des touches pour le chat
         function handleKeyPress(event) {
             if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault();
                 document.getElementById('chatForm').dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
             }
         }
+
+        // Attendre que le DOM soit complètement chargé
+        document.addEventListener('DOMContentLoaded', function() {
+            // Ajouter un écouteur d'événements pour la gestion des touches
+            const chatInput = document.getElementById('chatInput');
+            if (chatInput) {
+                chatInput.addEventListener('keydown', handleKeyPress);
+            }
+        });
 
         function updateSendButton() {
             const input = document.getElementById('chatInput');
@@ -1371,12 +1380,6 @@
                 connectWebSocket(taskId);
             }, 3000);
         }
-
-        // Initialisation avec validation du formulaire
-        document.addEventListener('DOMContentLoaded', function() {
-            const input = document.getElementById('chatInput');
-            const form = document.getElementById('chatForm');
-
             // Focus sur l'input
             input.focus();
 
