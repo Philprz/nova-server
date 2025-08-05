@@ -62,25 +62,34 @@ class WebSocketManager:
         :param task_id: identifiant de tâche (optionnel)
         """
         await websocket.accept()
+        logger.info(f"🔌 WebSocket ACCEPTÉ pour task_id: {task_id}")
+        if task_id not in self.task_connections:
+            self.task_connections[task_id] = []
+        
+        self.task_connections[task_id].append(websocket)
+        self.active_connections.add(websocket)
+        
+        # Nouveau log
+        logger.info(f"✅ WebSocket AJOUTÉ - Total connexions: {len(self.active_connections)}, Pour {task_id}: {len(self.task_connections[task_id])}")
+        
+        # Vérifier les messages en attente
+        if task_id in self.pending_messages:
+            logger.info(f"📨 {len(self.pending_messages[task_id])} messages en attente pour {task_id}")
         self.active_connections.setdefault("all", set()).add(websocket)
         if task_id:
             self.task_connections.setdefault(task_id, set()).add(websocket)
         logger.info("WebSocket connecté", extra={"task_id": task_id})
 
-    def disconnect(self, websocket: WebSocket, task_id: str = None) -> None:
-        """
-        Déconnecte une WebSocket et nettoie les enregistrements.
-
-        :param websocket: instance du WebSocket
-        :param task_id: identifiant de tâche (optionnel)
-        """
-        self.active_connections.get("all", set()).discard(websocket)
-        if task_id:
-            conns = self.task_connections.get(task_id, set())
-            conns.discard(websocket)
-            if not conns:
-                self.task_connections.pop(task_id, None)
-        logger.info("WebSocket déconnecté", extra={"task_id": task_id})
+    async def disconnect(self, websocket: WebSocket, task_id: str):
+        """Déconnecte un WebSocket"""
+        # Nouveau log
+        logger.info(f"🔌 WebSocket DÉCONNEXION demandée pour {task_id}")
+        
+        if task_id in self.task_connections:
+            if websocket in self.task_connections[task_id]:
+                self.task_connections[task_id].remove(websocket)
+                # Nouveau log
+                logger.info(f"✅ WebSocket RETIRÉ de {task_id}")
 
     async def broadcast_to_task(
         self,
