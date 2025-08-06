@@ -209,7 +209,6 @@ class WebSocketManager:
         logger.info(f"📨 Message WebSocket préparé: {json.dumps(message, indent=2, default=str)}")
         # Toujours enrichir le message avec un timestamp
         if 'timestamp' not in message:
-            from datetime import datetime, timezone
             message['timestamp'] = datetime.now(timezone.utc).isoformat()
 
 
@@ -255,7 +254,6 @@ class WebSocketManager:
                 "message": "Reconnexion WebSocket requise"
             }
             if 'timestamp' not in recon_msg:
-                from datetime import datetime, timezone
                 recon_msg['timestamp'] = datetime.now(timezone.utc).isoformat()
             await self.broadcast_to_task(task_id, recon_msg)
 
