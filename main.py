@@ -19,7 +19,7 @@ from routes.routes_devis import router as quote_router
 from routes.routes_clients import router as client_router
 from routes.routes_client_listing import router as client_listing_router
 from routes.routes_websocket import router as websocket_router
-
+from routes.routes_intelligent_assistant import router as intelligent_assistant_router
 if sys.platform == "win32":
     os.environ["PYTHONIOENCODING"] = "utf-8"    
     
@@ -134,7 +134,7 @@ app.include_router(quote_router, prefix="/api/assistant", tags=["Quote"])
 app.include_router(client_router, prefix="/api/assistant", tags=["Client"])
 app.include_router(client_listing_router, prefix="/api/clients", tags=["Client Listing"])
 app.include_router(websocket_router, prefix="/ws", tags=["WebSocket"])
-
+app.include_router(intelligent_assistant_router)
 # Route temporaire de débogage
 @app.get('/api/assistant/interface')
 async def get_assistant_interface():
