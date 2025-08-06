@@ -22,6 +22,8 @@ from utils.client_lister import find_client_everywhere
 from services.product_search_engine import ProductSearchEngine
 from workflow.client_creation_workflow import client_creation_workflow
 from services.price_engine import PriceEngineService
+from services.cache_manager import referential_cache
+
 # Configuration sécurisée pour Windows
 if sys.platform == "win32":
     os.environ["PYTHONIOENCODING"] = "utf-8"
