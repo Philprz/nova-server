@@ -654,7 +654,7 @@
                 </div>
             </div>
 
-            <form id="chatForm" class="input-container" onsubmit="handleFormSubmit(event)" novalidate>
+            <form id="chatForm" class="input-container" novalidate>
                 
                 <textarea
                     id="chatInput"
@@ -1177,6 +1177,7 @@
 
             // Si validation OK, envoyer le message
             await sendMessage();
+            return false
         }
         
         function showValidationError(message) {
@@ -1223,7 +1224,10 @@
         function handleKeyPress(event) {
             if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault();
-                document.getElementById('chatForm').dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+                const form = document.getElementById('chatForm');
+            if (form) {
+                form.requestSubmit(); // Utiliser requestSubmit pour déclencher l'événement submit
+            }
             }
         }
 
@@ -1256,6 +1260,7 @@
                 button.style.opacity = '0.6';
                 button.style.cursor = 'not-allowed';
             }
+            button.disabled = !message || message.length < 3 || message.length > 1000 || isProcessing;            
         }
 
         function autoResize() {
@@ -1429,6 +1434,10 @@
         document.addEventListener('DOMContentLoaded', function() {
             const input = document.getElementById('chatInput');
             const form = document.getElementById('chatForm');
+            // CORRECTION: Ajouter l'écouteur sur le formulaire
+            if (form) {
+                form.addEventListener('submit', handleFormSubmit);
+            }
             
             if (input) {
                 input.addEventListener('keydown', handleKeyPress);
