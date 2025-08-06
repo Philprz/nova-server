@@ -885,44 +885,65 @@
 
         async function trackProgress(taskId) {
             if (!taskId) return;
-            // On attend 1.5s avant de commencer le polling, puis on lance le setInterval (une seule fois)
-            setTimeout(() => {
-                progressInterval = setInterval(async () => {
-                    try {
-                        const response = await fetch(`/progress/task/${taskId}`);
-                        if (!response.ok) {
-                            // Arrêter si 404 ou autre erreur fatale
-                            clearInterval(progressInterval);
-                            hideProgress();
-                            handleTaskError('Tâche introuvable ou erreur serveur');
-                            return;
-                        }
-                        const data = await response.json();
 
-                        if (data.status === 'completed') {
-                            clearInterval(progressInterval);
-                            hideProgress();
-                            handleTaskComplete(data);
-                        } else if (data.status === 'failed') {
-                            clearInterval(progressInterval);
-                            hideProgress();
-                            handleTaskError(data.error);
-                        } else {
-                            updateProgress(
-                                data.overall_progress,
-                                data.current_step_title || 'Traitement en cours...',
-                                data.completed_steps
-                            );
+            // Si un polling est déjà en cours, on le stoppe
+            if (progressInterval) {
+                clearInterval(progressInterval);
+                progressInterval = null;
+            }
+
+            // Attendre 1.5 seconde avant de démarrer le polling (pour laisser le temps au backend)
+            await new Promise(resolve => setTimeout(resolve, 1500));
+
+            progressInterval = setInterval(async () => {
+                try {
+                    const response = await fetch(`/progress/task/${taskId}`);
+                    if (!response.ok) {
+                        clearInterval(progressInterval);
+                        progressInterval = null;
+                        hideProgress();
+                        handleTaskError('Tâche introuvable ou erreur serveur');
+                        return;
+                    }
+                    if (response.status === 404) {
+                        console.warn(Tâche ${taskId} pas encore disponible, nouvelle tentative...);
+                        return; // Continuer le polling
                         }
-                    } catch (error) {
+                        // Arrêter si autre erreur fatale
                         clearInterval(progressInterval);
                         hideProgress();
-                        handleTaskError('Erreur suivi progression : ' + error.message);
-                        console.error('Erreur suivi progression :', error);
+                        handleTaskError('Tâche introuvable ou erreur serveur');
+                        return;
                     }
-                }, 1000);
-            }, 1500); // délai avant le premier polling
+                    const data = await response.json();
+
+                    if (data.status === 'completed') {
+                        clearInterval(progressInterval);
+                        progressInterval = null;
+                        hideProgress();
+                        handleTaskComplete(data);
+                    } else if (data.status === 'failed') {
+                        clearInterval(progressInterval);
+                        progressInterval = null;
+                        hideProgress();
+                        handleTaskError(data.error || 'Tâche échouée');
+                    } else {
+                        updateProgress(
+                            data.overall_progress,
+                            data.current_step_title || 'Traitement en cours...',
+                            data.completed_steps
+                        );
+                    }
+                } catch (error) {
+                    clearInterval(progressInterval);
+                    progressInterval = null;
+                    hideProgress();
+                    handleTaskError('Erreur suivi progression : ' + error.message);
+                    console.error('Erreur suivi progression :', error);
+                }
+            }, 1000);
         }
+        
 
         // Enrichissement client
         function showEnrichment(clientData) {
@@ -1081,8 +1102,11 @@
                 if (result?.task_id) {
                     currentTaskId = result.task_id;
                     showProgress();
+                    // Attendre que la tâche soit créée côté serveur
+                    setTimeout(() => {
                     connectWebSocket(result.task_id);
-                    await trackProgress(result.task_id);
+                    trackProgress(result.task_id);
+                    }, 500);
                 } else {
                     handleDirectResponse(result);
                 }
@@ -1343,7 +1367,8 @@
 
             websocket.onclose = (event) => {
                 console.warn(`🔌 WebSocket déconnecté. Code: ${event.code}, Raison: ${event.reason}`);
-                if (event.code !== 1000) {
+                console.log(🔌 WebSocket fermé. Code: ${event.code}, Raison: ${event.reason});
+                if (event.code !== 1000 && event.code !== 1001) {
                     addMessage("La connexion a été perdue. Tentative de reconnexion...", 'system');
                     attemptReconnection(taskId);
                 }

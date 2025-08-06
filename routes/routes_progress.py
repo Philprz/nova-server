@@ -69,7 +69,7 @@ async def get_task_progress(task_id: str):
     """
     Récupère le statut de progression d'une tâche
     """
-    logger.info(f"Recherche de la tâche {task_id} dans progress_tracker")
+    logger.info(f"📍 Requête progression pour tâche: {task_id}")
     try:
         # Rechercher d'abord dans les tâches actives
         task = progress_tracker.get_task(task_id)
@@ -77,11 +77,9 @@ async def get_task_progress(task_id: str):
             progress_data = task.get_overall_progress()
             return TaskProgressResponse(**progress_data)
         # Attendre brièvement si tâche en cours de création
-        import asyncio
         if not task:
             await asyncio.sleep(1.0)  # Attendre 1000ms
             task = progress_tracker.get_task(task_id)
-        
         # Rechercher dans l'historique si pas trouvé
         historical_task = progress_tracker.get_task_from_history(task_id)
         if historical_task:
