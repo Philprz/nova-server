@@ -1280,7 +1280,7 @@
                 return;
             }
             const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-            const wsUrl = `${wsProtocol}://${window.location.host}/ws/${taskId}`;
+            const wsUrl = ${wsProtocol}://${window.location.host}/ws/task/${taskId};
 
             console.log(`🔌 Tentative de connexion à ${wsUrl}`);
             websocket = new WebSocket(wsUrl);
