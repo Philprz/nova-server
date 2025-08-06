@@ -119,28 +119,7 @@ async def get_task_detailed_progress(task_id: str):
     except Exception as e:
         logger.error(f"Erreur récupération progression détaillée {task_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-@router.get("/quote_status/{task_id}")
-async def get_quote_status(task_id: str, detailed: bool = False):
-    """
-    Route spécifique pour l'interface NOVA - Compatible avec l'ancien système
-    """
-    try:
-        task = progress_tracker.get_task(task_id)
-        if not task:
-            # Chercher dans l'historique
-            for completed_task in progress_tracker.completed_tasks:
-                if completed_task.get("task_id") == task_id:
-                    return completed_task
-            raise HTTPException(status_code=404, detail=f"Tâche {task_id} non trouvée")
-        
-        if detailed:
-            return task.get_detailed_progress()
-        else:
-            return task.get_overall_progress()
-        
-    except Exception as e:
-        logger.error(f"Erreur récupération quote_status {task_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/tasks/active")
 async def get_active_tasks():
     """
@@ -454,13 +433,11 @@ async def get_quote_status(task_id: str, detailed: bool = False):
     """
     try:
         task = progress_tracker.get_task(task_id)
-        
         if not task:
-            logger.info(f"Recherche de la tâche {task_id} dans progress_tracker")
+            logger.info(f"Tâche {task_id} non trouvée dans les tâches actives, recherche dans l'historique")
             # Vérifier dans l'historique
             history = progress_tracker.get_task_history()
-            task_history = next((t for t in history if t["task_id"] == task_id), None)
-            
+            task_history = next((t for t in history if t.get("task_id") == task_id), None)
             if task_history:
                 return {
                     "found": True,
@@ -468,6 +445,7 @@ async def get_quote_status(task_id: str, detailed: bool = False):
                     **task_history
                 }
             else:
+                logger.warning(f"Tâche {task_id} introuvable même dans l'historique")
                 raise HTTPException(status_code=404, detail=f"Tâche {task_id} introuvable")
         
         # Tâche active trouvée
@@ -483,11 +461,13 @@ async def get_quote_status(task_id: str, detailed: bool = False):
                 "completed": False,
                 **task.get_overall_progress()
             }
-            
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Erreur récupération quote_status {task_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Erreur lors de la récupération: {str(e)}")
+
+
 
 @router.get("/active_quotes")
 async def get_active_quotes():
@@ -506,7 +486,7 @@ async def get_quote_history(limit: int = 20):
     """Récupère l'historique des générations de devis"""
     try:
         history = progress_tracker.get_task_history()
-        
+        logger.info(f"Recherche de la tâche {task_id} dans progress_tracker")
         # Trier par date de fin décroissante et limiter
         history_sorted = sorted(
             history, 
@@ -610,7 +590,7 @@ async def get_progress_stats():
     try:
         active_tasks = progress_tracker.get_all_active_tasks()
         history = progress_tracker.get_task_history()
-        
+        logger.info(f"Recherche de la tâche {task_id} dans progress_tracker")
         # Calculer statistiques
         total_tasks = len(active_tasks) + len(history)
         completed_tasks = len([t for t in history if t.get("status") == "completed"])
