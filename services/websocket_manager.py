@@ -29,7 +29,11 @@ WS_SEND_LATENCY = Histogram(
 
 logger = logging.getLogger(__name__)
 
-
+def json_serializer(obj):
+    """Sérialiseur JSON pour gérer les types datetime"""
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    raise TypeError(f"Type {type(obj)} not serializable")
 class TaskUpdateModel(BaseModel, extra=Extra.forbid):
     type: str
     task_id: str
@@ -147,7 +151,7 @@ class WebSocketManager:
         for ws in sockets:
             try:
                 with WS_SEND_LATENCY.labels(task_id=task_id, type=payload.get("type")).time():
-                    await ws.send_text(json.dumps(payload))
+                    await ws.send_text(json.dumps(payload, default=json_serializer))
                 WS_MESSAGES_SENT.labels(task_id=task_id, type=payload.get("type")).inc()
             except WebSocketDisconnect:
                 logger.info("Client déconnecté proprement", extra={"task_id": task_id})
@@ -205,7 +209,7 @@ class WebSocketManager:
             for i, client in enumerate(interaction_data.get('client_options', [])):
                 logger.info(f"📊 Client {i+1}: {client.get('name')} ({client.get('source')})")
         else:
-            logger.warning(f"⚠️ Pas de client_options dans interaction_data: {json.dumps(interaction_data, indent=2, default=str)}")
+            logger.warning(f"⚠️ Pas de client_options dans interaction_data: {json.dumps(interaction_data, indent=2, default=json_serializer)}")
 
         message = {
             "type": "user_interaction_required",
@@ -339,10 +343,9 @@ class WebSocketManager:
             self.task_connections[new_task_id] = connections
             # Transférer messages en attente
             if old_task_id in self.pending_messages:
-                self.pending_messages[new_task_id] = self.pending_messages[old_task_id]
-                del self.pending_messages[old_task_id]
+                self.pending_messages[new_task_id] = self.pending_messages.pop(old_task_id)
             # Nettoyer ancienne entrée
-            del self.task_connections[old_task_id]
+            self.task_connections.pop(old_task_id)
             logger.info(f"🔄 Connexions transférées: {old_task_id} → {new_task_id}")
             # Notifier les clients du changement
             for websocket in connections:
@@ -352,9 +355,10 @@ class WebSocketManager:
                         "old_task_id": old_task_id,
                         "new_task_id": new_task_id,
                         "timestamp": datetime.now(timezone.utc).isoformat()
-                    }))
+                    }, default=json_serializer))
                 except Exception as e:
                     logger.error(f"Erreur notification changement task_id: {e}")
+
 
     def cleanup_pending_messages(self, task_id: str):
         """
