@@ -104,6 +104,8 @@ class WebSocketManager:
         :param wait: attendre une connexion active
         :param timeout: délai d'attente maximal
         """
+
+
         if wait:
             start = time.monotonic()
             while not self.task_connections.get(task_id):
@@ -122,7 +124,9 @@ class WebSocketManager:
         if not sockets:
             logger.warning("Aucune socket disponible pour broadcast", extra={"task_id": task_id})
             return
-
+        # Normaliser la présence de 'timestamp'
+        if 'timestamp' not in message:
+            message['timestamp'] = datetime.now(timezone.utc).isoformat()
         # Validate payload
         try:
             validated = TaskUpdateModel(**{k: message[k] for k in ["type", "task_id", "timestamp"]})
@@ -203,6 +207,11 @@ class WebSocketManager:
         }
 
         logger.info(f"📨 Message WebSocket préparé: {json.dumps(message, indent=2, default=str)}")
+        # Toujours enrichir le message avec un timestamp
+        if 'timestamp' not in message:
+            from datetime import datetime, timezone
+            message['timestamp'] = datetime.now(timezone.utc).isoformat()
+
 
         # Si pas de connexions, stocker et planifier retry
         if not self.task_connections.get(task_id):
@@ -239,11 +248,17 @@ class WebSocketManager:
         task = progress_tracker.get_task(task_id)
         if task and task.status.name in ['RUNNING', 'PENDING']:
             # Notifier le frontend qu'une reconnexion est nécessaire
-            await self.broadcast_to_task(task_id, {
+            # Ajouter un 'timestamp' au message de reconnexion si absent
+            recon_msg = {
                 "type": "reconnection_required",
                 "task_id": task_id,
                 "message": "Reconnexion WebSocket requise"
-            }, wait=False)
+            }
+            if 'timestamp' not in recon_msg:
+                from datetime import datetime, timezone
+                recon_msg['timestamp'] = datetime.now(timezone.utc).isoformat()
+            await self.broadcast_to_task(task_id, recon_msg)
+
 
     def _schedule_retry(self, task_id: str) -> None:
         # Requiert une reconnexion côté client ET tente périodiquement d'envoyer les messages en attente
