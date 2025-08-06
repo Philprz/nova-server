@@ -76,6 +76,13 @@ class WebSocketManager:
         # Vérifier les messages en attente
         if task_id in self.pending_messages:
             logger.info(f"📨 {len(self.pending_messages[task_id])} messages en attente pour {task_id}")
+            # Envoyer chaque message puis vider la liste
+            for msg in self.pending_messages[task_id]:
+                try:
+                    await self.broadcast_to_task(task_id, msg, wait=False)
+                except Exception as e:
+                    logger.error(f"Erreur lors de l'envoi du message en attente : {e}")
+            self.pending_messages[task_id] = []
         logger.info("WebSocket connecté", extra={"task_id": task_id})
 
     async def disconnect(self, websocket: "WebSocket", task_id: str):
@@ -111,9 +118,10 @@ class WebSocketManager:
             while not self.task_connections.get(task_id):
                 if time.monotonic() - start > timeout:
                     logger.warning(
-                        "Aucune connexion pour tâche après timeout",
-                        extra={"task_id": task_id, "timeout": timeout},
+                        "Aucune connexion pour tâche après timeout, message stocké pour task_id=%s", task_id
                     )
+                    # Stockage automatique dans la file d'attente
+                    self.pending_messages.setdefault(task_id, []).append(message)
                     return
                 await asyncio.sleep(RETRY_INTERVAL)
 
