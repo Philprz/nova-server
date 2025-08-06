@@ -1348,97 +1348,91 @@
             };
         }
 
+        // Assure-toi que reconnectInterval est global
+        let reconnectInterval = null;
+
+        // Fonction de tentative de reconnexion WebSocket avec limitation
         function attemptReconnection(taskId) {
             if (reconnectInterval) return;
-            
             let attempts = 0;
             const maxAttempts = 5;
-            
+
             reconnectInterval = setInterval(() => {
                 attempts++;
                 console.log(`🔄 Tentative reconnexion ${attempts}/${maxAttempts}`);
-                
+
                 if (attempts >= maxAttempts) {
                     clearInterval(reconnectInterval);
                     reconnectInterval = null;
                     console.log("❌ Abandon reconnexion WebSocket");
                     return;
                 }
-                
+
                 connectWebSocket(taskId);
             }, 3000);
         }
-            // Focus sur l'input
-            input.focus();
 
-            // Vérification de la connexion
-            checkConnection();
-            setInterval(checkConnection, 30000);
+        // Initialisation au chargement de la page, une seule fois !
+        document.addEventListener('DOMContentLoaded', function () {
+            const input = document.getElementById('chatInput');
+            const form = document.getElementById('chatForm');
+            const errorDiv = document.getElementById('validationError');
 
-            // Validation du formulaire en temps réel
-            form.addEventListener('input', function(e) {
-                if (e.target.id === 'chatInput') {
-                    const message = e.target.value.trim();
+            // Écouteur de validation formulaire sur submit
+            if (form) {
+                form.addEventListener('submit', handleFormSubmit);
 
-                    // Validation en temps réel
-                    if (message.length > 1000) {
-                        showValidationError('Message trop long (maximum 1000 caractères)');
-                    } else {
-                        const errorDiv = document.getElementById('validationError');
-                        if (errorDiv) {
+                // Validation du formulaire en temps réel (input sur le champ de saisie)
+                form.addEventListener('input', function (e) {
+                    if (e.target.id === 'chatInput') {
+                        const message = e.target.value.trim();
+                        if (message.length > 1000) {
+                            showValidationError('Message trop long (maximum 1000 caractères)');
+                        } else if (errorDiv) {
                             errorDiv.style.display = 'none';
                         }
                     }
-                }
-            });
-
-            // Écouter les soumissions de formulaire pour extraire task_id
-            document.addEventListener('submit', function(e) {
-                if (e.target.id === 'chatForm') {
-                    // Le handleFormSubmit s'occupe déjà de la validation
-                    return;
-                }
-
-                if (e.target.closest('.input-container')) {
-                    // Extraire task_id de la réponse pour connecter WebSocket
-                    setTimeout(() => {
-                        const messagesContainer = document.getElementById('chatMessages');
-                        if (messagesContainer) {
-                            // Chercher un task_id dans les messages récents
-                            const lastMessages = messagesContainer.querySelectorAll('.message');
-                            if (lastMessages.length > 0) {
-                                const lastMessage = lastMessages[lastMessages.length - 1];
-                                const taskIdMatch = lastMessage.textContent.match(/quote_\d{8}_\d{6}_\w+/);
-                                if (taskIdMatch) {
-                                    const taskId = taskIdMatch[0];
-                                    console.log("🎯 Task ID détecté:", taskId);
-                                    connectWebSocket(taskId);
-                                }
-                            }
-                        }
-                    }, 1000);
-                }
-            });
-
-        // Initialisation au chargement de la page
-        document.addEventListener('DOMContentLoaded', function() {
-            const input = document.getElementById('chatInput');
-            const form = document.getElementById('chatForm');
-            // CORRECTION: Ajouter l'écouteur sur le formulaire
-            if (form) {
-                form.addEventListener('submit', handleFormSubmit);
+                });
             }
-            
+
+            // Écouteur sur input pour gestion de l'envoi par clavier
             if (input) {
                 input.addEventListener('keydown', handleKeyPress);
                 input.focus();
             }
-            
-            // Vérification de la connexion
+
+            // Vérification de la connexion WebSocket régulière
             checkConnection();
             setInterval(checkConnection, 30000);
-            
+
             updateSendButton();
+        });
+
+        // Écouter toute soumission de formulaire pour détecter un nouveau task_id
+        document.addEventListener('submit', function (e) {
+            if (e.target.id === 'chatForm') {
+                // handleFormSubmit gère la logique principale
+                return;
+            }
+
+            if (e.target.closest('.input-container')) {
+                setTimeout(() => {
+                    const messagesContainer = document.getElementById('chatMessages');
+                    if (messagesContainer) {
+                        // Cherche un task_id dans le dernier message
+                        const lastMessages = messagesContainer.querySelectorAll('.message');
+                        if (lastMessages.length > 0) {
+                            const lastMessage = lastMessages[lastMessages.length - 1];
+                            const taskIdMatch = lastMessage.textContent.match(/quote_\d{8}_\d{6}_\w+/);
+                            if (taskIdMatch) {
+                                const taskId = taskIdMatch[0];
+                                console.log("🎯 Task ID détecté:", taskId);
+                                connectWebSocket(taskId);
+                            }
+                        }
+                    }
+                }, 1000);
+            }
         });
 
     </script>
