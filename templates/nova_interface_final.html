@@ -888,7 +888,7 @@
             
             progressInterval = setInterval(async () => {
                 try {
-                    const response = await fetch(`/progress/quote_status/${taskId}`);
+                    const response = await fetch(`/progress/task/${taskId}`);
                     const data = await response.json();
                     
                     if (data.status === 'completed') {
@@ -1040,7 +1040,7 @@
             showTyping();
 
             try {
-                const resp = await fetch('/workflow/create_quote', {
+                const resp = await fetch('/api/assistant/workflow/create_quote', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
