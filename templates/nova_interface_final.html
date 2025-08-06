@@ -888,7 +888,7 @@
             
             progressInterval = setInterval(async () => {
                 try {
-                    const response = await fetch(`/progress/task/${taskId}`);
+                    const response = await fetch(`/progress/quote_status/${taskId}`);
                     const data = await response.json();
                     
                     if (data.status === 'completed') {
@@ -1280,7 +1280,7 @@
                 return;
             }
             const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-            const wsUrl = `${wsProtocol}://${window.location.host}/ws/task/${taskId}`;
+            const wsUrl = `${wsProtocol}://${window.location.host}/ws/assistant/${taskId}`;
 
 
             console.log(`🔌 Tentative de connexion à ${wsUrl}`);
