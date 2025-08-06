@@ -1024,22 +1024,13 @@
             const errorDiv = document.getElementById('validationError');
             const message = (input?.value || '').trim();
 
-            // Garde-fous
+            // Garde-fous UI et validation
             if (isProcessing) return;
-            if (!message) {
-                showValidationError('Le message est vide');
-                return;
-            }
-            if (message.length < 3) {
-                showValidationError('Le message doit contenir au moins 3 caractères');
-                return;
-            }
-            if (message.length > 1000) {
-                showValidationError('Le message ne peut pas dépasser 1000 caractères');
-                return;
-            }
+            if (!message)      return showValidationError('Le message est vide');
+            if (message.length < 3)   return showValidationError('Le message doit contenir au moins 3 caractères');
+            if (message.length > 1000) return showValidationError('Le message ne peut pas dépasser 1000 caractères');
 
-            // Mise à jour UI avant l'appel réseau
+            // Préparation interface avant l'appel réseau
             isProcessing = true;
             if (errorDiv) errorDiv.style.display = 'none';
             addMessage(message, 'user');
@@ -1050,50 +1041,51 @@
 
             try {
                 const resp = await fetch('/api/assistant/workflow/create_quote', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-Request-ID': generateUUID(), // traçabilité
-                },
-                body: JSON.stringify({ message, draft_mode: false }),
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Request-ID': generateUUID(),
+                    },
+                    body: JSON.stringify({ message, draft_mode: false }),
                 });
 
-                // Gestion des erreurs HTTP (non-200)
+                // Gestion des erreurs HTTP
                 if (!resp.ok) {
                     let details = '';
+                    const text = await resp.text();
                     try {
-                        const errJson = await resp.json();
-                        details = errJson?.error || JSON.stringify(errJson);
-                    } catch {
-                        details = await resp.text();
+                        const errJson = JSON.parse(text);
+                        details = errJson?.error || text;
+                    } catch (e) {
+                        details = text;
                     }
                     throw new Error(`HTTP ${resp.status} — ${details}`);
                 }
-                let result = null;
-                if (resp.ok) {
-                    result = await resp.json();
 
+
+                const result = await resp.json();
                 hideTyping();
 
                 if (result?.task_id) {
                     currentTaskId = result.task_id;
                     showProgress();
-                    // Se connecter APRÈS réception du task_id
                     connectWebSocket(result.task_id);
                     await trackProgress(result.task_id);
                 } else {
-                  handleDirectResponse(result);
+                    handleDirectResponse(result);
                 }
-                } catch (error) {
-                    hideTyping();
-                    addMessage(`Erreur de connexion : ${error.message}`, 'system');
-                    console.error('Erreur sendMessage:', error);
-                } finally {
-                    isProcessing = false;
-                    updateSendButton();
-                    input?.focus();
-                }           
+
+            } catch (error) {
+                hideTyping();
+                addMessage(`Erreur de connexion : ${error.message}`, 'system');
+                console.error('Erreur sendMessage:', error);
+            } finally {
+                isProcessing = false;
+                updateSendButton();
+                input?.focus();
+            }
         }
+
 
 
         function handleDirectResponse(result) {
