@@ -133,7 +133,7 @@ async def start_quote_workflow(
     """
     try:
         # 1. Génération de task_id si nécessaire
-        task_id = request.websocket_task_id or request.task_id or f"quote_{datetime.now():%Y%m%d_%H%M%S}_{secrets.token_hex(4)}"
+        task_id = request.websocket_task_id or f"quote_{datetime.now():%Y%m%d_%H%M%S}_{secrets.token_hex(4)}"
         logger.info(f"🔑 Démarrage du DevisWorkflow pour task_id={task_id}")
 
         # 2. Instanciation du workflow
