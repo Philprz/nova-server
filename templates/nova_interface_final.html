@@ -1177,7 +1177,7 @@
 
             // Si validation OK, envoyer le message
             await sendMessage();
-            return false
+            return false;
         }
         
         function showValidationError(message) {
@@ -1249,17 +1249,7 @@
             // - Pas de message ou message trop court
             // - Message trop long
             // - Traitement en cours
-            const isValid = message.length >= 3 && message.length <= 1000 && !isProcessing;
-            button.disabled = !isValid;
-
-            // Mettre à jour l'apparence du bouton
-            if (isValid) {
-                button.style.opacity = '1';
-                button.style.cursor = 'pointer';
-            } else {
-                button.style.opacity = '0.6';
-                button.style.cursor = 'not-allowed';
-            }
+            
             button.disabled = !message || message.length < 3 || message.length > 1000 || isProcessing;            
         }
 
@@ -1297,7 +1287,7 @@
                 return;
             }
             const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-            const const wsUrl = `${wsProtocol}://${window.location.host}/ws/${taskId}`;
+            const wsUrl = ${wsProtocol}://${window.location.host}/ws/${taskId};
             console.log(`🔌 Tentative de connexion à ${wsUrl}`);
             websocket = new WebSocket(wsUrl);
 
