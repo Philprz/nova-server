@@ -1040,7 +1040,7 @@
             showTyping();
 
             try {
-                const resp = await fetch('/api/assistant/workflow/create_quote', {
+                const resp = await fetch('/workflow/create_quote', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -1280,7 +1280,8 @@
                 return;
             }
             const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-            const wsUrl = ${wsProtocol}://${window.location.host}/ws/task/${taskId};
+            const wsUrl = `${wsProtocol}://${window.location.host}/ws/task/${taskId}`;
+
 
             console.log(`🔌 Tentative de connexion à ${wsUrl}`);
             websocket = new WebSocket(wsUrl);
