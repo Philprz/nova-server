@@ -23,6 +23,7 @@ from services.product_search_engine import ProductSearchEngine
 from workflow.client_creation_workflow import client_creation_workflow
 from services.price_engine import PriceEngineService
 from services.cache_manager import referential_cache
+from workflow.validation_workflow import SequentialValidator
 
 # Configuration sécurisée pour Windows
 if sys.platform == "win32":
