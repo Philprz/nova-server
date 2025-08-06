@@ -659,9 +659,8 @@
                 <textarea
                     id="chatInput"
                     class="chat-input"
-                    placeholder="Exemple : Créer un devis pour 12 imprimantes 50ppm pour RONDOT..."
+                    placeholder="Exemple : Créer un devis de 12 imprimantes 50ppm pour RONDOT..."
                     rows="1"
-                    oninput="handleInput()"
                     aria-label="Message"
                     required
                     minlength="3"
@@ -1061,37 +1060,39 @@
 
                 // Gestion des erreurs HTTP (non-200)
                 if (!resp.ok) {
-                let details = '';
-                try {
-                    const errJson = await resp.json();
-                    details = errJson?.error || JSON.stringify(errJson);
-                } catch {
-                    details = await resp.text();
+                    let details = '';
+                    try {
+                        const errJson = await resp.json();
+                        details = errJson?.error || JSON.stringify(errJson);
+                    } catch {
+                        details = await resp.text();
+                    }
+                    throw new Error(`HTTP ${resp.status} — ${details}`);
                 }
-                throw new Error(`HTTP ${resp.status} — ${details}`);
-                }
+                let result = null;
+                if (resp.ok) {
+                    result = await resp.json();
 
-                const result = await resp.json();
                 hideTyping();
 
                 if (result?.task_id) {
-                currentTaskId = result.task_id;
-                showProgress();
-                // Se connecter APRÈS réception du task_id
-                connectWebSocket(result.task_id);
-                await trackProgress(result.task_id);
+                    currentTaskId = result.task_id;
+                    showProgress();
+                    // Se connecter APRÈS réception du task_id
+                    connectWebSocket(result.task_id);
+                    await trackProgress(result.task_id);
                 } else {
-                handleDirectResponse(result);
+                  handleDirectResponse(result);
                 }
-            } catch (error) {
-                hideTyping();
-                addMessage(`Erreur de connexion : ${error.message}`, 'system');
-                console.error('Erreur sendMessage:', error);
-            } finally {
-                isProcessing = false;
-                updateSendButton();
-                input?.focus();
-            }
+                } catch (error) {
+                    hideTyping();
+                    addMessage(`Erreur de connexion : ${error.message}`, 'system');
+                    console.error('Erreur sendMessage:', error);
+                } finally {
+                    isProcessing = false;
+                    updateSendButton();
+                    input?.focus();
+                }           
         }
 
 
@@ -1249,7 +1250,7 @@
             // - Pas de message ou message trop court
             // - Message trop long
             // - Traitement en cours
-            
+            console.log("[updateSendButton] isProcessing:", isProcessing, "| value:", input.value, "| trim:", message, "| len:", message.length, "| disabled sera:", (!message || message.length < 3 || message.length > 1000 || isProcessing));
             button.disabled = !message || message.length < 3 || message.length > 1000 || isProcessing;            
         }
 
@@ -1287,7 +1288,8 @@
                 return;
             }
             const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-            const wsUrl = ${wsProtocol}://${window.location.host}/ws/${taskId};
+            const wsUrl = `${wsProtocol}://${window.location.host}/ws/${taskId}`;
+
             console.log(`🔌 Tentative de connexion à ${wsUrl}`);
             websocket = new WebSocket(wsUrl);
 
@@ -1347,10 +1349,6 @@
                 addMessage("Une erreur de connexion est survenue.", 'system');
             };
         }
-
-        // Assure-toi que reconnectInterval est global
-        let reconnectInterval = null;
-
         // Fonction de tentative de reconnexion WebSocket avec limitation
         function attemptReconnection(taskId) {
             if (reconnectInterval) return;
@@ -1398,6 +1396,7 @@
             // Écouteur sur input pour gestion de l'envoi par clavier
             if (input) {
                 input.addEventListener('keydown', handleKeyPress);
+                input.addEventListener('input', handleInput);
                 input.focus();
             }
 
