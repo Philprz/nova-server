@@ -5009,105 +5009,128 @@ class DevisWorkflow:
         """Propose la sélection du client avec interface utilisateur - AMÉLIORÉ"""
         try:
             option_id = 1
-            client_options: List[Dict[str, Any]] = []
-
-            # Sources configurées unifiées
-            sources = {
-                'salesforce': {
-                    'name_field': 'Name',
-                    'id_field': 'Id',
-                    'display_info': {
-                        'account_number': 'AccountNumber',
-                        'phone': 'Phone',
-                        'city': 'BillingCity'
+            client_options: List[Dict[str, Any]] = []   
+            
+            # Utiliser les clients dédupliqués pour éviter les doublons
+            deduplicated_clients = search_results.get("deduplicated_clients", [])
+            logger.info(f"🔧 Traitement de {len(deduplicated_clients)} clients dédupliqués")
+            
+            for client in deduplicated_clients:
+                if not client:
+                    continue
+                    
+                source = client.get("source", "unknown")
+                
+                # Déterminer le nom et les IDs selon la source
+                if source == "both":
+                    # Client présent dans les deux systèmes
+                    name = client.get("Name") or client.get("CardName", f"Client {option_id}")
+                    source_display = "Salesforce & SAP"
+                    sf_id = client.get("Id", "N/A")
+                    sap_code = client.get("sap_data", {}).get("CardCode", "N/A")
+                    
+                    # Fusionner les détails des deux systèmes
+                    sap_data = client.get("sap_data", {})
+                    details = {
+                        "sf_id": sf_id,
+                        "sap_code": sap_code,
+                        "phone": client.get("Phone") or sap_data.get("Phone1", "N/A"),
+                        "address": sap_data.get("BillToStreet", "N/A"),
+                        "city": sap_data.get("City", client.get("BillingCity", "N/A")),
+                        "siret": sap_data.get("FederalTaxID", "N/A"),
+                        "industry": client.get("Industry", "N/A")
                     }
-                },
-                'sap': {
-                    'name_field': 'CardName',
-                    'id_field': 'CardCode',
-                    'display_info': {
-                        'card_code': 'CardCode',
-                        'phone': 'Phone1',
-                        'city': 'BillToCity'
+                    
+                elif source == "salesforce":
+                    name = client.get("Name", f"Client SF {option_id}")
+                    source_display = "Salesforce"
+                    details = {
+                        "sf_id": client.get("Id", "N/A"),
+                        "phone": client.get("Phone", "N/A"),
+                        "address": f"{client.get('BillingStreet', '')} {client.get('BillingCity', '')}".strip() or "N/A",
+                        "city": client.get("BillingCity", "N/A"),
+                        "industry": client.get("Industry", "N/A"),
+                        "siret": "Non disponible en Salesforce"
                     }
+                    
+                else:  # source == "sap"
+                    name = client.get("CardName", f"Client SAP {option_id}")
+                    source_display = "SAP"
+                    details = {
+                        "sap_code": client.get("CardCode", "N/A"),
+                        "phone": client.get("Phone1", "N/A"),
+                        "address": client.get("BillToStreet", "N/A"),
+                        "city": client.get("City", "N/A"),
+                        "siret": client.get("FederalTaxID", "N/A"),
+                        "country": client.get("Country", "N/A")
+                    }
+                
+                # Format dense pour l'affichage
+                display_info = []
+                if details.get("city") and details["city"] != "N/A":
+                    display_info.append(details["city"])
+                if details.get("siret") and details["siret"] != "N/A" and "Non disponible" not in details["siret"]:
+                    display_info.append(f"SIRET: {details['siret']}")
+                if details.get("phone") and details["phone"] != "N/A":
+                    display_info.append(f"Tél: {details['phone']}")
+                    
+                display_detail = " | ".join(display_info) if display_info else "Informations limitées"
+                
+                client_options.append({
+                    "id": option_id,
+                    "name": name,
+                    "source": source_display,
+                    "source_raw": source,
+                    "display_detail": display_detail,
+                    "sf_id": details.get("sf_id"),
+                    "sap_code": details.get("sap_code"), 
+                    "details": details
+                })
+            option_id += 1        
+            # Vérifier qu'on a des clients à proposer
+            if not client_options:
+                return {
+                    "status": "client_not_found",
+                    "requires_user_selection": False,
+                    "message": f"Client '{client_name}' introuvable."
                 }
+            validation_data = {
+                "options": client_options,
+                "clients": client_options,
+                "client_options": client_options,
+                "total_options": len(client_options),
+                "original_client_name": client_name,
+                "allow_create_new": True,
+                "interaction_type": "client_selection"
             }
 
-            total_found = search_results.get("total_found", 0)
-
-            if total_found == 1:
-                # Sélection automatique
-                for source, cfg in sources.items():
-                    clients = search_results.get(source, {}).get("clients", [])
-                    if clients:
-                        single = clients[0]
-                        return {
-                            "status": "client_found",
-                            "client_data": single,
-                            "source": source,
-                            "requires_user_selection": False
-                        }
-
-            elif total_found > 1:
-                # Construire la liste
-                for source, cfg in sources.items():
-                    for client in search_results.get(source, {}).get("clients", []):
-                        client_options.append({
-                            "id": client.get(cfg['id_field']),
-                            "name": client.get(cfg['name_field']),
-                            "source": source,
-                            "details": {
-                                "account_number": client.get(cfg['display_info'].get('account_number', ''), ''),
-                                "card_code": client.get(cfg['display_info'].get('card_code', cfg['id_field']), ''),
-                                "phone": client.get(cfg['display_info'].get('phone', ''), ''),
-                                "city": client.get(cfg['display_info'].get('city', ''), '')
-                            }
-                        })
-                        option_id += 1
-
-                validation_data = {
+            self.current_task.require_user_validation("client_selection", "client_selection", validation_data)
+            logger.info(f"🔍 DEBUG WORKFLOW: selection_result = {json.dumps({'status': 'user_interaction_required', 'client_options_count': len(client_options)}, indent=2, default=str)}")
+            logger.info(f"🔍 DEBUG WORKFLOW: interaction_data présent = {'interaction_data' in locals()}")
+            return {
+                "status": "user_interaction_required",
+                "requires_user_selection": True,
+                "validation_pending": True,
+                "task_id": self.task_id,
+                "message": f"Sélection client requise - {len(client_options)} options disponibles",
+                "interaction_type": "client_selection",
+                "interaction_data": {
+                    "type": "client_selection",
+                    "interaction_type": "client_selection",
                     "options": client_options,
                     "clients": client_options,
                     "client_options": client_options,
                     "total_options": len(client_options),
                     "original_client_name": client_name,
                     "allow_create_new": True,
-                    "interaction_type": "client_selection"
-                }
+                    "message": f"Sélection client requise - {len(client_options)} options disponibles"
+                },
+                "client_options": client_options,
+                "total_options": len(client_options),
+                "original_client_name": client_name,
+                "allow_create_new": True
+            }
 
-                self.current_task.require_user_validation("client_selection", "client_selection", validation_data)
-                logger.info(f"🔍 DEBUG WORKFLOW: selection_result = {json.dumps({'status': 'user_interaction_required', 'client_options_count': len(client_options)}, indent=2, default=str)}")
-                logger.info(f"🔍 DEBUG WORKFLOW: interaction_data présent = {'interaction_data' in locals()}")
-                return {
-                    "status": "user_interaction_required",
-                    "requires_user_selection": True,
-                    "validation_pending": True,
-                    "task_id": self.task_id,
-                    "message": f"Sélection client requise - {len(client_options)} options disponibles",
-                    "interaction_type": "client_selection",
-                    "interaction_data": {
-                        "type": "client_selection",
-                        "interaction_type": "client_selection",
-                        "options": client_options,
-                        "clients": client_options,
-                        "client_options": client_options,
-                        "total_options": len(client_options),
-                        "original_client_name": client_name,
-                        "allow_create_new": True,
-                        "message": f"Sélection client requise - {len(client_options)} options disponibles"
-                    },
-                    "client_options": client_options,
-                    "total_options": len(client_options),
-                    "original_client_name": client_name,
-                    "allow_create_new": True
-                }
-
-            else:
-                return {
-                    "status": "client_not_found",
-                    "requires_user_selection": False,
-                    "message": f"Client '{client_name}' introuvable."
-                }
 
         except Exception as e:
             logger.error(f"❌ Erreur proposition sélection clients: {e}")
