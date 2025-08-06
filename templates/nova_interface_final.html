@@ -905,16 +905,6 @@
                         handleTaskError('Tâche introuvable ou erreur serveur');
                         return;
                     }
-                    if (response.status === 404) {
-                        console.warn(Tâche ${taskId} pas encore disponible, nouvelle tentative...);
-                        return; // Continuer le polling
-                        }
-                        // Arrêter si autre erreur fatale
-                        clearInterval(progressInterval);
-                        hideProgress();
-                        handleTaskError('Tâche introuvable ou erreur serveur');
-                        return;
-                    }
                     const data = await response.json();
 
                     if (data.status === 'completed') {
@@ -1367,7 +1357,7 @@
 
             websocket.onclose = (event) => {
                 console.warn(`🔌 WebSocket déconnecté. Code: ${event.code}, Raison: ${event.reason}`);
-                console.log(🔌 WebSocket fermé. Code: ${event.code}, Raison: ${event.reason});
+                console.log('🔌 WebSocket fermé. Code: ${event.code}, Raison: ${event.reason}');
                 if (event.code !== 1000 && event.code !== 1001) {
                     addMessage("La connexion a été perdue. Tentative de reconnexion...", 'system');
                     attemptReconnection(taskId);
