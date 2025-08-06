@@ -475,6 +475,7 @@ async def get_quote_status(task_id: str, detailed: bool = False):
         task = progress_tracker.get_task(task_id)
         
         if not task:
+            logger.info(f"Recherche de la tâche {task_id} dans progress_tracker")
             # Vérifier dans l'historique
             history = progress_tracker.get_task_history()
             task_history = next((t for t in history if t["task_id"] == task_id), None)
