@@ -61,28 +61,17 @@ class WebSocketManager:
     async def connect(self, websocket: "WebSocket", task_id: str = None) -> None:
         """
         Accepte une connexion WebSocket et l'enregistre.
-
-        :param websocket: instance du WebSocket
-        :param task_id: identifiant de tâche (optionnel)
-        """
-        await websocket.accept()
-        # Vérifier que le task_id existe avant d'accepter la connexion
-        if task_id:
-            task = progress_tracker.get_task(task_id)
-            if not task:
-                logger.error(f"❌ Task_id {task_id} introuvable - connexion refusée")
-                await websocket.close(code=1003, reason=f"Task {task_id} not found")
-                return
-        
+            :param websocket: instance du WebSocket
+            :param task_id: identifiant de tâche (optionnel)
+            """
         await websocket.accept()
         logger.info(f"🔌 WebSocket ACCEPTÉ pour task_id: {task_id}")
-        # Enregistre la connexion
+        
+        # Enregistrer la connexion immédiatement  
         self.active_connections.setdefault("all", set()).add(websocket)
         if task_id:
             self.task_connections.setdefault(task_id, set()).add(websocket)
-        
-        # Nouveau log
-        logger.info(f"✅ WebSocket AJOUTÉ - Total connexions: {len(self.active_connections)}, Pour {task_id}: {len(self.task_connections[task_id])}")
+            logger.info(f"✅ WebSocket AJOUTÉ - Connexions pour {task_id}: {len(self.task_connections[task_id])}")
         
         # Vérifier les messages en attente
         if task_id in self.pending_messages:
