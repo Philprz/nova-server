@@ -194,7 +194,7 @@ async def cleanup_old_tasks(max_age_hours: int = 24):
 # WEBSOCKET POUR TEMPS RÉEL
 # =============================================
 
-@router.websocket("/ws/{task_id}")
+
 async def websocket_progress(websocket: WebSocket, task_id: str):
     """
     WebSocket pour suivi en temps réel d'une tâche
