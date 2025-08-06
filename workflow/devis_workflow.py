@@ -5066,6 +5066,8 @@ class DevisWorkflow:
                         option_id += 1
 
                 validation_data = {
+                    "options": client_options,
+                    "clients": client_options,
                     "client_options": client_options,
                     "total_options": len(client_options),
                     "original_client_name": client_name,
@@ -5086,6 +5088,8 @@ class DevisWorkflow:
                     "interaction_data": {
                         "type": "client_selection",
                         "interaction_type": "client_selection",
+                        "options": client_options,
+                        "clients": client_options,
                         "client_options": client_options,
                         "total_options": len(client_options),
                         "original_client_name": client_name,

@@ -101,7 +101,7 @@ async def lifespan(app: FastAPI):
         # 3. SUCCÈS DU DÉMARRAGE
         logger.info("=" * 60)
         logger.info("NOVA DEMARRE AVEC SUCCES")
-        logger.info("   Interface: http://localhost:8000/api/assistant/interface")
+        logger.info("   Interface: http://localhost:8000/interface/itspirit")
         logger.info("   Sante: http://localhost:8000/health")
         logger.info("   Documentation: http://localhost:8000/docs")
         logger.info("=" * 60)
