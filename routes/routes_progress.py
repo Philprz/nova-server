@@ -79,7 +79,7 @@ async def get_task_progress(task_id: str):
         # Attendre brièvement si tâche en cours de création
         import asyncio
         if not task:
-            await asyncio.sleep(0.5)  # Attendre 500ms
+            await asyncio.sleep(1.0)  # Attendre 1000ms
             task = progress_tracker.get_task(task_id)
         
         # Rechercher dans l'historique si pas trouvé

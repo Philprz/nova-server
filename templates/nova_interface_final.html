@@ -885,31 +885,43 @@
 
         async function trackProgress(taskId) {
             if (!taskId) return;
-            
-            progressInterval = setInterval(async () => {
-                try {
-                    const response = await fetch(`/progress/task/${taskId}`);
-                    const data = await response.json();
-                    
-                    if (data.status === 'completed') {
+            // On attend 1.5s avant de commencer le polling, puis on lance le setInterval (une seule fois)
+            setTimeout(() => {
+                progressInterval = setInterval(async () => {
+                    try {
+                        const response = await fetch(`/progress/task/${taskId}`);
+                        if (!response.ok) {
+                            // Arrêter si 404 ou autre erreur fatale
+                            clearInterval(progressInterval);
+                            hideProgress();
+                            handleTaskError('Tâche introuvable ou erreur serveur');
+                            return;
+                        }
+                        const data = await response.json();
+
+                        if (data.status === 'completed') {
+                            clearInterval(progressInterval);
+                            hideProgress();
+                            handleTaskComplete(data);
+                        } else if (data.status === 'failed') {
+                            clearInterval(progressInterval);
+                            hideProgress();
+                            handleTaskError(data.error);
+                        } else {
+                            updateProgress(
+                                data.overall_progress,
+                                data.current_step_title || 'Traitement en cours...',
+                                data.completed_steps
+                            );
+                        }
+                    } catch (error) {
                         clearInterval(progressInterval);
                         hideProgress();
-                        handleTaskComplete(data);
-                    } else if (data.status === 'failed') {
-                        clearInterval(progressInterval);
-                        hideProgress();
-                        handleTaskError(data.error);
-                    } else {
-                        updateProgress(
-                            data.overall_progress, 
-                            data.current_step_title || 'Traitement en cours...',
-                            data.completed_steps
-                        );
+                        handleTaskError('Erreur suivi progression : ' + error.message);
+                        console.error('Erreur suivi progression :', error);
                     }
-                } catch (error) {
-                    console.error('Erreur suivi progression :', error);
-                }
-            }, 1000);
+                }, 1000);
+            }, 1500); // délai avant le premier polling
         }
 
         // Enrichissement client
