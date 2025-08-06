@@ -21,8 +21,7 @@ from services.company_search_service import company_search_service
 from utils.client_lister import find_client_everywhere
 from services.product_search_engine import ProductSearchEngine
 from workflow.client_creation_workflow import client_creation_workflow
-from services.price_engine import PriceEngine
-
+from services.price_engine import PriceEngineService
 # Configuration sécurisée pour Windows
 if sys.platform == "win32":
     os.environ["PYTHONIOENCODING"] = "utf-8"
@@ -1160,7 +1159,7 @@ class DevisWorkflow:
             # ✅ NOUVEAU CODE AVEC PRICE ENGINE
 
             self._track_step_start("calculate_prices", "Calcul des prix avec Price Engine...")
-            price_engine = PriceEngine()
+            price_engine = PriceEngineService()
 
             # Calculer les prix avec le nouveau moteur
             pricing_result = await price_engine.calculate_quote_pricing({
@@ -3172,7 +3171,7 @@ class DevisWorkflow:
         """Applique le Price Engine pour calculer les prix finaux"""
         try:
             
-            price_engine = PriceEngine()
+            price_engine = PriceEngineService()
             
             # Préparer les données pour le Price Engine
             pricing_request = {
@@ -3228,7 +3227,7 @@ class DevisWorkflow:
             logger.info("💰 Démarrage calculs Prix Engine...")
             
             # Préparer les données pour le Price Engine
-            price_engine = PriceEngine()
+            price_engine = PriceEngineService()
             
             pricing_request = {
                 "client": {
