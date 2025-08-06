@@ -1049,11 +1049,38 @@
 
             // Garde-fous UI et validation
             if (isProcessing) return;
-            if (!message)      return showValidationError('Le message est vide');
-            if (message.length < 3)   return showValidationError('Le message doit contenir au moins 3 caractères');
+            if (!message) return showValidationError('Le message est vide');
+            if (message.length < 3) return showValidationError('Le message doit contenir au moins 3 caractères');
             if (message.length > 1000) return showValidationError('Le message ne peut pas dépasser 1000 caractères');
 
-            // Préparation interface avant l'appel réseau
+            // Détection si c'est un devis avec nom de client
+            const clientMatch = message.match(/devis.*pour\s+([A-Za-z\s]+?)(?:\s+pour|\s*$)/i);
+            if (clientMatch) {
+                const clientName = clientMatch[1].trim();
+                
+                // Recherche immédiate des clients
+                try {
+                    const searchResp = await fetch('/api/assistant/search_clients', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({client_name: clientName})
+                    });
+                    
+                    const searchResult = await searchResp.json();
+                    
+                    if (searchResult.requires_selection) {
+                        // Afficher directement la sélection
+                        addMessage(message, 'user');
+                        addClientSelection(searchResult.clients, clientName);
+                        if (input) input.value = '';
+                        return;
+                    }
+                } catch (e) {
+                    console.error('Erreur recherche client:', e);
+                }
+            }
+
+            // Continuer avec le flux normal pour les autres cas
             isProcessing = true;
             if (errorDiv) errorDiv.style.display = 'none';
             addMessage(message, 'user');
@@ -1096,7 +1123,7 @@
                     setTimeout(() => {
                     connectWebSocket(result.task_id);
                     trackProgress(result.task_id);
-                    }, 500);
+                    }, 1500);
                 } else {
                     handleDirectResponse(result);
                 }

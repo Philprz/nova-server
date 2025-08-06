@@ -6,18 +6,23 @@ import os
 import json
 import logging
 import asyncio
+from fastapi import APIRouter, HTTPException
+
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
-
+from difflib import SequenceMatcher
 from services.llm_extractor import LLMExtractor
 from services.mcp_connector import MCPConnector, call_mcp_with_progress, test_mcp_connections_with_progress
 from services.progress_tracker import progress_tracker, QuoteTask, TaskStatus
-
 from services.suggestion_engine import SuggestionEngine
 from services.client_validator import ClientValidator
 from services.websocket_manager import websocket_manager
 from services.company_search_service import company_search_service
 from utils.client_lister import find_client_everywhere
+from services.product_search_engine import ProductSearchEngine
+from workflow.client_creation_workflow import client_creation_workflow
+from services.price_engine import PriceEngine
+
 # Configuration sécurisée pour Windows
 if sys.platform == "win32":
     os.environ["PYTHONIOENCODING"] = "utf-8"
@@ -37,7 +42,6 @@ logger = logging.getLogger('workflow_devis')
 
 # Import conditionnel du validateur client
 try:
-    from services.client_validator import ClientValidator
     VALIDATOR_AVAILABLE = True
     logger.info("✅ Validateur client disponible")
 except ImportError as e:
@@ -108,8 +112,6 @@ class DevisWorkflow:
         self.product_suggestions = []
 
         # Initialisation des validateurs et cache
-        from services.cache_manager import referential_cache
-        from workflow.validation_workflow import SequentialValidator
         self.cache_manager = referential_cache
         self.sequential_validator = SequentialValidator(self.mcp_connector, self.llm_extractor)
 
@@ -203,7 +205,6 @@ class DevisWorkflow:
         Returns:
             Dict avec structure d'erreur standardisée
         """
-        from datetime import datetime
 
         response = {
             "success": False,
@@ -514,7 +515,7 @@ class DevisWorkflow:
     def _calculate_similarity(self, name1: str, name2: str) -> float:
         """Calcul simple de similarité entre deux noms"""
         try:
-            from difflib import SequenceMatcher
+            
             return SequenceMatcher(None, name1.lower(), name2.lower()).ratio()
         except:
             return 0.0
@@ -678,9 +679,17 @@ class DevisWorkflow:
         """Process le prompt utilisateur via LLM et workflow"""
         try:
             # 🔧 MODIFICATION : Utiliser le task_id fourni si disponible
-            if task_id and not self.task_id:
+            if task_id:
                 self.task_id = task_id
+                # Récupérer la tâche existante créée par start_quote_workflow
                 self.current_task = progress_tracker.get_task(task_id)
+                if not self.current_task:
+                # Si pas trouvée (ne devrait pas arriver), la créer
+                    self.current_task = progress_tracker.create_task(
+                    user_prompt=user_prompt,
+                    draft_mode=self.draft_mode,
+                    task_id=task_id
+                    )
 
             # Si pas de task existante, en créer une nouvelle
             if not self.current_task:
@@ -908,7 +917,6 @@ class DevisWorkflow:
             # Étape 2.1: Recherche client
             self._track_step_start("search_client", "Recherche du client...")
             
-            from services.unified_validator import unified_validator
             client_info = await unified_validator.validate_client_complete(extracted_info.get("client"))
             # CORRECTION : Gérer les suggestions client MÊME si trouvé (choix multiple)
             if client_info.get("suggestions") and len(client_info["suggestions"]) > 1:
@@ -1150,7 +1158,6 @@ class DevisWorkflow:
             # Étape 3.4: Calcul des prix
             self._track_step_complete("check_stock", "Stock disponible")
             # ✅ NOUVEAU CODE AVEC PRICE ENGINE
-            from services.price_engine import PriceEngine
 
             self._track_step_start("calculate_prices", "Calcul des prix avec Price Engine...")
             price_engine = PriceEngine()
@@ -1971,7 +1978,6 @@ class DevisWorkflow:
 
         # 🔁 Finalisation (restaurée)
         if self.current_task and self.task_id:
-            from services.progress_tracker import progress_tracker
             progress_tracker.complete_task(self.task_id, response)
 
         return response
@@ -2927,7 +2933,6 @@ class DevisWorkflow:
     async def _get_recent_sap_quotes(self, client_name: str, hours: int = 48) -> List[Dict[str, Any]]:
         """Récupère les devis SAP récents pour un client"""
         try:
-            from datetime import datetime, timedelta
             
             # Calculer la date limite
             cutoff_date = datetime.now() - timedelta(hours=hours)
@@ -2953,7 +2958,6 @@ class DevisWorkflow:
     async def _get_client_draft_quotes(self, client_name: str) -> List[Dict[str, Any]]:
         """Récupère les devis en brouillon pour un client"""
         try:
-            from sap_mcp import sap_list_draft_quotes
             
             # Récupérer tous les brouillons
             draft_result = await sap_list_draft_quotes()
@@ -3167,7 +3171,6 @@ class DevisWorkflow:
     async def _apply_price_engine(self, client_data: Dict, products_data: List[Dict]) -> Dict[str, Any]:
         """Applique le Price Engine pour calculer les prix finaux"""
         try:
-            from services.price_engine import PriceEngine
             
             price_engine = PriceEngine()
             
@@ -3221,7 +3224,6 @@ class DevisWorkflow:
         Applique les calculs de prix via le Price Engine
         """
         try:
-            from services.price_engine import PriceEngine
             
             logger.info("💰 Démarrage calculs Prix Engine...")
             
@@ -3396,7 +3398,6 @@ class DevisWorkflow:
 
                 # Importer le module avec gestion d'erreur
                 try:
-                    from services.llm_extractor import LLMExtractor
                     extracted_info = await LLMExtractor.extract_quote_info(prompt)
 
                     # Vérifier si l'extraction a réussi
@@ -4367,7 +4368,6 @@ class DevisWorkflow:
             }
         
         # Utiliser le moteur de recherche
-        from services.product_search_engine import ProductSearchEngine
         search_engine = ProductSearchEngine()
         
         results = await search_engine.search_products_by_characteristics(search_criteria)
@@ -4691,8 +4691,6 @@ class DevisWorkflow:
             return self._build_error_response("Erreur validation quantités", str(e))
 
     # 🔧 NOUVELLES ROUTES FASTAPI OPTIMISÉES
-    from fastapi import APIRouter, HTTPException
-    from datetime import datetime
 
     # Créer un routeur pour les nouvelles routes
     router_v2 = APIRouter()
@@ -5134,11 +5132,7 @@ class DevisWorkflow:
             
             try:
                 logger.info(f"🚀 Début création automatique client: {client_name}")
-                import re
-                import time
-                from datetime import datetime
 
-                logger.info(f"🚀 Début création automatique client: {client_name}")
 
                 # 1. Génération CardCode unique (éviter les doublons)
                 clean_name = re.sub(r'[^a-zA-Z0-9]', '', client_name)[:6].upper()
@@ -6016,7 +6010,7 @@ class DevisWorkflow:
         🔧 MODIFICATION : Initialiser le tracking si pas déjà fait
         """
         if not self.current_task:
-            from services.progress_tracker import progress_tracker
+            
             self.current_task = progress_tracker.create_task(
                 user_prompt=prompt,
                 draft_mode=self.draft_mode
@@ -6085,7 +6079,7 @@ class EnhancedDevisWorkflow(DevisWorkflow):
         
         try:
             # Utiliser le service d'enrichissement existant
-            from workflow.client_creation_workflow import client_creation_workflow
+            
             
             # Rechercher les informations via INSEE/Pappers
             search_result = await client_creation_workflow.search_company_by_name(company_name)
@@ -6265,9 +6259,6 @@ class EnhancedDevisWorkflow(DevisWorkflow):
             logger.info(f"🚀 Création client validé: {client_name}")
             
             # Utiliser les données enrichies pour la création
-            import re
-            import time
-            from datetime import datetime
             
             # Génération CardCode unique
             clean_name = re.sub(r'[^a-zA-Z0-9]', '', client_name)[:6].upper()
