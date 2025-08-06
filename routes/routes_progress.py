@@ -11,6 +11,7 @@ from services.progress_tracker import progress_tracker, TaskStatus
 from workflow.devis_workflow import DevisWorkflow
 from typing import Dict, Any, List, Optional
 import logging
+import asyncio
 from datetime import datetime
 logger = logging.getLogger(__name__)
 
@@ -88,6 +89,7 @@ async def get_task_progress(task_id: str):
         # Dernier essai après délai plus long pour tâches en création
         if not task and not historical_task:
             await asyncio.sleep(1.0)  # Attendre 1 seconde
+            
             task = progress_tracker.get_task(task_id)
         if task:
             progress_data = task.get_overall_progress()
@@ -348,9 +350,6 @@ class QuoteTaskResponse(BaseModel):
 
 # === ENDPOINTS PRINCIPAUX ===
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks
-import asyncio
-
 @router.post("/start_quote", response_model=QuoteTaskResponse)
 async def start_quote_generation(request: StartQuoteRequest, background_tasks: BackgroundTasks):
     """
@@ -484,7 +483,6 @@ async def get_quote_history(limit: int = 20):
     """Récupère l'historique des générations de devis"""
     try:
         history = progress_tracker.get_task_history()
-        logger.info(f"Recherche de la tâche {task_id} dans progress_tracker")
         # Trier par date de fin décroissante et limiter
         history_sorted = sorted(
             history, 
@@ -588,7 +586,6 @@ async def get_progress_stats():
     try:
         active_tasks = progress_tracker.get_all_active_tasks()
         history = progress_tracker.get_task_history()
-        logger.info(f"Recherche de la tâche {task_id} dans progress_tracker")
         # Calculer statistiques
         total_tasks = len(active_tasks) + len(history)
         completed_tasks = len([t for t in history if t.get("status") == "completed"])
