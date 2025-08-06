@@ -66,6 +66,15 @@ class WebSocketManager:
         :param task_id: identifiant de tâche (optionnel)
         """
         await websocket.accept()
+        # Vérifier que le task_id existe avant d'accepter la connexion
+        if task_id:
+            task = progress_tracker.get_task(task_id)
+            if not task:
+                logger.error(f"❌ Task_id {task_id} introuvable - connexion refusée")
+                await websocket.close(code=1003, reason=f"Task {task_id} not found")
+                return
+        
+        await websocket.accept()
         logger.info(f"🔌 WebSocket ACCEPTÉ pour task_id: {task_id}")
         # Enregistre la connexion
         self.active_connections.setdefault("all", set()).add(websocket)
@@ -81,11 +90,16 @@ class WebSocketManager:
         logger.info("WebSocket connecté", extra={"task_id": task_id})
 
     async def disconnect(self, websocket: "WebSocket", task_id: str):
-        conns = self.task_connections.get(task_id)
-        if conns and websocket in conns:
-            conns.discard(websocket)
-            logger.info(f"✅ WebSocket RETIRÉ de {task_id}")
-        self.active_connections.get("all", set()).discard(websocket)        
+        """Déconnecte proprement un WebSocket"""
+        try:
+            conns = self.task_connections.get(task_id)
+            if conns and websocket in conns:
+                conns.discard(websocket)
+                logger.info(f"✅ WebSocket RETIRÉ de {task_id}")
+                self.active_connections.get("all", set()).discard(websocket)
+        except Exception as e:
+            logger.error(f"❌ Erreur lors de la déconnexion WebSocket: {e}")
+    
     async def broadcast_to_task(
         self,
         task_id: str,
@@ -203,13 +217,17 @@ class WebSocketManager:
 
         # Si pas de connexions, stocker et planifier retry
         if not self.task_connections.get(task_id):
+            
             logger.warning(f"⚠️ Pas de connexion active pour {task_id}, message stocké")
             self.pending_messages.setdefault(task_id, []).append(message)
             # Vérifier si la tâche existe dans le progress_tracker
             task = progress_tracker.get_task(task_id)
             if not task:
-                logger.error(f"❌ Tâche {task_id} inexistante dans progress_tracker")
+                logger.error(f"❌ Tâche {task_id} inexistante - abandon envoi interaction")
                 return
+            # Si pas de connexions, stocker et planifier retry
+            if not self.task_connections.get(task_id):
+                logger.warning(f"⚠️ Pas de connexion active pour {task_id}, message stocké")
             # Tentative immédiate de reconnexion
             await self._attempt_reconnection(task_id)
             self._schedule_retry(task_id)
