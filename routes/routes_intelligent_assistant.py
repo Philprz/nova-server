@@ -959,24 +959,6 @@ def handle_client_search_intent(message: str, entities: Dict[str, Any]) -> Dict[
         search_term = client_names[0]
         logger.info(f"🔍 Recherche google-like pour client: '{search_term}'")
         
-        # Appel HTTP interne à l'endpoint de recherche clients
-        import httpx
-        import asyncio
-        
-        async def search_real_clients():
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    f"http://localhost:8000/clients/search_clients_advanced",
-                    params={"q": search_term, "limit": 10}
-                )
-                return response.json()
-        
-        # Exécuter la recherche
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        clients_data = loop.run_until_complete(search_real_clients())
-        loop.close()
-        
         response = {
             'type': 'client_search_results',
             'message': f"🔍 **Résultats pour '{search_term}'**\n\n",
