@@ -22,14 +22,13 @@ router = APIRouter(tags=["Assistant Intelligent"])
 # Import du système de progression
 from services.progress_tracker import progress_tracker, TaskStatus
 from workflow.devis_workflow import DevisWorkflow
-
+from workflow.client_creation_workflow import ClientCreationWorkflow
 logger = logging.getLogger(__name__)
 
 # Import des services NOVA existants
 from services.suggestion_engine import SuggestionEngine, SuggestionResult
 from services.client_validator import ClientValidator
 from services.progress_tracker import ProgressTracker
-from workflow.devis_workflow import DevisWorkflow
 
 # Import des routes existantes pour réutiliser la logique
 import asyncio
@@ -135,9 +134,14 @@ async def start_quote_workflow(
         # 1. Génération de task_id si nécessaire
         task_id = request.websocket_task_id or f"quote_{datetime.now():%Y%m%d_%H%M%S}_{secrets.token_hex(4)}"
         logger.info(f"🔑 Démarrage du DevisWorkflow pour task_id={task_id}")
+        # CORRECTION: Créer immédiatement la tâche dans le tracker
+        task = progress_tracker.create_task(
+            user_prompt=request.message,
+            draft_mode=request.draft_mode,
+            task_id=task_id
+        )
 
         # 2. Instanciation du workflow
-        from workflow.devis_workflow import DevisWorkflow
         workflow = DevisWorkflow(validation_enabled=True, draft_mode=True, force_production=True)
 
         # 3. Lancement en arrière-plan
@@ -173,7 +177,7 @@ async def workflow_create_client(request: Dict[str, Any]):
     try:
         client_data = request.get('client_data', {})
         validated = request.get('validated', False)
-        from workflow.client_creation_workflow import ClientCreationWorkflow
+        
         workflow = ClientCreationWorkflow()
         if validated:
             # Si les données sont déjà validées, créer directement le client
@@ -365,8 +369,6 @@ async def _handle_simple_chat(message_data: ProgressChatMessage) -> Dict[str, An
     """
     try:
         # Importer les modules nécessaires
-        from services.llm_extractor import get_llm_extractor
-        from services.suggestion_engine import SuggestionEngine
 
         message = message_data.message
         logger.info(f"💬 Chat simple: {message[:50]}...")
@@ -515,7 +517,6 @@ async def get_unified_data(data_type: str, limit: int = 20):
     try:
         if data_type == "clients":
             # Appel direct au MCP
-            from services.mcp_connector import MCPConnector
             sf_result = await MCPConnector.call_salesforce_mcp("salesforce_query", {
                 "query": f"SELECT Id, Name, Phone, BillingCity, BillingCountry, Type, Industry, AccountNumber FROM Account LIMIT {limit}"
             })
@@ -528,7 +529,6 @@ async def get_unified_data(data_type: str, limit: int = 20):
                 
         elif data_type == "products":
             # Appel direct au MCP
-            from services.mcp_connector import MCPConnector
             sap_result = await MCPConnector.call_sap_mcp("sap_read", {
                 "endpoint": f"/Items?$top={limit}",
                 "method": "GET"
@@ -740,7 +740,6 @@ async def chat_with_nova(message_data: ChatMessage):
             
             try:
                 # Lancer directement le workflow de création
-                from workflow.devis_workflow import DevisWorkflow
                 
                 # Mode production (pas draft) pour créer réellement le devis
                 workflow = DevisWorkflow(
@@ -884,7 +883,6 @@ def handle_quote_creation_intent(message: str, entities: Dict[str, Any]) -> Dict
     
     try:
         # Importer le workflow de devis existant
-        from workflow.devis_workflow import DevisWorkflow
         
         response = {
             'type': 'quote_creation',
@@ -1344,7 +1342,6 @@ async def handle_user_choice(choice_data: Dict[str, Any]):
 
 
 # Import du workflow de création de client
-from workflow.client_creation_workflow import client_creation_workflow
 
 # Modèles pour la création de client
 class ClientSearchRequest(BaseModel):
@@ -1510,7 +1507,6 @@ async def search_company_for_creation(request: ClientCreationRequest):
     🔍 Recherche d'entreprise pour création de client
     """
     try:
-        from workflow.client_creation_workflow import ClientCreationWorkflow
 
         workflow = ClientCreationWorkflow()
 
@@ -1545,7 +1541,6 @@ async def create_client_from_company(request: ClientCreationFromCompanyRequest):
     ✅ Création de client à partir des données d'entreprise sélectionnées
     """
     try:
-        from workflow.client_creation_workflow import ClientCreationWorkflow
 
         workflow = ClientCreationWorkflow()
 
@@ -1571,8 +1566,6 @@ async def create_client_from_text(request: Dict[str, str]):
     📝 Création de client à partir d'une demande en texte libre
     """
     try:
-        from workflow.client_creation_workflow import ClientCreationWorkflow
-        from services.llm_extractor import LLMExtractor
 
         workflow = ClientCreationWorkflow()
 
@@ -1662,7 +1655,6 @@ async def create_client_manual(request: Dict[str, Any]):
     📝 Création de client avec saisie manuelle (fallback API Sirene)
     """
     try:
-        from workflow.client_creation_workflow import ClientCreationWorkflow
 
         workflow = ClientCreationWorkflow()
         client_data = request.get('client_data', {})
@@ -1854,7 +1846,6 @@ async def generate_quote_endpoint(request: GenerateQuoteRequest):
         logger.info(f"🎯 Demande de devis via /generate_quote: {user_message}")
 
         # Utiliser la logique existante du workflow
-        from workflow.devis_workflow import DevisWorkflow
 
         # Créer le workflow avec task_id fixe pour éviter la double génération
         task_id = f"quote_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{secrets.token_hex(4)}"
@@ -1926,3 +1917,35 @@ async def generate_quote_endpoint(request: GenerateQuoteRequest):
             success=False,
             error=f"Erreur interne: {str(e)}"
         )
+@router.post("/search_clients")
+async def search_clients_direct(request: Dict[str, Any]):
+    """Recherche directe de clients pour affichage immédiat"""
+    try:
+        client_name = request.get("client_name", "")
+        if not client_name:
+            return {"success": False, "error": "Nom client requis"}
+        # Recherche dans Salesforce
+        from services.mcp_connector import MCPConnector
+        mcp = MCPConnector()
+        await mcp.connect()
+        
+        clients = await mcp.search_contacts(client_name)
+        
+        if clients:
+            return {
+                "success": True,
+                "requires_selection": True,
+                "clients": clients,
+                "message": f"{len(clients)} client(s) trouvé(s)"
+            }
+        else:
+            return {
+                "success": True,
+                "requires_creation": True,
+                "client_name": client_name,
+                "message": "Aucun client trouvé, création nécessaire"
+            }
+            
+    except Exception as e:
+        logger.error(f"Erreur recherche clients: {e}")
+        return {"success": False, "error": str(e)}
