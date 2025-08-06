@@ -850,7 +850,7 @@
             console.log("🤝 Interaction utilisateur requise:", data);
 
             if (data.interaction_type === 'client_selection') {
-                const clients = data.options || data.clients || [];
+                const clients = data.client_options || data.options || data.clients || [];
                 const originalName = data.original_client_name || data.client_name || '';
                 addClientSelection(clients, originalName);
             } else {
@@ -1319,11 +1319,11 @@
                     if (data.interaction_data && data.interaction_data.interaction_type === 'client_selection') {
                     hideProgress();
                     
-                    { const opts = data.interaction_data.options || data.interaction_data.clients || []; const name = data.interaction_data.original_client_name || data.interaction_data.client_name || ''; addClientSelection(opts, name); }
+                    { const opts = data.interaction_data.client_options || data.interaction_data.options || data.interaction_data.clients || []; const name = data.interaction_data.original_client_name || data.interaction_data.client_name || ''; addClientSelection(opts, name); }
                     }  
                 } else if (data.type === 'client_selection_required') {
                     hideProgress();
-                    const clients = data.clients || [];
+                    const clients = data.client_options || data.clients || [];
                     const originalName = data.original_client_name || '';
                     addClientSelection(clients, originalName);
                 } else if (data.type === 'completion') {

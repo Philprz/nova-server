@@ -163,8 +163,29 @@ async def start_quote_workflow(
             status="error",
             message=f"**Erreur technique**\n\n{e}"
         )
+@router.post('/workflow/create_client')
+async def workflow_create_client(request: Dict[str, Any]):
+    """
+    🚀 Alias pour la création complète de client.
+    Ce point d'entrée accepte un corps JSON du type {"client_data": {...}, "validated": bool}
+    et s'appuie sur le workflow existant pour créer un client.
+    """
+    try:
+        client_data = request.get('client_data', {})
+        validated = request.get('validated', False)
+        from workflow.client_creation_workflow import ClientCreationWorkflow
+        workflow = ClientCreationWorkflow()
+        if validated:
+            # Si les données sont déjà validées, créer directement le client
+            result = await workflow.create_client_in_salesforce(client_data)
+        else:
+            # Sinon, lancer le workflow complet de recherche/validation
+            result = await workflow.process_client_creation_request(client_data)
+        return result
+    except Exception as e:
+        logger.error(f"Erreur création client via alias: {e}")
+        return {'success': False, 'error': str(e), 'message': f"Erreur lors de la création du client"}
 
-        
 @router.websocket("/ws/assistant/{task_id}")
 async def websocket_endpoint(websocket: WebSocket, task_id: str):
     logger.info(f"🔌 WebSocket - Tentative de connexion pour {task_id}")
