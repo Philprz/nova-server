@@ -32,6 +32,7 @@ async def websocket_task_progress(websocket: WebSocket, task_id: str):
             message = json.loads(data)
             
             if message.get("type") == "user_response":
+                logger.info(f"🎯 Réception user_response pour {task_id}: {message}")
                 
                 response_data = message.get("data", {})
                 await handle_user_response_task(task_id, response_data)

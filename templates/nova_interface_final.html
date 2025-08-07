@@ -764,7 +764,7 @@
                 button.className = 'client-selection-button';
                 button.innerHTML = `
                     <strong>${client.name}</strong>
-                    <small>Source: ${client.source || 'Inconnue'} | ID: ${client.id || 'N/A'}</small>
+                    <small>Source: ${client.source || 'Inconnue'} | ${client.display_detail || 'Informations limitées'}</small>
                 `;
                 button.onclick = () => selectClient(client, index);
                 selectionDiv.appendChild(button);

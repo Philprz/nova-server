@@ -223,7 +223,9 @@ async def handle_user_response_task(task_id: str, response_data: dict):
         logger.info(f"🎯 Traitement réponse utilisateur task {task_id}: {response_data}")
         
         response_type = response_data.get("response_type")
-        if response_type == "client_validation":
+        if response_type == "client_selection":
+            await handle_client_selection_task(task_id, response_data)
+        elif response_type == "client_validation":
             await handle_client_selection_task(task_id, response_data)
             
     except Exception as e:
@@ -233,7 +235,27 @@ async def handle_client_selection_task(task_id: str, response_data: dict):
     """Traite sélection client pour les tâches"""
     from workflow.devis_workflow import DevisWorkflow
     
-    selected_client = response_data.get("selected_client")
+    # Récupérer les données client selon différents formats
+    selected_client = (response_data.get("selected_client") or 
+                      response_data.get("client_data") or
+                      response_data.get("selected_data"))
+    
+    # Si pas de client direct, essayer via action et index
+    if not selected_client:
+        action = response_data.get("action")
+        if action == "select_existing":
+            client_id = response_data.get("client_id")
+            client_name = response_data.get("client_name")
+            selected_index = response_data.get("selected_index")
+            
+            # Reconstituer les données client minimum
+            selected_client = {
+                "id": client_id,
+                "name": client_name, 
+                "selected_index": selected_index
+            }
+            
+    logger.info(f"🎯 Données client extraites: {selected_client}")
     if selected_client:
         workflow = DevisWorkflow(task_id=task_id, force_production=True)
         user_input = {

@@ -4803,9 +4803,6 @@ class DevisWorkflow:
 
                 logger.info(f"📨 Envoi WebSocket pour tâche {self.task_id}")
                 await websocket_manager.send_user_interaction_required(self.task_id, interaction_data)
-                # Attendre que la connexion WebSocket soit établie
-                await asyncio.sleep(2.0)  # Délai pour établir la connexion
-                await websocket_manager.send_user_interaction_required(self.task_id, interaction_data)
                 logger.info(f"⏸️ Tâche {self.task_id} en attente d'interaction utilisateur")
                 return client_result
             # 🔧 NOUVEAU: Vérifier autres statuts qui nécessitent un arrêt
@@ -5027,10 +5024,10 @@ class DevisWorkflow:
                     name = client.get("Name") or client.get("CardName", f"Client {option_id}")
                     source_display = "Salesforce & SAP"
                     sf_id = client.get("Id", "N/A")
-                    sap_code = client.get("sap_data", {}).get("CardCode", "N/A")
+                    sap_data = client.get("sap_data", {})
+                    sap_code = sap_data.get("CardCode", "N/A")
                     
                     # Fusionner les détails des deux systèmes
-                    sap_data = client.get("sap_data", {})
                     details = {
                         "sf_id": sf_id,
                         "sap_code": sap_code,
@@ -5047,7 +5044,7 @@ class DevisWorkflow:
                     details = {
                         "sf_id": client.get("Id", "N/A"),
                         "phone": client.get("Phone", "N/A"),
-                        "address": f"{client.get('BillingStreet', '')} {client.get('BillingCity', '')}".strip() or "N/A",
+                        "address": client.get("BillingStreet", "N/A"),
                         "city": client.get("BillingCity", "N/A"),
                         "industry": client.get("Industry", "N/A"),
                         "siret": "Non disponible en Salesforce"
@@ -5062,7 +5059,7 @@ class DevisWorkflow:
                         "address": client.get("BillToStreet", "N/A"),
                         "city": client.get("City", "N/A"),
                         "siret": client.get("FederalTaxID", "N/A"),
-                        "country": client.get("Country", "N/A")
+                        "country": client.get("Country", "FR")
                     }
                 
                 # Format dense pour l'affichage
@@ -5086,50 +5083,51 @@ class DevisWorkflow:
                     "sap_code": details.get("sap_code"), 
                     "details": details
                 })
-            option_id += 1        
-            # Vérifier qu'on a des clients à proposer
-            if not client_options:
-                return {
-                    "status": "client_not_found",
-                    "requires_user_selection": False,
-                    "message": f"Client '{client_name}' introuvable."
-                }
-            validation_data = {
-                "options": client_options,
-                "clients": client_options,
-                "client_options": client_options,
-                "total_options": len(client_options),
-                "original_client_name": client_name,
-                "allow_create_new": True,
-                "interaction_type": "client_selection"
-            }
-
-            self.current_task.require_user_validation("client_selection", "client_selection", validation_data)
-            logger.info(f"🔍 DEBUG WORKFLOW: selection_result = {json.dumps({'status': 'user_interaction_required', 'client_options_count': len(client_options)}, indent=2, default=str)}")
-            logger.info(f"🔍 DEBUG WORKFLOW: interaction_data présent = {'interaction_data' in locals()}")
-            return {
-                "status": "user_interaction_required",
-                "requires_user_selection": True,
-                "validation_pending": True,
-                "task_id": self.task_id,
-                "message": f"Sélection client requise - {len(client_options)} options disponibles",
-                "interaction_type": "client_selection",
-                "interaction_data": {
-                    "type": "client_selection",
-                    "interaction_type": "client_selection",
+                
+                option_id += 1     
+                # Vérifier qu'on a des clients à proposer
+                if not client_options:
+                    return {
+                        "status": "client_not_found",
+                        "requires_user_selection": False,
+                        "message": f"Client '{client_name}' introuvable."
+                    }
+                validation_data = {
                     "options": client_options,
                     "clients": client_options,
                     "client_options": client_options,
                     "total_options": len(client_options),
                     "original_client_name": client_name,
                     "allow_create_new": True,
-                    "message": f"Sélection client requise - {len(client_options)} options disponibles"
-                },
-                "client_options": client_options,
-                "total_options": len(client_options),
-                "original_client_name": client_name,
-                "allow_create_new": True
-            }
+                    "interaction_type": "client_selection"
+                }
+
+                self.current_task.require_user_validation("client_selection", "client_selection", validation_data)
+                logger.info(f"🔍 DEBUG WORKFLOW: selection_result = {json.dumps({'status': 'user_interaction_required', 'client_options_count': len(client_options)}, indent=2, default=str)}")
+                logger.info(f"🔍 DEBUG WORKFLOW: interaction_data présent = {'interaction_data' in locals()}")
+                return {
+                    "status": "user_interaction_required",
+                    "requires_user_selection": True,
+                    "validation_pending": True,
+                    "task_id": self.task_id,
+                    "message": f"Sélection client requise - {len(client_options)} options disponibles",
+                    "interaction_type": "client_selection",
+                    "interaction_data": {
+                        "type": "client_selection",
+                        "interaction_type": "client_selection",
+                        "options": client_options,
+                        "clients": client_options,
+                        "client_options": client_options,
+                        "total_options": len(client_options),
+                        "original_client_name": client_name,
+                        "allow_create_new": True,
+                        "message": f"Sélection client requise - {len(client_options)} options disponibles"
+                    },
+                    "client_options": client_options,
+                    "total_options": len(client_options),
+                    "original_client_name": client_name,
+                    "allow_create_new": True
+                }
 
 
         except Exception as e:
