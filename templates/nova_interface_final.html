@@ -56,7 +56,31 @@
             display: flex;
             flex-direction: column;
         }
-
+        .client-selection-button .client-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        
+        .client-selection-button .client-source {
+            background: rgba(255, 255, 255, 0.2);
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: bold;
+        }
+        
+        .client-selection-button .client-details {
+            font-size: 12px;
+            line-height: 1.4;
+            opacity: 0.9;
+            text-align: left;
+        }
+        
+        .client-selection-button:hover .client-details {
+            opacity: 1;
+        }
         .client-selection-button:hover {
             background-color: var(--bg-primary);
             border-color: var(--primary-blue);
@@ -762,9 +786,49 @@
             clients.forEach((client, index) => {
                 const button = document.createElement('button');
                 button.className = 'client-selection-button';
+                
+                // Construire les informations détaillées du client
+                const details = client.details || {};
+                let detailsHtml = '';
+                
+                // Afficher les détails disponibles de façon structurée
+                const clientInfo = [];
+                
+                if (details.phone && details.phone !== 'null' && details.phone !== null) {
+                    clientInfo.push(`📞 ${details.phone}`);
+                }
+                
+                if (details.address && details.address !== 'N/A' && details.address !== 'None') {
+                    clientInfo.push(`📍 ${details.address}`);
+                }
+                
+                if (details.city && details.city !== 'null' && details.city !== null) {
+                    clientInfo.push(`🏢 ${details.city}`);
+                }
+                
+                if (details.siret && details.siret !== 'null' && details.siret !== null) {
+                    clientInfo.push(`🏷️ SIRET: ${details.siret}`);
+                }
+                
+                if (details.sf_id && details.sf_id !== '') {
+                    clientInfo.push(`🆔 SF: ${details.sf_id.substring(0, 8)}...`);
+                }
+                
+                if (details.sap_code && details.sap_code !== '') {
+                    clientInfo.push(`💼 SAP: ${details.sap_code}`);
+                }
+                
+                // Construire le HTML avec les détails
+                detailsHtml = clientInfo.length > 0 ? 
+                    `<div class="client-details">${clientInfo.join('<br>')}</div>` : 
+                    '<div class="client-details">Aucun détail disponible</div>';
+                
                 button.innerHTML = `
-                    <strong>${client.name}</strong>
-                    <small>Source: ${client.source || 'Inconnue'} | ${client.display_detail || 'Informations limitées'}</small>
+                    <div class="client-header">
+                        <strong>${client.name}</strong>
+                        <span class="client-source">${client.source || 'Inconnue'}</span>
+                    </div>
+                    ${detailsHtml}
                 `;
                 button.onclick = () => selectClient(client, index);
                 selectionDiv.appendChild(button);

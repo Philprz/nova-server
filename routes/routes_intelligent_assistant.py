@@ -198,17 +198,39 @@ async def websocket_endpoint(websocket: WebSocket, task_id: str):
         logger.info(f"✅ WebSocket - Connexion établie pour {task_id}")
         
         while True:
-            # Ping/pong pour maintenir la connexion
+            # Ping/pong pour maintenir la connexion + traitement user_response
             try:
                 data = await websocket.receive_text()
                 logger.debug(f"📥 WebSocket - Message reçu de {task_id}: {data}")
                 
-                # Echo pour vérifier la connexion
-                await websocket.send_text(json.dumps({
-                    "type": "pong",
-                    "task_id": task_id,
-                    "timestamp": datetime.utcnow().isoformat()
-                }))
+                # Parse du message JSON
+                try:
+                    message = json.loads(data)
+                    message_type = message.get("type")
+                    
+                    if message_type == "user_response":
+                        logger.info(f"🎯 Traitement user_response pour {task_id}: {message}")
+                        response_data = message.get("data", {})
+                        # Importer et traiter la réponse utilisateur
+                        from routes.routes_progress import handle_user_response_task
+                        await handle_user_response_task(task_id, response_data)
+                        
+                        # Confirmer la réception
+                        await websocket.send_text(json.dumps({
+                            "type": "user_response_processed",
+                            "task_id": task_id,
+                            "timestamp": datetime.utcnow().isoformat()
+                        }))
+                    else:
+                        # Echo pour vérifier la connexion (ping/pong)
+                        await websocket.send_text(json.dumps({
+                            "type": "pong",
+                            "task_id": task_id,
+                            "timestamp": datetime.utcnow().isoformat()
+                        }))
+                except json.JSONDecodeError:
+                    logger.warning(f"⚠️ WebSocket - Message non JSON reçu de {task_id}")
+                    
             except WebSocketDisconnect:
                 logger.warning(f"⚠️ WebSocket - Client déconnecté: {task_id}")
                 break
