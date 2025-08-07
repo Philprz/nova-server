@@ -114,8 +114,8 @@ class ClientLister:
     async def _search_salesforce_by_name(self, client_name: str) -> List[Dict[str, Any]]:
         """Recherche dans Salesforce avec différentes variantes - CORRIGÉ"""
         try:
-            # Recherche exacte
-            exact_query = f"SELECT Id, Name, AccountNumber, Phone, BillingCity, BillingCountry, Sic FROM Account WHERE Name = '{client_name}' LIMIT 5"
+            # Recherche exacte ET variantes communes
+            exact_query = f"SELECT Id, Name, AccountNumber, Phone, BillingStreet, BillingCity, BillingCountry, BillingPostalCode, Sic FROM Account WHERE Name = '{client_name}' OR Name LIKE '{client_name} %' OR Name LIKE '% {client_name}' OR Name LIKE '%{client_name}%' LIMIT 20"
             
             result = await self.mcp_connector.call_mcp(
                 "salesforce_mcp",
@@ -171,6 +171,13 @@ class ClientLister:
     async def _search_sap_by_name(self, client_name: str) -> List[Dict[str, Any]]:
         """Recherche dans SAP avec différentes variantes et diagnostics améliorés"""
         try:
+            # Validation et filtrage des données avant comptage
+            if isinstance(result, dict) and "value" in result:
+                clients = result["value"]
+                # Filtrer les entrées vides ou invalides
+                clients = [c for c in clients if c and c.get('CardName') and c.get('CardName').strip()]
+                logger.info(f"✅ Recherche SAP: {len(clients)} résultats valides (après filtrage)")
+                return clients
             # Utiliser sap_read avec OData filter au lieu de sap_search
             result = await self.mcp_connector.call_mcp(
                 "sap_mcp",
@@ -323,6 +330,10 @@ class ClientLister:
                     
                 sap_name = sap_client.get('CardName', '').strip().upper()
                 similarity = SequenceMatcher(None, sf_name, sap_name).ratio()
+                
+                # Exception: Ne pas fusionner si l'un contient l'autre mais sont différents
+                if (sf_name in sap_name or sap_name in sf_name) and sf_name != sap_name:
+                    continue  # Garder séparés (ex: RONDOT vs RONDOT Group)
                 
                 if similarity > 0.85 and similarity > best_similarity:
                     best_similarity = similarity

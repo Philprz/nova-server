@@ -1405,8 +1405,9 @@
 
             websocket.onopen = () => {
                 console.log("✅ WebSocket connecté !");
-                hideProgress();
-                addMessage("Connexion établie. En attente d'instructions...", 'system');
+                // NE PAS cacher la progression automatiquement
+                // hideProgress(); // SUPPRIMÉ
+                addMessage("Connexion établie.", 'system');
                 if(reconnectInterval) clearInterval(reconnectInterval);
             };
 

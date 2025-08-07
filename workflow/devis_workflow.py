@@ -5031,9 +5031,11 @@ class DevisWorkflow:
                         "sf_id": sf_client.get("Id", ""),
                         "sap_code": "",
                         "phone": sf_client.get("Phone"),
-                        "address": f"{sf_client.get('BillingStreet', '')} {sf_client.get('BillingCity', '')}".strip() or "N/A",
+                        "address": f"{sf_client.get('BillingStreet', '')}, {sf_client.get('BillingCity', '')}".strip(', '),
                         "city": sf_client.get("BillingCity"),
-                        "siret": sf_client.get("Symbol"),
+                        "postal_code": sf_client.get("BillingPostalCode"),
+                        "country": sf_client.get("BillingCountry"),
+                        "siret": sf_client.get("Sic"),
                         "industry": sf_client.get("Industry", "N/A")
                     }
                 })
