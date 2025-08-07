@@ -115,7 +115,7 @@ class ClientLister:
         """Recherche dans Salesforce avec différentes variantes - CORRIGÉ"""
         try:
             # Recherche exacte
-            exact_query = f"SELECT Id, Name, AccountNumber, Phone, BillingCity, BillingCountry, Symbol FROM Account WHERE Name = '{client_name}' LIMIT 5"
+            exact_query = f"SELECT Id, Name, AccountNumber, Phone, BillingCity, BillingCountry, Sic FROM Account WHERE Name = '{client_name}' LIMIT 5"
             
             result = await self.mcp_connector.call_mcp(
                 "salesforce_mcp",
@@ -138,7 +138,7 @@ class ClientLister:
                 # Ne pas retourner ici, continuer avec la recherche approximative
             
             # Si pas de résultat exact, recherche approximative
-            fuzzy_query = f"SELECT Id, Name, AccountNumber, Phone, BillingCity, BillingCountry, Symbol FROM Account WHERE Name LIKE '%{client_name}%' LIMIT 10"
+            fuzzy_query = f"SELECT Id, Name, AccountNumber, Phone, BillingCity, BillingCountry, Sic FROM Account WHERE Name LIKE '%{client_name}%' LIMIT 10"
             
             result = await self.mcp_connector.call_mcp(
                 "salesforce_mcp",
