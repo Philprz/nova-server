@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 from services.suggestion_engine import SuggestionEngine, SuggestionResult
 from services.client_validator import ClientValidator
 from services.progress_tracker import ProgressTracker
-
+from services.mcp_connector import MCPConnector
 # Import des routes existantes pour réutiliser la logique
 import asyncio
 import httpx
@@ -1907,9 +1907,11 @@ async def search_clients_direct(request: Dict[str, Any]):
         if not client_name:
             return {"success": False, "error": "Nom client requis"}
         # Recherche dans Salesforce
-        from services.mcp_connector import MCPConnector
         mcp = MCPConnector()
-        await mcp.connect()
+        # CORRECTION: MCPConnector n'a pas de méthode connect(), utiliser test_connections
+        connection_status = await mcp.test_connections()
+        if not connection_status.get("results", {}).get("overall_status") == "OK":
+            return {"success": False, "error": "Connexions système indisponibles"}
         
         clients = await mcp.search_contacts(client_name)
         
