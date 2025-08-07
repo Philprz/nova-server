@@ -173,9 +173,10 @@ class DevisWorkflow:
             # Notification WebSocket si disponible
             try:
                 asyncio.create_task(websocket_manager.broadcast_to_task(
-                    self.current_task.task_id,
+                    self.task_id,  # CORRECTION: Ajouter task_id explicite
                     {
                         "type": "progress_update",
+                        "task_id": self.task_id,  # CORRECTION: Inclure task_id dans le message
                         "step_id": step_id,
                         "progress": progress,
                         "message": message
@@ -5007,91 +5008,62 @@ class DevisWorkflow:
         try:
             option_id = 1
             client_options: List[Dict[str, Any]] = []   
-            
-            # Utiliser les clients dédupliqués pour éviter les doublons
             deduplicated_clients = search_results.get("deduplicated_clients", [])
-            logger.info(f"🔧 Traitement de {len(deduplicated_clients)} clients dédupliqués")
+            # CORRECTION: Utiliser TOUS les clients trouvés, pas seulement dédupliqués  
+            all_sf_clients = search_results.get("salesforce", {}).get("clients", [])
+            all_sap_clients = search_results.get("sap", {}).get("clients", [])
             
-            for client in deduplicated_clients:
-                if not client:
+            logger.info(f"🔧 Traitement de {len(all_sf_clients)} clients SF + {len(all_sap_clients)} clients SAP")
+            
+            # Traiter clients Salesforce
+            for sf_client in all_sf_clients:
+                if not sf_client:
                     continue
-                    
-                source = client.get("source", "unknown")
-                
-                # Déterminer le nom et les IDs selon la source
-                if source == "both":
-                    # Client présent dans les deux systèmes
-                    name = client.get("Name") or client.get("CardName", f"Client {option_id}")
-                    source_display = "Salesforce & SAP"
-                    sf_id = client.get("Id", "N/A")
-                    sap_data = client.get("sap_data", {})
-                    sap_code = sap_data.get("CardCode", "N/A")
-                    
-                    # Fusionner les détails des deux systèmes
-                    details = {
-                        "sf_id": sf_id,
-                        "sap_code": sap_code,
-                        "phone": client.get("Phone") or sap_data.get("Phone1", "N/A"),
-                        "address": sap_data.get("BillToStreet", "N/A"),
-                        "city": sap_data.get("City", client.get("BillingCity", "N/A")),
-                        "siret": sap_data.get("FederalTaxID", "N/A"),
-                        "industry": client.get("Industry", "N/A")
-                    }
-                    
-                elif source == "salesforce":
-                    name = client.get("Name", f"Client SF {option_id}")
-                    source_display = "Salesforce"
-                    details = {
-                        "sf_id": client.get("Id", "N/A"),
-                        "phone": client.get("Phone", "N/A"),
-                        "address": client.get("BillingStreet", "N/A"),
-                        "city": client.get("BillingCity", "N/A"),
-                        "industry": client.get("Industry", "N/A"),
-                        "siret": "Non disponible en Salesforce"
-                    }
-                    
-                else:  # source == "sap"
-                    name = client.get("CardName", f"Client SAP {option_id}")
-                    source_display = "SAP"
-                    details = {
-                        "sap_code": client.get("CardCode", "N/A"),
-                        "phone": client.get("Phone1", "N/A"),
-                        "address": client.get("BillToStreet", "N/A"),
-                        "city": client.get("City", "N/A"),
-                        "siret": client.get("FederalTaxID", "N/A"),
-                        "country": client.get("Country", "FR")
-                    }
-                
-                # Format dense pour l'affichage
-                display_info = []
-                if details.get("city") and details["city"] != "N/A":
-                    display_info.append(details["city"])
-                if details.get("siret") and details["siret"] != "N/A" and "Non disponible" not in details["siret"]:
-                    display_info.append(f"SIRET: {details['siret']}")
-                if details.get("phone") and details["phone"] != "N/A":
-                    display_info.append(f"Tél: {details['phone']}")
-                    
-                display_detail = " | ".join(display_info) if display_info else "Informations limitées"
-                
                 client_options.append({
                     "id": option_id,
-                    "name": name,
-                    "source": source_display,
-                    "source_raw": source,
-                    "display_detail": display_detail,
-                    "sf_id": details.get("sf_id"),
-                    "sap_code": details.get("sap_code"), 
-                    "details": details
-                })
-                
-                option_id += 1     
-                # Vérifier qu'on a des clients à proposer
-                if not client_options:
-                    return {
-                        "status": "client_not_found",
-                        "requires_user_selection": False,
-                        "message": f"Client '{client_name}' introuvable."
+                    "name": sf_client.get("Name", f"Client SF {option_id}"),
+                    "source": "Salesforce",
+                    "source_raw": "salesforce", 
+                    "display_detail": "Client Salesforce",
+                    "sf_id": sf_client.get("Id", ""),
+                    "sap_code": "",
+                    "details": {
+                        "sf_id": sf_client.get("Id", ""),
+                        "sap_code": "",
+                        "phone": sf_client.get("Phone"),
+                        "address": f"{sf_client.get('BillingStreet', '')} {sf_client.get('BillingCity', '')}".strip() or "N/A",
+                        "city": sf_client.get("BillingCity"),
+                        "siret": sf_client.get("AccountNumber"),
+                        "industry": sf_client.get("Industry", "N/A")
                     }
+                })
+                option_id += 1
+                
+            # Traiter clients SAP
+            for sap_client in all_sap_clients:
+                if not sap_client:
+                    continue
+                client_options.append({
+                    "id": option_id,
+                    "name": sap_client.get("CardName", f"Client SAP {option_id}"),
+                    "source": "SAP", 
+                    "source_raw": "sap",
+                    "display_detail": "Client SAP",
+                    "sf_id": "",
+                    "sap_code": sap_client.get("CardCode", ""),
+                    "details": {
+                        "sf_id": "",
+                        "sap_code": sap_client.get("CardCode", ""),
+                        "phone": sap_client.get("Phone1"),
+                        "address": sap_client.get("BillToStreet", "N/A"),
+                        "city": sap_client.get("City"), 
+                        "siret": sap_client.get("FederalTaxID"),
+                        "industry": "N/A"
+                    }
+                })
+                option_id += 1
+            
+                logger.info(f"🔧 Préparation de {len(client_options)} options pour sélection")
                 validation_data = {
                     "options": client_options,
                     "clients": client_options,

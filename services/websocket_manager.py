@@ -140,11 +140,12 @@ class WebSocketManager:
         if 'timestamp' not in message:
             message['timestamp'] = datetime.now(timezone.utc).isoformat()
         # Validate payload
+        # CORRECTION: Assurer la présence du task_id dans le message
+        if 'task_id' not in message:
+            message['task_id'] = task_id
+        
+        # Validate payload
         try:
-            # Vérifier présence des champs requis avant validation
-            if 'task_id' not in message:
-                logger.error(f"❌ Message sans task_id: {message}")
-                return
             validated = TaskUpdateModel(**{k: message[k] for k in ["type", "task_id", "timestamp"]})
             payload = {**validated.dict(), **{k: v for k, v in message.items() if k not in validated.__fields__}}
         except ValidationError as e:
