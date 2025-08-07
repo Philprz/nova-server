@@ -123,32 +123,43 @@ class ClientLister:
                 {"query": exact_query}
             )
             
-            # CORRECTION: Traitement approprié de la réponse
-            if not (result.get("success") is False or "error" in result):
-                if "records" in result and result["records"]:
-                    logger.info(f"✅ Recherche exacte Salesforce: {len(result['records'])} résultats")
-                    return result["records"]
-                elif "data" in result and result["data"]:
-                    logger.info(f"✅ Recherche exacte Salesforce: {len(result['data'])} résultats")
-                    return result["data"]
+            # CORRECTION: Vérifier d'abord les données, puis les erreurs
+            if "records" in result and result["records"]:
+                logger.info(f"✅ Recherche exacte Salesforce: {len(result['records'])} résultats")
+                return result["records"]
+            elif "data" in result and result["data"]:
+                logger.info(f"✅ Recherche exacte Salesforce: {len(result['data'])} résultats")
+                return result["data"]
+            
+            # Vérifier les erreurs seulement après avoir testé les données
+            if result.get("success") is False or "error" in result:
+                error_msg = result.get("error", "Erreur inconnue")
+                logger.error(f"❌ Erreur recherche exacte Salesforce: {error_msg}")
+                # Ne pas retourner ici, continuer avec la recherche approximative
             
             # Si pas de résultat exact, recherche approximative
             fuzzy_query = f"SELECT Id, Name, AccountNumber, Phone, BillingCity, BillingCountry, Symbol FROM Account WHERE Name LIKE '%{client_name}%' LIMIT 10"
             
             result = await self.mcp_connector.call_mcp(
                 "salesforce_mcp",
-                "salesforce_query", 
+                "salesforce_query",
                 {"query": fuzzy_query}
             )
             
-            # CORRECTION: Traitement approprié de la réponse
-            if not (result.get("success") is False or "error" in result):
-                if "records" in result and result["records"]:
-                    logger.info(f"✅ Recherche floue Salesforce: {len(result['records'])} résultats")
-                    return result["records"]
-                elif "data" in result and result["data"]:
-                    logger.info(f"✅ Recherche floue Salesforce: {len(result['data'])} résultats")
-                    return result["data"]
+            # CORRECTION: Même logique pour la recherche approximative
+            if "records" in result and result["records"]:
+                logger.info(f"✅ Recherche approximative Salesforce: {len(result['records'])} résultats")
+                return result["records"]
+            elif "data" in result and result["data"]:
+                logger.info(f"✅ Recherche approximative Salesforce: {len(result['data'])} résultats")
+                return result["data"]
+            
+            # Vérifier les erreurs
+            if result.get("success") is False or "error" in result:
+                error_msg = result.get("error", "Erreur inconnue")
+                logger.error(f"❌ Erreur recherche approximative Salesforce: {error_msg}")
+            else:
+                logger.warning(f"⚠️ Aucun client Salesforce trouvé pour '{client_name}'")
             
             logger.info(f"⚠️ Aucun résultat Salesforce pour: {client_name}")
             return []
