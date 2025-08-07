@@ -48,7 +48,7 @@ FIELD_MAPPING = {
         "Notes": "Description",
         # CORRECTION: Supprimer les champs d'adresse problématiques
         "Phone2": "Fax",
-        "FederalTaxID": "Sic"
+        "FederalTaxID": "Symbol"
         # Tous les champs MailXXX supprimés car problématiques
     },
     "sf_to_sap": {
@@ -57,7 +57,7 @@ FIELD_MAPPING = {
         "Fax": "Phone2", 
         "Website": "Website",
         "Description": "Notes",
-        "Sic": "FederalTaxID"
+        "Symbol": "FederalTaxID"
         # CORRECTION : Supprimer TOUS les champs d'adresse et Industry
         # Car ils causent des erreurs SAP constantes
     }
@@ -129,7 +129,7 @@ async def get_salesforce_accounts() -> List[Dict[str, Any]]:
                Phone, Fax, Website, Description,
                BillingStreet, BillingCity, BillingState, BillingPostalCode, BillingCountry,
                ShippingStreet, ShippingCity, ShippingState, ShippingPostalCode, ShippingCountry,
-               CreatedDate, LastModifiedDate, Sic
+               CreatedDate, LastModifiedDate, Symbol    
         FROM Account 
         ORDER BY Name
         """

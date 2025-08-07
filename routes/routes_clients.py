@@ -419,7 +419,7 @@ async def search_clients_advanced(q: str = "", limit: int =50):
         # Requête enrichie avec plus de champs et correction du tri
         if not q.strip():
             query = f"""
-            SELECT Id, Name, BillingCity, BillingCountry, BillingState, Phone, Type, Industry,
+            SELECT Id, Name, BillingCity, BillingCountry, BillingState, Phone, Type, Industry, Symbol,
                    ShippingCity, ShippingCountry, AccountNumber, CreatedDate
             FROM Account 
             WHERE Name != null 

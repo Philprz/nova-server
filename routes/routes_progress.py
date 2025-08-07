@@ -262,7 +262,16 @@ async def handle_client_selection_task(task_id: str, response_data: dict):
             "action": "select_existing", 
             "selected_data": selected_client
         }
-        result = await workflow.continue_after_user_input(user_input, {})
+        # Construire le contexte nécessaire pour la continuation
+        context = {
+            "interaction_type": "client_selection",
+            "workflow_context": {
+                "extracted_info": {
+                    "products": [{"name": "imprimante", "quantity": 19, "code": ""}]
+                }
+            }
+        }
+        result = await workflow.continue_after_user_input(user_input, context)
         logger.info(f"✅ Client task sélectionné pour {task_id}")
         
 # =============================================

@@ -5033,7 +5033,7 @@ class DevisWorkflow:
                         "phone": sf_client.get("Phone"),
                         "address": f"{sf_client.get('BillingStreet', '')} {sf_client.get('BillingCity', '')}".strip() or "N/A",
                         "city": sf_client.get("BillingCity"),
-                        "siret": sf_client.get("AccountNumber"),
+                        "siret": sf_client.get("Symbol"),
                         "industry": sf_client.get("Industry", "N/A")
                     }
                 })
