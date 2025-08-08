@@ -220,16 +220,16 @@
 
         .welcome-message {
             text-align: center;
-            padding: 32px;
+            padding: 4px;
             background: var(--bg-secondary);
-            border-radius: 6px;
-            margin-bottom: 20px;
+            border-radius: 1px;
+            margin-bottom: 4px;
             border: 1px solid var(--border-color);
         }
 
         .welcome-title {
             font-size: 1.5rem;
-            font-weight: 600;
+            font-weight: 500;
             color: var(--primary-blue);
             margin-bottom: 12px;
         }
@@ -260,7 +260,7 @@
         }
 
         .progress-title {
-            font-weight: 600;
+            font-weight: 500;
             color: var(--text-primary);
             font-size: 0.9rem;
         }
@@ -623,27 +623,25 @@
 
     <div class="main-container">
         <header class="header">
-            <div class="logo-container">
+            <div style="display: flex; align-items: center; justify-content: center; gap: 40px; flex-wrap: wrap;">
                 <a href="https://www.it-spirit.com" target="_blank" rel="noopener noreferrer">
-                    <img src="/static/Logo.png" alt="IT Spirit">
+                    <img src="/static/Logo.png" alt="IT Spirit" style="height: 200px; display: block;">
                 </a>
-                <a href="https://www.covia.fr" target="_blank" rel="noopener noreferrer">
-                    <img src="/static/covia.png" alt="COVIA">
+                <div style="font-size: 1.4rem; color: var(--primary-violet); font-weight: bold; text-align: center; font-style: italic;">
+                    présente l'assistant<br> 
+                    commercial intelligent
+                </div>
+                <a href="http://178.33.233.120:8000/interface/itspirit" target="_blank" rel="noopener noreferrer">
+                    <img src="/static/covia_clair.png" alt="COVIA" style="height: 180px; display: block;">
                 </a>
-            </div>
-            <p class="tagline-main">L'esprit humain au coeur de la technologie</p>
-            <div class="tagline">
-                Assistant Commercial Intelligent
             </div>
         </header>
 
         <div class="chat-container">
             <div class="chat-messages" id="chatMessages" role="log" aria-live="polite">
                 <div class="welcome-message">
-                    <div class="welcome-title">Bonjour ! Je suis NOVA</div>
-                    <div class="welcome-subtitle">
-                        Votre assistant commercial intelligent.<br>
-                        Demandez-moi de créer un devis ou posez-moi vos questions.
+                    <div class="welcome-title">Bonjour !
+                    Demandez-moi de créer un devis ou posez-moi vos questions.
                     </div>
                 </div>
             </div>
