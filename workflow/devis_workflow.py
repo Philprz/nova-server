@@ -350,8 +350,17 @@ class DevisWorkflow:
                 logger.info(f"✅ Client sélectionné: {client_display_name}")
 
                 # Poursuite du workflow
+                # Récupérer les produits depuis le contexte ou depuis la tâche
                 workflow_ctx = context.get("workflow_context", {})
                 original_products = workflow_ctx.get("extracted_info", {}).get("products", [])
+
+                # Si pas de produits dans le contexte, essayer de les récupérer depuis la tâche
+                if not original_products and self.current_task:
+                    if hasattr(self.current_task, 'validation_data'):
+                        client_validation = self.current_task.validation_data.get("client_selection", {})
+                        original_context = client_validation.get("original_context", {})
+                        original_products = original_context.get("extracted_info", {}).get("products", [])
+                        logger.info(f"🔍 Produits récupérés depuis validation_data de la tâche: {len(original_products)} produit(s)")
                 if original_products:
                     self._track_step_start(
                         "lookup_products",
@@ -4844,13 +4853,15 @@ class DevisWorkflow:
         🔧 REFONTE : Workflow de devis avec gestion d'interruption client et statuts critiques
         """
         try:
+            # 0) Entrées extraites du prompt
             client_name = extracted_info.get("client", "")
             products = extracted_info.get("products", [])
 
             # Étape 1 : recherche/validation du client
             self._track_step_start("search_client", f"👤 Recherche du client : {client_name}")
             client_result = await self._process_client_validation(client_name)
-            # 🔧 CORRECTION CRITIQUE: Vérifier que client_result n'est pas None
+
+            # 🔒 Garde-fous
             if client_result is None:
                 logger.error("❌ _process_client_validation a retourné None")
                 return {
@@ -4859,30 +4870,59 @@ class DevisWorkflow:
                     "message": "Erreur lors de la validation du client",
                     "error": "client_validation_failed"
                 }
-            # 🔧 CORRECTION CRITIQUE: Vérifier si interaction utilisateur requise
+
+            # ⏸️ Cas d'interaction utilisateur requise (sélection client)
             if client_result.get("status") in ["user_interaction_required", "client_selection_required"]:
-                # Marquer la tâche comme en attente d'interaction
+                # Récupérer des options client de manière robuste
+                interaction_data = client_result.get("interaction_data") or client_result
+                client_options = (
+                    interaction_data.get("client_options")
+                    or interaction_data.get("options")
+                    or interaction_data.get("clients")
+                    or []
+                )
+
+                # Construire la validation_data ENRICHIE avec le contexte initial (client + produits)
+                validation_data = {
+                    "options": client_options,
+                    "clients": client_options,
+                    "client_options": client_options,
+                    "total_options": len(client_options),
+                    "original_client_name": client_name,
+                    "allow_create_new": True,
+                    "interaction_type": "client_selection",
+                    "original_context": {
+                        "extracted_info": {
+                            "client": client_name,
+                            "products": products
+                        }
+                    }
+                }
+
+                # Marquer la tâche et enregistrer l'attente d'interaction
                 if self.current_task:
                     self.current_task.status = TaskStatus.PENDING
-                    self.current_task.require_user_validation("client_selection", "client_selection", client_result)
-                logger.info("⏸️ Workflow interrompu - Interaction utilisateur requise pour sélection client")
-                # 🔧 CORRECTION CRITIQUE: Envoyer interaction via WebSocket avec debug amélioré
-                interaction_data = client_result.get("interaction_data", client_result)
+                    # 🔑 Un SEUL appel, avec le contexte complet
+                    self.current_task.require_user_validation("client_selection", "client_selection", validation_data)
 
-                # Debug des données
-                if not interaction_data.get("client_options"):
-                    logger.error("❌ ERREUR: Pas de client_options dans interaction_data")
-                    logger.error(f"❌ Structure reçue: {json.dumps(interaction_data, indent=2, default=str)}")
+                # Logs de debug utiles
+                if not client_options:
+                    logger.error("❌ ERREUR: Pas de client_options dans validation_data")
+                    logger.error(f"❌ Structure envoyée: {json.dumps(validation_data, indent=2, default=str)}")
                 else:
-                    logger.info(f"✅ {len(interaction_data.get('client_options', []))} clients prêts pour sélection")
-                    for i, client in enumerate(interaction_data.get('client_options', [])):
-                        logger.info(f"Client {i+1}: {client.get('name')} ({client.get('source')}) - ID: {client.get('id')}")
+                    logger.info(f"✅ {len(client_options)} clients prêts pour sélection")
 
-                logger.info(f"📨 Envoi WebSocket pour tâche {self.task_id}")
-                await websocket_manager.send_user_interaction_required(self.task_id, interaction_data)
-                logger.info(f"⏸️ Tâche {self.task_id} en attente d'interaction utilisateur")
-                return client_result
-            # 🔧 NOUVEAU: Vérifier autres statuts qui nécessitent un arrêt
+                # Retour standardisé pour le front
+                return {
+                    "success": True,
+                    "status": "user_interaction_required",
+                    "type": "client_selection",
+                    "message": "Sélection du client requise",
+                    "task_id": self.task_id,
+                    "interaction_data": validation_data
+                }
+
+            # 🔧 Statuts bloquants
             if client_result.get("status") in ["error", "cancelled"]:
                 logger.warning(f"❌ Workflow interrompu - Statut client : {client_result.get('status')}")
                 return client_result
@@ -4896,7 +4936,7 @@ class DevisWorkflow:
             self._track_step_complete("lookup_products", f"✅ {found} produit(s) trouvé(s)")
 
             # Étape 3 : création du devis
-            self._track_step_start("prepare_quote", "📋 Préparation du devis")
+            self._track_step_start("create_quote", "🧾 Création du devis")
             quote_result = await self._create_quote_document(client_result, products_result)
             if not isinstance(quote_result, dict):
                 logger.error("❌ _create_quote_document a retourné un résultat invalide")
@@ -4909,8 +4949,7 @@ class DevisWorkflow:
                 logger.warning("❌ Aucun produit valide pour le devis")
                 return {"success": False, "error": "Aucun produit valide trouvé"}
 
-            # Étape 4 : synchronisation dans les systèmes externes
-            # 🔧 FACTORISATION : un seul appel pour SAP et Salesforce
+            # Étape 4 : synchronisation dans les systèmes externes (SAP / Salesforce)
             self._track_step_start("sync_external_systems", "💾 Synchronisation SAP & Salesforce")
             sync_results = {}
             for system in ("sap", "salesforce"):
@@ -4920,7 +4959,7 @@ class DevisWorkflow:
                 self._track_step_complete(key, f"✅ {system.upper()} mis à jour")
                 sync_results[system] = result
 
-            # Calcul du montant total
+            # Total
             total_amount = sum(p.get("total_price", 0) for p in returned_products)
 
             # Résultat final
@@ -4939,12 +4978,21 @@ class DevisWorkflow:
                 "quote_data": quote_data,
                 "client_result": client_result,
                 "products_result": products_result,
-                "sync_results": sync_results,
+                "sync_results": sync_results
             }
 
-        except Exception as e:
-            logger.error(f"❌ Erreur workflow devis : {e}", exc_info=True)
+        except HTTPException:
+            # Réélever les erreurs HTTP
             raise
+        except Exception as e:
+            logger.exception(f"Erreur _process_quote_workflow: {e}")
+            return {
+                "success": False,
+                "status": "error",
+                "message": "Erreur interne pendant le workflow de devis",
+                "error": str(e)
+            }
+
 
 
 
@@ -5148,9 +5196,14 @@ class DevisWorkflow:
                 "total_options": len(client_options),
                 "original_client_name": client_name,
                 "allow_create_new": True,
-                "interaction_type": "client_selection"
+                "interaction_type": "client_selection",
+                "original_context": {
+                    "extracted_info": {
+                        "client": client_name,
+                        "products": products
+                    }
+                }
             }
-
             self.current_task.require_user_validation("client_selection", "client_selection", validation_data)
             logger.info(f"🔍 DEBUG WORKFLOW: selection_result = {json.dumps({'status': 'user_interaction_required', 'client_options_count': len(client_options)}, indent=2, default=str)}")
             logger.info(f"🔍 DEBUG WORKFLOW: interaction_data présent = {'interaction_data' in locals()}")
