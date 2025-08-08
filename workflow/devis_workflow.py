@@ -5072,45 +5072,43 @@ class DevisWorkflow:
                     }
                 })
                 option_id += 1
-            
-                logger.info(f"🔧 Préparation de {len(client_options)} options pour sélection")
-                validation_data = {
+            logger.info(f"🔧 Préparation de {len(client_options)} options pour sélection")
+            validation_data = {
+                "options": client_options,
+                "clients": client_options,
+                "client_options": client_options,
+                "total_options": len(client_options),
+                "original_client_name": client_name,
+                "allow_create_new": True,
+                "interaction_type": "client_selection"
+            }
+
+            self.current_task.require_user_validation("client_selection", "client_selection", validation_data)
+            logger.info(f"🔍 DEBUG WORKFLOW: selection_result = {json.dumps({'status': 'user_interaction_required', 'client_options_count': len(client_options)}, indent=2, default=str)}")
+            logger.info(f"🔍 DEBUG WORKFLOW: interaction_data présent = {'interaction_data' in locals()}")
+            return {
+                "status": "user_interaction_required",
+                "requires_user_selection": True,
+                "validation_pending": True,
+                "task_id": self.task_id,
+                "message": f"Sélection client requise - {len(client_options)} options disponibles",
+                "interaction_type": "client_selection",
+                "interaction_data": {
+                    "type": "client_selection",
+                    "interaction_type": "client_selection",
                     "options": client_options,
                     "clients": client_options,
                     "client_options": client_options,
                     "total_options": len(client_options),
                     "original_client_name": client_name,
                     "allow_create_new": True,
-                    "interaction_type": "client_selection"
-                }
-
-                self.current_task.require_user_validation("client_selection", "client_selection", validation_data)
-                logger.info(f"🔍 DEBUG WORKFLOW: selection_result = {json.dumps({'status': 'user_interaction_required', 'client_options_count': len(client_options)}, indent=2, default=str)}")
-                logger.info(f"🔍 DEBUG WORKFLOW: interaction_data présent = {'interaction_data' in locals()}")
-                return {
-                    "status": "user_interaction_required",
-                    "requires_user_selection": True,
-                    "validation_pending": True,
-                    "task_id": self.task_id,
-                    "message": f"Sélection client requise - {len(client_options)} options disponibles",
-                    "interaction_type": "client_selection",
-                    "interaction_data": {
-                        "type": "client_selection",
-                        "interaction_type": "client_selection",
-                        "options": client_options,
-                        "clients": client_options,
-                        "client_options": client_options,
-                        "total_options": len(client_options),
-                        "original_client_name": client_name,
-                        "allow_create_new": True,
-                        "message": f"Sélection client requise - {len(client_options)} options disponibles"
-                    },
-                    "client_options": client_options,
-                    "total_options": len(client_options),
-                    "original_client_name": client_name,
-                    "allow_create_new": True
-                }
-
+                    "message": f"Sélection client requise - {len(client_options)} options disponibles"
+                },
+                "client_options": client_options,
+                "total_options": len(client_options),
+                "original_client_name": client_name,
+                "allow_create_new": True
+            }
 
         except Exception as e:
             logger.error(f"❌ Erreur proposition sélection clients: {e}")
