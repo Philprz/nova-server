@@ -4026,7 +4026,36 @@ class DevisWorkflow:
                 "found": False,
                 "error": str(e)
             }
-
+    def _get_intelligent_search_terms(self, product_name: str) -> List[str]:
+        """
+        Génère des termes de recherche intelligents pour SAP
+        """
+        product_lower = product_name.lower()
+        search_terms = []
+        
+        # Mapping français -> anglais pour SAP
+        translations = {
+            "imprimante": ["printer", "imprimante", "Printer", "PRINTER"],
+            "ordinateur": ["computer", "PC", "desktop", "ordinateur"],
+            "écran": ["monitor", "screen", "display", "écran"],
+            "clavier": ["keyboard", "clavier"],
+            "souris": ["mouse", "souris"],
+            "scanner": ["scanner", "scan"],
+            "laser": ["laser", "Laser"],
+            "couleur": ["color", "colour", "couleur"]
+        }
+        
+        # Chercher des correspondances
+        for french_term, english_terms in translations.items():
+            if french_term in product_lower:
+                search_terms.extend(english_terms)
+        
+        # Ajouter le terme original
+        search_terms.append(product_name)
+        
+        # Retourner les termes uniques, anglais en premier
+        return list(dict.fromkeys(search_terms))[:4]
+    
     def _extract_product_keywords(self, product_name: str) -> List[str]:
         """
         🔧 EXTRACTION INTELLIGENTE de mots-clés pour "Imprimante 20 ppm"
