@@ -144,7 +144,29 @@ Réponds UNIQUEMENT au format JSON suivant:
             )
             response.raise_for_status()
             return response.json()["choices"][0]["message"]["content"]
-
+    
+    def _extract_client_from_prompt(self, prompt: str) -> str:
+        """Extrait le nom du client depuis le prompt original"""
+        import re
+        
+        # Chercher des patterns clients courants
+        patterns = [
+            r'pour\s+([A-Z][A-Za-z]+)',
+            r'client\s+([A-Z][A-Za-z]+)',
+            r'société\s+([A-Z][A-Za-z]+)',
+            r'entreprise\s+([A-Z][A-Za-z]+)',
+            r'([A-Z][A-Za-z]+)\s+souhaite',
+            r'([A-Z][A-Za-z]+)\s+demande'
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, prompt)
+            if match:
+                client_name = match.group(1).strip()
+                if len(client_name) > 2:  # Éviter les mots courts
+                    return client_name
+        
+        return ""
     async def extract_quote_info(self, prompt: str) -> Dict[str, Any]:
         logger.error(f"🚨 FONCTION extract_quote_info APPELÉE AVEC: {prompt}")
         logger.info(f"Extraction d'informations de devis à partir de: {prompt}")
@@ -160,7 +182,15 @@ Réponds UNIQUEMENT au format JSON suivant:
                 logger.info(f"🔧 JSON EXTRAIT: {json_str}")
                 extracted_data = json.loads(json_str)
                 logger.info(f"EXTRACTION RÉUSSIE: {extracted_data}")
+                
+                # CORRECTION: Préserver le client détecté
                 action_type = extracted_data.get("action_type", "NON_DÉTECTÉ")
+                if action_type == "RECHERCHE_PRODUIT" and not extracted_data.get("client"):
+                    # Rechercher le client dans le prompt original
+                    client_match = self._extract_client_from_prompt(prompt)
+                    if client_match:
+                        extracted_data["client"] = client_match
+                        logger.info(f"🔧 CLIENT RÉCUPÉRÉ: {client_match}")
                 logger.info(f"TYPE D'ACTION DÉTECTÉ: {action_type}")
                 if action_type == "RECHERCHE_PRODUIT":
                     search_criteria = extracted_data.get('search_criteria', {})
