@@ -200,6 +200,14 @@ Réponds UNIQUEMENT au format JSON suivant:
                     products = extracted_data.get('products', [])
                     logger.info(f"CLIENT DEVIS: {client}")
                     logger.info(f"PRODUITS DEVIS: {products}")
+                # CORRECTION: Détecter le client dans le prompt si manquant
+                if extracted_data.get("action_type") == "RECHERCHE_PRODUIT" and not extracted_data.get("client"):
+                    # Rechercher le client dans le prompt original
+                    client_match = self._extract_client_from_original_prompt(prompt)
+                    if client_match:
+                        extracted_data["client"] = client_match
+                        logger.info(f"🔧 CLIENT RÉCUPÉRÉ du prompt: {client_match}")
+                
                 return extracted_data
             else:
                 logger.error("Impossible de trouver du JSON dans la réponse Claude")
@@ -243,6 +251,32 @@ Réponds UNIQUEMENT au format JSON suivant:
         except Exception as e:
             logger.error(f"Erreur extraction critères: {e}")
             return {"category": product_name, "main_keywords": [product_name]}
+        
+    def _extract_client_from_original_prompt(self, prompt: str) -> str:
+        """Extrait le nom du client depuis le prompt original avec patterns robustes"""
+        import re
+        
+        # Patterns pour détecter les clients (ordre de priorité)
+        patterns = [
+            r'(?:pour|chez|client)\s+([A-Z][A-Z0-9\s]+?)(?:\s+avec|\s+de|\s*,|\s*$)',
+            r'([A-Z][A-Z0-9\s]{2,15})\s+(?:souhaite|demande|veut)',
+            r'société\s+([A-Z][A-Za-z\s]+)',
+            r'entreprise\s+([A-Z][A-Za-z\s]+)',
+            r'([A-Z]{3,}(?:\s+[A-Z]+)*)'  # Mots en majuscules
+        ]
+        
+        for pattern in patterns:
+            matches = re.findall(pattern, prompt)
+            for match in matches:
+                client_name = match.strip()
+                # Filtrer les mots courts et les mots courants
+                if (len(client_name) >= 3 and 
+                    client_name.upper() not in ['AVEC', 'POUR', 'DANS', 'SUR', 'PAR', 'DEVIS']):
+                    logger.info(f"🎯 Client détecté avec pattern '{pattern}': {client_name}")
+                    return client_name
+        
+        return ""        
+    
     def _extract_json_from_response(self, content: str) -> Dict[str, Any]:
         """Extrait et parse le JSON de la réponse LLM."""
         start_idx = content.find("{")

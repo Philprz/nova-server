@@ -333,7 +333,14 @@ class DevisWorkflow:
                 # Mise à jour du contexte
                 self.context["client_info"] = {"data": selected_client_data, "found": True}
                 self.context["client_validated"] = True
-                logger.info(f"✅ Client sélectionné: {selected_client_data.get('Name','N/A')}")
+                
+                # CORRECTION: Préserver le nom client réel pour affichage
+                client_display_name = (selected_client_data.get('Name') or 
+                                     selected_client_data.get('CardName') or 
+                                     client_name or 'Client sans nom')
+                
+                self.context["selected_client_display"] = client_display_name
+                logger.info(f"✅ Client sélectionné: {client_display_name}")
 
                 # Poursuite du workflow
                 workflow_ctx = context.get("workflow_context", {})
@@ -3150,7 +3157,30 @@ class DevisWorkflow:
                 }
             else:
                 # Erreur dans la recherche MCP
-                logger.error(f"❌ Erreur recherche MCP: {search_result.get('error')}")
+                logger.error(f"❌ Erreur recherche MCP: {search_result.get('error') if search_result else 'Résultat None'}")
+                
+                # CORRECTION: Gérer le cas None et ajouter recherche intelligente
+                if search_result is None:
+                    logger.warning("⚠️ search_result est None, tentative recherche alternative")
+                    # Recherche avec termes anglais
+                    english_terms = self._get_english_search_terms(product_name)
+                    for term in english_terms:
+                        logger.info(f"🔍 Recherche alternative: {term}")
+                        alt_result = await self.mcp_connector.call_mcp(
+                            "sap_mcp",
+                            "sap_search",
+                            {"search_term": term, "search_fields": ["ItemName", "U_Description"], "limit": 5}
+                        )
+                        if alt_result and alt_result.get("success") and alt_result.get("results"):
+                            best_match = alt_result["results"][0]
+                            return {
+                                "ItemCode": best_match.get("ItemCode"),
+                                "ItemName": best_match.get("ItemName"),
+                                "OnHand": best_match.get("OnHand", 0),
+                                "AvgPrice": best_match.get("AvgPrice", 0),
+                                "U_Description": best_match.get("U_Description", ""),
+                                "found_by": f"alternative_{term}"
+                            }
                 return {
                     "error": f"Erreur recherche SAP: {search_result.get('error')}"
                 }
@@ -5627,6 +5657,30 @@ class DevisWorkflow:
                 keywords.append(first_word)
         
         return keywords[:3]  # Limiter à 3 mots-clés
+    def _get_english_search_terms(self, product_name: str) -> List[str]:
+        """Génère des termes de recherche anglais pour SAP"""
+        product_lower = product_name.lower()
+        
+        # Mapping français -> anglais pour SAP
+        translations = {
+            "imprimante": ["printer", "Printer", "PRINTER"],
+            "ordinateur": ["computer", "Computer", "PC"],
+            "écran": ["monitor", "Monitor", "screen"],
+            "clavier": ["keyboard", "Keyboard"],
+            "souris": ["mouse", "Mouse"],
+            "scanner": ["scanner", "Scanner"]
+        }
+        
+        search_terms = []
+        for french_term, english_terms in translations.items():
+            if french_term in product_lower:
+                search_terms.extend(english_terms)
+                break
+        
+        # Ajouter le terme original en dernier
+        search_terms.append(product_name)
+        
+        return search_terms[:3]
     async def _process_products_retrieval(self, products: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
         Récupération des produits avec progression avancée
