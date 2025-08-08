@@ -5189,6 +5189,23 @@ class DevisWorkflow:
                 })
                 option_id += 1
             logger.info(f"🔧 Préparation de {len(client_options)} options pour sélection")
+
+            # CORRECTION: Log du contexte pour debug
+            logger.info(f"🔍 DEBUG: self.context = {json.dumps(self.context, indent=2, default=str)}")
+
+            # CORRECTION: S'assurer que extracted_info est récupéré correctement avec une valeur par défaut sûre
+            products_list = []
+            try:
+                if hasattr(self, 'context') and self.context:
+                    extracted_info = self.context.get("extracted_info", {})
+                    products_list = extracted_info.get("products", [])
+                    logger.info(f"🔍 DEBUG: Produits extraits = {products_list}")
+                else:
+                    logger.warning("⚠️ Contexte non initialisé ou vide")
+            except Exception as e:
+                logger.error(f"❌ Erreur lors de l'extraction des produits: {e}")
+                products_list = []
+
             validation_data = {
                 "options": client_options,
                 "clients": client_options,
@@ -5200,7 +5217,7 @@ class DevisWorkflow:
                 "original_context": {
                     "extracted_info": {
                         "client": client_name,
-                        "products": products
+                        "products": products_list
                     }
                 }
             }
@@ -5233,6 +5250,8 @@ class DevisWorkflow:
 
         except Exception as e:
             logger.error(f"❌ Erreur proposition sélection clients: {e}")
+            import traceback
+            logger.error(f"❌ Traceback complet: {traceback.format_exc()}")
             return {"status": "error", "found": False, "error": str(e)}
 
 
