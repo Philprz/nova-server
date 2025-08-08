@@ -241,19 +241,28 @@ async def handle_client_selection_task(task_id: str, response_data: dict):
                       response_data.get("selected_data"))
     
     # Si pas de client direct, essayer via action et index
+    # Récupérer les données client selon différents formats avec cache task
+    selected_client = (response_data.get("selected_client") or 
+                    response_data.get("client_data") or
+                    response_data.get("selected_data"))
+
+    # Récupérer les données client depuis le cache task si elles existent
     if not selected_client:
-        action = response_data.get("action")
-        if action == "select_existing":
-            client_id = response_data.get("client_id")
-            client_name = response_data.get("client_name")
-            selected_index = response_data.get("selected_index")
+        task = progress_tracker.get_task(task_id)
+        if task and task.validation_data:
+            interaction_data = task.validation_data.get("client_selection", {})
+            client_options = interaction_data.get("client_options", [])
             
-            # Reconstituer les données client minimum
-            selected_client = {
-                "id": client_id,
-                "name": client_name, 
-                "selected_index": selected_index
-            }
+            action = response_data.get("action")
+            if action == "select_existing":
+                client_id = response_data.get("client_id")
+                selected_index = response_data.get("selected_index", 0)
+                
+                # Récupérer client depuis options par ID ou index
+                if client_id:
+                    selected_client = next((c for c in client_options if c.get("id") == client_id), None)
+                elif selected_index is not None and selected_index < len(client_options):
+                    selected_client = client_options[selected_index]
             
     logger.info(f"🎯 Données client extraites: {selected_client}")
     # Traiter les actions spécifiques même sans selected_client
@@ -296,6 +305,7 @@ async def handle_client_selection_task(task_id: str, response_data: dict):
         # Construire le contexte nécessaire pour la continuation
         context = {
             "interaction_type": "client_selection",
+            "original_client_name": client_name,
             "workflow_context": {
                 "extracted_info": {
                     "products": [{"name": "imprimante", "quantity": 19, "code": ""}]

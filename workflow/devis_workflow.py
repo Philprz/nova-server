@@ -321,7 +321,13 @@ class DevisWorkflow:
             if action == "select_existing":
                 # Vérification et cache
                 selected_client_data = user_input.get("selected_data")
+                # Initialiser client_name AVANT usage
+                client_name = "Client_Inconnu"
+
                 if not selected_client_data:
+                    # Récupération impossible si selected_client_data est None
+                    logger.warning("⚠️ selected_data manquant - utilisation valeur par défaut")
+                else:
                     # Récupérer le nom du client avec différentes clés possibles
                     client_name = (selected_client_data.get("Name") or 
                                 selected_client_data.get("name") or 
