@@ -322,11 +322,13 @@ class DevisWorkflow:
                 # Vérification et cache
                 selected_client_data = user_input.get("selected_data")
                 if not selected_client_data:
-                    return self._build_error_response("Sélection invalide", "Données client manquantes")
-                await self.cache_manager.cache_client(
-                    selected_client_data.get("Name"),
-                    selected_client_data
-                )
+                    # Récupérer le nom du client avec différentes clés possibles
+                    client_name = (selected_client_data.get("Name") or 
+                                selected_client_data.get("name") or 
+                                selected_client_data.get("client_name") or
+                                "Client_Inconnu")
+                    
+                    await self.cache_manager.cache_client(client_name, selected_client_data)
 
                 # Mise à jour du contexte
                 self.context["client_info"] = {"data": selected_client_data, "found": True}

@@ -256,6 +256,37 @@ async def handle_client_selection_task(task_id: str, response_data: dict):
             }
             
     logger.info(f"🎯 Données client extraites: {selected_client}")
+    # Traiter les actions spécifiques même sans selected_client
+    action = response_data.get("action")
+    
+    if action == "create_new":
+        # Création de nouveau client
+        client_name = response_data.get("client_name", "")
+        logger.info(f"🆕 Création client demandée: {client_name}")
+        
+        if client_name:
+            workflow = DevisWorkflow(task_id=task_id, force_production=True)
+            user_input = {
+                "action": "create_new",
+                "client_name": client_name
+            }
+            context = {
+                "interaction_type": "client_selection",
+                "original_client_name": client_name,
+                "workflow_context": {
+                    "extracted_info": {
+                        "products": [{"name": "imprimante", "quantity": 19, "code": ""}]
+                    }
+                }
+            }
+            result = await workflow.continue_after_user_input(user_input, context)
+            logger.info(f"✅ Workflow création client lancé pour {task_id}")
+            return
+        else:
+            logger.error(f"❌ Nom de client manquant pour création")
+            return
+    
+    # Traitement normal pour select_existing
     if selected_client:
         workflow = DevisWorkflow(task_id=task_id, force_production=True)
         user_input = {

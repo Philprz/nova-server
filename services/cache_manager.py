@@ -237,6 +237,10 @@ class ReferentialCache:
         return None
     
     async def cache_client_suggestions(self, client_name: str, suggestions: List[Dict]):
+        if not client_name or client_name.strip() == "":
+            logger.error("❌ Nom de client vide ou None fourni à cache_client")
+            return       
+              
         """Met en cache les suggestions client"""
         cache_key = f"suggestions_{client_name.lower().strip()}"
         
@@ -263,6 +267,9 @@ class ReferentialCache:
         return None
     
     async def cache_client(self, client_name: str, client_data: Dict):
+        if not client_name or client_name.strip() == "":
+            logger.error("❌ Nom de client vide ou None fourni à cache_client")
+            return
         """Met en cache les données client"""
         cache_key = f"client_{client_name.lower().strip()}"
         
