@@ -121,8 +121,8 @@
         }
 
         .main-container {
-            max-width: 1400px;
-            width: min(96vw, 1400px);
+            max-width: 1600px;
+            width: min(98vw, 1600px);
             margin: 0 auto;
             padding: 20px;
             min-height: 100vh;
@@ -131,24 +131,46 @@
         .header {
             background: var(--bg-primary);
             border-radius: 8px;
-            padding: 24px;
-            margin-bottom: 24px;
+            padding: 20px 24px 16px 24px;
+            margin-bottom: 20px;
             box-shadow: var(--shadow);
             border-left: 4px solid var(--primary-blue);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 12px;
         }
 
-        .logo {
-            font-size: 2.5rem;
-            font-weight: 700;
+        .header > div.logo-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 40px;
+            flex-wrap: wrap;
+            width: 100%;
+            max-width: 1200px;
+        }
+
+        .header > div.logo-container a img {
+            height: 140px;
+            display: block;
+        }
+
+        .header > div.tagline-main {
+            font-size: 1.6rem;
             color: var(--primary-blue);
-            margin-bottom: 8px;
+            font-style: italic;
+            font-weight: 700;
+            text-align: center;
+            margin: 0;
         }
 
         .tagline {
-            font-size: 1rem;
+            font-size: 1.1rem;
             color: var(--text-secondary);
             font-weight: 400;
             text-align: center;
+            margin-top: 4px;
         }
 
         .chat-container {
@@ -597,34 +619,23 @@
     </style>
 </head>
 <body>
-    <div class="connection-status disconnected" id="connectionStatus" role="status" aria-live="polite">
-        <i class="bi bi-wifi"></i> Connexion...
-    </div>
+    <div class="connection-status" id="connectionStatus"></div>
 
     <div class="main-container">
-        <div class="header">
-            <div style="display: flex; align-items: center; gap: 20px;">
-                <div style="flex: 0 1 auto; text-align: center;">
-                    <a
-                        href="https://www.it-spirit.fr"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        style="text-decoration: none; color: inherit;"
-                    >
-                        <img src="/static/Logo.png" alt="IT Spirit" style="height: 200px; display: block; margin: 0 auto 8px;">
-                        <div style="font-size: 1.1rem; color: var(--text-secondary); margin-bottom: 8px; font-style: italic; text-align: center;">
-                            L'esprit humain au coeur de la technologie
-                        </div>
-                    </a>
-                    <img src="/static/covia.png" alt="COVIA" style="height: 100px; display: block; margin: 0 auto 8px;">
-                    <div style="font-size: 1.1rem; color: var(--text-secondary); margin-bottom: 8px; font-style: italic; text-align: center;">
-                    <div class="tagline">
-                        COVIA - Assistant Commercial Intelligent<br>
-                        Génération Automatique de Devis • SAP Business One • Salesforce • Claude AI
-                    </div>
-                </div>
+        <header class="header">
+            <div class="logo-container">
+                <a href="https://www.it-spirit.com" target="_blank" rel="noopener noreferrer">
+                    <img src="/static/Logo.png" alt="IT Spirit">
+                </a>
+                <a href="https://www.covia.fr" target="_blank" rel="noopener noreferrer">
+                    <img src="/static/covia.png" alt="COVIA">
+                </a>
             </div>
-        </div>
+            <p class="tagline-main">L'esprit humain au coeur de la technologie</p>
+            <div class="tagline">
+                Assistant Commercial Intelligent
+            </div>
+        </header>
 
         <div class="chat-container">
             <div class="chat-messages" id="chatMessages" role="log" aria-live="polite">
@@ -683,7 +694,7 @@
             </div>
 
             <form id="chatForm" class="input-container" novalidate>
-                
+
                 <textarea
                     id="chatInput"
                     class="chat-input"
