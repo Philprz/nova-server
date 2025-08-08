@@ -171,13 +171,6 @@ class ClientLister:
     async def _search_sap_by_name(self, client_name: str) -> List[Dict[str, Any]]:
         """Recherche dans SAP avec différentes variantes et diagnostics améliorés"""
         try:
-            # Validation et filtrage des données avant comptage
-            if isinstance(result, dict) and "value" in result:
-                clients = result["value"]
-                # Filtrer les entrées vides ou invalides
-                clients = [c for c in clients if c and c.get('CardName') and c.get('CardName').strip()]
-                logger.info(f"✅ Recherche SAP: {len(clients)} résultats valides (après filtrage)")
-                return clients
             # Utiliser sap_read avec OData filter au lieu de sap_search
             result = await self.mcp_connector.call_mcp(
                 "sap_mcp",
@@ -193,7 +186,13 @@ class ClientLister:
             logger.debug(f"Type de réponse: {type(result)}")
             if isinstance(result, dict):
                 logger.debug(f"Clés disponibles: {list(result.keys())}")
-
+             # Validation et filtrage des données après appel MCP
+            if isinstance(result, dict) and "value" in result:
+                clients = result["value"]
+                # Filtrer les entrées vides ou invalides
+                clients = [c for c in clients if c and c.get('CardName') and c.get('CardName').strip()]
+                logger.info(f"✅ Recherche SAP: {len(clients)} résultats valides (après filtrage)")
+                return clients
             # garde-fou si None ou type inattendu
             if result is None or not isinstance(result, (dict, list)):
                 logger.warning(f"⚠️ Résultat SAP invalide pour: {client_name}")

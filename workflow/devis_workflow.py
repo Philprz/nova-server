@@ -4782,7 +4782,15 @@ class DevisWorkflow:
             # Étape 1 : recherche/validation du client
             self._track_step_start("search_client", f"👤 Recherche du client : {client_name}")
             client_result = await self._process_client_validation(client_name)
-
+            # 🔧 CORRECTION CRITIQUE: Vérifier que client_result n'est pas None
+            if client_result is None:
+                logger.error("❌ _process_client_validation a retourné None")
+                return {
+                    "success": False,
+                    "status": "error",
+                    "message": "Erreur lors de la validation du client",
+                    "error": "client_validation_failed"
+                }
             # 🔧 CORRECTION CRITIQUE: Vérifier si interaction utilisateur requise
             if client_result.get("status") in ["user_interaction_required", "client_selection_required"]:
                 # Marquer la tâche comme en attente d'interaction
