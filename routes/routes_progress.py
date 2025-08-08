@@ -232,15 +232,13 @@ async def handle_user_response_task(task_id: str, response_data: dict):
         logger.error(f"❌ Erreur traitement réponse task {task_id}: {e}")
 
 async def handle_client_selection_task(task_id: str, response_data: dict):
-    """Traite sélection client pour les tâches"""
+    """Traite la sélection client (création ou sélection existante) pour une tâche donnée."""
     try:
         logger.info(f"🎯 Traitement sélection client task {task_id}: {response_data}")
 
-        # Action en entrée
-        action = response_data.get("action")
-
-        # Nom client (priorité aux données réelles)
-        client_name = response_data.get("client_name") or "Client_Inconnu"
+        # 1) Extraction de l'action et des données d'entrée
+        action = (response_data.get("action") or "").strip()
+        client_name = (response_data.get("client_name") or "Client_Inconnu").strip()
 
         # Données client possibles (formats variés)
         selected_client = (
@@ -249,111 +247,140 @@ async def handle_client_selection_task(task_id: str, response_data: dict):
             or response_data.get("selected_data")
         )
 
-        # Si pas de client fourni, tenter le cache de validation du tracker
-        if not selected_client:
-            task = progress_tracker.get_task(task_id)
-            validation_entry = {}
-            client_options = []
+        # 2) Si rien de fourni côté réponse, tenter de lire dans le cache de validation de la tâche
+        task = progress_tracker.get_task(task_id)
+        client_options = []
+        validation_entry = {}
+        if task and hasattr(task, "validation_data"):
+            validation_entry = task.validation_data.get("client_selection", {}) or {}
+            interaction_data = validation_entry.get("data", {}) or {}
+            # selon les versions, cela peut être "client_options" | "options" | "clients"
+            client_options = (
+                interaction_data.get("client_options")
+                or interaction_data.get("options")
+                or interaction_data.get("clients")
+                or []
+            )
 
-            if task and getattr(task, "validation_data", None):
-                validation_entry = task.validation_data.get("client_selection", {}) or {}
-                interaction_data = validation_entry.get("data", {}) or {}
-                client_options = interaction_data.get("client_options", []) or []
+            # Si rien dans response_data et qu'une sélection unique a été validée côté UI,
+            # certains fronts renvoient juste un index/ID minimal.
+            if not selected_client and isinstance(interaction_data, dict):
+                maybe_selected = (
+                    interaction_data.get("selected_client")
+                    or interaction_data.get("selected_data")
+                )
+                if maybe_selected:
+                    selected_client = maybe_selected
 
-            if action == "select_existing" and client_options:
-                client_id = response_data.get("client_id")
-                selected_index = response_data.get("selected_index", None)
+        # 3) Finaliser le nom du client à partir des données réelles quand disponibles
+        if isinstance(selected_client, dict) and selected_client:
+            client_name = (
+                selected_client.get("name")
+                or selected_client.get("Name")
+                or selected_client.get("CardName")
+                or selected_client.get("card_name")
+                or client_name
+            )
 
-                # Sélection par ID prioritaire
-                if client_id:
-                    selected_client = next(
-                        (c for c in client_options if c.get("id") == client_id), None
-                    )
-                    logger.info(
-                        f"🔍 Client par ID {client_id}: {selected_client.get('name') if selected_client else 'Aucun'}"
-                    )
+        logger.info(f"🧾 Données client détectées: {selected_client}")
+        logger.info(f"🧾 Nom client retenu: {client_name}")
 
-                # Sinon, sélection par index si valable
-                if not selected_client and selected_index is not None:
-                    try:
-                        idx = int(selected_index)
-                    except (TypeError, ValueError):
-                        idx = -1
-                    if 0 <= idx < len(client_options):
-                        selected_client = client_options[idx]
-                        logger.info(
-                            f"🔍 Client par index {idx}: {selected_client.get('name') if selected_client else 'Aucun'}"
-                        )
+        # 4) Récupérer les produits originaux AVANT de construire le contexte
+        original_products: list = []
+        extracted_info: dict = {}
 
-                # Mettre à jour le nom depuis les données réelles si trouvées
-                if selected_client:
-                    client_name = (
-                        selected_client.get("name")
-                        or selected_client.get("Name")
-                        or selected_client.get("CardName")
-                        or client_name
-                    )
+        # 4.a) Priorité : validation_data → "client_selection" → "original_context"
+        if task and hasattr(task, "validation_data"):
+            client_validation = task.validation_data.get("client_selection", {}) or {}
+            if client_validation:
+                original_context = client_validation.get("original_context", {}) or {}
+                extracted_info = original_context.get("extracted_info", {}) or {}
+                # produits initialement extraits du prompt
+                original_products = extracted_info.get("products", []) or []
+                logger.info(f"🔍 Produits récupérés depuis validation_data: {len(original_products)} produit(s)")
 
-        logger.info(f"🎯 Données client extraites: {selected_client}")
-        logger.info(f"🎯 Client name final: {client_name}")
+        # 4.b) Repli : task.context.extracted_info.products
+        if not original_products and task and hasattr(task, "context"):
+            original_products = (task.context.get("extracted_info", {}) or {}).get("products", []) or []
+            logger.info(f"🔍 Produits récupérés depuis task.context: {len(original_products)} produit(s)")
 
-        # Actions
+        # 5) Router l'action
         if action == "create_new":
-            req_name = (response_data.get("client_name") or "").strip()
-            logger.info(f"🆕 Création client demandée: {req_name}")
+            # Création d'un nouveau client
+            req_name = (response_data.get("client_name") or client_name).strip()
+            if not req_name or req_name == "Client_Inconnu":
+                logger.error("❌ Nom client requis pour la création")
+                return
 
-            if req_name:
-                workflow = DevisWorkflow(task_id=task_id, force_production=True)
-                user_input = {"action": "create_new", "client_name": req_name}
-                context = {
-                    "interaction_type": "client_selection",
-                    "original_client_name": req_name,
-                    "workflow_context": {"extracted_info": {"products": []}},
-                }
-                await workflow.continue_after_user_input(user_input, context)
-                logger.info(f"✅ Workflow création client lancé pour {task_id}")
-                return
-            else:
-                logger.error("❌ Nom de client manquant pour création")
-                return
+            workflow = DevisWorkflow(task_id=task_id, force_production=True)
+
+            user_input = {
+                "action": "create_new",
+                "requested_name": req_name,
+            }
+            context = {
+                "interaction_type": "client_selection",
+                "original_client_name": req_name,
+                "workflow_context": {
+                    "extracted_info": {
+                        "client": req_name,
+                        "products": original_products,
+                    }
+                },
+            }
+
+            logger.info(f"➡️ Poursuite workflow (création client) pour {task_id}")
+            await workflow.continue_after_user_input(user_input, context)
+            logger.info(f"✅ Nouveau client demandé et workflow poursuivi pour {task_id}")
+            return
 
         elif action == "select_existing":
-            if selected_client:
-                # Récupérer les produits originaux AVANT de construire le contexte
-                task = progress_tracker.get_task(task_id)
-                original_products = []
-                if task and hasattr(task, 'context'):
-                    original_products = task.context.get("extracted_info", {}).get("products", [])
+            # Sélection d'un client existant
+            if not selected_client:
+                # Si le front n'a pas renvoyé d'objet complet, tenter de déduire un candidat depuis client_options
+                if isinstance(client_options, list) and len(client_options) == 1:
+                    selected_client = client_options[0]
+                else:
+                    logger.error(f"❌ Aucune donnée client disponible pour {task_id} (select_existing)")
+                    return
 
-                workflow = DevisWorkflow(task_id=task_id, force_production=True)
-                user_input = {"action": "select_existing", "selected_data": selected_client}
-                context = {
-                    "interaction_type": "client_selection",
-                    "original_client_name": (
+            workflow = DevisWorkflow(task_id=task_id, force_production=True)
+
+            user_input = {
+                "action": "select_existing",
+                "selected_data": selected_client,
+            }
+            context = {
+                "interaction_type": "client_selection",
+                "original_client_name": (
+                    (isinstance(selected_client, dict) and (
                         selected_client.get("Name")
                         or selected_client.get("CardName")
                         or selected_client.get("name")
                         or client_name
-                    ),
-                    "workflow_context": {
-                        "extracted_info": {
-                            "products": original_products
-                        }
+                    )) or client_name
+                ),
+                "workflow_context": {
+                    "extracted_info": {
+                        "products": original_products,
                     }
-                }
-                await workflow.continue_after_user_input(user_input, context)
-                logger.info(f"✅ Client sélectionné et workflow poursuivi pour {task_id}")
-            else:
-                logger.error(f"❌ Aucune donnée client disponible pour {task_id}")
-                return
+                },
+            }
+
+            logger.info(f"➡️ Poursuite workflow (sélection client existant) pour {task_id}")
+            await workflow.continue_after_user_input(user_input, context)
+            logger.info(f"✅ Client sélectionné et workflow poursuivi pour {task_id}")
+            return
 
         else:
-            logger.error(f"❌ Action non reconnue: {action}")
+            logger.error(f"❌ Action non reconnue: {action!r}")
             return
 
     except Exception as e:
         logger.error(f"❌ Erreur traitement sélection client {task_id}: {e}", exc_info=True)
         raise
+
+
 
 # =============================================
 # ENDPOINTS DE VALIDATION UTILISATEUR
