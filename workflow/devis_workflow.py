@@ -319,22 +319,23 @@ class DevisWorkflow:
             action = user_input.get("action")
 
             if action == "select_existing":
-                # Vérification et cache
+                # Récupérer selected_client_data AVANT utilisation
                 selected_client_data = user_input.get("selected_data")
-                # Initialiser client_name AVANT usage
-                client_name = "Client_Inconnu"
+                # Initialiser client_name AVANT usage - TOUJOURS
+                client_name = (user_input.get("client_name") or 
+                            context.get("original_client_name") or
+                            "Client_Inconnu")
 
-                if not selected_client_data:
-                    # Récupération impossible si selected_client_data est None
-                    logger.warning("⚠️ selected_data manquant - utilisation valeur par défaut")
-                else:
-                    # Récupérer le nom du client avec différentes clés possibles
+                if selected_client_data:
+                    # Mettre à jour avec le nom réel depuis les données
                     client_name = (selected_client_data.get("Name") or 
                                 selected_client_data.get("name") or 
-                                selected_client_data.get("client_name") or
-                                "Client_Inconnu")
+                                selected_client_data.get("CardName") or
+                                client_name)
                     
                     await self.cache_manager.cache_client(client_name, selected_client_data)
+                else:
+                    logger.warning("⚠️ selected_data manquant - utilisation nom par défaut")
 
                 # Mise à jour du contexte
                 self.context["client_info"] = {"data": selected_client_data, "found": True}
