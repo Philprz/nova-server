@@ -121,7 +121,8 @@
         }
 
         .main-container {
-            max-width: 1200px;
+            max-width: 1400px;
+            width: min(96vw, 1400px);
             margin: 0 auto;
             padding: 20px;
             min-height: 100vh;
@@ -147,6 +148,7 @@
             font-size: 1rem;
             color: var(--text-secondary);
             font-weight: 400;
+            text-align: center;
         }
 
         .chat-container {
@@ -602,20 +604,22 @@
     <div class="main-container">
         <div class="header">
             <div style="display: flex; align-items: center; gap: 20px;">
-                <div style="flex: 1;">
+                <div style="flex: 0 1 auto; text-align: center;">
                     <a
                         href="https://www.it-spirit.fr"
                         target="_blank"
                         rel="noopener noreferrer"
                         style="text-decoration: none; color: inherit;"
                     >
-                        <img src="/static/Logo.png" alt="IT Spirit" style="height: 60px; margin-bottom: 8px;">
-                        <div style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 8px; font-style: italic;">
+                        <img src="/static/Logo.png" alt="IT Spirit" style="height: 90px; display: block; margin: 0 auto 8px;">
+                        <div style="font-size: 1.1rem; color: var(--text-secondary); margin-bottom: 8px; font-style: italic; text-align: center;">
                             L'esprit humain au coeur de la technologie
                         </div>
                     </a>
+                    <img src="/static/covia.png" alt="COVIA" style="height: 90px; display: block; margin: 0 auto 8px;">
+                    <div style="font-size: 1.1rem; color: var(--text-secondary); margin-bottom: 8px; font-style: italic; text-align: center;">
                     <div class="tagline">
-                        NOVA - Assistant Commercial Intelligent<br>
+                        COVIA - Assistant Commercial Intelligent<br>
                         Génération Automatique de Devis • SAP Business One • Salesforce • Claude AI
                     </div>
                 </div>

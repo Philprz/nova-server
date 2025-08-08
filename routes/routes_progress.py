@@ -240,7 +240,7 @@ async def handle_client_selection_task(task_id: str, response_data: dict):
         action = response_data.get("action")
 
         # Nom client (priorité aux données réelles)
-        client_name = (response_data.get("client_name") or "Client_Inconnu")
+        client_name = response_data.get("client_name") or "Client_Inconnu"
 
         # Données client possibles (formats variés)
         selected_client = (
@@ -275,7 +275,6 @@ async def handle_client_selection_task(task_id: str, response_data: dict):
 
                 # Sinon, sélection par index si valable
                 if not selected_client and selected_index is not None:
-                    # Cast défensif si index string convertible
                     try:
                         idx = int(selected_index)
                     except (TypeError, ValueError):
@@ -300,10 +299,10 @@ async def handle_client_selection_task(task_id: str, response_data: dict):
 
         # Actions
         if action == "create_new":
-            req_name = response_data.get("client_name", "")  # stricte: nom demandé
+            req_name = (response_data.get("client_name") or "").strip()
             logger.info(f"🆕 Création client demandée: {req_name}")
 
-            if req_name.strip():
+            if req_name:
                 workflow = DevisWorkflow(task_id=task_id, force_production=True)
                 user_input = {"action": "create_new", "client_name": req_name}
                 context = {
@@ -320,16 +319,30 @@ async def handle_client_selection_task(task_id: str, response_data: dict):
 
         elif action == "select_existing":
             if selected_client:
+                # Récupérer les produits originaux AVANT de construire le contexte
+                task = progress_tracker.get_task(task_id)
+                original_products = []
+                if task and hasattr(task, 'context'):
+                    original_products = task.context.get("extracted_info", {}).get("products", [])
+
                 workflow = DevisWorkflow(task_id=task_id, force_production=True)
                 user_input = {"action": "select_existing", "selected_data": selected_client}
                 context = {
                     "interaction_type": "client_selection",
-                    "original_client_name": client_name,
-                    "workflow_context": {"extracted_info": {"products": []}},
+                    "original_client_name": (
+                        selected_client.get("Name")
+                        or selected_client.get("CardName")
+                        or selected_client.get("name")
+                        or client_name
+                    ),
+                    "workflow_context": {
+                        "extracted_info": {
+                            "products": original_products
+                        }
+                    }
                 }
                 await workflow.continue_after_user_input(user_input, context)
-                logger.info(f"✅ Client sélectionné pour {task_id}: {client_name}")
-                return
+                logger.info(f"✅ Client sélectionné et workflow poursuivi pour {task_id}")
             else:
                 logger.error(f"❌ Aucune donnée client disponible pour {task_id}")
                 return
@@ -339,7 +352,7 @@ async def handle_client_selection_task(task_id: str, response_data: dict):
             return
 
     except Exception as e:
-        logger.error(f"❌ Erreur traitement sélection client {task_id}: {e}")
+        logger.error(f"❌ Erreur traitement sélection client {task_id}: {e}", exc_info=True)
         raise
 
 # =============================================
