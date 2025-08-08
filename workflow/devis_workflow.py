@@ -247,6 +247,10 @@ class DevisWorkflow:
                 )
             self._track_step_complete("parse_prompt", "✅ Demande analysée")
 
+            # IMPORTANT: Sauvegarder extracted_info dans le contexte
+            self.context["extracted_info"] = extracted_info
+            logger.info(f"✅ Contexte initialisé dans process_quote_request - client: {extracted_info.get('client', '')}, produits: {len(extracted_info.get('products', []))}")
+
             # PHASE 2: Exécution du workflow de devis
             self._track_step_start("quote_workflow", "🚀 Démarrage du workflow de devis")
             workflow_result = await self._process_quote_workflow(extracted_info)
@@ -4857,6 +4861,10 @@ class DevisWorkflow:
             client_name = extracted_info.get("client", "")
             products = extracted_info.get("products", [])
 
+            # IMPORTANT: Sauvegarder extracted_info dans le contexte pour que _process_client_validation puisse y accéder
+            self.context["extracted_info"] = extracted_info
+            logger.info(f"✅ Contexte initialisé avec extracted_info - client: {client_name}, produits: {len(products)}")
+
             # Étape 1 : recherche/validation du client
             self._track_step_start("search_client", f"👤 Recherche du client : {client_name}")
             client_result = await self._process_client_validation(client_name)
@@ -5224,6 +5232,28 @@ class DevisWorkflow:
             self.current_task.require_user_validation("client_selection", "client_selection", validation_data)
             logger.info(f"🔍 DEBUG WORKFLOW: selection_result = {json.dumps({'status': 'user_interaction_required', 'client_options_count': len(client_options)}, indent=2, default=str)}")
             logger.info(f"🔍 DEBUG WORKFLOW: interaction_data présent = {'interaction_data' in locals()}")
+
+            # IMPORTANT: Envoyer immédiatement via WebSocket si connecté
+            interaction_message = {
+                "type": "client_selection",
+                "interaction_type": "client_selection",
+                "options": client_options,
+                "clients": client_options,
+                "client_options": client_options,
+                "total_options": len(client_options),
+                "original_client_name": client_name,
+                "allow_create_new": True,
+                "message": f"Sélection client requise - {len(client_options)} options disponibles"
+            }
+
+            try:
+                # Envoyer via WebSocket
+                await websocket_manager.send_user_interaction_required(self.task_id, interaction_message)
+                logger.info(f"✅ Message WebSocket envoyé pour task {self.task_id} avec {len(client_options)} options")
+            except Exception as ws_error:
+                logger.warning(f"⚠️ Impossible d'envoyer via WebSocket: {ws_error}")
+                # Pas grave, le message sera récupéré via l'API de validation
+
             return {
                 "status": "user_interaction_required",
                 "requires_user_selection": True,
@@ -5231,17 +5261,7 @@ class DevisWorkflow:
                 "task_id": self.task_id,
                 "message": f"Sélection client requise - {len(client_options)} options disponibles",
                 "interaction_type": "client_selection",
-                "interaction_data": {
-                    "type": "client_selection",
-                    "interaction_type": "client_selection",
-                    "options": client_options,
-                    "clients": client_options,
-                    "client_options": client_options,
-                    "total_options": len(client_options),
-                    "original_client_name": client_name,
-                    "allow_create_new": True,
-                    "message": f"Sélection client requise - {len(client_options)} options disponibles"
-                },
+                "interaction_data": interaction_message,
                 "client_options": client_options,
                 "total_options": len(client_options),
                 "original_client_name": client_name,

@@ -1473,7 +1473,42 @@
                 console.error("❌ Erreur WebSocket:", error);
                 addMessage("Une erreur de connexion est survenue.", 'system');
             };
+
+            // Vérifier s'il y a des validations en attente après connexion
+            setTimeout(() => checkPendingValidations(taskId), 1000);
         }
+
+        // Fonction pour vérifier les validations en attente
+        async function checkPendingValidations(taskId) {
+            try {
+                const response = await fetch(`/progress/task/${taskId}/validation`);
+                if (response.ok) {
+                    const data = await response.json();
+                    console.log("📋 Vérification validations en attente:", data);
+
+                    if (data.has_validation && data.validation_data) {
+                        // Si client_selection est en attente
+                        const clientSelection = data.validation_data.client_selection;
+                        if (clientSelection && clientSelection.status === 'pending') {
+                            const validationData = clientSelection.data;
+                            console.log("🤝 Validation client en attente trouvée:", validationData);
+
+                            // Afficher la sélection client
+                            const clients = validationData.client_options || validationData.options || validationData.clients || [];
+                            const originalName = validationData.original_client_name || '';
+
+                            if (clients.length > 0) {
+                                hideProgress();
+                                addClientSelection(clients, originalName);
+                            }
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error("❌ Erreur récupération validations:", error);
+            }
+        }
+
         // Fonction de tentative de reconnexion WebSocket avec limitation
         function attemptReconnection(taskId) {
             if (reconnectInterval) return;
