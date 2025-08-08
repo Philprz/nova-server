@@ -3086,8 +3086,8 @@ class DevisWorkflow:
                     "sap_mcp",
                     "sap_search",
                     {
-                        "search_term": keyword,
-                        "search_fields": ["ItemName", "U_Description"],
+                        "query": keyword,
+                        "entity_type": "Items",
                         "limit": 3
                     }
                 )
@@ -3121,9 +3121,9 @@ class DevisWorkflow:
                 "sap_mcp",
                 "sap_search",
                 {
-                    "search_term": product_name,
-                    "search_fields": ["ItemName", "U_Description"],
-                    "limit": 5
+                    "query": product_name,
+                    "entity_type": "Items",
+                    "limit": 10
                 }
             )
             

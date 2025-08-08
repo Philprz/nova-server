@@ -479,8 +479,8 @@ async def get_cached_products_or_fetch(search_criteria: str, mcp_connector) -> L
     # Recherche dans SAP par caractéristiques
     product_search = await mcp_connector.call_mcp(
         "sap_mcp",
-        "search_items_by_description",
-        {"search_term": search_criteria, "limit": 10}
+        "sap_search",
+        {"query": search_criteria, "entity_type": "Items", "limit": 10}
     )
     
     if product_search.get("success"):
