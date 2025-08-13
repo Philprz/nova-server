@@ -209,6 +209,18 @@ class WebSocketManager:
         logger.info(f"🔗 DEBUG CONNEXIONS pour {task_id}: {len(self.task_connections.get(task_id, []))}")
         # 🔧 DEBUG AMÉLIORÉ: Log des données d'interaction
         logger.info(f"📊 Type d'interaction: {interaction_data.get('interaction_type', 'non_spécifié')}")
+        # 🆕 VÉRIFICATION AUTO-SÉLECTION - Éviter l'envoi si une seule option
+        if interaction_data.get('interaction_type') == 'client_selection':
+            client_options = interaction_data.get('client_options', [])
+            if len(client_options) == 1:
+                logger.info(f"🚀 Auto-sélection détectée - 1 seul client disponible, pas d'envoi WebSocket")
+                return  # Ne pas envoyer d'interaction si auto-sélection possible
+                
+        elif interaction_data.get('interaction_type') == 'product_selection':
+            product_options = interaction_data.get('options', [])
+            if len(product_options) == 1:
+                logger.info(f"🚀 Auto-sélection détectée - 1 seul produit disponible, pas d'envoi WebSocket") 
+                return  # Ne pas envoyer d'interaction si auto-sélection possible
         if interaction_data.get('client_options'):
             logger.info(f"📊 Nombre de clients: {len(interaction_data.get('client_options', []))}")
             for i, client in enumerate(interaction_data.get('client_options', [])):
