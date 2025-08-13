@@ -339,11 +339,12 @@ async def handle_client_selection_task(task_id: str, response_data: dict):
             if not selected_client:
                 # Si le front n'a pas renvoyé d'objet complet, tenter de déduire un candidat depuis client_options
                 if isinstance(client_options, list) and len(client_options) == 1:
+                    # Auto-sélection du seul client disponible
                     selected_client = client_options[0]
+                    logger.info(f"✅ Auto-sélection du client unique: {selected_client.get('name', 'Inconnu')}")
                 else:
                     logger.error(f"❌ Aucune donnée client disponible pour {task_id} (select_existing)")
                     return
-
             workflow = DevisWorkflow(task_id=task_id, force_production=True)
 
             user_input = {

@@ -1613,6 +1613,22 @@ class DevisWorkflow:
                     primary_suggestion = product_suggestion.primary_suggestion
                     logger.info(f"🎯 Suggestion produit: {primary_suggestion.suggested_value} (score: {primary_suggestion.score})")
                     
+                    # 🆕 AUTO-SÉLECTION SI CONFIANCE ÉLEVÉE ET UNE SEULE SUGGESTION
+                    if (primary_suggestion.confidence.value == "high" and 
+                        len(product_suggestion.all_suggestions) == 1):
+                        # Auto-sélectionner avec confiance élevée
+                        suggestion_data = primary_suggestion.metadata
+                        validated_products.append({
+                            "found": True,
+                            "data": suggestion_data,
+                            "quantity": quantity,
+                            "auto_selected": True,
+                            "confidence": "high"
+                        })
+                        self.product_suggestions.append(None)
+                        logger.info(f"✅ Produit auto-sélectionné (confiance élevée): {suggestion_data.get('item_code')}")
+                        continue
+                    
                     validated_products.append({
                         "found": False,
                         "original_code": product_code,
@@ -4661,13 +4677,187 @@ class DevisWorkflow:
         original_products = original_context.get("extracted_info", {}).get("products", [])
         
         if original_products:
-            # Passer directement à la récupération des produits
+            # Passer directement à la récupération des produits avec auto-sélection
             self._track_step_start("get_products_info", "🔍 Récupération des informations produits")
-            return await self._get_products_info(original_products)
+            return await self._get_products_info_with_auto_selection(original_products)
         else:
             # Si pas de produits, demander à l'utilisateur
             return self._build_product_selection_interface(client_data.get("Name", ""))
+    def _generate_client_efficiency_tip(self, searched_name: str, found_client: Dict) -> str:
+        """Génère des conseils d'efficacité pour l'utilisateur"""
+        tips = []
+        
+        # Conseil sur la ville
+        client_city = (found_client.get("BillingCity") or 
+                      found_client.get("City") or 
+                      found_client.get("Address", "").split(",")[-1].strip())
+        if client_city and len(client_city) > 2:
+            tips.append(f"💡 Pour être plus efficace, précisez la ville : '{searched_name} {client_city}'")
+        
+        # Conseil sur le code client
+        client_code = found_client.get("AccountNumber") or found_client.get("CardCode")
+        if client_code:
+            tips.append(f"💡 Vous pouvez aussi utiliser le code client : '{client_code}'")
+        
+        # Conseil général
+        if not tips:
+            tips.append("💡 Pour gagner du temps, précisez la ville ou le secteur d'activité du client")
+        
+        return " • ".join(tips[:2])  # Maximum 2 conseils
 
+    async def _get_products_info_with_auto_selection(self, products: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Récupération des produits avec auto-sélection intelligente"""
+        try:
+            if not products:
+                return {
+                    "status": "success",
+                    "products": [],
+                    "message": "Aucun produit à traiter"
+                }
+
+            self._track_step_progress("get_products_info", 10, f"🔍 Recherche de {len(products)} produit(s)...")
+
+            validated_products = []
+            products_needing_interaction = []
+            auto_selected_count = 0
+
+            for i, product in enumerate(products):
+                product_name = product.get("name", "")
+                product_code = product.get("code", "")
+                quantity = product.get("quantity", 1)
+
+                # Progression
+                progress = int(20 + (i / len(products)) * 60)
+                self._track_step_progress("get_products_info", progress,
+                                        f"📦 Recherche '{product_name}' ({i+1}/{len(products)})")
+
+                # Recherche du produit
+                product_result = await self._find_product_with_suggestions(product_code, product_name)
+                
+                if product_result.get("found"):
+                    # Produit trouvé directement
+                    validated_products.append({
+                        "found": True,
+                        "data": product_result["data"],
+                        "quantity": quantity,
+                        "auto_selected": True
+                    })
+                    auto_selected_count += 1
+                    logger.info(f"✅ Produit auto-sélectionné: {product_code}")
+                    
+                elif product_result.get("suggestions") and len(product_result["suggestions"]) == 1:
+                    # Une seule suggestion - Auto-sélection
+                    suggestion = product_result["suggestions"][0]
+                    validated_products.append({
+                        "found": True,
+                        "data": suggestion,
+                        "quantity": quantity,
+                        "auto_selected": True,
+                        "was_suggested": True
+                    })
+                    auto_selected_count += 1
+                    logger.info(f"✅ Produit auto-sélectionné depuis suggestion: {suggestion.get('ItemCode')}")
+                    
+                else:
+                    # Nécessite interaction utilisateur
+                    products_needing_interaction.append({
+                        "original": product,
+                        "suggestions": product_result.get("suggestions", []),
+                        "efficiency_tip": self._generate_product_efficiency_tip(product_code, product_name)
+                    })
+
+            # Traitement des résultats
+            if not products_needing_interaction:
+                # Tous les produits auto-sélectionnés
+                efficiency_tip = f"✨ {auto_selected_count} produit(s) automatiquement identifié(s) ! Pour plus d'efficacité, utilisez les codes de référence précis."
+                
+                await websocket_manager.send_task_update(self.task_id, {
+                    "type": "auto_selection",
+                    "step": "products_auto_selected", 
+                    "message": f"✅ {auto_selected_count} produit(s) automatiquement sélectionné(s)",
+                    "efficiency_tip": efficiency_tip,
+                    "show_tip": True
+                })
+                
+                self.context["products_info"] = [p["data"] for p in validated_products]
+                self._track_step_complete("get_products_info", f"{len(validated_products)} produit(s) validé(s)")
+                
+                # Continuer vers la génération du devis
+                return await self._continue_quote_generation(validated_products)
+                
+            else:
+                # Certains produits nécessitent une interaction
+                return await self._handle_mixed_product_validation(validated_products, products_needing_interaction)
+                
+        except Exception as e:
+            logger.exception(f"Erreur _get_products_info_with_auto_selection: {e}")
+            return self._build_error_response("Erreur validation produits", str(e))
+
+    def _generate_product_efficiency_tip(self, product_code: str, product_name: str) -> str:
+        """Génère des conseils d'efficacité pour les produits"""
+        tips = []
+        
+        # Conseil sur les codes de référence
+        if not product_code or len(product_code) < 3:
+            tips.append("💡 Utilisez le code de référence exact pour une recherche plus rapide")
+        
+        # Conseil sur les caractéristiques
+        generic_terms = ["imprimante", "ordinateur", "écran", "scanner"]
+        if any(term in product_name.lower() for term in generic_terms):
+            tips.append("💡 Précisez le modèle, la marque ou les caractéristiques (ex: 'HP LaserJet', 'A4 couleur')")
+        
+        # Conseil général
+        if not tips:
+            tips.append("💡 Plus vous précisez le produit, plus la recherche sera efficace")
+        
+        return tips[0] if tips else ""
+
+    async def _handle_mixed_product_validation(self, validated_products: List, products_needing_interaction: List) -> Dict:
+        """Gère le cas mixte : certains produits auto-sélectionnés, d'autres nécessitent interaction"""
+        
+        first_unresolved = products_needing_interaction[0]
+        product_suggestions = first_unresolved["suggestions"]
+        efficiency_tip = first_unresolved["efficiency_tip"]
+        
+        # Préparer les options pour l'utilisateur
+        options = []
+        for i, suggestion in enumerate(product_suggestions[:5], 1):
+            options.append({
+                "id": suggestion.get("ItemCode", f"option_{i}"),
+                "label": f"{suggestion.get('ItemName', 'N/A')} (Ref: {suggestion.get('ItemCode', 'N/A')})",
+                "value": suggestion.get("ItemCode"),
+                "data": suggestion
+            })
+        
+        # Préparer la validation pour l'interaction utilisateur
+        validation_data = {
+            "type": "product_selection",
+            "interaction_type": "product_selection", 
+            "product": first_unresolved["original"],
+            "options": options,
+            "validated_products": validated_products,
+            "remaining_products": products_needing_interaction[1:],
+            "efficiency_tip": efficiency_tip,
+            "message": f"Sélectionnez le produit pour '{first_unresolved['original'].get('name', '')}'",
+            "show_tip": True
+        }
+        
+        # Marquer la tâche en attente d'interaction
+        if self.current_task:
+            self.current_task.status = TaskStatus.PENDING
+            self.current_task.require_user_validation("product_selection", "product_selection", validation_data)
+        
+        # Envoyer via WebSocket
+        await websocket_manager.send_user_interaction_required(self.task_id, validation_data)
+        
+        return {
+            "success": True,
+            "status": "user_interaction_required",
+            "type": "product_selection",
+            "message": "Sélection de produit requise",
+            "task_id": self.task_id,
+            "interaction_data": validation_data
+        }
     # 🆕 MÉTHODES AUXILIAIRES POUR LA VALIDATION SÉQUENTIELLE
 
     async def _initiate_client_creation(self, client_name: str) -> Dict[str, Any]:
@@ -5147,6 +5337,64 @@ class DevisWorkflow:
             
             logger.info(f"🔧 Traitement de {len(all_sf_clients)} clients SF + {len(all_sap_clients)} clients SAP")
             
+            # 🆕 AUTO-SÉLECTION SI UN SEUL CLIENT TROUVÉ
+            total_clients = len(all_sf_clients) + len(all_sap_clients)
+            if total_clients == 1:
+                # Un seul client trouvé - Auto-sélection avec conseils
+                single_client = all_sf_clients[0] if all_sf_clients else all_sap_clients[0]
+                client_display_name = single_client.get("Name") or single_client.get("CardName", "Client sans nom")
+                
+                logger.info(f"✅ Auto-sélection client unique: {client_display_name}")
+                
+                # Générer conseils d'efficacité
+                efficiency_tip = self._generate_client_efficiency_tip(client_name, single_client)
+                
+                # Mettre à jour le contexte immédiatement
+                self.context.update({
+                    "client_info": {"data": single_client, "found": True},
+                    "client_validated": True,
+                    "selected_client_display": client_display_name
+                })
+                
+                # Récupérer les produits du contexte pour continuation
+                try:
+                    if hasattr(self, 'context') and self.context.get("extracted_info"):
+                        products_list = self.context["extracted_info"].get("products", [])
+                    else:
+                        products_list = []
+                except Exception as e:
+                    logger.error(f"❌ Erreur lors de l'extraction des produits: {e}")
+                    products_list = []
+                
+                # Continuation automatique vers les produits
+                if products_list:
+                    self._track_step_complete("search_client", f"✅ Client auto-sélectionné: {client_display_name}")
+                    self._track_step_start("lookup_products", f"📦 Recherche de {len(products_list)} produit(s)")
+                    
+                    # Envoyer notification d'auto-sélection avec conseil
+                    await websocket_manager.send_task_update(self.task_id, {
+                        "type": "auto_selection",
+                        "step": "client_auto_selected",
+                        "message": f"✅ Client '{client_display_name}' automatiquement sélectionné",
+                        "efficiency_tip": efficiency_tip,
+                        "show_tip": True
+                    })
+                    
+                    # Continuer directement avec les produits
+                    return await self._continue_workflow_after_client_selection(
+                        single_client, 
+                        {"extracted_info": {"products": products_list}}
+                    )
+                else:
+                    # Demander les produits si manquants
+                    await websocket_manager.send_task_update(self.task_id, {
+                        "type": "auto_selection",
+                        "step": "client_auto_selected",
+                        "message": f"✅ Client '{client_display_name}' automatiquement sélectionné",
+                        "efficiency_tip": efficiency_tip,
+                        "show_tip": True
+                    })
+                    return self._build_product_request_response(client_display_name)
             # Traiter clients Salesforce
             for sf_client in all_sf_clients:
                 if not sf_client:
