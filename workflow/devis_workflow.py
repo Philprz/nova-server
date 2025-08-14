@@ -3653,32 +3653,50 @@ class DevisWorkflow:
             "note": "Extraction minimale - données à vérifier"
         }
     async def _extract_intelligent_search_criteria(self, product_name: str) -> Dict[str, Any]:
-        """Extrait critères de recherche intelligents via LLM"""
-        
-        prompt = f"""
-    Analyse ce produit et extrais les critères de recherche SAP :
-    Produit: "{product_name}"
-
-    Extrais :
-    - Catégorie principale (imprimante, ordinateur, etc.)
-    - Spécifications techniques (vitesse ppm, type laser/jet, etc.)
-    - Mots-clés de recherche optimaux
-
-    Format JSON uniquement.
-    """
+        """Extrait critères de recherche intelligents pour produits SAP"""
         
         try:
-            result = await self.llm_extractor.extract_quote_info(prompt)
-            search_criteria = result.get("search_criteria", {})
+            # Utiliser une approche directe pour l'analyse de produits
+            # au lieu de extract_quote_info qui confond avec l'analyse de devis
+            
+            # Catégorisation simple basée sur des mots-clés
+            product_lower = product_name.lower()
+            
+            # Détection de catégorie
+            if any(term in product_lower for term in ["imprimante", "printer"]):
+                category = "imprimante"
+                characteristics = ["imprimante"]
+            elif any(term in product_lower for term in ["ordinateur", "pc", "computer"]):
+                category = "ordinateur"
+                characteristics = ["ordinateur", "pc"]
+            elif any(term in product_lower for term in ["écran", "monitor", "screen"]):
+                category = "écran"
+                characteristics = ["écran", "monitor"]
+            else:
+                category = "général"
+                characteristics = [product_name]
             
             return {
-                "category": search_criteria.get("category", product_name.split()[0]),
-                "specifications": search_criteria.get("specifications", {}),
-                "keywords": search_criteria.get("characteristics", [product_name])
+                "action_type": "RECHERCHE_PRODUIT",
+                "search_criteria": {
+                    "category": category,
+                    "characteristics": characteristics,
+                    "specifications": {}
+                },
+                "query_details": f"Recherche de produits de type '{category}'"
             }
+            
         except Exception as e:
-            logger.warning(f"LLM extraction failed: {e}")
-            return {"category": product_name, "keywords": [product_name]}
+            logger.error(f"Erreur analyse critères produit: {e}")
+            return {
+                "action_type": "RECHERCHE_PRODUIT",
+                "search_criteria": {
+                    "category": "général",
+                    "characteristics": [product_name],
+                    "specifications": {}
+                },
+                "query_details": f"Recherche générale pour '{product_name}'"
+            }
 
     async def _smart_product_search(self, criteria: Dict[str, Any]) -> Dict[str, Any]:
         """Recherche produits avec critères intelligents"""
@@ -4731,9 +4749,32 @@ class DevisWorkflow:
                 self._track_step_progress("get_products_info", progress,
                                         f"📦 Recherche '{product_name}' ({i+1}/{len(products)})")
 
-                # Recherche du produit
-                product_result = await self._find_product_with_suggestions(product_code, product_name)
+                # Recherche du produit avec méthode existante
+                single_product_list = [{
+                    "name": product_name,
+                    "code": product_code,
+                    "quantity": quantity
+                }]
                 
+                # Utiliser _process_products_retrieval qui existe
+                search_result = await self._process_products_retrieval(single_product_list)
+                found_products = search_result.get("products", [])
+                
+                if found_products and len(found_products) > 0:
+                    # Produit trouvé directement
+                    product_data = found_products[0]
+                    product_result = {
+                        "found": True,
+                        "data": product_data,
+                        "suggestions": []
+                    }
+                else:
+                    # Produit non trouvé
+                    product_result = {
+                        "found": False,
+                        "suggestions": [],
+                        "error": "Produit non trouvé"
+                    }
                 if product_result.get("found"):
                     # Produit trouvé directement
                     validated_products.append({
