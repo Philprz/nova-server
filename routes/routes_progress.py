@@ -263,6 +263,31 @@ async def handle_client_selection_task(task_id: str, response_data: dict):
             )
 
             # Si rien dans response_data et qu'une sélection unique a été validée côté UI,
+            # 2.b) NOUVEAU: Récupérer le client depuis selected_index si fourni
+            selected_index = response_data.get("selected_index")
+            if not selected_client and selected_index is not None and isinstance(client_options, list):
+                try:
+                    if 0 <= selected_index < len(client_options):
+                        selected_client = client_options[selected_index]
+                        logger.info(f"✅ Client récupéré par index {selected_index}: {selected_client.get('name', 'Inconnu')}")
+                    else:
+                        logger.error(f"❌ Index {selected_index} hors limites pour {len(client_options)} options")
+                except (IndexError, TypeError) as e:
+                    logger.error(f"❌ Erreur récupération client par index: {e}")
+            # 2.c) NOUVEAU: Récupérer le client depuis client_id si fourni
+            client_id = response_data.get("client_id")
+            if not selected_client and client_id is not None and isinstance(client_options, list):
+                try:
+                    # Chercher le client par ID dans les options
+                    for option in client_options:
+                        if option.get("id") == client_id:
+                            selected_client = option
+                            logger.info(f"✅ Client récupéré par ID {client_id}: {selected_client.get('name', 'Inconnu')}")
+                            break
+                    if not selected_client:
+                        logger.error(f"❌ Aucun client trouvé avec ID {client_id}")
+                except (TypeError, AttributeError) as e:
+                    logger.error(f"❌ Erreur récupération client par ID: {e}")
             # certains fronts renvoient juste un index/ID minimal.
             if not selected_client and isinstance(interaction_data, dict):
                 maybe_selected = (
@@ -293,7 +318,9 @@ async def handle_client_selection_task(task_id: str, response_data: dict):
         if task and hasattr(task, "validation_data"):
             client_validation = task.validation_data.get("client_selection", {}) or {}
             if client_validation:
-                original_context = client_validation.get("original_context", {}) or {}
+                # Récupérer les données depuis la structure correcte
+                validation_data_content = client_validation.get("data", client_validation)
+                original_context = validation_data_content.get("original_context", {}) or {}
                 extracted_info = original_context.get("extracted_info", {}) or {}
                 # produits initialement extraits du prompt
                 original_products = extracted_info.get("products", []) or []
@@ -342,7 +369,16 @@ async def handle_client_selection_task(task_id: str, response_data: dict):
                     # Auto-sélection du seul client disponible
                     selected_client = client_options[0]
                     logger.info(f"✅ Auto-sélection du client unique: {selected_client.get('name', 'Inconnu')}")
-                else:
+                elif isinstance(client_options, list) and len(client_options) > 1:
+                    # Essayer de trouver le client par nom
+                    for option in client_options:
+                        option_name = option.get("name") or option.get("Name") or ""
+                        if option_name.upper() == client_name.upper():
+                            selected_client = option
+                            logger.info(f"✅ Client trouvé par nom: {option_name}")
+                            break
+                    
+                if not selected_client:
                     logger.error(f"❌ Aucune donnée client disponible pour {task_id} (select_existing)")
                     return
             workflow = DevisWorkflow(task_id=task_id, force_production=True)
