@@ -6339,7 +6339,7 @@ class DevisWorkflow:
                     "message": f"{suggestions_count} produit(s) nécessitent votre choix, {errors_count} produit(s) en erreur",
                     "products": found_products,
                     "workflow_context": {
-                        "client_info": client_info,
+                        "client_info": self.context.get("client_info", {}),
                         "task_id": self.task_id,
                         "step": "product_selection"
                     },
