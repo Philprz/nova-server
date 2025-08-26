@@ -838,8 +838,21 @@ class MCPConnector:
             }
             
             if not all([sf_config['username'], sf_config['password'], sf_config['security_token']]):
-                logger.warning("Configuration Salesforce incomplète")
-                return False
+                # Validation des credentials avec debug étendu
+                missing_creds = []
+                if not sf_config['username']:
+                    missing_creds.append("username")
+                if not sf_config['password']:
+                    missing_creds.append("password") 
+                if not sf_config['security_token']:
+                    missing_creds.append("security_token")
+                    
+                if missing_creds:
+                    logger.warning(f"Configuration Salesforce incomplète - Manquant: {', '.join(missing_creds)}")
+                    return False
+                
+                # Log des credentials pour debug (masqués)
+                logger.info(f"Tentative connexion Salesforce - User: {sf_config['username'][:10]}***, Domain: {sf_config['domain']}")
             
             self.salesforce_client = Salesforce(**sf_config)
             self.connection_status["salesforce"] = True
