@@ -6152,26 +6152,81 @@ class DevisWorkflow:
                 # 2. Recherche par nom si pas trouvé par code
                 if not product_found and product_name:
                     try:
-                        # 2.1 Extraction critères intelligents via LLM
-                        search_criteria = await self._extract_intelligent_search_criteria(product_name)
+                        logger.info(f"🔍 Recherche par nom: '{product_name}'")
                         
-                        # 2.2 Recherche principale par critères
-                        search_result = await self._smart_product_search(search_criteria)
+                        # Extraire des mots-clés intelligents
+                        keywords = self._extract_product_keywords(product_name)
                         
-                        if search_result.get("success") and search_result.get("products"):
-                            exact_matches = search_result.get("exact_matches", [])
-                            close_matches = search_result.get("close_matches", [])
+                        for keyword in keywords[:2]:  # Limiter à 2 mots-clés
+                            logger.info(f"🔍 Recherche avec mot-clé: '{keyword}'")
                             
-                            if exact_matches:
-                                product_found = exact_matches[0]
-                                logger.info(f"✅ Correspondance exacte: {product_name}")
-                            elif close_matches:
-                                # Proposer alternatives à l'utilisateur
-                                return await self._propose_product_alternatives(
-                                    product_name, close_matches, i, total_products
+                            search_result = await self.mcp_connector.call_mcp(
+                                "sap_mcp",
+                                "sap_search",
+                                {
+                                    "query": keyword,
+                                    "entity_type": "Items",
+                                    "limit": 5
+                                }
+                            )
+                            
+                            if search_result and search_result.get("results") and len(search_result["results"]) > 0:
+                                best_match = search_result["results"][0]
+                                
+                                # CORRECTION CRITIQUE : Mapper AvgPrice vers Price pour compatibilité
+                                product_found = {
+                                    "ItemCode": best_match.get("ItemCode"),
+                                    "ItemName": best_match.get("ItemName"),
+                                    "Price": float(best_match.get("AvgPrice", 0)),  # MAPPING CRITIQUE
+                                    "OnHand": best_match.get("OnHand", 0),
+                                    "U_Description": best_match.get("U_Description", ""),
+                                    # Conserver données originales pour compatibilité
+                                    "AvgPrice": best_match.get("AvgPrice", 0),
+                                    "QuantityOnStock": best_match.get("OnHand", 0)
+                                }
+                                logger.info(f"✅ Produit trouvé via mot-clé '{keyword}': {best_match.get('ItemName')}")
+                                break
+                        
+                        # Si pas trouvé avec mots-clés, essayer termes anglais
+                        if not product_found:
+                            english_terms = self._get_english_search_terms(product_name)
+                            
+                            for term in english_terms[:2]:
+                                logger.info(f"🔍 Recherche terme anglais: '{term}'")
+                                
+                                search_result = await self.mcp_connector.call_mcp(
+                                    "sap_mcp",
+                                    "sap_search",
+                                    {
+                                        "query": term,
+                                        "entity_type": "Items",
+                                        "limit": 3
+                                    }
                                 )
+                                
+                                if search_result and search_result.get("results") and len(search_result["results"]) > 0:
+                                    best_match = search_result["results"][0]
+                                    
+                                    # MÊME MAPPING CRITIQUE
+                                    product_found = {
+                                        "ItemCode": best_match.get("ItemCode"),
+                                        "ItemName": best_match.get("ItemName"), 
+                                        "Price": float(best_match.get("AvgPrice", 0)),  # MAPPING CRITIQUE
+                                        "OnHand": best_match.get("OnHand", 0),
+                                        "U_Description": best_match.get("U_Description", ""),
+                                        "AvgPrice": best_match.get("AvgPrice", 0),
+                                        "QuantityOnStock": best_match.get("OnHand", 0)
+                                    }
+                                    logger.info(f"✅ Produit trouvé via terme '{term}': {best_match.get('ItemName')}")
+                                    break
+                                    
                     except Exception as e:
                         logger.warning(f"⚠️ Erreur recherche par nom {product_name}: {e}")
+                
+                # 3. SÉCURITÉ : Log détaillé si aucun produit trouvé
+                if not product_found:
+                    logger.error(f"❌ AUCUN PRODUIT TROUVÉ après toutes les recherches pour: '{product_name}' (code: '{product_code}')")
+                    logger.info("🔍 Cette recherche aurait dû trouver quelque chose dans le catalogue SAP")
                 
                 # 3. Ajouter le produit aux résultats
                 if product_found:
