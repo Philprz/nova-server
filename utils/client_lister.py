@@ -124,6 +124,10 @@ class ClientLister:
             )
             
             # CORRECTION: Vérifier d'abord les données, puis les erreurs
+            # Gestion spéciale des sessions expirées
+            if result.get("error") and "EXPIRED_PASSWORD" in str(result.get("error")):
+                logger.error(f"🔐 Session Salesforce expirée - Reconnexion nécessaire")
+                return []
             if "records" in result and result["records"]:
                 logger.info(f"✅ Recherche exacte Salesforce: {len(result['records'])} résultats")
                 return result["records"]

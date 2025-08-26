@@ -633,12 +633,29 @@ class DevisWorkflow:
 
         try:
             # PHASE 3: Génération du devis avec données validées
-            self._track_step_start("generate_quote", "📄 Génération du devis...")
+            # Gérer le cas où validated_data peut être une liste ou un dict
+            if isinstance(validated_data, list):
+                # Si c'est une liste, la transformer en dict avec clé "products"
+                validated_data = {"products": [p.get("data", p) for p in validated_data]}
 
             client_data = validated_data.get("client", self.context.get("client_info", {}).get("data"))
             products_data = validated_data.get("products", self.context.get("products_info", []))
 
             # Calculs finaux
+            # Validation des données avant calculs
+            if not isinstance(products_data, list):
+                logger.warning("⚠️ products_data n'est pas une liste, correction...")
+                products_data = []
+            
+            # S'assurer que chaque produit a les champs requis
+            validated_products_data = []
+            for product in products_data:
+                if isinstance(product, dict) and product.get("Price") is not None:
+                    validated_products_data.append(product)
+                else:
+                    logger.warning(f"⚠️ Produit invalide ignoré: {product}")
+            
+            products_data = validated_products_data
             total_amount = sum(p.get("LineTotal", 0) for p in products_data)
 
             # Génération SAP
@@ -4824,7 +4841,10 @@ class DevisWorkflow:
                 self._track_step_complete("get_products_info", f"{len(validated_products)} produit(s) validé(s)")
                 
                 # Continuer vers la génération du devis
-                return await self._continue_quote_generation(validated_products)
+                # Transformer les produits validés en format attendu par _continue_quote_generation
+                products_for_generation = {"products": [p.get("data", p) for p in validated_products]}
+                return await self._continue_quote_generation(products_for_generation)
+
                 
             else:
                 # Certains produits nécessitent une interaction
