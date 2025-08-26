@@ -5211,7 +5211,31 @@ class DevisWorkflow:
             # Étape 2 : récupération des produits
             self._track_step_start("lookup_products", f"📦 Recherche de {len(products)} produit(s)")
             products_result = await self._process_products_retrieval(products)
-            found = len(products_result.get("products", []))
+            # VÉRIFICATION CRITIQUE : Arrêter le workflow si sélection de produits requise  
+            if products_result.get("status") == "product_selection_required":
+                logger.warning("⚠️ Sélection de produits requise - Arrêt du workflow")
+                self._track_step_fail("lookup_products", "Produits non trouvés", "Sélection manuelle requise")
+                return {
+                    "success": False,
+                    "status": "user_interaction_required",
+                    "interaction_type": "product_selection", 
+                    "message": products_result.get("message", "Sélection de produits requise"),
+                    "products_info": products_result.get("products", []),
+                    "task_id": self.task_id
+                }
+                
+            # Vérification des produits valides AVANT création du devis
+            valid_products = [p for p in products_result.get("products", []) if not p.get("error") and not p.get("requires_manual_search")]
+            if not valid_products:
+                error_msg = "Aucun produit valide trouvé dans le catalogue SAP"
+                if products_result.get("products"):
+                    errors = [p.get("error", "Produit non trouvé") for p in products_result["products"] if p.get("error")]
+                    if errors:
+                        error_msg = f"Erreurs produits: {'; '.join(set(errors))}"
+                logger.error(f"❌ {error_msg}")
+                self._track_step_fail("lookup_products", "Produits invalides", error_msg)
+                return {"success": False, "error": error_msg, "status": "product_error"}
+            found = len(valid_products)  # Utiliser les produits réellement valides
             self._track_step_complete("lookup_products", f"✅ {found} produit(s) trouvé(s)")
 
             # Étape 3 : création du devis
@@ -5223,7 +5247,7 @@ class DevisWorkflow:
 
             # Extraction sécurisée de quote_data
             quote_data = quote_result.get("quote_data") or {}
-            returned_products = quote_data.get("products") or products_result.get("products", [])
+            returned_products = quote_data.get("products") or valid_products  # Utiliser produits valides uniquement
             if not returned_products:
                 logger.warning("❌ Aucun produit valide pour le devis")
                 return {"success": False, "error": "Aucun produit valide trouvé"}
