@@ -654,6 +654,13 @@ class DevisWorkflow:
                     validated_products_data.append(product)
                 else:
                     logger.warning(f"⚠️ Produit invalide ignoré: {product}")
+                # NE PAS IGNORER - Signaler l'erreur pour forcer la sélection
+                return {
+                    "success": False,
+                    "error": f"Produit invalide détecté: {product}. Tous les produits doivent être validés avant création du devis.",
+                    "invalid_product": product,
+                    "requires_product_validation": True
+                }
             
             products_data = validated_products_data
             total_amount = sum(p.get("LineTotal", 0) for p in products_data)
@@ -2221,20 +2228,12 @@ class DevisWorkflow:
             valid_products = found_products + custom_products
             
             if not valid_products:
-                logger.warning("❌ Aucun produit à traiter - création d'un devis vide")
-                # Permettre la création d'un devis vide pour déblocage
-                valid_products = [{
-                    "code": "PLACEHOLDER",
-                    "name": "Article à définir",
-                    "quantity": 1,
-                    "unit_price": 0.0,
-                    "total_price": 0.0,
-                    "currency": "EUR",
-                    "found": False,
-                    "custom_product": True,
-                    "note": "Devis créé sans produit spécifique"
-                }]
-            
+                logger.error("❌ AUCUN PRODUIT VALIDE - Impossible de créer un devis")
+                return {
+                    "success": False,
+                    "error": "Aucun produit valide disponible pour créer le devis. Veuillez sélectionner des produits du catalogue.",
+                    "requires_product_selection": True
+                }
             logger.info(f"Produits valides: {len(valid_products)}")
             def _estimate_product_price(self, product_name: str) -> float:
                 """Estime un prix par défaut basé sur le nom du produit"""
@@ -6246,25 +6245,106 @@ class DevisWorkflow:
                         "search_method": "code" if product_code else "name"
                     })
                 else:
-                    # Produit non trouvé - créer une entrée sans clé "error"
+                    # Produit non trouvé - RECHERCHE INTELLIGENTE OBLIGATOIRE
                     logger.warning(f"❌ Produit non trouvé: {product_name or product_code}")
-                    found_products.append({
-                        "code": product_code or "CUSTOM_" + str(i),
-                        "name": product_name or "Produit personnalisé",
-                        "quantity": quantity,
-                        "unit_price": 0.0,
-                        "total_price": 0.0,
-                        "currency": "EUR",
-                        "sap_data": None,
-                        "found": False,
-                        "custom_product": True,
-                        "note": "Produit non trouvé dans le catalogue SAP - Prix à définir"
-                    })
+                    
+                    # Utiliser le système de suggestions existant
+                    logger.info(f"🔍 Recherche de suggestions pour: {product_name or product_code}")
+                    
+                    # Récupérer tous les produits pour suggestions
+                    try:
+                        all_products_result = await self.mcp_connector.call_sap_mcp("sap_read", {
+                            "endpoint": "/Items?$select=ItemCode,ItemName,OnHand,Price&$top=500",
+                            "method": "GET"
+                        })
+                        
+                        if "error" not in all_products_result and "value" in all_products_result:
+                            available_products = all_products_result["value"]
+                            
+                            # Utiliser le suggestion engine existant
+                            from services.suggestion_engine import SuggestionEngine
+                            suggestion_engine = SuggestionEngine()
+                            
+                            suggestion_result = await suggestion_engine.suggest_product(
+                                product_name or product_code, available_products
+                            )
+                            
+                            if suggestion_result.has_suggestions:
+                                # Produit avec suggestions à faire valider
+                                found_products.append({
+                                    "code": product_code or f"UNKNOWN_{i}",
+                                    "name": product_name or "Produit à identifier",
+                                    "quantity": quantity,
+                                    "unit_price": 0.0,
+                                    "total_price": 0.0,
+                                    "currency": "EUR",
+                                    "sap_data": None,
+                                    "found": False,
+                                    "requires_selection": True,
+                                    "suggestions": suggestion_result.to_dict(),
+                                    "original_request": product_name or product_code
+                                })
+                                logger.info(f"✅ Suggestions trouvées pour: {product_name or product_code}")
+                            else:
+                                # Aucune suggestion - BLOQUER le processus
+                                found_products.append({
+                                    "code": product_code or f"UNKNOWN_{i}",
+                                    "name": product_name or "Produit inconnu",
+                                    "quantity": quantity,
+                                    "error": f"Aucun produit similaire trouvé dans le catalogue pour '{product_name or product_code}'",
+                                    "requires_manual_search": True,
+                                    "original_request": product_name or product_code
+                                })
+                                logger.error(f"❌ Aucune suggestion trouvée pour: {product_name or product_code}")
+                        else:
+                            # Erreur accès catalogue SAP
+                            found_products.append({
+                                "code": product_code or f"ERROR_{i}",
+                                "name": product_name or "Produit inaccessible",
+                                "quantity": quantity,
+                                "error": "Impossible d'accéder au catalogue SAP pour trouver des alternatives",
+                                "requires_manual_search": True,
+                                "original_request": product_name or product_code
+                            })
+                            
+                    except Exception as e:
+                        logger.error(f"Erreur lors de la recherche de suggestions: {str(e)}")
+                        found_products.append({
+                            "code": product_code or f"ERROR_{i}",
+                            "name": product_name or "Erreur produit",
+                            "quantity": quantity,
+                            "error": f"Erreur technique lors de la recherche: {str(e)}",
+                            "requires_manual_search": True,
+                            "original_request": product_name or product_code
+                        })
 
             # Finaliser la progression
             self._track_step_progress("lookup_products", 100, f"✅ Recherche terminée")
             
-            # Statistiques
+            # Statistiques et validation
+            found_count = len([p for p in found_products if p.get("found", False)])
+            suggestions_count = len([p for p in found_products if p.get("requires_selection", False)])
+            errors_count = len([p for p in found_products if p.get("error")])
+            total_amount = sum(p.get("total_price", 0) for p in found_products if p.get("found", False))
+            
+            logger.info(f"📊 Produits: {found_count}/{len(products)} trouvés, {suggestions_count} nécessitent sélection, {errors_count} erreurs")
+            
+            # CONTRÔLE : Si des produits nécessitent une sélection, interrompre le workflow
+            if suggestions_count > 0 or errors_count > 0:
+                logger.warning("⚠️ Sélection de produits requise - Interruption du workflow")
+                
+                # Retourner les suggestions/erreurs pour validation utilisateur
+                return {
+                    "status": "product_selection_required",
+                    "message": f"{suggestions_count} produit(s) nécessitent votre choix, {errors_count} produit(s) en erreur",
+                    "products": found_products,
+                    "workflow_context": {
+                        "client_info": client_info,
+                        "task_id": self.task_id,
+                        "step": "product_selection"
+                    },
+                    "requires_user_action": True
+                }
             found_count = len([p for p in found_products if p.get("found", False)])
             total_amount = sum(p.get("total_price", 0) for p in found_products)
             

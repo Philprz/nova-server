@@ -341,9 +341,14 @@ async def sap_create_quotation_complete(quotation_data: Dict[str, Any]) -> dict:
         # Valider les lignes de document
         valid_lines = []
         for i, line in enumerate(quotation_data["DocumentLines"]):
-            if not line.get("ItemCode"):
-                log(f"⚠️ Ligne {i}: ItemCode manquant, ignorée", "WARNING")
-                continue
+            # Validation stricte - AUCUN produit sans ItemCode valide accepté
+            if not line.get("ItemCode") or line.get("ItemCode") in ["PLACEHOLDER", "GENERIC_ITEM"] or line.get("ItemCode").startswith("CUSTOM_"):
+                log(f"❌ Ligne {i}: ItemCode invalide ou produit fictif '{line.get('ItemCode')}' rejeté", "ERROR")
+                return {
+                    "success": False, 
+                    "error": f"Produit fictif détecté: '{line.get('ItemCode')}'. Seuls les produits existants du catalogue sont acceptés."
+                }
+    
             
             # Vérifier que le produit existe
             item_check = await call_sap(f"/Items('{line['ItemCode']}')")
