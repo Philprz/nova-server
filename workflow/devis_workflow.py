@@ -6870,7 +6870,144 @@ class EnhancedDevisWorkflow(DevisWorkflow):
                 "error": f"Erreur système: {str(e)}"
             }
     async def _search_sap_product(self, product_code: str, product_name: str):
-        """Déléguer à product_manager"""
+        """Recherche produit SAP avec fallback intelligent"""
+        try:
+            logger.info(f"🔍 Recherche SAP: code='{product_code}', nom='{product_name}'")
+            
+            # 1. Recherche par code exact si disponible
+            if product_code and product_code != "":
+                try:
+                    code_result = await self.mcp_connector.call_mcp(
+                        "sap_mcp",
+                        "sap_read",
+                        {"endpoint": f"/Items('{product_code}')"}
+                    )
+                    
+                    if not code_result.get("error") and code_result.get("ItemCode"):
+                        logger.info(f"✅ Produit trouvé par code: {product_code}")
+                        return {
+                            "found": True,
+                            "data": code_result,
+                            "search_method": "code"
+                        }
+                except Exception as e:
+                    logger.warning(f"⚠️ Erreur recherche par code {product_code}: {e}")
+            
+            # 2. Recherche par nom avec mots-clés intelligents
+            if product_name:
+                keywords = self._extract_product_keywords(product_name)
+                
+                for keyword in keywords[:2]:  # Tester 2 mots-clés max
+                    try:
+                        logger.info(f"🔍 Recherche avec mot-clé: '{keyword}'")
+                        
+                        search_result = await self.mcp_connector.call_mcp(
+                            "sap_mcp",
+                            "sap_search",
+                            {
+                                "query": keyword,
+                                "entity_type": "Items",
+                                "limit": 5
+                            }
+                        )
+                        
+                        if search_result and search_result.get("success") and search_result.get("results"):
+                            best_match = search_result["results"][0]
+                            logger.info(f"✅ Produit trouvé via '{keyword}': {best_match.get('ItemName')} ({best_match.get('ItemCode')})")
+                            
+                            return {
+                                "found": True,
+                                "data": {
+                                    "ItemCode": best_match.get("ItemCode"),
+                                    "ItemName": best_match.get("ItemName"),
+                                    "OnHand": best_match.get("OnHand", 0),
+                                    "AvgPrice": best_match.get("AvgPrice", 0),
+                                    "U_Description": best_match.get("U_Description", "")
+                                },
+                                "search_method": f"keyword_{keyword}",
+                                "matched_keyword": keyword
+                            }
+                    except Exception as e:
+                        logger.warning(f"⚠️ Erreur recherche mot-clé '{keyword}': {e}")
+                        continue
+            
+            # 3. Recherche avec termes anglais
+            if product_name:
+                english_terms = self._get_english_search_terms(product_name)
+                
+                for term in english_terms[:2]:
+                    try:
+                        logger.info(f"🔍 Recherche terme anglais: '{term}'")
+                        
+                        alt_result = await self.mcp_connector.call_mcp(
+                            "sap_mcp",
+                            "sap_search",
+                            {
+                                "query": term,
+                                "entity_type": "Items", 
+                                "limit": 3
+                            }
+                        )
+                        
+                        if alt_result and alt_result.get("success") and alt_result.get("results"):
+                            best_match = alt_result["results"][0]
+                            logger.info(f"✅ Produit trouvé via terme '{term}': {best_match.get('ItemName')}")
+                            
+                            return {
+                                "found": True,
+                                "data": {
+                                    "ItemCode": best_match.get("ItemCode"),
+                                    "ItemName": best_match.get("ItemName"),
+                                    "OnHand": best_match.get("OnHand", 0),
+                                    "AvgPrice": best_match.get("AvgPrice", 0),
+                                    "U_Description": best_match.get("U_Description", "")
+                                },
+                                "search_method": f"english_{term}",
+                                "matched_term": term
+                            }
+                    except Exception as e:
+                        logger.warning(f"⚠️ Erreur recherche terme '{term}': {e}")
+                        continue
+            
+            # 4. Recherche générale sur tous les items
+            try:
+                logger.info("🔍 Recherche générale dans Items...")
+                all_items = await self.mcp_connector.call_mcp(
+                    "sap_mcp",
+                    "sap_read",
+                    {"endpoint": "/Items?$top=50&$orderby=ItemCode"}
+                )
+                
+                if all_items and not all_items.get("error") and all_items.get("value"):
+                    items = all_items["value"]
+                    logger.info(f"📦 {len(items)} produits disponibles dans SAP")
+                    
+                    # Chercher correspondance dans les noms
+                    for item in items:
+                        item_name = item.get("ItemName", "").lower()
+                        if any(keyword.lower() in item_name for keyword in self._extract_product_keywords(product_name)):
+                            logger.info(f"✅ Correspondance trouvée: {item.get('ItemName')}")
+                            return {
+                                "found": True,
+                                "data": item,
+                                "search_method": "general_scan"
+                            }
+            except Exception as e:
+                logger.warning(f"⚠️ Erreur recherche générale: {e}")
+            
+            # Aucune correspondance trouvée
+            logger.warning(f"❌ Aucun produit SAP trouvé pour: code='{product_code}', nom='{product_name}'")
+            return {
+                "found": False,
+                "error": f"Produit non trouvé: {product_name or product_code}"
+            }
+            
+        except Exception as e:
+            logger.exception(f"❌ Exception recherche produit: {str(e)}")
+            return {
+                "found": False,
+                "error": f"Erreur système: {str(e)}"
+            }
         return await self.product_manager._search_sap_product(product_code, product_name)
     
     async def _search_products_with_notifications(self, products: list):
