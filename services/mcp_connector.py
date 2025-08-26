@@ -309,8 +309,26 @@ class MCPConnector:
 
     @staticmethod
     async def call_salesforce_mcp(action: str, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Appelle un outil MCP Salesforce"""
-        return await MCPConnector._call_mcp("salesforce_mcp", action, params)
+        """Appelle un outil MCP Salesforce avec reconnexion automatique"""
+        try:
+            result = await MCPConnector._call_mcp("salesforce_mcp", action, params)
+            
+            # Si erreur de connexion, tenter reconnexion automatique
+            if isinstance(result, dict) and result.get("error"):
+                error_msg = str(result.get("error", "")).lower()
+                if any(term in error_msg for term in ["invalid_login", "unauthorized", "authentication"]):
+                    logger.warning("Tentative de reconnexion Salesforce automatique...")
+                    
+                    # Obtenir instance du connecteur et forcer reconnexion
+                    connector = get_mcp_connector()
+                    if await connector._init_salesforce():
+                        logger.info("Reconnexion Salesforce réussie, nouvelle tentative...")
+                        result = await MCPConnector._call_mcp("salesforce_mcp", action, params)
+                    
+            return result
+        except Exception as e:
+            logger.error(f"Erreur call_salesforce_mcp: {str(e)}")
+            return {"error": str(e)}
 
     @staticmethod
     async def call_sap_mcp(action: str, params: Dict[str, Any]) -> Dict[str, Any]:

@@ -3188,10 +3188,16 @@ class DevisWorkflow:
             )
             
             if search_result.get("success") and search_result.get("results"):
-                # Prendre le premier résultat comme meilleure correspondance
-                best_match = search_result["results"][0]
+                # CORRECTION: Améliorer la sélection du meilleur résultat
+                results = search_result.get("results", [])
                 
-                logger.info(f"✅ Produit trouvé par nom: {best_match.get('ItemName')} ({best_match.get('ItemCode')})")
+                # Trier par score de pertinence si disponible
+                if results and "_relevance_score" in results[0]:
+                    results.sort(key=lambda x: x.get("_relevance_score", 0), reverse=True)
+                
+                best_match = results[0]
+                
+                logger.info(f"✅ Produit trouvé par nom: {best_match.get('ItemName')} ({best_match.get('ItemCode')}) - Score: {best_match.get('_relevance_score', 'N/A')}")
                 
                 # Retourner au format attendu par _get_products_info
                 return {
@@ -4157,39 +4163,6 @@ class DevisWorkflow:
         # Retourner les termes uniques, anglais en premier
         return list(dict.fromkeys(search_terms))[:4]
     
-    def _extract_product_keywords(self, product_name: str) -> List[str]:
-        """
-        🔧 EXTRACTION INTELLIGENTE de mots-clés pour "Imprimante 20 ppm"
-        """
-        product_lower = product_name.lower()
-        keywords = []
-        
-        # Détection type de produit
-        if "imprimante" in product_lower:
-            keywords.extend(["printer", "imprimante", "laser"])
-            
-            # Détection vitesse
-            if "20 ppm" in product_lower or "20ppm" in product_lower:
-                keywords.extend(["20ppm", "20 ppm", "pages per minute"])
-                
-            # Détection technologie
-            if any(tech in product_lower for tech in ["laser", "jet", "inkjet"]):
-                keywords.extend(["laser", "inkjet"])
-            else:
-                keywords.append("laser")  # Par défaut pour imprimantes pro
-        
-        elif "ordinateur" in product_lower or "pc" in product_lower:
-            keywords.extend(["computer", "pc", "desktop"])
-        
-        elif "écran" in product_lower or "moniteur" in product_lower:
-            keywords.extend(["monitor", "screen", "display"])
-        
-        else:
-            # Mots génériques
-            keywords.append(product_name.split()[0])  # Premier mot
-        
-        logger.info(f"🔍 Mots-clés extraits de '{product_name}': {keywords}")
-        return keywords
 
     def _create_generic_product(self, product_name: str) -> Dict[str, Any]:
         """
@@ -6043,13 +6016,14 @@ class DevisWorkflow:
         product_lower = product_name.lower()
         keywords = []
         
-        # Dictionnaire de synonymes pour élargir la recherche
+        # CORRECTION: Dictionnaire de synonymes amélioré pour SAP
         synonyms = {
-            "imprimante": ["printer", "imprimante", "laser", "jet"],
-            "ordinateur": ["computer", "pc", "desktop"],
-            "écran": ["monitor", "screen", "display"],
-            "clavier": ["keyboard", "clavier"],
-            "souris": ["mouse", "souris"]
+            "imprimante": ["imprimante", "printer", "laser", "inkjet", "Imprimante"],
+            "ordinateur": ["ordinateur", "computer", "pc", "desktop", "Ordinateur", "PC"],
+            "écran": ["écran", "monitor", "screen", "display", "Moniteur"],
+            "clavier": ["clavier", "keyboard", "Clavier"],
+            "souris": ["souris", "mouse", "Souris"],
+            "scanner": ["scanner", "scan", "numériseur", "Scanner"]
         }
         
         # Chercher des correspondances
