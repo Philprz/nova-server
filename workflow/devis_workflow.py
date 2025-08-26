@@ -1189,6 +1189,13 @@ class DevisWorkflow:
             # Étape 1: Récupérer les données techniques
             self._track_step_start("get_products_info", "Récupération des informations produits...")
             products_info = await self._get_products_info(extracted_info.get("products", []))
+            # Vérifier si interaction utilisateur requise pour les produits
+            if isinstance(products_info, dict) and products_info.get("status") == "product_selection_required":
+                logger.info("⏸️ Workflow interrompu - Sélection de produits requise")
+                return products_info
+            elif isinstance(products_info, dict) and products_info.get("status") == "user_interaction_required":
+                logger.info("⏸️ Workflow interrompu - Interaction utilisateur requise")
+                return products_info
             self._track_step_complete("get_products_info", f"{len(products_info)} produit(s) trouvé(s)")
 
             # Étape 2: Calculer les prix avec le Price Engine
