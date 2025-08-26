@@ -492,35 +492,45 @@ async def sap_search(query: str, entity_type: str = "Items", limit: int = 5) -> 
         search_fields = search_mappings.get(entity_type, ["ItemName"])
         all_results = []
         
-        # Recherche multi-mots-clés et multi-champs
-        for keyword in keywords[:3]:  # Limiter à 3 mots-clés pour éviter surcharge
-            escaped_keyword = keyword.replace("'", "''")
+        # CORRECTION: Simplification de la recherche pour "Imprimante 10 ppm"
+        # 1. Recherche directe avec le terme complet d'abord
+        main_search_terms = [query.strip()]
+        
+        # 2. Ajouter les mots-clés décomposés
+        main_search_terms.extend(keywords[:2])  # Maximum 2 mots-clés
+        
+        # 3. Recherche séquentielle avec termes prioritaires
+        for search_term in main_search_terms:
+            if len(all_results) >= limit:
+                break
+                
+            escaped_term = search_term.replace("'", "''").lower()
             
-            # Construire filtre multi-champs
-            field_filters = []
-            for field in search_fields:
-                field_filters.append(f"contains(tolower({field}),'{escaped_keyword}')")
+            # Construire filtre simple et efficace
+            if entity_type == "Items":
+                # Recherche dans ItemName et U_Description avec OU logique
+                simple_filter = f"contains(tolower(ItemName),'{escaped_term}') or contains(tolower(U_Description),'{escaped_term}')"
+            else:
+                simple_filter = f"contains(tolower(CardName),'{escaped_term}') or contains(tolower(CardCode),'{escaped_term}')"
             
-            combined_filter = " or ".join(field_filters)
-            endpoint = f"/{entity_type}?$filter=({combined_filter})&$top={limit}"
+            endpoint = f"/{entity_type}?$filter={simple_filter}&$top={limit * 2}"
             
-            log(f"Recherche avec mot-clé: '{keyword}' sur champs: {search_fields}")
+            log(f"Recherche simplifiée avec terme: '{search_term}'")
             
             result = await call_sap(endpoint)
             
             if "error" not in result and "value" in result:
-                # Ajouter score de pertinence et éviter doublons
                 for item in result["value"]:
+                    # Éviter doublons par ID unique
                     item_id = item.get("ItemCode" if entity_type == "Items" else "CardCode")
                     
-                    # Éviter doublons
                     if not any(existing.get("ItemCode" if entity_type == "Items" else "CardCode") == item_id 
                               for existing in all_results):
                         
-                        # Calculer score de pertinence
-                        relevance_score = _calculate_relevance_score(item, keyword, search_fields)
+                        # Score de pertinence amélioré
+                        relevance_score = _calculate_improved_relevance_score(item, query, search_term, search_fields)
                         item["_relevance_score"] = relevance_score
-                        item["_matched_keyword"] = keyword
+                        item["_matched_term"] = search_term
                         
                         all_results.append(item)
         
@@ -574,7 +584,45 @@ def _extract_smart_keywords(query: str, synonyms_dict: dict) -> list:
     
     # Supprimer doublons et retourner
     return list(dict.fromkeys(keywords))  # Preserve order, remove duplicates
-
+def _calculate_improved_relevance_score(item: dict, original_query: str, matched_term: str, search_fields: list) -> float:
+    """
+    Calcul amélioré du score de pertinence pour la recherche SAP
+    """
+    score = 0.0
+    original_lower = original_query.lower()
+    term_lower = matched_term.lower()
+    
+    # Vérifier chaque champ de recherche
+    for field in search_fields:
+        field_value = str(item.get(field, "")).lower()
+        
+        if not field_value:
+            continue
+            
+        # Score exact match (priorité maximale)
+        if original_lower in field_value:
+            score += 100.0
+            
+        # Score partial match du terme
+        if term_lower in field_value:
+            score += 50.0
+            
+        # Score pour correspondance en début de chaîne
+        if field_value.startswith(term_lower):
+            score += 25.0
+            
+        # Bonus si le champ est ItemName (plus important)
+        if field == "ItemName":
+            score *= 1.5
+    
+    # Bonus pour correspondance avec plusieurs mots du query original
+    query_words = original_lower.split()
+    field_text = " ".join(str(item.get(field, "")).lower() for field in search_fields)
+    
+    matching_words = sum(1 for word in query_words if len(word) > 2 and word in field_text)
+    score += matching_words * 10.0
+    
+    return round(score, 2)
 def _calculate_relevance_score(item: dict, keyword: str, search_fields: list) -> float:
     """
     Calcule un score de pertinence pour un résultat
