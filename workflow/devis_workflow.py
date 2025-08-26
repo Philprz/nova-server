@@ -6059,33 +6059,40 @@ class DevisWorkflow:
             logger.exception(f"Erreur création client: {str(e)}")
             return {"created": False, "error": str(e)}
     def _extract_product_keywords(self, product_name: str) -> List[str]:
-        """Extrait des mots-clés intelligents pour la recherche produit"""
+        """
+        Extrait des mots-clés intelligents pour la recherche de produits
+        VERSION AMÉLIORÉE avec plus de variantes
+        """
         product_lower = product_name.lower()
-        keywords = []
+        search_terms = []
         
-        # CORRECTION: Dictionnaire de synonymes amélioré pour SAP
-        synonyms = {
-            "imprimante": ["imprimante", "printer", "laser", "inkjet", "Imprimante"],
-            "ordinateur": ["ordinateur", "computer", "pc", "desktop", "Ordinateur", "PC"],
-            "écran": ["écran", "monitor", "screen", "display", "Moniteur"],
-            "clavier": ["clavier", "keyboard", "Clavier"],
-            "souris": ["souris", "mouse", "Souris"],
-            "scanner": ["scanner", "scan", "numériseur", "Scanner"]
+        # Dictionnaire étendu de traductions et variantes
+        translations = {
+            "imprimante": ["imprimante", "printer", "Print", "printing", "impression", "impr"],
+            "ordinateur": ["ordinateur", "computer", "PC", "desktop", "workstation", "laptop"],
+            "écran": ["écran", "monitor", "screen", "display", "moniteur"],
+            "scanner": ["scanner", "Scanner", "scan", "Scan"]
         }
         
-        # Chercher des correspondances
-        for word, related in synonyms.items():
-            if word in product_lower:
-                keywords.extend(related)
-                break
+        # Ajouter tous les termes correspondants
+        for french_term, english_terms in translations.items():
+            if french_term in product_lower:
+                search_terms.extend(english_terms)
         
-        # Si pas de correspondance, utiliser le premier mot
-        if not keywords:
-            first_word = product_name.split()[0].lower()
-            if len(first_word) >= 3:
-                keywords.append(first_word)
+        # Extraire des fragments du nom original
+        words = product_name.split()
+        for word in words:
+            if len(word) > 2:  # Ignorer les mots trop courts
+                search_terms.append(word)
+                search_terms.append(word.capitalize())
         
-        return keywords[:3]  # Limiter à 3 mots-clés
+        # Ajouter le terme original
+        search_terms.append(product_name)
+        
+        # Supprimer les doublons et augmenter la limite
+        unique_terms = list(dict.fromkeys(search_terms))
+        return unique_terms[:5]  # Augmenter à 5 termes
+    
     def _get_english_search_terms(self, product_name: str) -> List[str]:
         """Génère des termes de recherche anglais pour SAP"""
         product_lower = product_name.lower()
@@ -6163,7 +6170,7 @@ class DevisWorkflow:
                         # Extraire des mots-clés intelligents
                         keywords = self._extract_product_keywords(product_name)
                         
-                        for keyword in keywords[:2]:  # Limiter à 2 mots-clés
+                        for keyword in keywords[:3]:  # Limiter à 3 mots-clés
                             logger.info(f"🔍 Recherche avec mot-clé: '{keyword}'")
                             
                             search_result = await self.mcp_connector.call_mcp(
@@ -6182,22 +6189,19 @@ class DevisWorkflow:
                                 # CORRECTION CRITIQUE : Mapper AvgPrice vers Price pour compatibilité
                                 product_found = {
                                     "ItemCode": best_match.get("ItemCode"),
-                                    "ItemName": best_match.get("ItemName"),
+                                    "ItemName": best_match.get("ItemName"), 
                                     "Price": float(best_match.get("AvgPrice", 0)),  # MAPPING CRITIQUE
                                     "OnHand": best_match.get("OnHand", 0),
                                     "U_Description": best_match.get("U_Description", ""),
-                                    # Conserver données originales pour compatibilité
                                     "AvgPrice": best_match.get("AvgPrice", 0),
                                     "QuantityOnStock": best_match.get("OnHand", 0)
                                 }
-                                logger.info(f"✅ Produit trouvé via mot-clé '{keyword}': {best_match.get('ItemName')}")
+                                logger.info(f"✅ Produit trouvé via terme '{keyword}': {best_match.get('ItemName')}")
                                 break
-                        
-                        # Si pas trouvé avec mots-clés, essayer termes anglais
+                                
+                        # Recherche alternative si toujours rien
                         if not product_found:
-                            english_terms = self._get_english_search_terms(product_name)
-                            
-                            for term in english_terms[:2]:
+                            for term in ["printer", "Printer"]:
                                 logger.info(f"🔍 Recherche terme anglais: '{term}'")
                                 
                                 search_result = await self.mcp_connector.call_mcp(
