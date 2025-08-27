@@ -649,13 +649,14 @@ class DevisWorkflow:
             
             # S'assurer que chaque produit a les champs requis
             # Si aucun produit valide après normalisation, retourner erreur appropriée
+            validated_products_data = []
             if not validated_products_data:
                 logger.error("❌ Aucun produit valide après normalisation des prix")
                 return {
                     "success": False,
                     "error": "Aucun produit valide trouvé. Vérifiez que tous les produits ont un prix."
                 }
-            validated_products_data = []
+            
             for product in products_data:
                 # Normaliser les champs de prix pour tous types de produits
                 normalized_product = dict(product)
@@ -6132,14 +6133,14 @@ class DevisWorkflow:
         import re
         numbers = re.findall(r'\d+', product_name)
         if numbers:
-            search_terms.extend([f"{num} ppm" for num in numbers[:1]])
+            search_terms.extend([f"{num}ppm", f"{num} ppm", f"{num}PPM" for num in numbers[:2]])
         
         # Ajouter terme original en dernier
         search_terms.append(product_name.strip())
         
         # Retourner termes uniques, limités à 5 max
         unique_terms = list(dict.fromkeys([t for t in search_terms if len(t.strip()) > 1]))
-        return unique_terms[:5]
+        return unique_terms[:8]  # Augmenter à 8 termes max pour plus de chances
     
     def _get_english_search_terms(self, product_name: str) -> List[str]:
         """Génère des termes de recherche anglais pour SAP"""
@@ -6233,97 +6234,72 @@ class DevisWorkflow:
                         })
                         product_found = True
                         continue
-                # Étape 3: Recherches par mots-clés (corrigé)
+                # Étape 3: Recherches par mots-clés élargies
                 if not product_found:
-                    search_terms = [
-                        ("imprimante", "printer"),
-                        ("Printer", "PRINTER")
-                    ]
+                    # Extraire des mots-clés intelligents du nom du produit
+                    search_keywords = self._extract_product_keywords(product_name)
                     
-                    for french_term, english_term in search_terms:
+                    for keyword in search_keywords:
                         if product_found:
                             break
                             
-                        for term in [french_term, english_term]:
-                            if product_found:
-                                break
-                                
-                            logger.info(f"🔍 Recherche avec mot-clé: '{term}'")
-                            
-                            keyword_endpoint = f"/Items?$filter=contains(tolower(ItemName), tolower('{term}'))&$top=5&$orderby=ItemName"
-                            keyword_search = await self.mcp_connector.call_sap_mcp(
+                        logger.info(f"🔎 Recherche avec mot-clé: '{keyword}'")
+                        
+                        # Recherche dans ItemName
+                        try:
+                            result = await self.mcp_connector.call_sap_mcp(
                                 "sap_read",
                                 {
-                                    "endpoint": keyword_endpoint,
+                                    "endpoint": f"/Items?$filter=contains(tolower(ItemName),tolower('{keyword}'))&$top=5",
                                     "method": "GET"
                                 }
                             )
                             
-                            if keyword_search.get("value") and len(keyword_search["value"]) > 0:
-                                best_match = keyword_search["value"][0]
-                                logger.info(f"✅ Produit trouvé via mot-clé '{term}': {best_match.get('ItemName')}")
+                            if result.get("value"):
+                                # Prendre le premier résultat le plus pertinent
+                                matches = result["value"]
+                                best_match = matches[0]  # Pour l'instant, prendre le premier
+                                
+                                logger.info(f"✅ Produit trouvé par mot-clé '{keyword}': {best_match.get('ItemName')}")
                                 found_products.append({
                                     **self._format_product_data(best_match, quantity),
-                                    "search_method": f"keyword_{term}",
+                                    "search_method": f"keyword_{keyword}",
                                     "found": True
                                 })
                                 product_found = True
                                 break
-                # 3. SÉCURITÉ : Log détaillé si aucun produit trouvé
-                if not product_found:
-                    logger.error(f"❌ AUCUN PRODUIT TROUVÉ après toutes les recherches pour: '{product_name}' (code: '{product_code}')")
-                    
-                    # CORRECTION : Recherche de suggestions avec méthode améliorée
-                    logger.warning(f"❌ Produit non trouvé: {product_name}")
-                    logger.info(f"🔍 Recherche de suggestions pour: {product_name}")
-                    
-                    # Utiliser recherche générale avec méthode corrigée
-                    try:
-                        # Construire l'endpoint avec les paramètres OData
-                        filter_param = f"contains(tolower(ItemName), 'imprimante') or contains(tolower(ItemName), 'printer')"
-                        endpoint = f"/Items?$filter={filter_param}&$top=10&$orderby=ItemName"
-                        
-                        general_search = await self.mcp_connector.call_sap_mcp(
-                            "sap_read",
-                            {
-                                "endpoint": endpoint,
-                                "method": "GET"
-                            }
-                        )
-                        
-                        if general_search.get("success") and general_search.get("data", {}).get("value"):
-                            suggestions = general_search["data"]["value"][:3]  # Top 3
-                            found_products.append({
-                                "code": f"SUGGESTION_{i}",
-                                "name": f"Produit non trouvé: {product_name}",
-                                "quantity": quantity,
-                                "suggestions": [
-                                    {
-                                        "code": s.get("ItemCode", ""),
-                                        "name": s.get("ItemName", ""),
-                                        "price": float(s.get("Price", 0)),
-                                        "description": s.get("U_Description", "")
-                                    } for s in suggestions
-                                ],
-                                "requires_selection": True,
-                                "error": f"Produit '{product_name}' non trouvé - suggestions disponibles",
-                                "original_request": product_name
-                            })
-                            logger.info(f"✅ {len(suggestions)} suggestions trouvées pour '{product_name}'")
-                        else:
-                            # Fallback complet - générer produit générique
-                            generic_product = self._create_generic_product(product_name)
-                            found_products.append({
-                                **generic_product,
-                                "quantity": quantity,
-                                "found": True,
-                                "search_method": "generic_creation",
-                                "note": "Produit générique créé automatiquement"
-                            })
-                            logger.info(f"🔧 Produit générique créé: {generic_product['ItemName']}")
+                                
+                        except Exception as e:
+                            logger.debug(f"Recherche '{keyword}' échouée: {str(e)}")
+                            continue
                             
-                    except Exception as search_error:
-                        logger.error(f"Erreur recherche suggestions: {str(search_error)}")
+                        # Si tolower() ne fonctionne pas, essayer recherche simple
+                        if not product_found:
+                            try:
+                                result = await self.mcp_connector.call_sap_mcp(
+                                    "sap_read",
+                                    {
+                                        "endpoint": f"/Items?$filter=contains(ItemName,'{keyword}')&$top=5",
+                                        "method": "GET"
+                                    }
+                                )
+                                
+                                if result.get("value"):
+                                    matches = result["value"]
+                                    best_match = matches[0]
+                                    
+                                    logger.info(f"✅ Produit trouvé par recherche simple '{keyword}': {best_match.get('ItemName')}")
+                                    found_products.append({
+                                        **self._format_product_data(best_match, quantity),
+                                        "search_method": f"simple_{keyword}",
+                                        "found": True
+                                    })
+                                    product_found = True
+                                    break
+                                    
+                            except Exception as e:
+                                logger.debug(f"Recherche simple '{keyword}' échouée: {str(e)}")
+                                continue
                 
                 # 3. Ajouter le produit aux résultats
                 if product_found:
