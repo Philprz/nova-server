@@ -643,9 +643,14 @@ class DevisWorkflow:
             if not isinstance(products_data, list):
                 logger.warning("⚠️ products_data n'est pas une liste, correction...")
                 products_data = []
-                        
+                # Initialiser la liste des produits validés
+                validated_products_data = []        
             for product in products_data:
                 # Vérifier après la normalisation qu'au moins un produit est valide
+                validated_products_data = (self.context.get("validated_products_data")
+                    or self.context.get("validated_products")
+                    or self.context.get("products_info")
+                    or [])
                 if not validated_products_data:
                     logger.error("❌ Aucun produit valide après normalisation des prix")
                     return {
