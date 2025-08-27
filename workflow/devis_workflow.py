@@ -4221,8 +4221,15 @@ class DevisWorkflow:
         estimated_price = 100.0  # Par défaut
         
         if "imprimante" in product_name.lower():
-            if "20 ppm" in product_name.lower():
-                estimated_price = 250.0  # Imprimante laser 20 ppm
+            if "20 ppm" in product_name.lower() or "ppm" in product_name.lower():
+                    # Extraction intelligente de la vitesse
+                    import re
+                    ppm_match = re.search(r'(\d+)\s*ppm', product_name.lower())
+                    if ppm_match:
+                        ppm_value = int(ppm_match.group(1))
+                        estimated_price = 150.0 + (ppm_value * 5)  # Prix basé sur vitesse
+                    else:
+                        estimated_price = 300.0  # Imprimante standard
             else:
                 estimated_price = 150.0  # Imprimante générique
         elif "ordinateur" in product_name.lower():
@@ -6084,38 +6091,43 @@ class DevisWorkflow:
             return {"created": False, "error": str(e)}
     def _extract_product_keywords(self, product_name: str) -> List[str]:
         """
-        Extrait des mots-clés intelligents pour la recherche de produits
-        VERSION AMÉLIORÉE avec plus de variantes
+        Extrait des mots-clés de recherche intelligents pour SAP
+        CORRECTION : Meilleure extraction avec synonymes et fallback
         """
         product_lower = product_name.lower()
         search_terms = []
         
-        # Dictionnaire étendu de traductions et variantes
+        # Dictionnaire enrichi français/anglais
         translations = {
-            "imprimante": ["imprimante", "printer", "Print", "printing", "impression", "impr"],
-            "ordinateur": ["ordinateur", "computer", "PC", "desktop", "workstation", "laptop"],
-            "écran": ["écran", "monitor", "screen", "display", "moniteur"],
-            "scanner": ["scanner", "Scanner", "scan", "Scan"]
+            "imprimante": ["imprimante", "printer", "Printer", "PRINTER", "laser"],
+            "ordinateur": ["ordinateur", "computer", "PC", "desktop", "workstation"],
+            "écran": ["écran", "monitor", "screen", "display"],
+            "clavier": ["clavier", "keyboard"],
+            "souris": ["souris", "mouse"],
+            "scanner": ["scanner", "scan", "numériseur"],
+            "laser": ["laser", "Laser", "LASER"],
+            "couleur": ["couleur", "color", "colour"],
+            "noir": ["noir", "black", "monochrome"],
+            "ppm": ["ppm", "pages", "vitesse"]
         }
         
-        # Ajouter tous les termes correspondants
+        # Chercher correspondances exactes
         for french_term, english_terms in translations.items():
             if french_term in product_lower:
-                search_terms.extend(english_terms)
+                search_terms.extend(english_terms[:3])  # Max 3 par catégorie
         
-        # Extraire des fragments du nom original
-        words = product_name.split()
-        for word in words:
-            if len(word) > 2:  # Ignorer les mots trop courts
-                search_terms.append(word)
-                search_terms.append(word.capitalize())
+        # Extraire chiffres pour PPM, capacité, etc.
+        import re
+        numbers = re.findall(r'\d+', product_name)
+        if numbers:
+            search_terms.extend([f"{num} ppm" for num in numbers[:1]])
         
-        # Ajouter le terme original
-        search_terms.append(product_name)
+        # Ajouter terme original en dernier
+        search_terms.append(product_name.strip())
         
-        # Supprimer les doublons et augmenter la limite
-        unique_terms = list(dict.fromkeys(search_terms))
-        return unique_terms[:5]  # Augmenter à 5 termes
+        # Retourner termes uniques, limités à 5 max
+        unique_terms = list(dict.fromkeys([t for t in search_terms if len(t.strip()) > 1]))
+        return unique_terms[:5]
     
     def _get_english_search_terms(self, product_name: str) -> List[str]:
         """Génère des termes de recherche anglais pour SAP"""
@@ -6260,7 +6272,58 @@ class DevisWorkflow:
                 # 3. SÉCURITÉ : Log détaillé si aucun produit trouvé
                 if not product_found:
                     logger.error(f"❌ AUCUN PRODUIT TROUVÉ après toutes les recherches pour: '{product_name}' (code: '{product_code}')")
-                    logger.info("🔍 Cette recherche aurait dû trouver quelque chose dans le catalogue SAP")
+                    
+                    # CORRECTION : Recherche de suggestions avec méthode améliorée
+                    logger.warning(f"❌ Produit non trouvé: {product_name}")
+                    logger.info(f"🔍 Recherche de suggestions pour: {product_name}")
+                    
+                    # Utiliser recherche générale avec fallback intelligent
+                    try:
+                        general_search = await self.mcp_connector.call_sap_mcp(
+                            "sap_read",
+                            {
+                                "endpoint": "/Items",
+                                "params": {
+                                    "$filter": f"contains(tolower(ItemName), 'imprimante') or contains(tolower(ItemName), 'printer')",
+                                    "$top": "10",
+                                    "$orderby": "ItemName"
+                                }
+                            }
+                        )
+                        
+                        if general_search.get("success") and general_search.get("data", {}).get("value"):
+                            suggestions = general_search["data"]["value"][:3]  # Top 3
+                            found_products.append({
+                                "code": f"SUGGESTION_{i}",
+                                "name": f"Produit non trouvé: {product_name}",
+                                "quantity": quantity,
+                                "suggestions": [
+                                    {
+                                        "code": s.get("ItemCode", ""),
+                                        "name": s.get("ItemName", ""),
+                                        "price": float(s.get("Price", 0)),
+                                        "description": s.get("U_Description", "")
+                                    } for s in suggestions
+                                ],
+                                "requires_selection": True,
+                                "error": f"Produit '{product_name}' non trouvé - suggestions disponibles",
+                                "original_request": product_name
+                            })
+                            logger.info(f"✅ {len(suggestions)} suggestions trouvées pour '{product_name}'")
+                        else:
+                            # Fallback complet - générer produit générique
+                            generic_product = self._create_generic_product(product_name)
+                            found_products.append({
+                                **generic_product,
+                                "quantity": quantity,
+                                "found": True,
+                                "search_method": "generic_creation",
+                                "note": "Produit générique créé automatiquement"
+                            })
+                            logger.info(f"🔧 Produit générique créé: {generic_product['ItemName']}")
+                            
+                    except Exception as search_error:
+                        logger.error(f"Erreur recherche suggestions: {str(search_error)}")
                 
                 # 3. Ajouter le produit aux résultats
                 if product_found:
