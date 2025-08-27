@@ -6168,6 +6168,7 @@ class DevisWorkflow:
         search_terms.append(product_name)
         
         return search_terms[:3]
+    
     async def _process_products_retrieval(self, products: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
         Récupération des produits avec progression avancée
@@ -6209,6 +6210,7 @@ class DevisWorkflow:
                     )
                     if "error" not in exact_search and exact_search.get("ItemCode"):
                         logger.info(f"✅ Produit trouvé par code exact: {product_code}")
+                        product_found = exact_search
                         found_products.append({
                             **self._format_product_data(exact_search, quantity),
                             "search_method": "exact_code",
@@ -6227,14 +6229,13 @@ class DevisWorkflow:
                         }
                     )
                     if name_search.get("value") and len(name_search["value"]) > 0:
-                        match = name_search["value"][0]
                         logger.info(f"✅ Produit trouvé par nom exact: {product_name}")
+                        product_found = name_search["value"][0]
                         found_products.append({
-                            **self._format_product_data(match, quantity),
-                            "search_method": "exact_name", 
+                            **self._format_product_data(product_found, quantity),
+                            "search_method": "exact_name",
                             "found": True
                         })
-                        product_found = True
                         continue
                 # Étape 3: Recherches par mots-clés élargies
                 if not product_found:
@@ -6291,12 +6292,12 @@ class DevisWorkflow:
                                     best_match = matches[0]
                                     
                                     logger.info(f"✅ Produit trouvé par recherche simple '{keyword}': {best_match.get('ItemName')}")
+                                    product_found = first_match
                                     found_products.append({
                                         **self._format_product_data(best_match, quantity),
                                         "search_method": f"simple_{keyword}",
                                         "found": True
                                     })
-                                    product_found = True
                                     break
                                     
                             except Exception as e:
