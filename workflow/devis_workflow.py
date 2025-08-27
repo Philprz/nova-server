@@ -6183,92 +6183,80 @@ class DevisWorkflow:
                 # === RECHERCHE MULTI-CRITÈRES ===
                 product_found = None
                 
-                # 1. Recherche par code exact si disponible
+                # Étape 1: Recherche exacte par code
                 if product_code:
-                    try:
-                        code_result = await self.mcp_connector.call_mcp(
-                            "sap_mcp",
-                            "sap_read",
-                            {"endpoint": f"/Items('{product_code}')"}
-                        )
-                        
-                        if not code_result.get("error") and code_result.get("data", {}).get("ItemCode"):
-                            product_found = code_result["data"]
-                            logger.info(f"✅ Produit trouvé par code: {product_code}")
-                    except Exception as e:
-                        logger.warning(f"⚠️ Erreur recherche par code {product_code}: {e}")
+                    exact_search = await self.mcp_connector.call_sap_mcp(
+                        "sap_read",
+                        {
+                            "endpoint": f"/Items('{product_code}')",
+                            "method": "GET"
+                        }
+                    )
+                    if "error" not in exact_search and exact_search.get("ItemCode"):
+                        logger.info(f"✅ Produit trouvé par code exact: {product_code}")
+                        found_products.append({
+                            **self._format_product_data(exact_search, quantity),
+                            "search_method": "exact_code",
+                            "found": True
+                        })
+                        product_found = True
+                        continue
                 
-                # 2. Recherche par nom si pas trouvé par code
-                if not product_found and product_name:
-                    try:
-                        logger.info(f"🔍 Recherche par nom: '{product_name}'")
-                        
-                        # Extraire des mots-clés intelligents
-                        keywords = self._extract_product_keywords(product_name)
-                        
-                        for keyword in keywords[:3]:  # Limiter à 3 mots-clés
-                            logger.info(f"🔍 Recherche avec mot-clé: '{keyword}'")
+                # Étape 2: Recherche par nom exacte
+                if product_name and not product_found:
+                    name_search = await self.mcp_connector.call_sap_mcp(
+                        "sap_read", 
+                        {
+                            "endpoint": f"/Items?$filter=ItemName eq '{product_name}'&$top=1",
+                            "method": "GET"
+                        }
+                    )
+                    if name_search.get("value") and len(name_search["value"]) > 0:
+                        match = name_search["value"][0]
+                        logger.info(f"✅ Produit trouvé par nom exact: {product_name}")
+                        found_products.append({
+                            **self._format_product_data(match, quantity),
+                            "search_method": "exact_name", 
+                            "found": True
+                        })
+                        product_found = True
+                        continue
+                # Étape 3: Recherches par mots-clés (corrigé)
+                if not product_found:
+                    search_terms = [
+                        ("imprimante", "printer"),
+                        ("Printer", "PRINTER")
+                    ]
+                    
+                    for french_term, english_term in search_terms:
+                        if product_found:
+                            break
                             
-                            search_result = await self.mcp_connector.call_mcp(
-                                "sap_mcp",
-                                "sap_search",
+                        for term in [french_term, english_term]:
+                            if product_found:
+                                break
+                                
+                            logger.info(f"🔍 Recherche avec mot-clé: '{term}'")
+                            
+                            keyword_endpoint = f"/Items?$filter=contains(tolower(ItemName), tolower('{term}'))&$top=5&$orderby=ItemName"
+                            keyword_search = await self.mcp_connector.call_sap_mcp(
+                                "sap_read",
                                 {
-                                    "query": keyword,
-                                    "entity_type": "Items",
-                                    "limit": 5
+                                    "endpoint": keyword_endpoint,
+                                    "method": "GET"
                                 }
                             )
                             
-                            if search_result and search_result.get("results") and len(search_result["results"]) > 0:
-                                best_match = search_result["results"][0]
-                                
-                                # CORRECTION CRITIQUE : Mapper AvgPrice vers Price pour compatibilité
-                                product_found = {
-                                    "ItemCode": best_match.get("ItemCode"),
-                                    "ItemName": best_match.get("ItemName"), 
-                                    "Price": float(best_match.get("AvgPrice", 0)),  # MAPPING CRITIQUE
-                                    "OnHand": best_match.get("OnHand", 0),
-                                    "U_Description": best_match.get("U_Description", ""),
-                                    "AvgPrice": best_match.get("AvgPrice", 0),
-                                    "QuantityOnStock": best_match.get("OnHand", 0)
-                                }
-                                logger.info(f"✅ Produit trouvé via terme '{keyword}': {best_match.get('ItemName')}")
+                            if keyword_search.get("value") and len(keyword_search["value"]) > 0:
+                                best_match = keyword_search["value"][0]
+                                logger.info(f"✅ Produit trouvé via mot-clé '{term}': {best_match.get('ItemName')}")
+                                found_products.append({
+                                    **self._format_product_data(best_match, quantity),
+                                    "search_method": f"keyword_{term}",
+                                    "found": True
+                                })
+                                product_found = True
                                 break
-                                
-                        # Recherche alternative si toujours rien
-                        if not product_found:
-                            for term in ["printer", "Printer"]:
-                                logger.info(f"🔍 Recherche terme anglais: '{term}'")
-                                
-                                search_result = await self.mcp_connector.call_mcp(
-                                    "sap_mcp",
-                                    "sap_search",
-                                    {
-                                        "query": term,
-                                        "entity_type": "Items",
-                                        "limit": 3
-                                    }
-                                )
-                                
-                                if search_result and search_result.get("results") and len(search_result["results"]) > 0:
-                                    best_match = search_result["results"][0]
-                                    
-                                    # MÊME MAPPING CRITIQUE
-                                    product_found = {
-                                        "ItemCode": best_match.get("ItemCode"),
-                                        "ItemName": best_match.get("ItemName"), 
-                                        "Price": float(best_match.get("AvgPrice", 0)),  # MAPPING CRITIQUE
-                                        "OnHand": best_match.get("OnHand", 0),
-                                        "U_Description": best_match.get("U_Description", ""),
-                                        "AvgPrice": best_match.get("AvgPrice", 0),
-                                        "QuantityOnStock": best_match.get("OnHand", 0)
-                                    }
-                                    logger.info(f"✅ Produit trouvé via terme '{term}': {best_match.get('ItemName')}")
-                                    break
-                                    
-                    except Exception as e:
-                        logger.warning(f"⚠️ Erreur recherche par nom {product_name}: {e}")
-                
                 # 3. SÉCURITÉ : Log détaillé si aucun produit trouvé
                 if not product_found:
                     logger.error(f"❌ AUCUN PRODUIT TROUVÉ après toutes les recherches pour: '{product_name}' (code: '{product_code}')")
@@ -6277,17 +6265,17 @@ class DevisWorkflow:
                     logger.warning(f"❌ Produit non trouvé: {product_name}")
                     logger.info(f"🔍 Recherche de suggestions pour: {product_name}")
                     
-                    # Utiliser recherche générale avec fallback intelligent
+                    # Utiliser recherche générale avec méthode corrigée
                     try:
+                        # Construire l'endpoint avec les paramètres OData
+                        filter_param = f"contains(tolower(ItemName), 'imprimante') or contains(tolower(ItemName), 'printer')"
+                        endpoint = f"/Items?$filter={filter_param}&$top=10&$orderby=ItemName"
+                        
                         general_search = await self.mcp_connector.call_sap_mcp(
                             "sap_read",
                             {
-                                "endpoint": "/Items",
-                                "params": {
-                                    "$filter": f"contains(tolower(ItemName), 'imprimante') or contains(tolower(ItemName), 'printer')",
-                                    "$top": "10",
-                                    "$orderby": "ItemName"
-                                }
+                                "endpoint": endpoint,
+                                "method": "GET"
                             }
                         )
                         
@@ -6475,7 +6463,19 @@ class DevisWorkflow:
                 },
                 "message": f"Erreur système: {str(e)}"
             }
-
+    def _format_product_data(self, sap_product: Dict[str, Any], quantity: int) -> Dict[str, Any]:
+            """Formate les données produit SAP en format standard"""
+            return {
+                "code": sap_product.get("ItemCode", ""),
+                "name": sap_product.get("ItemName", ""),
+                "quantity": quantity,
+                "unit_price": float(sap_product.get("AvgPrice", 0)),
+                "total_price": float(sap_product.get("AvgPrice", 0)) * quantity,
+                "currency": "EUR",
+                "stock": int(sap_product.get("OnHand", 0)),
+                "description": sap_product.get("U_Description", ""),
+                "sap_data": sap_product
+            }
     async def _create_quote_document(self, client_result: Dict, products_result: Dict) -> Dict[str, Any]:
         """
         Création document devis avec données réelles
