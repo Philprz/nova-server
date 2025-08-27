@@ -318,9 +318,12 @@ class MCPConnector:
                 error_msg = str(result.get("error", "")).lower()
                 if any(term in error_msg for term in ["invalid_login", "unauthorized", "authentication"]):
                     # 🔧 TOLÉRANCE: Si Salesforce échoue, continuer avec SAP uniquement
-                    if "invalid_login" in error_msg or "unauthorized" in error_msg:
-                        logger.warning("🔄 Salesforce indisponible - Mode dégradé activé")
-                        return {"error": "salesforce_unavailable", "fallback_mode": True}
+                    if "invalid_login" in error_msg:
+                        logger.warning("🔄 Salesforce connexion échouée - Mode dégradé activé")
+                        return {"error": "salesforce_unavailable", "fallback_mode": True, "reason": "invalid_login"}
+                    elif "unauthorized" in error_msg:
+                        logger.warning("🔄 Salesforce accès refusé - Mode dégradé activé") 
+                        return {"error": "salesforce_unavailable", "fallback_mode": True, "reason": "unauthorized"}
                     logger.warning("Tentative de reconnexion Salesforce automatique...")
                     
                     # Obtenir instance du connecteur et forcer reconnexion
@@ -581,8 +584,15 @@ class MCPConnector:
             return output_data
             
         except Exception as e:
-            logger.exception(f"Erreur lors de l'appel MCP {server_name}.{action}: {str(e)}")
-            return {"error": str(e)}
+            error_msg = str(e)
+            logger.error(f"Erreur MCP {server_name}.{action}: {error_msg}")
+            # Propager l'erreur réelle plutôt que de masquer
+            if "INVALID_LOGIN" in error_msg or "invalid_login" in error_msg.lower():
+                return {"error": f"Authentification Salesforce échouée: {error_msg}"}
+            elif "unauthorized" in error_msg.lower():
+                return {"error": f"Accès non autorisé: {error_msg}"}
+            else:
+                return {"error": error_msg}
             
         finally:
             # Nettoyage des fichiers temporaires

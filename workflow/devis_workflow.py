@@ -156,7 +156,6 @@ class DevisWorkflow:
     
     def _track_step_start(self, step_id: str, message: str = ""):
         """Démarre le tracking d'une étape"""
-        self._track_step_complete("extract_info", "✅ Informations extraites avec succès")
         if self.current_task:
             self.current_task.start_step(step_id, message)
     
@@ -401,8 +400,6 @@ class DevisWorkflow:
             logger.exception(f"Erreur _handle_client_selection: {e}")
             return self._build_error_response("Erreur sélection client", str(e))
 
-            logger.exception(f"Erreur gestion sélection client: {str(e)}")
-            return self._build_error_response("Erreur sélection client", str(e))
 
 
     async def _search_company_enrichment(self, company_name: str) -> Dict[str, Any]:
@@ -646,18 +643,15 @@ class DevisWorkflow:
             if not isinstance(products_data, list):
                 logger.warning("⚠️ products_data n'est pas une liste, correction...")
                 products_data = []
-            
-            # S'assurer que chaque produit a les champs requis
-            # Si aucun produit valide après normalisation, retourner erreur appropriée
-            validated_products_data = []
-            if not validated_products_data:
-                logger.error("❌ Aucun produit valide après normalisation des prix")
-                return {
+                        
+            for product in products_data:
+                # Vérifier après la normalisation qu'au moins un produit est valide
+                if not validated_products_data:
+                    logger.error("❌ Aucun produit valide après normalisation des prix")
+                    return {
                     "success": False,
                     "error": "Aucun produit valide trouvé. Vérifiez que tous les produits ont un prix."
-                }
-            
-            for product in products_data:
+                    }
                 # Normaliser les champs de prix pour tous types de produits
                 normalized_product = dict(product)
                 
@@ -1237,14 +1231,14 @@ class DevisWorkflow:
 
             # Calculer les prix avec le nouveau moteur
             pricing_result = await price_engine.calculate_quote_pricing({
-                "client_data": client_data,
-                "products": products_data,
-                "special_conditions": extracted_info.get("conditions", {})
+            "client_data": client_info.get("data", {}),
+            "products": products_info,
+            "special_conditions": extracted_info.get("conditions", {})
             })
 
             # Mettre à jour les produits avec les nouveaux prix
-            products_data = pricing_result.get("updated_products", products_data)
-            total_amount = pricing_result.get("total_amount", 0.0)
+            products_info = pricing_result.get("updated_products", products_info)
+            total_amount = pricing_result.get("total_amount", total_amount)
 
             self._track_step_progress("calculate_prices", 90, "Prix calculés avec Price Engine")
             
@@ -1540,31 +1534,6 @@ class DevisWorkflow:
             }
 
     # === MÉTHODES D'APPUI REQUISES ===
-
-    def _detect_country_from_name(self, client_name: str) -> str:
-        """Détecte le pays probable à partir du nom du client - VERSION ROBUSTE"""
-        if not client_name:
-            return "FR"  # Par défaut
-            
-        client_name_lower = client_name.lower()
-        
-        # Indicateurs USA
-        us_indicators = ["inc", "llc", "corp", "corporation", "ltd", "usa", "america", "-usa-"]
-        if any(indicator in client_name_lower for indicator in us_indicators):
-            return "US"
-        
-        # Indicateurs français
-        french_indicators = ["sarl", "sas", "sa", "eurl", "sasu", "sci", "france", "paris", "lyon", "marseille", "-france-"]
-        if any(indicator in client_name_lower for indicator in french_indicators):
-            return "FR"
-        
-        # Indicateurs britanniques
-        uk_indicators = ["limited", "plc", "uk", "britain", "london"]
-        if any(indicator in client_name_lower for indicator in uk_indicators):
-            return "UK"
-        
-        # Par défaut, France
-        return "FR"
 
     async def _request_user_validation_for_client_creation(self, client_name: str, context_data: Dict) -> Dict[str, Any]:
         """Demande validation utilisateur pour création client - MÉTHODE MANQUANTE AJOUTÉE"""
@@ -3157,21 +3126,19 @@ class DevisWorkflow:
                 total_stock = self._extract_stock_from_sap_data(product_details)
                 
                 # Récupérer l'ID Salesforce
-                salesforce_id = await self._find_product_in_salesforce(product["code"])
+                salesforce_id = await self._find_product_in_salesforce(product_code)
                 
                 # ✅ NOUVEAU : Produit enrichi SANS calcul de prix
                 enriched_product = {
-                    "code": product["code"],
-                    "quantity": product["quantity"],
-                    "name": product_details.get("ItemName", "Unknown"),
-                    "stock": total_stock,
-                    "salesforce_id": salesforce_id,
-                    # ✅ Conserver les données SAP brutes pour le Price Engine
-                    "sap_raw_data": product_details,
-                    # ✅ Prix à null - sera calculé par le Price Engine
-                    "unit_price": None,
-                    "line_total": None,
-                    "price_calculated": False
+                "code": product_code,
+                "quantity": product.get("quantity", 1),
+                "name": product_details.get("ItemName", "Unknown"),
+                "stock": total_stock,
+                "salesforce_id": salesforce_id,
+                "sap_raw_data": product_details,
+                "unit_price": None,
+                "line_total": None,
+                "price_calculated": False
                 }
                 
                 enriched_products.append(enriched_product)
@@ -3777,9 +3744,28 @@ class DevisWorkflow:
                 },
                 "query_details": f"Recherche générale pour '{product_name}'"
             }
-
-    async def _smart_product_search(self, criteria: Dict[str, Any]) -> Dict[str, Any]:
+    def _extract_category_from_name(self, product_name: str) -> str:
+        """Extrait la catégorie d'un nom de produit"""
+        product_lower = product_name.lower()
+        
+        if any(term in product_lower for term in ["imprimante", "printer"]):
+            return "imprimante"
+        elif any(term in product_lower for term in ["ordinateur", "pc", "computer"]):
+            return "ordinateur"
+        elif any(term in product_lower for term in ["écran", "monitor", "screen"]):
+            return "écran"
+        else:
+            return "général"
+    async def _smart_product_search(self, product_name: str, product_code: str = "") -> Dict[str, Any]:
         """Recherche produits avec critères intelligents"""
+        
+        # Construire les critères à partir des paramètres
+        criteria = {
+            "product_name": product_name,
+            "product_code": product_code,
+            "category": self._extract_category_from_name(product_name),
+            "keywords": self._extract_product_keywords(product_name)
+        }
         
         category = criteria.get("category", "")
         specifications = criteria.get("specifications", {})
