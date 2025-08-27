@@ -179,10 +179,12 @@ class ClientLister:
             
             # Vérifier les erreurs
             if result.get("success") is False or "error" in result:
-                error_msg = result.get("error", "Erreur inconnue")
-                logger.error(f"❌ Erreur recherche approximative Salesforce: {error_msg}")
-            else:
-                logger.warning(f"⚠️ Aucun client Salesforce trouvé pour '{client_name}'")
+                error_msg = str(result.get("error", "Erreur inconnue"))
+                # Tolérer l'indisponibilité Salesforce et basculer silencieusement sur SAP
+                if error_msg == "salesforce_unavailable" or "authentification salesforce" in error_msg.lower() or "invalid_login" in error_msg.lower():
+                    logger.warning(f"⚠️ Salesforce indisponible (auth). Fallback SAP activé: {error_msg}")
+                else:
+                    logger.error(f"❌ Erreur recherche approximative Salesforce: {error_msg}")
             
             logger.info(f"⚠️ Aucun résultat Salesforce pour: {client_name}")
             return []

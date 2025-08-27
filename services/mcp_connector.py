@@ -1,4 +1,4 @@
-
+# services/mcp_connector.py
 import os
 import sys
 import json
@@ -565,8 +565,11 @@ class MCPConnector:
                 return {"error": "Timeout ou erreur lors de l'appel MCP"}
             
             if result.returncode != 0:
-                error_msg = result.stderr or "Erreur inconnue"
+                error_msg = (result.stderr or result.stdout or "Erreur inconnue")
                 logger.error(f"Erreur MCP {server_name}.{action}: {error_msg}")
+                # Normaliser les erreurs critiques Salesforce pour permettre le fallback propre
+                if server_name == "salesforce_mcp" and ("INVALID_LOGIN" in error_msg or "invalid login" in error_msg.lower()):
+                    return {"error": "salesforce_unavailable", "fallback_mode": True, "reason": "invalid_login"}
                 return {"error": f"Erreur MCP: {error_msg}"}
             
             # Lecture du résultat
