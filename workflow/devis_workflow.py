@@ -6184,6 +6184,93 @@ class DevisWorkflow:
             self._track_step_progress("lookup_products", 10, f"🔍 Recherche de {len(products)} produit(s)...")
 
             found_products = []
+            # 🔧 AMÉLIORATION: Recherche intelligente par mots-clés
+            async def _smart_product_search(self, product_name: str, product_code: str = "") -> Dict[str, Any]:
+                """Recherche intelligente avec décomposition en mots-clés"""
+                
+                # 1. Recherche exacte par code si fourni
+                if product_code:
+                    exact_result = await self.mcp_connector.call_sap_mcp("sap_read", {
+                        "endpoint": f"/Items('{product_code}')",
+                        "method": "GET"
+                    })
+                    if "error" not in exact_result and exact_result.get("ItemCode"):
+                        return {"found": True, "products": [exact_result], "method": "exact_code"}
+                
+                # 2. Recherche par mots-clés décomposés
+                keywords = self._extract_search_keywords(product_name)
+                all_results = []
+                
+                for keyword in keywords:
+                    try:
+                        search_result = await self.mcp_connector.call_sap_mcp("sap_read", {
+                            "endpoint": f"/Items?$filter=contains(ItemName,'{keyword}')&$top=20",
+                            "method": "GET"
+                        })
+                        
+                        if "error" not in search_result and search_result.get("value"):
+                            all_results.extend(search_result["value"])
+                            logger.info(f"✅ Trouvé {len(search_result['value'])} produits avec '{keyword}'")
+                    except Exception as e:
+                        logger.warning(f"Erreur recherche '{keyword}': {str(e)}")
+                
+                # 3. Filtrage et scoring des résultats
+                if all_results:
+                    scored_results = self._score_product_matches(all_results, product_name)
+                    return {"found": True, "products": scored_results[:10], "method": "keyword_search"}
+                
+                return {"found": False, "products": [], "method": "not_found"}
+
+            def _extract_search_keywords(self, product_name: str) -> List[str]:
+                """Extrait les mots-clés pertinents pour la recherche SAP"""
+                product_lower = product_name.lower()
+                keywords = []
+                
+                # Mots-clés principaux
+                main_keywords = ["imprimante", "printer", "ordinateur", "computer", "écran", "monitor", "scanner"]
+                for keyword in main_keywords:
+                    if keyword in product_lower:
+                        keywords.append(keyword)
+                        if keyword == "imprimante":
+                            keywords.extend(["IBM", "HP", "Canon", "Epson"])
+                
+                # Caractéristiques numériques
+                import re
+                numbers = re.findall(r'\d+', product_name)
+                for num in numbers[:2]:
+                    keywords.extend([f"{num}ppm", f"{num} ppm", num])
+                
+                # Mots de plus de 3 caractères
+                words = [w.strip() for w in product_name.split() if len(w.strip()) > 3]
+                keywords.extend(words)
+                
+                return list(set(keywords))[:6]  # Max 6 mots-clés
+
+            def _score_product_matches(self, products: List[Dict], search_term: str) -> List[Dict]:
+                """Score les produits selon la pertinence"""
+                scored = []
+                search_words = set(search_term.lower().split())
+                
+                for product in products:
+                    name = product.get("ItemName", "").lower()
+                    score = 0
+                    
+                    # Score selon les mots présents
+                    name_words = set(name.split())
+                    common_words = search_words.intersection(name_words)
+                    score += len(common_words) * 10
+                    
+                    # Bonus pour caractéristiques numériques
+                    import re
+                    search_numbers = set(re.findall(r'\d+', search_term))
+                    name_numbers = set(re.findall(r'\d+', name))
+                    score += len(search_numbers.intersection(name_numbers)) * 5
+                    
+                    product["_match_score"] = score
+                    if score > 0:
+                        scored.append(product)
+                
+                return sorted(scored, key=lambda x: x.get("_match_score", 0), reverse=True)
             total_products = len(products)
 
             for i, product in enumerate(products):
@@ -6197,6 +6284,18 @@ class DevisWorkflow:
                                         f"📦 Recherche '{product_name}' ({i+1}/{total_products})")
 
                 # === RECHERCHE MULTI-CRITÈRES ===
+                # === RECHERCHE INTELLIGENTE ===
+                smart_search = await self._smart_product_search(product_name, product_code)
+
+                if smart_search["found"] and smart_search["products"]:
+                    best_match = smart_search["products"][0]
+                    logger.info(f"✅ Produit trouvé via recherche intelligente: {best_match.get('ItemName')}")
+                    found_products.append({
+                        **self._format_product_data(best_match, quantity),
+                        "search_method": smart_search["method"],
+                        "found": True
+                    })
+                    continue
                 product_found = None
                 
                 # Étape 1: Recherche exacte par code

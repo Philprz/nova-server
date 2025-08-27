@@ -114,8 +114,16 @@ class ClientLister:
     async def _search_salesforce_by_name(self, client_name: str) -> List[Dict[str, Any]]:
         """Recherche dans Salesforce avec différentes variantes - CORRIGÉ"""
         try:
-            # Recherche exacte ET variantes communes
-            exact_query = f"SELECT Id, Name, AccountNumber, Phone, BillingStreet, BillingCity, BillingCountry, BillingPostalCode, Sic FROM Account WHERE Name = '{client_name}' OR Name LIKE '{client_name} %' OR Name LIKE '% {client_name}' OR Name LIKE '%{client_name}%' LIMIT 20"
+            # Requête SOQL corrigée - insensible à la casse + champs existants
+            exact_query = f"""
+            SELECT Id, Name, AccountNumber, Phone, BillingCity, BillingCountry, BillingPostalCode, Type, Industry, Website 
+            FROM Account 
+            WHERE (UPPER(Name) = UPPER('{client_name}') 
+            OR UPPER(Name) LIKE UPPER('{client_name} %') 
+            OR UPPER(Name) LIKE UPPER('% {client_name}') 
+            OR UPPER(Name) LIKE UPPER('%{client_name}%'))
+            LIMIT 20
+            """.strip()
             
             result = await self.mcp_connector.call_mcp(
                 "salesforce_mcp",
@@ -136,13 +144,24 @@ class ClientLister:
                 return result["data"]
             
             # Vérifier les erreurs seulement après avoir testé les données
+            # Debug complet de la réponse MCP
+            logger.info(f"🔍 DEBUG Salesforce - Type réponse: {type(result)}")
+            logger.info(f"🔍 DEBUG Salesforce - Clés: {list(result.keys()) if isinstance(result, dict) else 'Non-dict'}")
+            if isinstance(result, dict) and result.get("error"):
+                logger.error(f"🔍 DEBUG Salesforce - Erreur détaillée: {result.get('error')}")
+                logger.error(f"🔍 DEBUG Salesforce - Réponse complète: {result}")
             if result.get("success") is False or "error" in result:
                 error_msg = result.get("error", "Erreur inconnue")
                 logger.error(f"❌ Erreur recherche exacte Salesforce: {error_msg}")
                 # Ne pas retourner ici, continuer avec la recherche approximative
             
-            # Si pas de résultat exact, recherche approximative
-            fuzzy_query = f"SELECT Id, Name, AccountNumber, Phone, BillingCity, BillingCountry, Sic FROM Account WHERE Name LIKE '%{client_name}%' LIMIT 10"
+            # Si pas de résultat exact, recherche approximative avec UPPER()
+            fuzzy_query = f"""
+            SELECT Id, Name, AccountNumber, Phone, BillingCity, BillingCountry 
+            FROM Account 
+            WHERE UPPER(Name) LIKE UPPER('%{client_name}%') 
+            LIMIT 10
+            """.strip()
             
             result = await self.mcp_connector.call_mcp(
                 "salesforce_mcp",
@@ -170,6 +189,8 @@ class ClientLister:
             
         except Exception as e:
             logger.error(f"❌ Erreur recherche Salesforce: {str(e)}")
+            # En cas d'erreur Salesforce, continuer avec la recherche SAP
+            logger.info("⚠️ Salesforce indisponible, recherche SAP uniquement")
             return []
     
     async def _search_sap_by_name(self, client_name: str) -> List[Dict[str, Any]]:

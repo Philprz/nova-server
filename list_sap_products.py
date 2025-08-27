@@ -201,10 +201,10 @@ def display_products_summary(result: Dict[str, Any]):
                 
     # Afficher quelques exemples de produits
     if result.get('products'):
-        print(f"\n📋 EXEMPLES DE PRODUITS (5 premiers):")
+        print(f"\n📋 EXEMPLES DE PRODUITS (10 premiers):")
         print("-"*80)
         
-        for i, product in enumerate(result['products'][:5], 1):
+        for i, product in enumerate(result['products'][:10], 1):
             print(f"\n🔸 Produit #{i}:")
             print(f"   - Code: {product.get('ItemCode', 'N/A')}")
             print(f"   - Nom: {product.get('ItemName', 'N/A')}")
