@@ -435,7 +435,12 @@ async def get_cached_client_or_fetch(client_name: str, mcp_connector) -> Dict:
         "salesforce_mcp", 
         "salesforce_query",
         {
-            "query": f"SELECT Id, Name, AccountNumber, Phone, Email, BillingCity, BillingCountry FROM Account WHERE Name = '{client_name}' LIMIT 1"
+            "query": f"""
+                SELECT Id, Name, AccountNumber, Phone, BillingCity, BillingCountry 
+                FROM Account 
+                WHERE UPPER(Name) = UPPER('{client_name}') 
+                LIMIT 1
+                """.strip()
         }
     )
     
@@ -449,7 +454,13 @@ async def get_cached_client_or_fetch(client_name: str, mcp_connector) -> Dict:
         "salesforce_mcp", 
         "salesforce_query", 
         {
-            "query": f"SELECT Id, Name, AccountNumber FROM Account WHERE Name LIKE '%{client_name[:5]}%' ORDER BY Name LIMIT 5"
+            "query": f"""
+                SELECT Id, Name, AccountNumber 
+                FROM Account 
+                WHERE UPPER(Name) LIKE UPPER('%{client_name[:5]}%') 
+                ORDER BY Name 
+                LIMIT 5
+                """.strip()
         }
     )
     

@@ -317,6 +317,10 @@ class MCPConnector:
             if isinstance(result, dict) and result.get("error"):
                 error_msg = str(result.get("error", "")).lower()
                 if any(term in error_msg for term in ["invalid_login", "unauthorized", "authentication"]):
+                    # 🔧 TOLÉRANCE: Si Salesforce échoue, continuer avec SAP uniquement
+                    if "invalid_login" in error_msg or "unauthorized" in error_msg:
+                        logger.warning("🔄 Salesforce indisponible - Mode dégradé activé")
+                        return {"error": "salesforce_unavailable", "fallback_mode": True}
                     logger.warning("Tentative de reconnexion Salesforce automatique...")
                     
                     # Obtenir instance du connecteur et forcer reconnexion
