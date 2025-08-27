@@ -1198,13 +1198,15 @@ class DevisWorkflow:
             # Étape 1: Récupérer les données techniques
             self._track_step_start("get_products_info", "Récupération des informations produits...")
             products_info = await self._get_products_info(extracted_info.get("products", []))
-            # Vérifier si interaction utilisateur requise pour les produits
-            if isinstance(products_info, dict) and products_info.get("status") == "product_selection_required":
-                logger.info("⏸️ Workflow interrompu - Sélection de produits requise")
-                return products_info
-            elif isinstance(products_info, dict) and products_info.get("status") == "user_interaction_required":
-                logger.info("⏸️ Workflow interrompu - Interaction utilisateur requise")
-                return products_info
+            products_info_result = await self._get_products_info_with_auto_selection(extracted_info.get("products", []))
+            if isinstance(products_info_result, dict) and products_info_result.get("status") in ["product_selection_required", "user_interaction_required"]:
+                logger.info("⏸️ Workflow interrompu - Sélection/interaction produits requise")
+                return products_info_result
+            products_info = products_info_result.get("products", []) if isinstance(products_info_result, dict) else products_info_result
+            if not products_info:
+                self._track_step_fail("get_products_info", "Aucun produit valide", "Sélection requise")
+                return {"status": "product_selection_required", "message": "Aucun produit valide trouvé. Veuillez sélectionner une alternative.", "products": []}
+            
             self._track_step_complete("get_products_info", f"{len(products_info)} produit(s) trouvé(s)")
 
             # Étape 2: Calculer les prix avec le Price Engine
@@ -1578,7 +1580,7 @@ class DevisWorkflow:
         """Continuation automatique après sélection client"""
         self.context["client_info"] = {"data": client_data, "found": True}
         products = original_context.get("extracted_info", {}).get("products", [])
-        return await self._get_products_info(products)
+        return await self._get_products_info_with_auto_selection(products)
 
 
     async def _validate_products_with_suggestions(self, products: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
