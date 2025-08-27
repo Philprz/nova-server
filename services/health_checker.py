@@ -152,23 +152,39 @@ class HealthChecker:
         
         try:
             connector = MCPConnector()
-            # Test simple de connexion
-            if hasattr(connector, 'sap_login'):
-                logger.info("Connexion SAP établie")
-                logger.info("Connexion SAP réussie via sap_login")
-                return {
-                    "success": True,
-                    "message": "Connexion SAP B1 établie avec succès",
-                    "timestamp": datetime.now().isoformat(),
-                    "duration_ms": round((time.time() - start_time) * 1000, 2)
-                }
-            else:
+            # VRAIE connexion SAP avec test d'authentification
+            login_result = await connector.call_sap_mcp("sap_login", {})
+            
+            if "error" in login_result:
                 return {
                     "success": False,
-                    "message": "Module SAP non disponible",
+                    "message": f"Échec authentification SAP: {login_result.get('error', 'Erreur inconnue')}",
                     "timestamp": datetime.now().isoformat(),
                     "duration_ms": round((time.time() - start_time) * 1000, 2)
                 }
+            
+            # Test requête simple pour valider la connexion
+            test_query = await connector.call_sap_mcp("sap_read", {
+                "endpoint": "/Items?$top=1",
+                "method": "GET"
+            })
+            
+            if "error" in test_query:
+                return {
+                    "success": False,
+                    "message": f"Échec test requête SAP: {test_query.get('error', 'Erreur inconnue')}",
+                    "timestamp": datetime.now().isoformat(),
+                    "duration_ms": round((time.time() - start_time) * 1000, 2)
+                }
+            
+            logger.info("Connexion SAP établie")
+            logger.info("Connexion SAP réussie via sap_login")
+            return {
+                "success": True,
+                "message": "Connexion SAP B1 établie avec succès",
+                "timestamp": datetime.now().isoformat(),
+                "duration_ms": round((time.time() - start_time) * 1000, 2)
+            }
                 
         except Exception as e:
             return {
@@ -184,25 +200,38 @@ class HealthChecker:
         
         try:
             connector = MCPConnector()
-            # Test simple de connexion
-            if hasattr(connector, 'salesforce_login'):
-                # Simulation d'un délai réaliste
-                await asyncio.sleep(0.8)
-                logger.info("Connexion Salesforce établie")
-                logger.info("Connexion Salesforce réussie via salesforce_login")
-                return {
-                    "success": True,
-                    "message": "Connexion Salesforce établie avec succès",
-                    "timestamp": datetime.now().isoformat(),
-                    "duration_ms": round((time.time() - start_time) * 1000, 2)
-                }
-            else:
+            # VRAIE connexion Salesforce avec test d'authentification
+            login_result = await connector.call_salesforce_mcp("salesforce_login", {})
+            
+            if "error" in login_result:
                 return {
                     "success": False,
-                    "message": "Module Salesforce non disponible",
+                    "message": f"Échec authentification Salesforce: {login_result.get('error', 'Erreur inconnue')}",
                     "timestamp": datetime.now().isoformat(),
                     "duration_ms": round((time.time() - start_time) * 1000, 2)
                 }
+            
+            # Test requête simple pour valider la connexion
+            test_query = await connector.call_salesforce_mcp("salesforce_query", {
+                "query": "SELECT Id, Name FROM Account LIMIT 1"
+            })
+            
+            if "error" in test_query:
+                return {
+                    "success": False,
+                    "message": f"Échec test requête Salesforce: {test_query.get('error', 'Erreur inconnue')}",
+                    "timestamp": datetime.now().isoformat(),
+                    "duration_ms": round((time.time() - start_time) * 1000, 2)
+                }
+            
+            logger.info("Connexion Salesforce établie")
+            logger.info("Connexion Salesforce réussie via salesforce_login")
+            return {
+                "success": True,
+                "message": "Connexion Salesforce établie avec succès",
+                "timestamp": datetime.now().isoformat(),
+                "duration_ms": round((time.time() - start_time) * 1000, 2)
+            }
                 
         except Exception as e:
             return {
@@ -290,10 +319,30 @@ class HealthChecker:
             connector = MCPConnector()
             logger.info("Appel MCP: sap_mcp.sap_read")
             
-            # Simulation d'un appel MCP SAP
-            await asyncio.sleep(2.0)  # Simulation du délai réseau
+            # VRAIE récupération de données SAP
+            result = await connector.call_sap_mcp("sap_read", {
+                "endpoint": "/Items?$top=5",
+                "method": "GET"
+            })
             
-            logger.info("Appel MCP réussi: sap_mcp.sap_read")
+            if "error" in result:
+                return {
+                    "success": False,
+                    "message": f"Échec récupération données SAP: {result.get('error', 'Erreur inconnue')}",
+                    "timestamp": datetime.now().isoformat(),
+                    "duration_ms": round((time.time() - start_time) * 1000, 2)
+                }
+            
+            # Vérifier que des données sont retournées
+            if not result.get("value") or len(result["value"]) == 0:
+                return {
+                    "success": False,
+                    "message": "Aucune donnée retournée par SAP",
+                    "timestamp": datetime.now().isoformat(),
+                    "duration_ms": round((time.time() - start_time) * 1000, 2)
+                }
+            
+            logger.info(f"Appel MCP réussi: sap_mcp.sap_read - {len(result['value'])} éléments récupérés")
             return {
                 "success": True,
                 "message": "Récupération données SAP opérationnelle",
@@ -317,10 +366,29 @@ class HealthChecker:
             connector = MCPConnector()
             logger.info("Appel MCP: salesforce_mcp.salesforce_query")
             
-            # Simulation d'un appel MCP Salesforce
-            await asyncio.sleep(2.0)  # Simulation du délai réseau
+            # VRAIE récupération de données Salesforce
+            result = await connector.call_salesforce_mcp("salesforce_query", {
+                "query": "SELECT Id, Name FROM Account LIMIT 5"
+            })
             
-            logger.info("Appel MCP réussi: salesforce_mcp.salesforce_query")
+            if "error" in result:
+                return {
+                    "success": False,
+                    "message": f"Échec récupération données Salesforce: {result.get('error', 'Erreur inconnue')}",
+                    "timestamp": datetime.now().isoformat(),
+                    "duration_ms": round((time.time() - start_time) * 1000, 2)
+                }
+            
+            # Vérifier que des données sont retournées
+            if not result.get("records") or len(result["records"]) == 0:
+                return {
+                    "success": False,
+                    "message": "Aucune donnée retournée par Salesforce",
+                    "timestamp": datetime.now().isoformat(),
+                    "duration_ms": round((time.time() - start_time) * 1000, 2)
+                }
+            
+            logger.info(f"Appel MCP réussi: salesforce_mcp.salesforce_query - {len(result['records'])} éléments récupérés")
             return {
                 "success": True,
                 "message": "Récupération données Salesforce opérationnelle",
