@@ -6133,8 +6133,10 @@ class DevisWorkflow:
         import re
         numbers = re.findall(r'\d+', product_name)
         if numbers:
-            search_terms.extend([f"{num}ppm", f"{num} ppm", f"{num}PPM" for num in numbers[:2]])
-        
+            search_terms.extend((f"{num}ppm" for num in numbers[:2]))
+            search_terms.extend((f"{num} ppm" for num in numbers[:2]))
+            search_terms.extend((f"{num}PPM" for num in numbers[:2]))
+
         # Ajouter terme original en dernier
         search_terms.append(product_name.strip())
         
