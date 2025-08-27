@@ -3,6 +3,8 @@
 from mcp.server.fastmcp import FastMCP
 import os
 import json
+import time
+import threading
 from datetime import datetime
 import sys
 import io
@@ -92,6 +94,7 @@ def handle_error(error: Exception, context: str = "opération") -> Dict[str, Any
     
     # Renvoyer une erreur détaillée pour debug
     return {
+        "success": False,
         "error": error_msg,
         "error_type": error_type,
         "context": context
@@ -104,11 +107,30 @@ def handle_sf_object_error(sobject: str, error: Exception) -> Dict[str, Any]:
         return {"error": ERROR_MESSAGES["SF_OBJECT_NOT_FOUND"].format(sobject)}
     return handle_error(error, f"objet {sobject}")
 
-def validate_sf_connection(sf) -> Optional[Dict[str, Any]]:
-    """Valide la connexion Salesforce"""
+def validate_sf_connection() -> Optional[Dict[str, Any]]:
+    """Valide la connexion Salesforce avec verrou et retry"""
+    global sf, _sf_lock
+
+    # Verrou global initialisé à la volée pour éviter les courses de connexion
+    _sf_lock = globals().get("_sf_lock")
+    if _sf_lock is None:
+        _sf_lock = threading.Lock()
+        globals()["_sf_lock"] = _sf_lock
+
     if sf is None:
-        if not init_salesforce():
-            return {"error": ERROR_MESSAGES["SF_CONNECTION_FAILED"]}
+        with _sf_lock:
+            if globals().get("sf") is None:
+                for _ in range(2):
+                    if init_salesforce():
+                        break
+                    time.sleep(0.5)
+
+                if globals().get("sf") is None:
+                    log_warning("Échec de l'initialisation Salesforce après plusieurs tentatives")
+                    return {"error": ERROR_MESSAGES["SF_INIT_FAILED"]}
+                else:
+                    sf = globals().get("sf")
+
     return None
 
 # === INITIALISATION ===
@@ -195,7 +217,7 @@ async def salesforce_query(query: str) -> Dict[str, Any]:
     global sf
     
     # Validation de la connexion
-    error_check = validate_sf_connection(sf)
+    error_check = validate_sf_connection()
     if error_check:
         return error_check
     
@@ -209,6 +231,7 @@ async def salesforce_query(query: str) -> Dict[str, Any]:
         query_time_ms = (end_time - start_time).total_seconds() * 1000
         
         response = {
+            "success": True,
             "totalSize": result.get("totalSize", 0),
             "records": result.get("records", []),
             "done": result.get("done", True),
@@ -228,17 +251,17 @@ async def salesforce_query(query: str) -> Dict[str, Any]:
 async def salesforce_create_record(sobject: str, data: Dict[str, Any]) -> Dict[str, Any]:
     """Crée un enregistrement dans Salesforce"""
     global sf
-    
-    error_check = validate_sf_connection(sf)
+
+    error_check = validate_sf_connection()
     if error_check:
         return error_check
-    
+
     try:
         log(f"Création d'un enregistrement {sobject}")
-        
+
         sf_object = getattr(sf, sobject)
         result = sf_object.create(data)
-        
+
         if is_success_result(result):
             record_id = result.get("id")
             log_success("SF_CREATE_OK", sobject, record_id)
@@ -250,7 +273,7 @@ async def salesforce_create_record(sobject: str, data: Dict[str, Any]) -> Dict[s
         else:
             log_error("SF_CREATE_FAILED", str(result))
             return {"error": ERROR_MESSAGES["SF_CREATE_FAILED"].format(result)}
-            
+
     except AttributeError as e:
         return handle_sf_object_error(sobject, e)
     except Exception as e:
@@ -260,24 +283,24 @@ async def salesforce_create_record(sobject: str, data: Dict[str, Any]) -> Dict[s
 async def salesforce_update_record(sobject: str, record_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
     """Met à jour un enregistrement dans Salesforce"""
     global sf
-    
-    error_check = validate_sf_connection(sf)
+
+    error_check = validate_sf_connection()
     if error_check:
         return error_check
-    
+
     try:
         log(f"Mise à jour {sobject} {record_id}")
-        
+
         sf_object = getattr(sf, sobject)
         sf_object.update(record_id, data)
-        
+
         log_success("SF_UPDATE_OK", sobject, record_id)
         return {
             "success": True,
             "id": record_id,
             "updated": True
         }
-        
+
     except AttributeError as e:
         return handle_sf_object_error(sobject, e)
     except Exception as e:
@@ -287,16 +310,16 @@ async def salesforce_update_record(sobject: str, record_id: str, data: Dict[str,
 async def salesforce_get_standard_pricebook() -> Dict[str, Any]:
     """Récupère l'ID du Pricebook standard"""
     global sf
-    
-    error_check = validate_sf_connection(sf)
+
+    error_check = validate_sf_connection()
     if error_check:
         return error_check
-    
+
     try:
         log("Recherche du Pricebook standard")
-        
+
         result = sf.query("SELECT Id, Name FROM Pricebook2 WHERE IsStandard = TRUE LIMIT 1")
-        
+
         if has_records(result):
             pricebook = result["records"][0]
             log_success("SF_PRICEBOOK_FOUND", pricebook['Id'], pricebook['Name'])
@@ -308,7 +331,7 @@ async def salesforce_get_standard_pricebook() -> Dict[str, Any]:
         else:
             log_error("SF_PRICEBOOK_NOT_FOUND")
             return {"error": ERROR_MESSAGES["SF_PRICEBOOK_NOT_FOUND"]}
-            
+
     except Exception as e:
         return handle_error(e, "recherche Pricebook")
 
@@ -316,15 +339,15 @@ async def salesforce_get_standard_pricebook() -> Dict[str, Any]:
 async def salesforce_create_product_complete(product_data: Dict[str, Any], unit_price: float = 0.0) -> Dict[str, Any]:
     """Crée un produit complet dans Salesforce avec son entrée Pricebook"""
     global sf
-    
-    error_check = validate_sf_connection(sf)
+
+    error_check = validate_sf_connection()
     if error_check:
         return error_check
-    
+
     try:
         product_name = product_data.get('Name', 'Sans nom')
         log(f"Création produit complet: {product_name}")
-        
+
         # Vérifier si le produit existe déjà
         product_code = product_data.get("ProductCode")
         if product_code:
@@ -338,23 +361,23 @@ async def salesforce_create_product_complete(product_data: Dict[str, Any], unit_
                     "created": False,
                     "message": "Produit existant utilisé"
                 }
-        
+
         # Créer le produit
         product_result = sf.Product2.create(product_data)
-        
+
         if not is_success_result(product_result):
             return {"error": f"Échec création produit: {product_result}"}
-        
+
         product_id = product_result.get("id")
         log(f"Produit créé: {product_id}", "SUCCESS")
-        
+
         # Récupérer le Pricebook standard
         pricebook_result = await salesforce_get_standard_pricebook()
         if not pricebook_result.get("success"):
             return {"error": "Impossible de récupérer le Pricebook standard"}
-        
+
         pricebook_id = pricebook_result["pricebook_id"]
-        
+
         # Créer l'entrée Pricebook
         pricebook_entry_data = {
             "Pricebook2Id": pricebook_id,
@@ -362,15 +385,15 @@ async def salesforce_create_product_complete(product_data: Dict[str, Any], unit_
             "UnitPrice": unit_price,
             "IsActive": True
         }
-        
+
         pricebook_entry_result = sf.PricebookEntry.create(pricebook_entry_data)
         pricebook_entry_id = pricebook_entry_result.get("id") if is_success_result(pricebook_entry_result) else None
-        
+
         if pricebook_entry_id:
             log(f"Entrée Pricebook créée: {pricebook_entry_id}", "SUCCESS")
         else:
             log(f"Échec création entrée Pricebook: {pricebook_entry_result}", "WARNING")
-        
+
         log_success("SF_PRODUCT_COMPLETE")
         return {
             "success": True,
@@ -379,7 +402,7 @@ async def salesforce_create_product_complete(product_data: Dict[str, Any], unit_
             "created": True,
             "message": SUCCESS_MESSAGES["SF_PRODUCT_COMPLETE"]
         }
-        
+
     except Exception as e:
         return handle_error(e, "création produit complet")
 
@@ -387,44 +410,44 @@ async def salesforce_create_product_complete(product_data: Dict[str, Any], unit_
 async def salesforce_create_opportunity_complete(opportunity_data: Dict[str, Any], line_items: List[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Crée une opportunité complète avec ses lignes"""
     global sf
-    
-    error_check = validate_sf_connection(sf)
+
+    error_check = validate_sf_connection()
     if error_check:
         return error_check
-    
+
     try:
         opportunity_name = opportunity_data.get('Name', 'Sans nom')
         log(f"Création opportunité complète: {opportunity_name}")
-        
+
         # Créer l'opportunité
         opportunity_result = sf.Opportunity.create(opportunity_data)
-        
+
         if not is_success_result(opportunity_result):
             return {"error": f"Échec création opportunité: {opportunity_result}"}
-        
+
         opportunity_id = opportunity_result.get("id")
         log(f"Opportunité créée: {opportunity_id}", "SUCCESS")
-        
+
         # Créer les lignes d'opportunité
         line_items_created = []
         if line_items:
             log(f"Création de {len(line_items)} lignes d'opportunité")
-            
+
             for i, line_item in enumerate(line_items):
                 try:
                     line_item["OpportunityId"] = opportunity_id
                     line_result = sf.OpportunityLineItem.create(line_item)
-                    
+
                     if is_success_result(line_result):
                         line_id = line_result.get("id")
                         line_items_created.append(line_id)
                         log(f"Ligne {i+1} créée: {line_id}", "SUCCESS")
                     else:
                         log(f"Échec création ligne {i+1}: {line_result}", "ERROR")
-                        
+
                 except Exception as e:
                     log(f"Erreur création ligne {i+1}: {str(e)}", "ERROR")
-        
+
         log_success("SF_OPPORTUNITY_COMPLETE", len(line_items_created))
         return {
             "success": True,
@@ -433,7 +456,7 @@ async def salesforce_create_opportunity_complete(opportunity_data: Dict[str, Any
             "lines_count": len(line_items_created),
             "message": SUCCESS_MESSAGES["SF_OPPORTUNITY_COMPLETE"].format(len(line_items_created))
         }
-        
+
     except Exception as e:
         return handle_error(e, "création opportunité complète")
 
@@ -441,19 +464,19 @@ async def salesforce_create_opportunity_complete(opportunity_data: Dict[str, Any
 async def inspect_salesforce(object_name: str = None) -> Dict[str, Any]:
     """Liste les objets et champs Salesforce depuis le cache"""
     global sf
-    
-    error_check = validate_sf_connection(sf)
+
+    error_check = validate_sf_connection()
     if error_check:
         return error_check
-    
+
     try:
         cache = load_cache()
-        
+
         if object_name:
             return _inspect_single_object(object_name, cache)
         else:
             return _inspect_all_objects(cache)
-            
+
     except Exception as e:
         return handle_error(e, "inspection Salesforce")
 
@@ -535,31 +558,31 @@ def _inspect_all_objects(cache: Dict[str, Any]) -> Dict[str, Any]:
 async def refresh_salesforce_metadata(objects_to_refresh: Optional[List[str]] = None) -> Dict[str, Any]:
     """Force la mise à jour des métadonnées Salesforce"""
     global sf
-    
-    error_check = validate_sf_connection(sf)
+
+    error_check = validate_sf_connection()
     if error_check:
         return error_check
-    
+
     try:
         log("Rafraîchissement des métadonnées Salesforce")
-        
+
         cache = load_cache()
-        
+
         if not objects_to_refresh:
             objects_to_refresh = _get_default_objects_to_refresh()
             _update_objects_cache(cache)
-        
+
         updated, errors = _refresh_objects_metadata(objects_to_refresh, cache)
-        
+
         save_cache(cache)
-        
+
         return {
             "status": "ok" if not errors else "partial",
             "updated": updated,
             "errors": errors,
             "summary": f"{len(updated)} objets mis à jour, {len(errors)} erreurs"
         }
-        
+
     except Exception as e:
         return handle_error(e, "rafraîchissement métadonnées")
 

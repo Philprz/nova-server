@@ -5809,7 +5809,7 @@ class DevisWorkflow:
             self._track_step_progress("search_client", 10, f"🔍 Recherche exacte de '{client_name}'")
             exact_result = await self.mcp_connector.call_mcp("salesforce_mcp", "salesforce_query", {"query": exact_query})
 
-            if exact_result.get("success") and exact_result.get("totalSize", 0) > 0:
+            if exact_result.get("totalSize", 0) > 0:
                 client_data = exact_result["records"][0]
                 logger.info(f"✅ Client trouvé (exact): {client_data['Name']}")
                 return {
@@ -5829,7 +5829,7 @@ class DevisWorkflow:
             self._track_step_progress("search_client", 20, "🔍 Recherche insensible à la casse")
             ci_result = await self.mcp_connector.call_mcp("salesforce_mcp", "salesforce_query", {"query": ci_query})
 
-            if ci_result.get("success") and ci_result.get("totalSize", 0) > 0:
+            if ci_result.get("totalSize", 0) > 0:
                 for record in ci_result["records"]:
                     if record["Name"].upper() == client_name.upper():
                         logger.info(f"✅ Client trouvé (insensible à la casse): {record['Name']}")
@@ -5850,7 +5850,7 @@ class DevisWorkflow:
             self._track_step_progress("search_client", 40, "🔍 Recherche floue dans Salesforce")
             fuzzy_result = await self.mcp_connector.call_mcp("salesforce_mcp", "salesforce_query", {"query": fuzzy_query})
 
-            if fuzzy_result.get("success") and fuzzy_result.get("totalSize", 0) > 0:
+            if fuzzy_result.get("totalSize", 0) > 0:
                 suggestions = fuzzy_result["records"]
                 logger.info(f"🔍 {len(suggestions)} suggestions trouvées pour '{client_name}'")
                 return {
