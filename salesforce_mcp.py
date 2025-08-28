@@ -206,7 +206,7 @@ def has_records(query_result: Dict[str, Any]) -> bool:
 
 # === OUTILS MCP ===
 @mcp.tool(name="ping")
-def ping() -> str:
+async def ping() -> str:
     """Test simple de disponibilité du serveur MCP Salesforce"""
     log("Ping reçu!")
     return "pong! Serveur MCP Salesforce opérationnel - VERSION REFACTORISÉE"

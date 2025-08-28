@@ -152,13 +152,14 @@ class HealthChecker:
         
         try:
             connector = MCPConnector()
-            # VRAIE connexion SAP avec test d'authentification
-            login_result = await connector.call_sap_mcp("sap_login", {})
+            # VRAIE connexion SAP avec les actions disponibles
+            # Utiliser 'ping' au lieu de 'sap_login' inexistant
+            ping_result = await connector.call_sap_mcp("ping", {})
             
-            if "error" in login_result:
+            if "error" in ping_result:
                 return {
                     "success": False,
-                    "message": f"Échec authentification SAP: {login_result.get('error', 'Erreur inconnue')}",
+                    "message": f"Échec ping SAP: {ping_result.get('error', 'Erreur inconnue')}",
                     "timestamp": datetime.now().isoformat(),
                     "duration_ms": round((time.time() - start_time) * 1000, 2)
                 }
@@ -178,6 +179,7 @@ class HealthChecker:
                 }
             
             logger.info("Connexion SAP établie")
+            logger.info("Connexion SAP réussie via ping + sap_read")
             logger.info("Connexion SAP réussie via sap_login")
             return {
                 "success": True,
@@ -200,13 +202,14 @@ class HealthChecker:
         
         try:
             connector = MCPConnector()
-            # VRAIE connexion Salesforce avec test d'authentification
-            login_result = await connector.call_salesforce_mcp("salesforce_login", {})
+            # VRAIE connexion Salesforce avec les actions disponibles
+            # Utiliser 'ping' au lieu de 'salesforce_login' inexistant
+            ping_result = await connector.call_salesforce_mcp("ping", {})
             
-            if "error" in login_result:
+            if "error" in ping_result:
                 return {
                     "success": False,
-                    "message": f"Échec authentification Salesforce: {login_result.get('error', 'Erreur inconnue')}",
+                    "message": f"Échec ping Salesforce: {ping_result.get('error', 'Erreur inconnue')}",
                     "timestamp": datetime.now().isoformat(),
                     "duration_ms": round((time.time() - start_time) * 1000, 2)
                 }
@@ -225,6 +228,7 @@ class HealthChecker:
                 }
             
             logger.info("Connexion Salesforce établie")
+            logger.info("Connexion Salesforce réussie via ping + salesforce_query")
             logger.info("Connexion Salesforce réussie via salesforce_login")
             return {
                 "success": True,
