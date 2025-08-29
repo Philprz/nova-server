@@ -548,6 +548,53 @@ class DevisWorkflow:
             return SequenceMatcher(None, name1.lower(), name2.lower()).ratio()
         except:
             return 0.0
+    def _format_client_details(self, client: Dict[str, Any], source: str) -> Dict[str, Any]:
+        """Formate les détails client selon la source"""
+        details = {
+            "sf_id": "",
+            "sap_code": "",
+            "phone": None,
+            "address": "N/A",
+            "city": None,
+            "postal_code": None,
+            "country": None,
+            "siret": None,
+            "industry": "N/A"
+        }
+        
+        if not client:
+            return details
+            
+        source_lower = source.lower() if source else ""
+        
+        if "salesforce" in source_lower or "sf" in source_lower:
+            # Formatage client Salesforce
+            details.update({
+                "sf_id": client.get("Id", ""),
+                "sap_code": "",
+                "phone": client.get("Phone"),
+                "address": f"{client.get('BillingStreet', '')}, {client.get('BillingCity', '')}".strip(", "),
+                "city": client.get("BillingCity"),
+                "postal_code": client.get("BillingPostalCode"),
+                "country": client.get("BillingCountry"),
+                "siret": client.get("Sic"),
+                "industry": client.get("Industry", "N/A")
+            })
+        elif "sap" in source_lower:
+            # Formatage client SAP
+            details.update({
+                "sf_id": "",
+                "sap_code": client.get("CardCode", ""),
+                "phone": client.get("Phone1"),
+                "address": client.get("BillToStreet", "N/A"),
+                "city": client.get("City"),
+                "postal_code": client.get("ZipCode"),
+                "country": client.get("Country"),
+                "siret": client.get("FederalTaxID"),
+                "industry": "N/A"
+            })
+        
+        return details
     async def _handle_client_creation(self, user_input: Dict, context: Dict) -> Dict[str, Any]:
         """Gère la création d'un nouveau client"""
 
