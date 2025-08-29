@@ -273,45 +273,95 @@ class ClientLister:
 
     
     async def search_client_by_name(self, client_name: str) -> Dict[str, Any]:
-        """Recherche spécifique d'un client par nom dans les deux systèmes - CORRIGÉ"""
+        """Recherche spécifique d'un client par nom dans les deux systèmes - VERSION OPTIMISÉE (structure inchangée)"""
         logger.info(f"🔍 Recherche spécifique du client: {client_name}")
-        
+        # Normalisation entrée
+        client_name = (client_name or "").strip()
+        # Normalisation simple espaces multiples (sans import): "ACME   SA" -> "ACME SA"
+        if client_name:
+            client_name = " ".join(client_name.split())
+        # Petit seuil anti-bruit (ex: "a" ou "x")
+        MIN_LEN = 2
+
+        # Structure de retour standardisée
         result = {
             "search_term": client_name,
-            "salesforce": {"found": False, "clients": []},
-            "sap": {"found": False, "clients": []},
+            "salesforce": {"found": False, "clients": [], "count": 0},
+            "sap": {"found": False, "clients": [], "count": 0},
+            "deduplicated_clients": [],
             "total_found": 0
         }
-        
-        # Recherche parallèle dans les deux systèmes
-        sf_task = self._search_salesforce_by_name(client_name)
-        sap_task = self._search_sap_by_name(client_name)
-        
-        sf_clients, sap_clients = await asyncio.gather(sf_task, sap_task)
-        
-        # Traitement des résultats Salesforce
-        if sf_clients:
-            result["salesforce"] = {
-                "found": True,
-                "clients": sf_clients,
-                "count": len(sf_clients)
-            }
-            result["total_found"] += len(sf_clients)
-        
-        # Traitement des résultats SAP
-        if sap_clients:
-            result["sap"] = {
-                "found": True, 
-                "clients": sap_clients,
-                "count": len(sap_clients)
-            }
-            # Déduplication des clients avant calcul du total
-        deduplicated_results = self._deduplicate_clients(sf_clients, sap_clients)
-        result["deduplicated_clients"] = deduplicated_results
-        result["total_found"] = len(deduplicated_results)
-        
-        logger.info(f"✅ Recherche terminée: {result['total_found']} clients trouvés")
-        return result
+
+        # Cas entrée vide ou trop courte
+        if not client_name or len(client_name) < MIN_LEN:
+            logger.warning("⚠️ Nom client vide/trop court: retour sans recherche")
+            return result
+
+        try:
+            # Recherche parallèle dans les deux systèmes (avec timeout unitaire)
+            # On conserve les mêmes noms de variables et la même structure.
+            TIMEOUT_S = 5
+
+            sf_task = asyncio.wait_for(self._search_salesforce_by_name(client_name), timeout=TIMEOUT_S)
+            sap_task = asyncio.wait_for(self._search_sap_by_name(client_name), timeout=TIMEOUT_S)
+
+            sf_clients, sap_clients = await asyncio.gather(sf_task, sap_task, return_exceptions=True)
+
+            # Optionnel: borne douce pour éviter des payloads géants
+            def _cap_list(lst, cap=500):
+                return lst[:cap] if isinstance(lst, list) and len(lst) > cap else (lst if isinstance(lst, list) else [])
+
+            # Traitement sécurisé des résultats Salesforce
+            if isinstance(sf_clients, Exception):
+                logger.error(f"❌ Erreur recherche Salesforce: {sf_clients}")
+                sf_clients = []
+            elif sf_clients:
+                sf_clients = _cap_list(sf_clients)
+                result["salesforce"] = {
+                    "found": True,
+                    "clients": sf_clients,
+                    "count": len(sf_clients)
+                }
+                logger.info(f"✅ Salesforce: {len(sf_clients)} clients trouvés")
+
+            # Traitement sécurisé des résultats SAP
+            if isinstance(sap_clients, Exception):
+                logger.error(f"❌ Erreur recherche SAP: {sap_clients}")
+                sap_clients = []
+            elif sap_clients:
+                sap_clients = _cap_list(sap_clients)
+                result["sap"] = {
+                    "found": True,
+                    "clients": sap_clients,
+                    "count": len(sap_clients)
+                }
+                logger.info(f"✅ SAP: {len(sap_clients)} clients trouvés")
+
+            # Protection contre les valeurs non-list
+            sf_clients = sf_clients if isinstance(sf_clients, list) else []
+            sap_clients = sap_clients if isinstance(sap_clients, list) else []
+
+            # Déduplication (protégée)
+            if sf_clients or sap_clients:
+                try:
+                    deduplicated_clients = self._deduplicate_clients(sf_clients, sap_clients)
+                except Exception as dedup_err:
+                    logger.exception(f"❌ Erreur déduplication: {dedup_err}")
+                    # Fallback: concat simple
+                    deduplicated_clients = (sf_clients or []) + (sap_clients or [])
+
+                result["deduplicated_clients"] = deduplicated_clients
+                result["total_found"] = len(deduplicated_clients)
+                logger.info(
+                    f"🔄 Déduplication: {len(sf_clients)} SF + {len(sap_clients)} SAP = {len(deduplicated_clients)} clients uniques"
+                )
+
+            logger.info(f"✅ Recherche terminée: {result['total_found']} clients trouvés")
+            return result
+
+        except Exception as e:
+            logger.exception(f"❌ Erreur recherche client '{client_name}': {e}")
+            return result
     
     def format_client_summary(self, salesforce_clients: List[Dict], sap_clients: List[Dict]) -> Dict[str, Any]:
         """Formate un résumé des clients pour affichage - CORRIGÉ"""

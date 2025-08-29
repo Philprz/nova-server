@@ -5463,73 +5463,88 @@ class DevisWorkflow:
         """Propose la sélection du client avec interface utilisateur - AMÉLIORÉ"""
         try:
             option_id = 1
-            client_options: List[Dict[str, Any]] = []   
-            deduplicated_clients = search_results.get("deduplicated_clients", [])
-            # CORRECTION: Utiliser TOUS les clients trouvés, pas seulement dédupliqués  
-            all_sf_clients = search_results.get("salesforce", {}).get("clients", [])
-            all_sap_clients = search_results.get("sap", {}).get("clients", [])
-            
+            client_options: List[Dict[str, Any]] = []
+
+            # Sources
+            deduplicated_clients = search_results.get("deduplicated_clients", []) or []
+            all_sf_clients = search_results.get("salesforce", {}).get("clients", []) or []
+            all_sap_clients = search_results.get("sap", {}).get("clients", []) or []
+
+            # 1) Priorité aux clients dédupliqués si présents
+            if deduplicated_clients:
+                logger.info("✅ Utilisation des clients dédupliqués")
+                for client in deduplicated_clients:
+                    if not client:
+                        continue
+                    source = (client.get("source") or "Unknown").strip()
+                    source_raw = source.lower().replace(" & ", "_").replace(" ", "_")
+                    client_options.append({
+                        "id": option_id,
+                        "name": client.get("Name") or client.get("CardName", "Client sans nom"),
+                        "source": source,
+                        "source_raw": source_raw,
+                        "display_detail": f"Client {source}",
+                        "sf_id": client.get("Id", ""),
+                        "sap_code": client.get("CardCode", ""),
+                        "details": self._format_client_details(client, source)
+                    })
+                    option_id += 1
+                logger.info(f"✅ {len(client_options)} options préparées (dédupliquées)")
+            else:
+                logger.info("⚠️ Pas de déduplication disponible - traitement séparé")
+
             logger.info(f"🔧 Traitement de {len(all_sf_clients)} clients SF + {len(all_sap_clients)} clients SAP")
-            
-            # 🆕 AUTO-SÉLECTION SI UN SEUL CLIENT TROUVÉ
+
+            # 2) Auto-sélection si un seul client au total
             total_clients = len(all_sf_clients) + len(all_sap_clients)
             if total_clients == 1:
-                # Un seul client trouvé - Auto-sélection avec conseils
                 single_client = all_sf_clients[0] if all_sf_clients else all_sap_clients[0]
                 client_display_name = single_client.get("Name") or single_client.get("CardName", "Client sans nom")
-                
                 logger.info(f"✅ Auto-sélection client unique: {client_display_name}")
-                
-                # Générer conseils d'efficacité
+
                 efficiency_tip = self._generate_client_efficiency_tip(client_name, single_client)
-                
-                # Mettre à jour le contexte immédiatement
-                self.context.update({
-                    "client_info": {"data": single_client, "found": True},
-                    "client_validated": True,
-                    "selected_client_display": client_display_name
-                })
-                
-                # Récupérer les produits du contexte pour continuation
+
+                # Maj contexte
+                if hasattr(self, "context") and isinstance(self.context, dict):
+                    self.context.update({
+                        "client_info": {"data": single_client, "found": True},
+                        "client_validated": True,
+                        "selected_client_display": client_display_name
+                    })
+
+                # Produits pour continuation
+                products_list: List[Dict[str, Any]] = []
                 try:
-                    if hasattr(self, 'context') and self.context.get("extracted_info"):
-                        products_list = self.context["extracted_info"].get("products", [])
-                    else:
-                        products_list = []
+                    if hasattr(self, "context") and isinstance(self.context, dict):
+                        extracted_info = self.context.get("extracted_info") or {}
+                        products_list = extracted_info.get("products", []) or []
                 except Exception as e:
                     logger.error(f"❌ Erreur lors de l'extraction des produits: {e}")
                     products_list = []
-                
-                # Continuation automatique vers les produits
+
+                # Continuer si produits connus
+                try:
+                    await websocket_manager.send_task_update(self.task_id, {
+                        "type": "auto_selection",
+                        "step": "client_auto_selected",
+                        "message": f"✅ Client '{client_display_name}' automatiquement sélectionné",
+                        "efficiency_tip": efficiency_tip,
+                        "show_tip": True
+                    })
+                except Exception as ws_error:
+                    logger.warning(f"⚠️ Impossible d'envoyer via WebSocket: {ws_error}")
+
                 if products_list:
                     self._track_step_complete("search_client", f"✅ Client auto-sélectionné: {client_display_name}")
                     self._track_step_start("lookup_products", f"📦 Recherche de {len(products_list)} produit(s)")
-                    
-                    # Envoyer notification d'auto-sélection avec conseil
-                    await websocket_manager.send_task_update(self.task_id, {
-                        "type": "auto_selection",
-                        "step": "client_auto_selected",
-                        "message": f"✅ Client '{client_display_name}' automatiquement sélectionné",
-                        "efficiency_tip": efficiency_tip,
-                        "show_tip": True
-                    })
-                    
-                    # Continuer directement avec les produits
                     return await self._continue_workflow_after_client_selection(
-                        single_client, 
+                        single_client,
                         {"extracted_info": {"products": products_list}}
                     )
                 else:
-                    # Demander les produits si manquants
-                    await websocket_manager.send_task_update(self.task_id, {
-                        "type": "auto_selection",
-                        "step": "client_auto_selected",
-                        "message": f"✅ Client '{client_display_name}' automatiquement sélectionné",
-                        "efficiency_tip": efficiency_tip,
-                        "show_tip": True
-                    })
                     return self._build_product_request_response(client_display_name)
-            # Traiter clients Salesforce
+
+            # 3) Construire options SF
             for sf_client in all_sf_clients:
                 if not sf_client:
                     continue
@@ -5537,7 +5552,7 @@ class DevisWorkflow:
                     "id": option_id,
                     "name": sf_client.get("Name", f"Client SF {option_id}"),
                     "source": "Salesforce",
-                    "source_raw": "salesforce", 
+                    "source_raw": "salesforce",
                     "display_detail": "Client Salesforce",
                     "sf_id": sf_client.get("Id", ""),
                     "sap_code": "",
@@ -5545,7 +5560,7 @@ class DevisWorkflow:
                         "sf_id": sf_client.get("Id", ""),
                         "sap_code": "",
                         "phone": sf_client.get("Phone"),
-                        "address": f"{sf_client.get('BillingStreet', '')}, {sf_client.get('BillingCity', '')}".strip(', '),
+                        "address": f"{sf_client.get('BillingStreet', '')}, {sf_client.get('BillingCity', '')}".strip(", "),
                         "city": sf_client.get("BillingCity"),
                         "postal_code": sf_client.get("BillingPostalCode"),
                         "country": sf_client.get("BillingCountry"),
@@ -5554,15 +5569,15 @@ class DevisWorkflow:
                     }
                 })
                 option_id += 1
-                
-            # Traiter clients SAP
+
+            # 4) Construire options SAP
             for sap_client in all_sap_clients:
                 if not sap_client:
                     continue
                 client_options.append({
                     "id": option_id,
                     "name": sap_client.get("CardName", f"Client SAP {option_id}"),
-                    "source": "SAP", 
+                    "source": "SAP",
                     "source_raw": "sap",
                     "display_detail": "Client SAP",
                     "sf_id": "",
@@ -5572,23 +5587,41 @@ class DevisWorkflow:
                         "sap_code": sap_client.get("CardCode", ""),
                         "phone": sap_client.get("Phone1"),
                         "address": sap_client.get("BillToStreet", "N/A"),
-                        "city": sap_client.get("City"), 
+                        "city": sap_client.get("City"),
+                        "postal_code": sap_client.get("ZipCode") if "ZipCode" in sap_client else None,
+                        "country": sap_client.get("Country") if "Country" in sap_client else None,
                         "siret": sap_client.get("FederalTaxID"),
                         "industry": "N/A"
                     }
                 })
                 option_id += 1
+
+            # 5) Dé-duplication finale par (sf_id, sap_code, name, source_raw)
+            seen: set = set()
+            deduped_options: List[Dict[str, Any]] = []
+            for opt in client_options:
+                key = (opt.get("sf_id", ""), opt.get("sap_code", ""), opt.get("name", ""), opt.get("source_raw", ""))
+                if key in seen:
+                    continue
+                seen.add(key)
+                deduped_options.append(opt)
+            client_options = deduped_options
+
             logger.info(f"🔧 Préparation de {len(client_options)} options pour sélection")
 
-            # CORRECTION: Log du contexte pour debug
-            logger.info(f"🔍 DEBUG: self.context = {json.dumps(self.context, indent=2, default=str)}")
-
-            # CORRECTION: S'assurer que extracted_info est récupéré correctement avec une valeur par défaut sûre
-            products_list = []
+            # 6) Debug contexte (sécurisé)
             try:
-                if hasattr(self, 'context') and self.context:
-                    extracted_info = self.context.get("extracted_info", {})
-                    products_list = extracted_info.get("products", [])
+                import json  # local import pour éviter dépendance globale
+                logger.info(f"🔍 DEBUG: self.context = {json.dumps(self.context, indent=2, default=str)}")
+            except Exception as _:
+                logger.info("🔍 DEBUG: contexte non sérialisable")
+
+            # 7) Produits du contexte
+            products_list: List[Dict[str, Any]] = []
+            try:
+                if hasattr(self, "context") and isinstance(self.context, dict):
+                    extracted_info = self.context.get("extracted_info", {}) or {}
+                    products_list = extracted_info.get("products", []) or []
                     logger.info(f"🔍 DEBUG: Produits extraits = {products_list}")
                 else:
                     logger.warning("⚠️ Contexte non initialisé ou vide")
@@ -5596,6 +5629,7 @@ class DevisWorkflow:
                 logger.error(f"❌ Erreur lors de l'extraction des produits: {e}")
                 products_list = []
 
+            # 8) Validation utilisateur (garde si current_task absent)
             validation_data = {
                 "options": client_options,
                 "clients": client_options,
@@ -5611,11 +5645,15 @@ class DevisWorkflow:
                     }
                 }
             }
-            self.current_task.require_user_validation("client_selection", "client_selection", validation_data)
-            logger.info(f"🔍 DEBUG WORKFLOW: selection_result = {json.dumps({'status': 'user_interaction_required', 'client_options_count': len(client_options)}, indent=2, default=str)}")
-            logger.info(f"🔍 DEBUG WORKFLOW: interaction_data présent = {'interaction_data' in locals()}")
+            try:
+                if getattr(self, "current_task", None):
+                    self.current_task.require_user_validation("client_selection", "client_selection", validation_data)
+                else:
+                    logger.warning("⚠️ current_task absent: impossible de pousser la validation dans le tracker")
+            except Exception as e:
+                logger.error(f"❌ Erreur lors du require_user_validation: {e}")
 
-            # IMPORTANT: Envoyer immédiatement via WebSocket si connecté
+            # 9) Emission WebSocket
             interaction_message = {
                 "type": "client_selection",
                 "interaction_type": "client_selection",
@@ -5627,15 +5665,13 @@ class DevisWorkflow:
                 "allow_create_new": True,
                 "message": f"Sélection client requise - {len(client_options)} options disponibles"
             }
-
             try:
-                # Envoyer via WebSocket
                 await websocket_manager.send_user_interaction_required(self.task_id, interaction_message)
                 logger.info(f"✅ Message WebSocket envoyé pour task {self.task_id} avec {len(client_options)} options")
             except Exception as ws_error:
                 logger.warning(f"⚠️ Impossible d'envoyer via WebSocket: {ws_error}")
-                # Pas grave, le message sera récupéré via l'API de validation
 
+            # 10) Retour API
             return {
                 "status": "user_interaction_required",
                 "requires_user_selection": True,
@@ -5655,6 +5691,7 @@ class DevisWorkflow:
             import traceback
             logger.error(f"❌ Traceback complet: {traceback.format_exc()}")
             return {"status": "error", "found": False, "error": str(e)}
+
 
 
 
@@ -6112,19 +6149,35 @@ class DevisWorkflow:
             logger.exception(f"Erreur création client: {str(e)}")
             return {"created": False, "error": str(e)}
     def _extract_product_keywords(self, product_name: str) -> List[str]:
-        """
-        Extrait des mots-clés de recherche intelligents pour SAP
-        CORRECTION : Meilleure extraction avec synonymes et fallback
-        """
+        """Génère mots-clés de recherche pour SAP"""
+        import re
+        import unicodedata
+
+        # Garde-fou
+        if not product_name or not isinstance(product_name, str):
+            return []
+
+        def _normalize(s: str) -> str:
+            # lower + suppression des accents pour matcher "écran" vs "ecran"
+            s_nfkd = unicodedata.normalize("NFKD", s)
+            s_no_accents = "".join(ch for ch in s_nfkd if not unicodedata.combining(ch))
+            return s_no_accents.lower()
+
         product_lower = product_name.lower()
-        search_terms = []
-        
-        
-        # Chercher correspondances exactes
-        for french_term, english_terms in translations.items():
-            if french_term in product_lower:
-                search_terms.extend(english_terms[:3])  # Max 3 par catégorie
-        
+        product_norm = _normalize(product_name)
+
+        search_terms: List[str] = []
+        seen = set()  # déduplication en préservant l’ordre
+
+        def _add(term: str):
+            t = term.strip()
+            if not t:
+                return
+            key = _normalize(t)
+            if key not in seen:
+                seen.add(key)
+                search_terms.append(t)
+
         # Dictionnaire enrichi français/anglais avec filtrage intelligent
         translations = {
             "imprimante": ["printer", "Printer", "PRINTER", "laser printer", "inkjet printer"],
@@ -6136,29 +6189,35 @@ class DevisWorkflow:
             "laser": ["laser", "LaserJet", "laser printer"],
             "couleur": ["color", "colour", "couleur"],
             "noir": ["black", "monochrome", "mono"],
-            "ppm": ["ppm", "pages per minute", "page/min"]
+            "ppm": ["ppm", "pages per minute", "page/min"],
         }
-        
+
         # Chercher correspondances exactes avec priorité sur les termes spécifiques
         for french_term, english_terms in translations.items():
-            if french_term in product_lower:
-                # Ajouter les termes les plus spécifiques en premier
-                search_terms.extend(english_terms[:2])  # Max 2 par catégorie pour la performance
-        
+            fr_norm = _normalize(french_term)
+            if fr_norm in product_norm:
+                # Ajouter les termes les plus spécifiques en premier (max 2)
+                for t in english_terms[:2]:
+                    _add(t)
+
         # Ajouter le terme original si pas encore ajouté
-        if product_name.lower() not in [term.lower() for term in search_terms]:
-            search_terms.append(product_name)
-        
+        _add(product_name)
+
         # Extraire caractéristiques numériques (PPM, etc.)
-        import re
-        numbers = re.findall(r'\d+', product_lower)
+        numbers = re.findall(r"\d+", product_lower)
         for num in numbers:
-            if int(num) > 5 and int(num) < 1000:  # Filtre raisonnable pour PPM/capacités
-                search_terms.append(f"{num}ppm")
-                search_terms.append(f"{num} ppm")
-                search_terms.append(f"{num} pages")
-        
-        return search_terms[:6]  # Limiter à 6 termes maximum
+            try:
+                val = int(num)
+            except ValueError:
+                continue
+            if 5 < val < 1000:  # Filtre raisonnable pour PPM/capacités
+                _add(f"{num}ppm")
+                _add(f"{num} ppm")
+                _add(f"{num} pages")
+
+        # Limiter à 6 termes maximum
+        return search_terms[:6]
+
     
     def _get_english_search_terms(self, product_name: str) -> List[str]:
         """Génère des termes de recherche anglais pour SAP"""
