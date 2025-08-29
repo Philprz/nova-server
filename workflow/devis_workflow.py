@@ -3850,7 +3850,9 @@ class DevisWorkflow:
                 except Exception as e:
                     logger.warning(f"Erreur recherche '{keyword}': {str(e)}")
                     continue
-            
+            # Annuler le timeout si recherche terminée
+            if search_timeout and not search_timeout.done():
+                search_timeout.cancel()
             # 3. Retourner résultats ou échec
             if all_results:
                 # Dédupliquer par ItemCode
@@ -3872,14 +3874,16 @@ class DevisWorkflow:
             }
             
         except Exception as e:
-            logger.exception(f"❌ Erreur recherche produit: {str(e)}")
+            logger.error(f"❌ Erreur recherche suggestions pour '{product_name}': {str(e)}")
+            # Retour d'erreur définitif pour éviter boucle infinie
             return {
                 "found": False,
-                "products": [],
-                "method": "error",
-                "error": str(e)
+                "error": f"Erreur technique lors de la recherche: {str(e)}",
+                "requires_manual_search": True,
+                "original_request": product_name,
+                "timeout_reached": True
             }
-        
+            
     def _calculate_product_match_score(self, product: Dict, criteria: Dict) -> float:
         """Calcule score de correspondance produit/critères"""
         
