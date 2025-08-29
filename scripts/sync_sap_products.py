@@ -3,6 +3,10 @@
 
 import os
 import sys
+from pathlib import Path
+
+# Ajout répertoire parent au path Python
+sys.path.append(str(Path(__file__).parent.parent))
 import asyncio
 import httpx
 import logging
