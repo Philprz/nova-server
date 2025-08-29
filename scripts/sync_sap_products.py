@@ -146,6 +146,12 @@ class SAPProductSyncer:
         
         with self.SessionLocal() as session:
             try:
+                # Vérification existence table avant truncate
+                table_check = session.execute(text("SELECT to_regclass('public.produits_sap')")).scalar()
+                if table_check is None:
+                    logger.error("❌ Table produits_sap n'existe pas. Exécutez 'alembic upgrade head' d'abord.")
+                    raise Exception("Table produits_sap manquante - migration Alembic requise")
+                
                 # Truncate et réinsertion complète pour éviter doublons
                 session.execute(text("TRUNCATE TABLE produits_sap RESTART IDENTITY"))
                 
