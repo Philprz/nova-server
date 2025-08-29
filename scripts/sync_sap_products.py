@@ -142,68 +142,71 @@ class SAPProductSyncer:
         return 0.0
     
     def sync_products_to_database(self, products: List[Dict[str, Any]]) -> int:
-        """Synchronisation produits vers PostgreSQL"""
-        
+        """Synchronisation produits vers PostgreSQL (purge + insert batch via ORM)"""
+        from models.database_models import ProduitsSAP  # import local pour éviter cycles
+
+        def to_float(v, default=0.0):
+            try:
+                return float(v) if v is not None else default
+            except (ValueError, TypeError):
+                return default
+
+        def to_int(v, default=0):
+            try:
+                # accepte "12", 12.0, "12.3" (tronqué)
+                return int(float(v)) if v is not None else default
+            except (ValueError, TypeError):
+                return default
+
+        now = datetime.now()
+
         with self.SessionLocal() as session:
             try:
-                # Vérification existence table avant truncate
-                table_check = session.execute(text("SELECT to_regclass('public.produits_sap')")).scalar()
+                # 1) Vérifier l’existence de la table
+                table_check = session.execute(
+                    text("SELECT to_regclass('public.produits_sap')")
+                ).scalar()
                 if table_check is None:
-                    logger.error("❌ Table produits_sap n'existe pas. Exécutez 'alembic upgrade head' d'abord.")
-                    raise Exception("Table produits_sap manquante - migration Alembic requise")
-                
-                # Truncate et réinsertion complète pour éviter doublons
-                session.execute(text("TRUNCATE TABLE produits_sap RESTART IDENTITY"))
-                 # Insertion via modèle SQLAlchemy pour plus de sécurité
-                from models.database_models import ProduitsSAP
-                
-                # Truncate via requête directe plus sûre
-                session.execute(text("DELETE FROM produits_sap"))
-                session.commit()
-                insert_count = 0
-                for product in products:
-                    # Normalisation données
-                    normalized_product = {
-                        'item_code': product.get('ItemCode', ''),
-                        'item_name': product.get('ItemName', ''),
-                        'u_description': product.get('U_Description', ''),
-                        'avg_price': float(product.get('AvgPrice', 0)),
-                        'on_hand': int(product.get('QuantityOnStock', 0)),
-                        'items_group_code': product.get('ItemsGroupCode', ''),
-                        'manufacturer': product.get('Manufacturer', ''),
-                        'bar_code': product.get('BarCode', ''),
-                        'valid': product.get('Valid') == 'Y',
-                        'sales_unit': product.get('SalesUnit', 'UN'),
-                        'created_at': datetime.now(),
-                        'updated_at': datetime.now()
-                    }
-                    # Insertion via SQLAlchemy ORM
-                    produit = ProduitsSAP(**normalized_product)
-                    session.add(produit)
-                    insert_count += 1
-                    # Insertion
-                    session.execute(
-                        text("""
-                        INSERT INTO produits_sap (
-                            item_code, item_name, u_description, avg_price, on_hand,
-                            items_group_code, manufacturer, bar_code, valid, sales_unit
-                        ) VALUES (
-                            :item_code, :item_name, :u_description, :avg_price, :on_hand,
-                            :items_group_code, :manufacturer, :bar_code, :valid, :sales_unit
-                        )
-                        """),
-                        normalized_product
+                    raise RuntimeError(
+                        "Table produits_sap manquante - exécutez 'alembic upgrade head'"
                     )
-                    insert_count += 1
-                
+
+                # 2) Purge (DELETE pour compatibilité)
+                session.execute(text("DELETE FROM produits_sap"))
+
+                # 3) Préparer le batch d’objets ORM
+                batch = []
+                for p in products or []:
+                    normalized = {
+                        "item_code":         p.get("ItemCode", "") or "",
+                        "item_name":         p.get("ItemName", "") or "",
+                        "u_description":     p.get("U_Description", "") or "",
+                        "avg_price":         to_float(p.get("AvgPrice"), 0.0),
+                        "on_hand":           to_int(p.get("QuantityOnStock"), 0),
+                        "items_group_code":  p.get("ItemsGroupCode", "") or "",
+                        "manufacturer":      p.get("Manufacturer", "") or "",
+                        "bar_code":          p.get("BarCode", "") or "",
+                        "valid":             (p.get("Valid") in ("Y", "y", True)),
+                        "sales_unit":        p.get("SalesUnit", "UN") or "UN",
+                        "created_at":        now,
+                        "updated_at":        now,
+                    }
+                    batch.append(ProduitsSAP(**normalized))
+
+                # 4) Insertion en une passe
+                if batch:
+                    session.bulk_save_objects(batch)
+
                 session.commit()
+                insert_count = len(batch)
                 logger.info(f"✅ {insert_count} produits synchronisés en base")
                 return insert_count
-                
+
             except Exception as e:
                 session.rollback()
-                logger.error(f"❌ Erreur sync database: {str(e)}")
+                logger.error(f"❌ Erreur sync database: {e}")
                 raise
+
     
     async def run_full_sync(self):
         """Synchronisation complète SAP -> PostgreSQL"""
