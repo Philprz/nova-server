@@ -6119,39 +6119,46 @@ class DevisWorkflow:
         product_lower = product_name.lower()
         search_terms = []
         
-        # Dictionnaire enrichi français/anglais
-        translations = {
-            "imprimante": ["imprimante", "printer", "Printer", "PRINTER", "laser"],
-            "ordinateur": ["ordinateur", "computer", "PC", "desktop", "workstation"],
-            "écran": ["écran", "monitor", "screen", "display"],
-            "clavier": ["clavier", "keyboard"],
-            "souris": ["souris", "mouse"],
-            "scanner": ["scanner", "scan", "numériseur"],
-            "laser": ["laser", "Laser", "LASER"],
-            "couleur": ["couleur", "color", "colour"],
-            "noir": ["noir", "black", "monochrome"],
-            "ppm": ["ppm", "pages", "vitesse"]
-        }
         
         # Chercher correspondances exactes
         for french_term, english_terms in translations.items():
             if french_term in product_lower:
                 search_terms.extend(english_terms[:3])  # Max 3 par catégorie
         
-        # Extraire chiffres pour PPM, capacité, etc.
-        import re
-        numbers = re.findall(r'\d+', product_name)
-        if numbers:
-            search_terms.extend((f"{num}ppm" for num in numbers[:2]))
-            search_terms.extend((f"{num} ppm" for num in numbers[:2]))
-            search_terms.extend((f"{num}PPM" for num in numbers[:2]))
-
-        # Ajouter terme original en dernier
-        search_terms.append(product_name.strip())
+        # Dictionnaire enrichi français/anglais avec filtrage intelligent
+        translations = {
+            "imprimante": ["printer", "Printer", "PRINTER", "laser printer", "inkjet printer"],
+            "ordinateur": ["computer", "PC", "desktop", "workstation", "laptop"],
+            "écran": ["monitor", "screen", "display", "LCD", "LED"],
+            "clavier": ["keyboard", "Keys", "mechanical keyboard"],
+            "souris": ["mouse", "optical mouse", "wireless mouse"],
+            "scanner": ["scanner", "scan", "document scanner"],
+            "laser": ["laser", "LaserJet", "laser printer"],
+            "couleur": ["color", "colour", "couleur"],
+            "noir": ["black", "monochrome", "mono"],
+            "ppm": ["ppm", "pages per minute", "page/min"]
+        }
         
-        # Retourner termes uniques, limités à 5 max
-        unique_terms = list(dict.fromkeys([t for t in search_terms if len(t.strip()) > 1]))
-        return unique_terms[:8]  # Augmenter à 8 termes max pour plus de chances
+        # Chercher correspondances exactes avec priorité sur les termes spécifiques
+        for french_term, english_terms in translations.items():
+            if french_term in product_lower:
+                # Ajouter les termes les plus spécifiques en premier
+                search_terms.extend(english_terms[:2])  # Max 2 par catégorie pour la performance
+        
+        # Ajouter le terme original si pas encore ajouté
+        if product_name.lower() not in [term.lower() for term in search_terms]:
+            search_terms.append(product_name)
+        
+        # Extraire caractéristiques numériques (PPM, etc.)
+        import re
+        numbers = re.findall(r'\d+', product_lower)
+        for num in numbers:
+            if int(num) > 5 and int(num) < 1000:  # Filtre raisonnable pour PPM/capacités
+                search_terms.append(f"{num}ppm")
+                search_terms.append(f"{num} ppm")
+                search_terms.append(f"{num} pages")
+        
+        return search_terms[:6]  # Limiter à 6 termes maximum
     
     def _get_english_search_terms(self, product_name: str) -> List[str]:
         """Génère des termes de recherche anglais pour SAP"""
@@ -6286,20 +6293,43 @@ class DevisWorkflow:
                             
                         logger.info(f"🔎 Recherche avec mot-clé: '{keyword}'")
                         
-                        # Recherche dans ItemName
+                        # Recherche dans ItemName avec filtrage intelligent
                         try:
+                            # Étape 1: Recherche avec filtrage des accessoires
+                            filter_query = f"contains(tolower(ItemName),tolower('{keyword}')) and not contains(tolower(ItemName),'cartouche') and not contains(tolower(ItemName),'encre') and not contains(tolower(ItemName),'toner') and not contains(tolower(ItemName),'cable')"
                             result = await self.mcp_connector.call_sap_mcp(
                                 "sap_read",
                                 {
-                                    "endpoint": f"/Items?$filter=contains(tolower(ItemName),tolower('{keyword}'))&$top=5",
+                                    "endpoint": f"/Items?$filter={filter_query}&$top=5",
                                     "method": "GET"
                                 }
                             )
                             
+                            # Si pas de résultats avec filtrage, essayer sans
+                            if not result.get("value"):
+                                result = await self.mcp_connector.call_sap_mcp(
+                                    "sap_read",
+                                    {
+                                        "endpoint": f"/Items?$filter=contains(tolower(ItemName),tolower('{keyword}'))&$top=5",
+                                        "method": "GET"
+                                    }
+                                )
+                            
                             if result.get("value"):
                                 # Prendre le premier résultat le plus pertinent
                                 matches = result["value"]
-                                best_match = matches[0]  # Pour l'instant, prendre le premier
+                                # Sélectionner le meilleur match en évitant les accessoires
+                                best_match = None
+                                for match in matches:
+                                    item_name_lower = match.get('ItemName', '').lower()
+                                    # Éviter cartouches, encre, toners, câbles
+                                    if not any(accessory in item_name_lower for accessory in ['cartouche', 'encre', 'toner', 'cable', 'câble']):
+                                        best_match = match
+                                        break
+                                
+                                # Si aucun produit principal trouvé, prendre le premier
+                                if not best_match:
+                                    best_match = matches[0]
                                 
                                 logger.info(f"✅ Produit trouvé par mot-clé '{keyword}': {best_match.get('ItemName')}")
                                 found_products.append({

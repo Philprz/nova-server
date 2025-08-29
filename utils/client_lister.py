@@ -118,10 +118,10 @@ class ClientLister:
             exact_query = f"""
             SELECT Id, Name, AccountNumber, Phone, BillingCity, BillingCountry, BillingPostalCode, Type, Industry, Website 
             FROM Account 
-            WHERE (UPPER(Name) = UPPER('{client_name}') 
-            OR UPPER(Name) LIKE UPPER('{client_name} %') 
-            OR UPPER(Name) LIKE UPPER('% {client_name}') 
-            OR UPPER(Name) LIKE UPPER('%{client_name}%'))
+            WHERE (Name = '{client_name}' 
+            OR Name LIKE '{client_name} %' 
+            OR Name LIKE '% {client_name}' 
+            OR Name LIKE '%{client_name}%')
             LIMIT 20
             """.strip()
             
@@ -155,11 +155,11 @@ class ClientLister:
                 logger.error(f"❌ Erreur recherche exacte Salesforce: {error_msg}")
                 # Ne pas retourner ici, continuer avec la recherche approximative
             
-            # Si pas de résultat exact, recherche approximative avec UPPER()
+            # Si pas de résultat exact, recherche approximative simple
             fuzzy_query = f"""
             SELECT Id, Name, AccountNumber, Phone, BillingCity, BillingCountry 
             FROM Account 
-            WHERE UPPER(Name) LIKE UPPER('%{client_name}%') 
+            WHERE Name LIKE '%{client_name}%' 
             LIMIT 10
             """.strip()
             
