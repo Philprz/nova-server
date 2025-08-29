@@ -162,7 +162,13 @@ class SAPProductSyncer:
                 return int(float(v)) if v is not None else default
             except (ValueError, TypeError):
                 return default
-
+        def to_str(v, default=""):
+            try:
+                if v is None:
+                    return default
+                return str(v).strip()
+            except (ValueError, TypeError):
+                return default
         now = datetime.now()
         products = products or []
 
@@ -193,7 +199,7 @@ class SAPProductSyncer:
                         "manufacturer":     (p.get("Manufacturer") or "").strip(),
                         "bar_code":         (p.get("BarCode") or "").strip(),
                         "valid":            (p.get("Valid") in ("Y", "y", True)),
-                        "sales_unit":       (p.get("SalesUnit") or "UN"),
+                        "sales_unit":       to_str(p.get("SalesUnit"), "UN"),
                         "created_at":       now,
                         "updated_at":       now,
                     }
