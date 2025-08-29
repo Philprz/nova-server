@@ -190,14 +190,14 @@ class SAPProductSyncer:
                 batch = []
                 for p in products:
                     normalized = {
-                        "item_code":        (p.get("ItemCode") or "").strip(),
-                        "item_name":        (p.get("ItemName") or "").strip(),
-                        "u_description":    (p.get("U_Description") or "").strip(),
+                        "item_code":        to_str(p.get("ItemCode")),
+                        "item_name":        to_str(p.get("ItemName")),
+                        "u_description":    to_str(p.get("U_Description")),
                         "avg_price":        to_float(p.get("AvgPrice"), 0.0),
                         "on_hand":          to_int(p.get("QuantityOnStock"), 0),
-                        "items_group_code": (p.get("ItemsGroupCode") or "").strip(),
-                        "manufacturer":     (p.get("Manufacturer") or "").strip(),
-                        "bar_code":         (p.get("BarCode") or "").strip(),
+                        "items_group_code": to_str(p.get("ItemsGroupCode")),
+                        "manufacturer":     to_str(p.get("Manufacturer")),
+                        "bar_code":         to_str(p.get("BarCode")),
                         "valid":            (p.get("Valid") in ("Y", "y", True)),
                         "sales_unit":       to_str(p.get("SalesUnit"), "UN"),
                         "created_at":       now,
