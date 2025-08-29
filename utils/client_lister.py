@@ -336,34 +336,29 @@ class ClientLister:
         
         return summary
     def _deduplicate_clients(self, sf_clients: List[Dict], sap_clients: List[Dict]) -> List[Dict]:
-        """Déduplique les clients basé sur la similarité des noms"""
-        from difflib import SequenceMatcher
+        """Déduplique les clients basé sur l'identifiant de liaison (AccountNumber <-> CardCode)"""
         
         unique_clients = []
         used_sap_indices = set()
         
         # Traiter clients Salesforce
         for sf_client in sf_clients:
-            sf_name = sf_client.get('Name', '').strip().upper()
+            sf_account_number = sf_client.get('AccountNumber', '').strip()
             
-            # Chercher correspondance SAP
+            # Chercher correspondance SAP par CardCode
             best_match_idx = None
-            best_similarity = 0
             
-            for idx, sap_client in enumerate(sap_clients):
-                if idx in used_sap_indices:
-                    continue
+            if sf_account_number:  # Si Salesforce a un AccountNumber
+                for idx, sap_client in enumerate(sap_clients):
+                    if idx in used_sap_indices:
+                        continue
                     
-                sap_name = sap_client.get('CardName', '').strip().upper()
-                similarity = SequenceMatcher(None, sf_name, sap_name).ratio()
-                
-                # Exception: Ne pas fusionner si l'un contient l'autre mais sont différents
-                if (sf_name in sap_name or sap_name in sf_name) and sf_name != sap_name:
-                    continue  # Garder séparés (ex: RONDOT vs RONDOT Group)
-                
-                if similarity > 0.85 and similarity > best_similarity:
-                    best_similarity = similarity
-                    best_match_idx = idx
+                    sap_card_code = sap_client.get('CardCode', '').strip()
+                    
+                    # Correspondance exacte sur l'identifiant
+                    if sf_account_number == sap_card_code:
+                        best_match_idx = idx
+                        break
             
             # Fusionner si correspondance trouvée
             if best_match_idx is not None:
@@ -371,16 +366,16 @@ class ClientLister:
                 unique_clients.append({
                     **sf_client,
                     'sap_data': sap_clients[best_match_idx],
-                    'source': 'both',
-                    'match_score': best_similarity
+                    'source': 'SAP & Salesforce',
+                    'CardCode': sap_clients[best_match_idx].get('CardCode', '')
                 })
             else:
-                unique_clients.append({**sf_client, 'source': 'salesforce'})
+                unique_clients.append({**sf_client, 'source': 'Salesforce'})
         
         # Ajouter clients SAP non correspondus
         for idx, sap_client in enumerate(sap_clients):
             if idx not in used_sap_indices:
-                unique_clients.append({**sap_client, 'source': 'sap'})
+                unique_clients.append({**sap_client, 'source': 'SAP'})
         
         return unique_clients
 # Instance globale
