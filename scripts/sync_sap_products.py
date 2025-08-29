@@ -38,7 +38,7 @@ class SAPProductSyncer:
         
         # Configuration SAP session
         self.session_id = None
-        self.http_client = httpx.AsyncClient(timeout=30.0)
+        self.http_client = httpx.AsyncClient(timeout=30.0, verify=False)
         
         # Configuration PostgreSQL
         self.engine = create_engine(self.db_url)
