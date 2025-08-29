@@ -1,8 +1,8 @@
 """create_produits_sap_table_initial
 
-Revision ID: ab15fc5a42f2
+Revision ID: c62fc780e855
 Revises: 
-Create Date: 2025-08-29 15:57:53.358947
+Create Date: 2025-08-29 16:25:04.442722
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'ab15fc5a42f2'
+revision: str = 'c62fc780e855'
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None

@@ -1,10 +1,10 @@
-from logging.config import fileConfig
+﻿from logging.config import fileConfig
 from sqlalchemy import engine_from_config, pool
 from alembic import context
 import os
 import sys
 
-# Ajout du répertoire parent au path
+# Ajout du rÃ©pertoire parent au path
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 from models.database_models import Base
@@ -16,13 +16,13 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 def run_migrations_offline() -> None:
-    """Exécute les migrations en mode 'offline' (sans connexion DB)."""
-    url = config.get_main_option("sqlalchemy.url")  # ✅ corrigé
+    """ExÃ©cute les migrations en mode 'offline' (sans connexion DB)."""
+    url = config.get_main_option("sqlalchemy.url")  # âœ… corrigÃ©
     context.configure(
         url=url,
         target_metadata=target_metadata,
         literal_binds=True,
-        dialect_opts={"paramstyle": "named"},  # ✅ corrigé
+        dialect_opts={"paramstyle": "named"},  # âœ… corrigÃ©
     )
 
     with context.begin_transaction():
@@ -30,11 +30,11 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
-    """Exécute les migrations en mode 'online' (avec connexion DB)."""
+    """ExÃ©cute les migrations en mode 'online' (avec connexion DB)."""
     configuration = config.get_section(config.config_ini_section) or {}
     connectable = engine_from_config(
         configuration,
-        prefix="sqlalchemy.",  # ✅ corrigé
+        prefix="sqlalchemy.",  # âœ… corrigÃ©
         poolclass=pool.NullPool,
     )
 
