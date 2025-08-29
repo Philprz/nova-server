@@ -4088,6 +4088,12 @@ class DevisWorkflow:
             engine = create_engine(db_url, pool_pre_ping=True)
             SessionLocal = sessionmaker(bind=engine)
             with SessionLocal() as session:
+                # Vérification disponibilité extension pg_trgm
+                try:
+                    session.execute(text("SELECT 1 WHERE pg_extension_exists('pg_trgm')")).fetchone()
+                except Exception:
+                    logger.warning("Extension pg_trgm non disponible, utilisation fallback")
+                    return await self._search_local_fallback(product_name)
                 results = session.execute(
                     text("""
                     SELECT item_code, item_name, u_description, avg_price, on_hand,
@@ -4121,7 +4127,67 @@ class DevisWorkflow:
         except Exception as e:
             logger.error(f"❌ Erreur recherche fuzzy locale: {str(e)}")
         return []
-
+    
+    async def _search_local_fallback(self, product_name: str) -> List[Dict[str, Any]]:
+        """Recherche locale sans pg_trgm - fallback LIKE"""
+        try:
+            from sqlalchemy import create_engine, text
+            from sqlalchemy.orm import sessionmaker
+            db_url = os.getenv("DATABASE_URL")
+            if not db_url:
+                return []
+            
+            engine = create_engine(db_url, pool_pre_ping=True)
+            SessionLocal = sessionmaker(bind=engine)
+            
+            with SessionLocal() as session:
+                results = session.execute(
+                    text("""
+                    SELECT item_code, item_name, u_description, avg_price, on_hand,
+                        items_group_code, manufacturer, sales_unit,
+                        CASE 
+                            WHEN LOWER(item_name) LIKE LOWER(:name_exact) THEN 0.9
+                            WHEN LOWER(item_name) LIKE LOWER(:name_start) THEN 0.8  
+                            WHEN LOWER(item_name) LIKE LOWER(:name_contain) THEN 0.6
+                            WHEN LOWER(u_description) LIKE LOWER(:name_contain) THEN 0.4
+                            ELSE 0.2
+                        END as sim_score
+                    FROM produits_sap 
+                    WHERE valid = true 
+                    AND on_hand > 0
+                    AND (
+                        LOWER(item_name) LIKE LOWER(:name_contain) OR
+                        LOWER(u_description) LIKE LOWER(:name_contain)
+                    )
+                    ORDER BY sim_score DESC, on_hand DESC
+                    LIMIT 5
+                    """),
+                    {
+                        "name_exact": product_name,
+                        "name_start": f"{product_name}%",
+                        "name_contain": f"%{product_name}%"
+                    }
+                ).fetchall()
+                
+                formatted_results = []
+                for row in results or []:
+                    formatted_results.append({
+                        "ItemCode": row.item_code,
+                        "ItemName": row.item_name,
+                        "U_Description": row.u_description or "",
+                        "AvgPrice": float(row.avg_price or 0),
+                        "OnHand": int(row.on_hand or 0),
+                        "QuantityOnStock": int(row.on_hand or 0),
+                        "ItemsGroupCode": row.items_group_code or "",
+                        "Manufacturer": row.manufacturer or "",
+                        "SalesUnit": row.sales_unit or "UN",
+                        "source": "local_db",
+                        "similarity_score": float(row.sim_score or 0.0)
+                    })
+                return formatted_results
+        except Exception as e:
+            logger.error(f"❌ Erreur recherche fallback locale: {str(e)}")
+        return []
     def _extract_product_keywords(self, product_name: str) -> List[str]:
         """Extrait les mots-clés intelligents d'un nom de produit"""
         import unicodedata
