@@ -2561,6 +2561,9 @@ class DevisWorkflow:
                     "error_timestamp": datetime.now().isoformat()
                 }
             }
+        except asyncio.CancelledError:
+            logger.warning("⚠️ Création devis interrompue par l'utilisateur")
+            return {"success": False, "error": "Opération interrompue", "cancelled": True}
     
     async def _create_sap_client_if_needed(self, client_info: Dict) -> Dict:
         """Crée un client SAP si nécessaire - STRUCTURE DE RETOUR CORRIGÉE"""
@@ -4945,7 +4948,9 @@ class DevisWorkflow:
             else:
                 # Certains produits nécessitent une interaction
                 return await self._handle_mixed_product_validation(validated_products, products_needing_interaction)
-                
+        except asyncio.CancelledError:
+            logger.warning("⚠️ Recherche produits interrompue")
+            return {"error": "Recherche interrompue", "cancelled": True}        
         except Exception as e:
             logger.exception(f"Erreur _get_products_info_with_auto_selection: {e}")
             return self._build_error_response("Erreur validation produits", str(e))
@@ -6157,8 +6162,7 @@ class DevisWorkflow:
             logger.info(f"🆕 Création client SAP: {card_code} ({client_name})")
 
             # Création dans SAP
-            create_result = await self.mcp_connector.call_mcp(
-                "sap_mcp",
+            create_result = await self.mcp_connector.call_sap_mcp(
                 "sap_create_customer_complete",
                 {"customer_data": sap_client_data}
             )
@@ -7200,10 +7204,9 @@ class EnhancedDevisWorkflow(DevisWorkflow):
             logger.info(f"📝 Données SAP validées préparées: {card_code}")
             
             # Création dans SAP
-            sap_result = await self.mcp_connector.call_mcp(
-                "sap_mcp",
+            result = await self.mcp_connector.call_sap_mcp(
                 "sap_create_customer_complete",
-                {"customer_data": sap_client_data}
+                {"customer_data": sap_data}
             )
             
             if not sap_result.get("success", False):

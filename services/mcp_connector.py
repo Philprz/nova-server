@@ -498,55 +498,85 @@ class MCPConnector:
     @staticmethod
     async def _call_mcp(server_name: str, action: str, params: Dict[str, Any]) -> Dict[str, Any]:
         """Méthode générique pour appeler un outil MCP via subprocess - VERSION OPTIMISÉE"""
-        
+
         # Cache intelligent pour les opérations de lecture
         cache_key = f"{server_name}:{action}:{hash(str(sorted(params.items())))}"
         read_only_actions = ['sap_read', 'salesforce_query', 'sap_get_product_details']
-        
+
         if action in read_only_actions:
             cached_result = mcp_cache.get(cache_key)
             if cached_result:
                 logger.debug(f"Cache hit pour {cache_key}")
                 return cached_result
-        
+
         logger.info(f"Appel MCP: {server_name}.{action}")
-        
+        timeout = get_timeout_for_action(action)
+
+        # --- Appel direct async avec possibilité de fallback ---
+        use_fallback = False
+        try:
+            direct_res = await asyncio.wait_for(
+                MCPConnector._execute_mcp_call(server_name, action, params),
+                timeout=timeout
+            )
+        except asyncio.TimeoutError:
+            logger.error(f"Timeout ({timeout}s) pour {server_name}.{action}")
+            use_fallback = True
+        except asyncio.CancelledError:
+            logger.warning(f"Appel MCP {server_name}.{action} annulé")
+            return {"error": "Opération annulée", "cancelled": True}
+        except Exception as e:
+            logger.error(f"Erreur appel direct MCP {server_name}.{action}: {e}")
+            use_fallback = True
+
+        if not use_fallback:
+            # Normalisation des erreurs critiques Salesforce côté appel direct
+            if isinstance(direct_res, dict):
+                err = str(direct_res.get("error", ""))
+                if server_name == "salesforce_mcp" and ("INVALID_LOGIN" in err or "invalid login" in err.lower()):
+                    return {"error": "salesforce_unavailable", "fallback_mode": True, "reason": "invalid_login"}
+
+            # Mise en cache sur lecture
+            if action in read_only_actions and isinstance(direct_res, dict) and "error" not in direct_res:
+                mcp_cache.set(cache_key, direct_res)
+
+            logger.info(f"Appel MCP réussi (direct): {server_name}.{action}")
+            return direct_res
+
+        # --- Fallback subprocess (bloc à partir de temp_in_path = None) ---
         temp_in_path = None
         temp_out_path = None
-        
+
         try:
             # Créer fichiers temporaires pour l'échange de données
             with tempfile.NamedTemporaryFile(mode='w+', suffix='.json', delete=False) as temp_in:
                 temp_in_path = temp_in.name
                 json.dump({"action": action, "params": params}, temp_in, ensure_ascii=False)
                 temp_in.flush()
-            
+
             with tempfile.NamedTemporaryFile(mode='w+', suffix='.json', delete=False) as temp_out:
                 temp_out_path = temp_out.name
-            
+
             # Configuration du subprocess
-            timeout_seconds = get_timeout_for_action(action)
             script_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), f"{server_name}.py")
-            
             if not os.path.exists(script_path):
                 logger.error(f"Script MCP introuvable: {script_path}")
                 return {"error": f"Script MCP introuvable: {script_path}"}
-            
-            # Fonction pour exécuter le subprocess
+
             def run_subprocess():
                 try:
                     result = subprocess.run(
                         [
-                            sys.executable, 
-                            script_path, 
-                            "--input-file", temp_in_path, 
+                            sys.executable,
+                            script_path,
+                            "--input-file", temp_in_path,
                             "--output-file", temp_out_path
                         ],
                         capture_output=True,
                         text=True,
                         encoding="utf-8",
                         errors="replace",
-                        timeout=timeout_seconds,
+                        timeout=timeout,
                         cwd=os.path.dirname(script_path)
                     )
                     return result
@@ -556,47 +586,49 @@ class MCPConnector:
                 except Exception as e:
                     logger.error(f"Erreur subprocess: {e}")
                     return None
-            
+
             # Exécution asynchrone
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             result = await loop.run_in_executor(None, run_subprocess)
-            
+
             if result is None:
                 return {"error": "Timeout ou erreur lors de l'appel MCP"}
-            
+
             if result.returncode != 0:
                 error_msg = (result.stderr or result.stdout or "Erreur inconnue")
                 logger.error(f"Erreur MCP {server_name}.{action}: {error_msg}")
-                # Normaliser les erreurs critiques Salesforce pour permettre le fallback propre
                 if server_name == "salesforce_mcp" and ("INVALID_LOGIN" in error_msg or "invalid login" in error_msg.lower()):
                     return {"error": "salesforce_unavailable", "fallback_mode": True, "reason": "invalid_login"}
                 return {"error": f"Erreur MCP: {error_msg}"}
-            
-            # Lecture du résultat
+
+            # Lecture du résultat (robuste au JSON partiel)
             if os.path.exists(temp_out_path) and os.path.getsize(temp_out_path) > 0:
-                with open(temp_out_path, 'r', encoding='utf-8') as f:
-                    output_data = json.load(f)
+                try:
+                    with open(temp_out_path, 'r', encoding='utf-8') as f:
+                        output_data = json.load(f)
+                except json.JSONDecodeError:
+                    with open(temp_out_path, 'r', encoding='utf-8') as f:
+                        output_data = {"success": True, "data": f.read()}
             else:
                 output_data = {"success": True, "data": result.stdout}
-            
+
             # Mise en cache pour les opérations de lecture
-            if action in read_only_actions and "error" not in output_data:
+            if action in read_only_actions and isinstance(output_data, dict) and "error" not in output_data:
                 mcp_cache.set(cache_key, output_data)
-            
-            logger.info(f"Appel MCP réussi: {server_name}.{action}")
+
+            logger.info(f"Appel MCP réussi (fallback): {server_name}.{action}")
             return output_data
-            
+
         except Exception as e:
             error_msg = str(e)
             logger.error(f"Erreur MCP {server_name}.{action}: {error_msg}")
-            # Propager l'erreur réelle plutôt que de masquer
-            if "INVALID_LOGIN" in error_msg or "invalid_login" in error_msg.lower():
+            if "INVALID_LOGIN" in error_msg or "invalid login" in error_msg.lower():
                 return {"error": f"Authentification Salesforce échouée: {error_msg}"}
             elif "unauthorized" in error_msg.lower():
                 return {"error": f"Accès non autorisé: {error_msg}"}
             else:
                 return {"error": error_msg}
-            
+
         finally:
             # Nettoyage des fichiers temporaires
             for temp_file in [temp_in_path, temp_out_path]:
@@ -606,6 +638,79 @@ class MCPConnector:
                     except Exception as e:
                         logger.warning(f"Erreur nettoyage fichier temporaire: {e}")
 
+    @staticmethod
+    async def _execute_mcp_call(server_name: str, action: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Exécute réellement l'appel MCP avec gestion d'erreurs"""
+        try:
+            # Configuration du serveur MCP selon le type
+            if server_name == "sap_mcp":
+                server_path = "sap_mcp.py"
+                server_env_name = "sap_mcp"
+            elif server_name == "salesforce_mcp":
+                server_path = "salesforce_mcp.py"  
+                server_env_name = "salesforce_mcp"
+            else:
+                return {"error": f"Serveur MCP inconnu: {server_name}"}
+
+            # Préparer la commande
+            command_data = {
+                "action": action,
+                "params": params,
+                "timestamp": datetime.now().isoformat()
+            }
+
+            # Créer fichiers temporaires
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding='utf-8') as input_file:
+                json.dump(command_data, input_file, ensure_ascii=False)
+                input_file_path = input_file.name
+
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as output_file:
+                output_file_path = output_file.name
+
+            try:
+                # Exécuter la commande MCP
+                command = [
+                    sys.executable,
+                    server_path,
+                    "--input-file", input_file_path,
+                    "--output-file", output_file_path
+                ]
+
+                process = await asyncio.create_subprocess_exec(
+                    *command,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    cwd=os.getcwd()
+                )
+
+                stdout, stderr = await process.communicate()
+
+                if process.returncode != 0:
+                    error_msg = f"Erreur subprocess {server_name}: {stderr.decode('utf-8', errors='ignore')}"
+                    logger.error(error_msg)
+                    return {"error": error_msg}
+
+                # Lire le résultat
+                try:
+                    with open(output_file_path, 'r', encoding='utf-8') as f:
+                        result = json.load(f)
+                except Exception as read_error:
+                    logger.error(f"Erreur lecture résultat MCP: {read_error}")
+                    return {"error": f"Impossible de lire le résultat: {read_error}"}
+
+                return result
+
+            finally:
+                # Nettoyer les fichiers temporaires
+                try:
+                    os.unlink(input_file_path)
+                    os.unlink(output_file_path)
+                except Exception as cleanup_error:
+                    logger.warning(f"Erreur nettoyage fichiers temporaires: {cleanup_error}")
+
+        except Exception as e:
+            logger.error(f"Erreur _execute_mcp_call: {str(e)}")
+            return {"error": str(e)}
     # ===================================================================
     # MÉTHODES D'INSTANCE AVEC CACHE ET TRACKING
     # ===================================================================
