@@ -4244,7 +4244,9 @@ class DevisWorkflow:
             
             
         except Exception as e:
+
             logger.exception(f"❌ Erreur recherche produit: {str(e)}")
+
             return {
                 "found": False,
                 "error": str(e)
@@ -7295,10 +7297,20 @@ class EnhancedDevisWorkflow(DevisWorkflow):
                     logger.warning(f"⚠️ Erreur recherche par code {product_code}: {e}")
             
             # 2. Recherche par nom avec mots-clés intelligents
+            # Protection contre boucle infinie
+                search_timeout = asyncio.create_task(asyncio.sleep(30))  # 30 secondes max
+                keyword_attempts = 0
+                max_keyword_attempts = 3
             if product_name:
                 keywords = self._extract_product_keywords(product_name)
                 
                 for keyword in keywords[:2]:  # Tester 2 mots-clés max
+                    # Vérifier limite d'essais et timeout
+                    if keyword_attempts >= max_keyword_attempts:
+                        logger.warning(f"⏰ Limite d'essais atteinte pour '{product_name}'")
+                        break
+                    
+                    keyword_attempts += 1
                     try:
                         logger.info(f"🔍 Recherche avec mot-clé: '{keyword}'")
                         
