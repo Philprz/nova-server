@@ -3979,7 +3979,42 @@ class DevisWorkflow:
                 logger.warning("DATABASE_URL manquant pour recherche locale par code")
                 return None
             engine = create_engine(db_url, pool_pre_ping=True)
-            SessionLocal = sessionmaker(bind=engine)
+            # Recherche simple et directe d'abord
+            simple_results = session.execute(
+                text("""
+                SELECT item_code, item_name, u_description, avg_price, on_hand,
+                    items_group_code, manufacturer, sales_unit
+                FROM produits_sap 
+                WHERE valid = true 
+                AND on_hand > 0
+                AND (
+                    LOWER(item_name) LIKE '%' || LOWER(:search_term) || '%' OR
+                    LOWER(u_description) LIKE '%' || LOWER(:search_term) || '%'
+                )
+                ORDER BY on_hand DESC
+                LIMIT 10
+                """),
+                {"search_term": product_name}
+            ).fetchall()
+
+            if simple_results:
+                logger.info(f"✅ Recherche simple trouvée: {len(simple_results)} résultats")
+                formatted_results: List[Dict[str, Any]] = []
+                for row in simple_results:
+                    formatted_results.append({
+                        "ItemCode": row.item_code,
+                        "ItemName": row.item_name,
+                        "U_Description": row.u_description or "",
+                        "AvgPrice": float(row.avg_price or 0),
+                        "OnHand": int(row.on_hand or 0),
+                        "QuantityOnStock": int(row.on_hand or 0),
+                        "ItemsGroupCode": row.items_group_code or "",
+                        "Manufacturer": row.manufacturer or "",
+                        "SalesUnit": row.sales_unit or "UN",
+                        "source": "local_db_simple",
+                        "relevance_score": 1.0
+                    })
+                return formatted_results
             with SessionLocal() as session:
                 result = session.execute(
                     text("""
@@ -4077,7 +4112,7 @@ class DevisWorkflow:
         return []
 
     async def _search_local_fuzzy(self, product_name: str) -> List[Dict[str, Any]]:
-        """Recherche fuzzy locale avec PostgreSQL pg_trgm"""
+        """Recherche fuzzy locale - Version compatible sans pg_trgm"""
         try:
             from sqlalchemy import create_engine, text
             from sqlalchemy.orm import sessionmaker
@@ -4088,25 +4123,31 @@ class DevisWorkflow:
             engine = create_engine(db_url, pool_pre_ping=True)
             SessionLocal = sessionmaker(bind=engine)
             with SessionLocal() as session:
-                # Vérification disponibilité extension pg_trgm
-                try:
-                    session.execute(text("SELECT 1 WHERE pg_extension_exists('pg_trgm')")).fetchone()
-                except Exception:
-                    logger.warning("Extension pg_trgm non disponible, utilisation fallback")
-                    return await self._search_local_fallback(product_name)
+                # Recherche par sous-chaînes multiples sans pg_trgm
+                search_terms = product_name.lower().split()
+                where_clauses = []
+                params = {"name": product_name}
+                
+                for i, term in enumerate(search_terms[:3]):  # Limite à 3 termes
+                    if len(term) > 2:  # Ignore les termes trop courts
+                        params[f"term_{i}"] = f"%{term}%"
+                        where_clauses.append(f"(LOWER(item_name) LIKE :term_{i} OR LOWER(u_description) LIKE :term_{i})")
+                
+                if not where_clauses:
+                    where_clauses = ["LOWER(item_name) LIKE '%' || LOWER(:name) || '%'"]
+                
                 results = session.execute(
-                    text("""
+                    text(f"""
                     SELECT item_code, item_name, u_description, avg_price, on_hand,
-                        items_group_code, manufacturer, sales_unit,
-                        similarity(item_name, :name) as sim_score
+                        items_group_code, manufacturer, sales_unit
                     FROM produits_sap 
                     WHERE valid = true 
                     AND on_hand > 0
-                    AND similarity(item_name, :name) > 0.2
-                    ORDER BY sim_score DESC, on_hand DESC
-                    LIMIT 5
+                    AND ({' OR '.join(where_clauses)})
+                    ORDER BY on_hand DESC, LENGTH(item_name) ASC
+                    LIMIT 10
                     """),
-                    {"name": product_name}
+                    params
                 ).fetchall()
                 formatted_results: List[Dict[str, Any]] = []
                 for row in results or []:
