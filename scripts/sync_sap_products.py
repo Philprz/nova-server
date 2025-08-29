@@ -154,7 +154,12 @@ class SAPProductSyncer:
                 
                 # Truncate et réinsertion complète pour éviter doublons
                 session.execute(text("TRUNCATE TABLE produits_sap RESTART IDENTITY"))
+                 # Insertion via modèle SQLAlchemy pour plus de sécurité
+                from models.database_models import ProduitsSAP
                 
+                # Truncate via requête directe plus sûre
+                session.execute(text("DELETE FROM produits_sap"))
+                session.commit()
                 insert_count = 0
                 for product in products:
                     # Normalisation données
@@ -168,9 +173,14 @@ class SAPProductSyncer:
                         'manufacturer': product.get('Manufacturer', ''),
                         'bar_code': product.get('BarCode', ''),
                         'valid': product.get('Valid') == 'Y',
-                        'sales_unit': product.get('SalesUnit', 'UN')
+                        'sales_unit': product.get('SalesUnit', 'UN'),
+                        'created_at': datetime.now(),
+                        'updated_at': datetime.now()
                     }
-                    
+                    # Insertion via SQLAlchemy ORM
+                    produit = ProduitsSAP(**normalized_product)
+                    session.add(produit)
+                    insert_count += 1
                     # Insertion
                     session.execute(
                         text("""
