@@ -38,7 +38,7 @@ class SAPProductSyncer:
         
         # Configuration SAP session
         self.session_id = None
-        self.http_client = httpx.AsyncClient(timeout=30.0, verify=False)
+        self.http_client = httpx.AsyncClient(timeout=30.0, verify=False, http2=False)
         
         # Configuration PostgreSQL
         self.engine = create_engine(self.db_url)
@@ -89,7 +89,6 @@ class SAPProductSyncer:
                     params={
                         "$skip": skip,
                         "$top": batch_size,
-                        "$select": "ItemCode,ItemName,U_Description,QuantityOnStock,ItemsGroupCode,Manufacturer,BarCode,Valid,SalesUnit",
                         "$filter": "Valid eq 'Y'"
                     },
                     headers={"Cookie": f"B1SESSION={self.session_id}"}
