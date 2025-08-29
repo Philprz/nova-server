@@ -11,7 +11,8 @@ from typing import Dict, List, Any
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from dotenv import load_dotenv
-
+# Import des modèles de données
+from models.database_models import ProduitsSAP
 # Configuration logging
 logging.basicConfig(
     level=logging.INFO,
@@ -143,7 +144,7 @@ class SAPProductSyncer:
     
     def sync_products_to_database(self, products: List[Dict[str, Any]]) -> int:
         """Synchronisation produits vers PostgreSQL (purge + insert batch via ORM)"""
-        from models.database_models import ProduitsSAP  # import local pour éviter cycles
+        from models.database_models import ProduitsSAP  # import local pour éviter les cycles
 
         def to_float(v, default=0.0):
             try:
@@ -159,6 +160,7 @@ class SAPProductSyncer:
                 return default
 
         now = datetime.now()
+        products = products or []
 
         with self.SessionLocal() as session:
             try:
@@ -171,34 +173,35 @@ class SAPProductSyncer:
                         "Table produits_sap manquante - exécutez 'alembic upgrade head'"
                     )
 
-                # 2) Purge (DELETE pour compatibilité)
+                # 2) Purge (DELETE pour compatibilité FK)
                 session.execute(text("DELETE FROM produits_sap"))
 
                 # 3) Préparer le batch d’objets ORM
                 batch = []
-                for p in products or []:
+                for p in products:
                     normalized = {
-                        "item_code":         p.get("ItemCode", "") or "",
-                        "item_name":         p.get("ItemName", "") or "",
-                        "u_description":     p.get("U_Description", "") or "",
-                        "avg_price":         to_float(p.get("AvgPrice"), 0.0),
-                        "on_hand":           to_int(p.get("QuantityOnStock"), 0),
-                        "items_group_code":  p.get("ItemsGroupCode", "") or "",
-                        "manufacturer":      p.get("Manufacturer", "") or "",
-                        "bar_code":          p.get("BarCode", "") or "",
-                        "valid":             (p.get("Valid") in ("Y", "y", True)),
-                        "sales_unit":        p.get("SalesUnit", "UN") or "UN",
-                        "created_at":        now,
-                        "updated_at":        now,
+                        "item_code":        (p.get("ItemCode") or "").strip(),
+                        "item_name":        (p.get("ItemName") or "").strip(),
+                        "u_description":    (p.get("U_Description") or "").strip(),
+                        "avg_price":        to_float(p.get("AvgPrice"), 0.0),
+                        "on_hand":          to_int(p.get("QuantityOnStock"), 0),
+                        "items_group_code": (p.get("ItemsGroupCode") or "").strip(),
+                        "manufacturer":     (p.get("Manufacturer") or "").strip(),
+                        "bar_code":         (p.get("BarCode") or "").strip(),
+                        "valid":            (p.get("Valid") in ("Y", "y", True)),
+                        "sales_unit":       (p.get("SalesUnit") or "UN"),
+                        "created_at":       now,
+                        "updated_at":       now,
                     }
                     batch.append(ProduitsSAP(**normalized))
 
                 # 4) Insertion en une passe
+                insert_count = 0
                 if batch:
                     session.bulk_save_objects(batch)
+                    insert_count = len(batch)
 
                 session.commit()
-                insert_count = len(batch)
                 logger.info(f"✅ {insert_count} produits synchronisés en base")
                 return insert_count
 
