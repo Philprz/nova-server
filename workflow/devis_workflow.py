@@ -24,7 +24,7 @@ from workflow.client_creation_workflow import client_creation_workflow
 from services.price_engine import PriceEngineService
 from services.cache_manager import referential_cache
 from workflow.validation_workflow import SequentialValidator
-
+from services.local_product_search import LocalProductSearchService
 # Configuration sécurisée pour Windows
 if sys.platform == "win32":
     os.environ["PYTHONIOENCODING"] = "utf-8"
@@ -110,6 +110,8 @@ class DevisWorkflow:
 
         # Initialisation des moteurs
         self.suggestion_engine = SuggestionEngine()
+        # Service recherche locale produits
+        self.local_product_service = LocalProductSearchService()
         self.client_suggestions = None
         self.product_suggestions = []
 
@@ -3813,76 +3815,401 @@ class DevisWorkflow:
             return "écran"
         else:
             return "général"
+
     async def _smart_product_search(self, product_name: str, product_code: str = "") -> Dict[str, Any]:
-        """Recherche produits avec critères intelligents - Format standardisé"""
-        
+        """Recherche produits avec critères intelligents - VERSION OPTIMISÉE AVEC BASE LOCALE"""
+        start_time = datetime.now()
+        logger.info(f"🔍 Recherche optimisée démarrée: '{product_name}' (code: '{product_code}')")
+
         try:
-            # Construire les critères à partir des paramètres
+            # Garde simple
+            if not (product_name or product_code):
+                return {"found": False, "products": [], "method": "no_input", "error": "Aucun critère fourni"}
+
+            # Construire les critères
             criteria = {
                 "product_name": product_name,
                 "product_code": product_code,
-                "category": self._extract_category_from_name(product_name),
-                "keywords": self._extract_product_keywords(product_name)
+                "category": self._extract_category_from_name(product_name) if product_name else "général",
+                "keywords": self._extract_product_keywords(product_name) if product_name else []
             }
-            
-            # 1. Recherche exacte par code si fourni
+
+            # ===== ÉTAPE 1: RECHERCHE LOCALE PRIORITAIRE (< 500ms) =====
+
+            # 1.1 Recherche exacte par code si fourni
             if product_code:
-                exact_result = await self.mcp_connector.call_sap_mcp("sap_read", {
-                    "endpoint": f"/Items('{product_code}')",
-                    "method": "GET"
-                })
-                if "error" not in exact_result and exact_result.get("ItemCode"):
-                    return {"found": True, "products": [exact_result], "method": "exact_code"}
-            
-            # 2. Recherche par mots-clés
-            keywords = criteria.get("keywords", [])
-            all_results = []
-            
-            for keyword in keywords[:3]:  # Limiter à 3 mots-clés
                 try:
-                    search_result = await self.mcp_connector.call_sap_mcp("sap_read", {
-                        "endpoint": f"/Items?$filter=contains(tolower(ItemName),tolower('{keyword}'))&$top=5",
+                    local_exact = await self._search_local_by_code(product_code)
+                    if local_exact:
+                        duration_ms = (datetime.now() - start_time).total_seconds() * 1000
+                        logger.info(f"✅ Produit trouvé en local par code en {duration_ms:.0f}ms: {local_exact.get('ItemName')}")
+                        return {"found": True, "products": [local_exact], "method": "exact_code_local", "duration_ms": duration_ms}
+                except Exception as e:
+                    logger.warning(f"⚠️ Erreur recherche locale par code: {str(e)}")
+
+            # 1.2 Recherche intelligente locale par nom
+            if product_name:
+                try:
+                    local_smart_results = await self._search_local_intelligent(product_name, criteria)
+                    if local_smart_results:
+                        # dédup locale par ItemCode
+                        seen = set()
+                        dedup = []
+                        for it in local_smart_results:
+                            code = it.get("ItemCode")
+                            if code and code not in seen:
+                                seen.add(code)
+                                dedup.append(it)
+                        duration_ms = (datetime.now() - start_time).total_seconds() * 1000
+                        logger.info(f"✅ {len(dedup)} produits trouvés en local en {duration_ms:.0f}ms")
+                        return {"found": True, "products": dedup[:10], "method": "intelligent_local", "duration_ms": duration_ms}
+                except Exception as e:
+                    logger.warning(f"⚠️ Erreur recherche locale intelligente: {str(e)}")
+
+            # 1.3 Recherche fuzzy locale
+            if product_name:
+                try:
+                    local_fuzzy_results = await self._search_local_fuzzy(product_name)
+                    if local_fuzzy_results:
+                        # dédup
+                        seen = set()
+                        dedup = []
+                        for it in local_fuzzy_results:
+                            code = it.get("ItemCode")
+                            if code and code not in seen:
+                                seen.add(code)
+                                dedup.append(it)
+                        duration_ms = (datetime.now() - start_time).total_seconds() * 1000
+                        logger.info(f"✅ {len(dedup)} produits trouvés en fuzzy local en {duration_ms:.0f}ms")
+                        return {"found": True, "products": dedup[:5], "method": "fuzzy_local", "duration_ms": duration_ms}
+                except Exception as e:
+                    logger.warning(f"⚠️ Erreur recherche fuzzy locale: {str(e)}")
+
+            # ===== ÉTAPE 2: FALLBACK SAP (LIMITÉ POUR ÉVITER BOUCLES) =====
+            logger.warning("🔄 Recherche locale vide - Activation fallback SAP limité")
+
+            # 2.1 Recherche exacte par code SAP
+            if product_code:
+                try:
+                    exact_result = await self.mcp_connector.call_sap_mcp("sap_read", {
+                        "endpoint": f"/Items('{product_code}')",
                         "method": "GET"
                     })
-                    
-                    if "error" not in search_result and search_result.get("value"):
-                        all_results.extend(search_result["value"])
+                    if "error" not in exact_result and exact_result.get("ItemCode"):
+                        duration_ms = (datetime.now() - start_time).total_seconds() * 1000
+                        logger.info(f"✅ Produit trouvé via SAP par code: {exact_result.get('ItemName')}")
+                        return {"found": True, "products": [exact_result], "method": "exact_code_sap", "duration_ms": duration_ms}
                 except Exception as e:
-                    logger.warning(f"Erreur recherche '{keyword}': {str(e)}")
-                    continue
-            # Annuler le timeout si recherche terminée
-            if search_timeout and not search_timeout.done():
-                search_timeout.cancel()
-            # 3. Retourner résultats ou échec
-            if all_results:
-                # Dédupliquer par ItemCode
-                unique_results = {item.get("ItemCode"): item for item in all_results if item.get("ItemCode")}
-                final_results = list(unique_results.values())[:5]  # Top 5
-                
-                return {
-                    "found": True,
-                    "products": final_results,
-                    "method": "keyword_search"
-                }
-            
-            # Aucun résultat trouvé
-            return {
-                "found": False,
-                "products": [],
-                "method": "no_match",
-                "error": f"Aucun produit trouvé pour '{product_name}'"
-            }
-            
+                    logger.warning(f"⚠️ Erreur recherche SAP par code: {str(e)}")
+
+            # 2.2 Recherche SAP par nom (LIMITÉE À 1 TENTATIVE)
+            if product_name:
+                try:
+                    search_timeout = asyncio.create_task(asyncio.sleep(15))  # 15s max
+                    search_task = asyncio.create_task(
+                        self.mcp_connector.call_mcp(
+                            "sap_mcp",
+                            "sap_search",
+                            {"query": product_name, "entity_type": "Items", "limit": 3}
+                        )
+                    )
+                    done, pending = await asyncio.wait([search_task, search_timeout], return_when=asyncio.FIRST_COMPLETED)
+                    for task in pending:
+                        task.cancel()
+
+                    if search_task in done:
+                        search_result = search_task.result()
+                        if search_result and search_result.get("success") and search_result.get("results"):
+                            results = search_result["results"][:3]
+                            duration_ms = (datetime.now() - start_time).total_seconds() * 1000
+                            logger.info(f"✅ Produit trouvé via SAP par nom ({len(results)} résultats)")
+                            return {"found": True, "products": results, "method": "name_search_sap", "duration_ms": duration_ms}
+                    else:
+                        logger.warning(f"⏰ Timeout recherche SAP pour '{product_name}' (15s dépassées)")
+                except Exception as e:
+                    logger.warning(f"⚠️ Erreur recherche SAP par nom: {str(e)}")
+
+            # 2.3 Recherche SAP alternative avec termes anglais (DERNIÈRE CHANCE)
+            if product_name:
+                try:
+                    english_terms = self._get_english_search_terms(product_name)
+                    for term in english_terms[:2]:
+                        logger.info(f"🔍 Recherche SAP alternative: {term}")
+                        alt_task = asyncio.create_task(
+                            self.mcp_connector.call_mcp(
+                                "sap_mcp",
+                                "sap_search",
+                                {"search_term": term, "search_fields": ["ItemName", "U_Description"], "limit": 2}
+                            )
+                        )
+                        try:
+                            alt_result = await asyncio.wait_for(alt_task, timeout=10.0)
+                            if alt_result and alt_result.get("success") and alt_result.get("results"):
+                                results = alt_result["results"][:2]
+                                duration_ms = (datetime.now() - start_time).total_seconds() * 1000
+                                logger.info(f"✅ Produit trouvé via terme alternatif '{term}'")
+                                return {"found": True, "products": results, "method": f"alternative_{term}", "duration_ms": duration_ms}
+                        except asyncio.TimeoutError:
+                            logger.warning(f"⏰ Timeout recherche alternative '{term}' (10s)")
+                            alt_task.cancel()
+                            continue
+                        except Exception as e:
+                            logger.warning(f"⚠️ Erreur recherche alternative '{term}': {str(e)}")
+                            continue
+                except Exception as e:
+                    logger.warning(f"⚠️ Erreur recherche termes alternatifs: {str(e)}")
+
+            # ===== AUCUN RÉSULTAT TROUVÉ =====
+            duration_ms = (datetime.now() - start_time).total_seconds() * 1000
+            logger.warning(f"❌ Aucun produit trouvé pour '{product_name}' après {duration_ms:.0f}ms")
+            return {"found": False, "products": [], "method": "no_match", "searched_criteria": criteria, "duration_ms": duration_ms}
+
         except Exception as e:
-            logger.error(f"❌ Erreur recherche suggestions pour '{product_name}': {str(e)}")
-            # Retour d'erreur définitif pour éviter boucle infinie
-            return {
-                "found": False,
-                "error": f"Erreur technique lors de la recherche: {str(e)}",
-                "requires_manual_search": True,
-                "original_request": product_name,
-                "timeout_reached": True
-            }
+            duration_ms = (datetime.now() - start_time).total_seconds() * 1000
+            logger.error(f"❌ Erreur critique _smart_product_search après {duration_ms:.0f}ms: {str(e)}")
+            return {"found": False, "products": [], "method": "error", "error": str(e), "duration_ms": duration_ms}
+
+    async def _search_local_by_code(self, item_code: str) -> Optional[Dict[str, Any]]:
+        """Recherche exacte par ItemCode en base locale PostgreSQL"""
+        try:
+            from sqlalchemy import create_engine, text
+            from sqlalchemy.orm import sessionmaker
+            db_url = os.getenv("DATABASE_URL")
+            if not db_url:
+                logger.warning("DATABASE_URL manquant pour recherche locale par code")
+                return None
+            engine = create_engine(db_url, pool_pre_ping=True)
+            SessionLocal = sessionmaker(bind=engine)
+            with SessionLocal() as session:
+                result = session.execute(
+                    text("""
+                    SELECT item_code, item_name, u_description, avg_price, on_hand,
+                        items_group_code, manufacturer, sales_unit
+                    FROM produits_sap 
+                    WHERE item_code = :code AND valid = true
+                    """),
+                    {"code": item_code}
+                ).fetchone()
+                if result:
+                    return {
+                        "ItemCode": result.item_code,
+                        "ItemName": result.item_name,
+                        "U_Description": result.u_description or "",
+                        "AvgPrice": float(result.avg_price or 0),
+                        "OnHand": int(result.on_hand or 0),
+                        "QuantityOnStock": int(result.on_hand or 0),
+                        "ItemsGroupCode": result.items_group_code or "",
+                        "Manufacturer": result.manufacturer or "",
+                        "SalesUnit": result.sales_unit or "UN",
+                        "source": "local_db"
+                    }
+        except Exception as e:
+            logger.error(f"❌ Erreur recherche locale par code: {str(e)}")
+        return None
+
+    async def _search_local_intelligent(self, product_name: str, criteria: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Recherche intelligente locale avec LLM et SQL optimisé"""
+        try:
+            from sqlalchemy import create_engine, text
+            from sqlalchemy.orm import sessionmaker
+
+            keywords = criteria.get("keywords", []) or []
+            category = criteria.get("category", "autre") or "autre"
+
+            # Conditions SQL
+            search_conditions = ["(LOWER(item_name) LIKE :search_term OR LOWER(u_description) LIKE :search_term)"]
+            params = {"search_term": f"%{product_name.lower()}%"}
+
+            for i, keyword in enumerate(keywords[:3]):
+                param_name = f"keyword_{i}"
+                search_conditions.append(f"(LOWER(item_name) LIKE :{param_name} OR LOWER(u_description) LIKE :{param_name})")
+                params[param_name] = f"%{keyword.lower()}%"
+
+            if category != "autre":
+                search_conditions.append("(LOWER(item_name) LIKE :category OR LOWER(u_description) LIKE :category)")
+                params["category"] = f"%{category.lower()}%"
+
+            query = f"""
+            SELECT item_code, item_name, u_description, avg_price, on_hand,
+                items_group_code, manufacturer, sales_unit,
+                (
+                    CASE 
+                    WHEN LOWER(item_name) LIKE :search_term THEN 100
+                    WHEN LOWER(u_description) LIKE :search_term THEN 80
+                    WHEN :category IS NOT NULL AND LOWER(item_name) LIKE :category THEN 60
+                    ELSE 40
+                    END
+                ) as relevance_score
+            FROM produits_sap 
+            WHERE valid = true 
+            AND on_hand > 0
+            AND ({' OR '.join(search_conditions)})
+            ORDER BY relevance_score DESC, on_hand DESC
+            LIMIT 10
+            """
+
+            db_url = os.getenv("DATABASE_URL")
+            if not db_url:
+                logger.warning("DATABASE_URL manquant pour recherche locale intelligente")
+                return []
+            engine = create_engine(db_url, pool_pre_ping=True)
+            SessionLocal = sessionmaker(bind=engine)
+            with SessionLocal() as session:
+                results = session.execute(text(query), params).fetchall()
+                formatted_results: List[Dict[str, Any]] = []
+                for row in results or []:
+                    formatted_results.append({
+                        "ItemCode": row.item_code,
+                        "ItemName": row.item_name,
+                        "U_Description": row.u_description or "",
+                        "AvgPrice": float(row.avg_price or 0),
+                        "OnHand": int(row.on_hand or 0),
+                        "QuantityOnStock": int(row.on_hand or 0),
+                        "ItemsGroupCode": row.items_group_code or "",
+                        "Manufacturer": row.manufacturer or "",
+                        "SalesUnit": row.sales_unit or "UN",
+                        "source": "local_db",
+                        "relevance_score": float(row.relevance_score or 0.0)
+                    })
+                return formatted_results
+        except Exception as e:
+            logger.error(f"❌ Erreur recherche locale intelligente: {str(e)}")
+        return []
+
+    async def _search_local_fuzzy(self, product_name: str) -> List[Dict[str, Any]]:
+        """Recherche fuzzy locale avec PostgreSQL pg_trgm"""
+        try:
+            from sqlalchemy import create_engine, text
+            from sqlalchemy.orm import sessionmaker
+            db_url = os.getenv("DATABASE_URL")
+            if not db_url:
+                logger.warning("DATABASE_URL manquant pour recherche fuzzy locale")
+                return []
+            engine = create_engine(db_url, pool_pre_ping=True)
+            SessionLocal = sessionmaker(bind=engine)
+            with SessionLocal() as session:
+                results = session.execute(
+                    text("""
+                    SELECT item_code, item_name, u_description, avg_price, on_hand,
+                        items_group_code, manufacturer, sales_unit,
+                        similarity(item_name, :name) as sim_score
+                    FROM produits_sap 
+                    WHERE valid = true 
+                    AND on_hand > 0
+                    AND similarity(item_name, :name) > 0.2
+                    ORDER BY sim_score DESC, on_hand DESC
+                    LIMIT 5
+                    """),
+                    {"name": product_name}
+                ).fetchall()
+                formatted_results: List[Dict[str, Any]] = []
+                for row in results or []:
+                    formatted_results.append({
+                        "ItemCode": row.item_code,
+                        "ItemName": row.item_name,
+                        "U_Description": row.u_description or "",
+                        "AvgPrice": float(row.avg_price or 0),
+                        "OnHand": int(row.on_hand or 0),
+                        "QuantityOnStock": int(row.on_hand or 0),
+                        "ItemsGroupCode": row.items_group_code or "",
+                        "Manufacturer": row.manufacturer or "",
+                        "SalesUnit": row.sales_unit or "UN",
+                        "source": "local_db",
+                        "similarity_score": float(row.sim_score or 0.0)
+                    })
+                return formatted_results
+        except Exception as e:
+            logger.error(f"❌ Erreur recherche fuzzy locale: {str(e)}")
+        return []
+
+    def _extract_product_keywords(self, product_name: str) -> List[str]:
+        """Extrait les mots-clés intelligents d'un nom de produit"""
+        import unicodedata
+
+        def _normalize(s: str) -> str:
+            s_no_accents = ''.join(ch for ch in unicodedata.normalize('NFD', s) if not unicodedata.combining(ch))
+            return s_no_accents.lower()
+
+        product_lower = product_name.lower()
+        product_norm = _normalize(product_name)
+
+        search_terms: List[str] = []
+        seen = set()
+
+        def _add(term: str) -> None:
+            t = term.strip()
+            if not t:
+                return
+            key = _normalize(t)
+            if key not in seen:
+                seen.add(key)
+                search_terms.append(t)
+
+        translations = {
+            "imprimante": ["laser printer", "inkjet printer"],
+            "ordinateur": ["workstation", "laptop"],
+            "écran": ["monitor", "display"],
+            "clavier": ["keyboard", "mechanical keyboard"],
+            "souris": ["wireless mouse", "optical mouse"],
+            "scanner": ["document scanner", "scan"],
+            "laser": ["laser printer", "LaserJet"],
+            "couleur": ["color", "colour"],
+            "noir": ["monochrome", "mono"],
+            "ppm": ["pages per minute", "page/min"],
+        }
+
+        for french_term, english_terms in translations.items():
+            fr_norm = _normalize(french_term)
+            if fr_norm in product_norm:
+                for t in english_terms[:2]:
+                    _add(t)
+
+        _add(product_name)
+
+        numbers = re.findall(r"\d+", product_lower)
+        for num in numbers:
+            try:
+                val = int(num)
+            except ValueError:
+                continue
+            if 5 < val < 1000:
+                _add(f"{num}ppm")
+                _add(f"{num} ppm")
+                _add(f"{num} pages")
+
+        return search_terms[:6]
+
+    def _get_english_search_terms(self, product_name: str) -> List[str]:
+        """Génère des termes de recherche anglais pour SAP"""
+        product_lower = product_name.lower()
+        translations = {
+            "imprimante": ["printer", "Printer", "PRINTER"],
+            "ordinateur": ["computer", "Computer", "PC"],
+            "écran": ["monitor", "Monitor", "screen"],
+            "clavier": ["keyboard", "Keyboard"],
+            "souris": ["mouse", "Mouse"],
+            "scanner": ["scanner", "Scanner"]
+        }
+        search_terms: List[str] = []
+        for french_term, english_terms in translations.items():
+            if french_term in product_lower:
+                search_terms.extend(english_terms)
+                break
+        search_terms.append(product_name)
+        return search_terms[:3]
+
+    def _extract_category_from_name(self, product_name: str) -> str:
+        """Extrait la catégorie d'un nom de produit"""
+        product_lower = product_name.lower()
+        if any(term in product_lower for term in ["imprimante", "printer"]):
+            return "imprimante"
+        elif any(term in product_lower for term in ["ordinateur", "pc", "computer"]):
+            return "ordinateur"
+        elif any(term in product_lower for term in ["écran", "monitor", "screen"]):
+            return "écran"
+        else:
+            return "général"
+
             
     def _calculate_product_match_score(self, product: Dict, criteria: Dict) -> float:
         """Calcule score de correspondance produit/critères"""
