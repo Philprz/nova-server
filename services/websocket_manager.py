@@ -146,10 +146,19 @@ class WebSocketManager:
         
         # Validate payload
         try:
+            # Assurer la présence des champs requis
+            if 'task_id' not in message:
+                message['task_id'] = task_id
+            if 'type' not in message:
+                message['type'] = 'task_update'
+                
             validated = TaskUpdateModel(**{k: message[k] for k in ["type", "task_id", "timestamp"]})
             payload = {**validated.dict(), **{k: v for k, v in message.items() if k not in validated.__fields__}}
         except ValidationError as e:
-            logger.error("Payload invalide pour broadcast", exc_info=e)
+            logger.error(f"Payload invalide pour broadcast: {e}", extra={"task_id": task_id})
+            return
+        except Exception as e:
+            logger.error(f"Erreur validation payload: {e}", extra={"task_id": task_id})
             return
 
         # Send and instrument

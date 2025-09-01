@@ -226,7 +226,6 @@ class DevisWorkflow:
             response["context"] = context
 
         return response
-
     # 🔧 NOUVELLE MÉTHODE PRINCIPALE AVEC VALIDATION SÉQUENTIELLE
     async def process_quote_request(self, user_prompt: str, draft_mode: bool = False) -> Dict[str, Any]:
         """
