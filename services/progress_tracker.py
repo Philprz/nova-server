@@ -363,10 +363,23 @@ class ProgressTracker:
             return False
 
         task = self.active_tasks[task_id]
-        task.complete_task(result)
 
+        # Sécuriser la complétion de la tâche
+        try:
+            task.complete_task(result)
+        except Exception as e:
+            logger.error(f"❌ Échec complete_task({task_id}): {e}")
+            # On continue quand même l’archivage minimal
+            # (option: return False si tu veux un échec strict)
+        
         # 🔧 MODIFICATION : Sauvegarder le résultat dans l'historique
-        task_data = task.get_overall_progress()
+        try:
+            task_data = task.get_overall_progress()
+        except Exception as e:
+            logger.error(f"❌ get_overall_progress({task_id}) a échoué: {e}")
+            task_data = {"task_id": task_id, "progress": None}
+        # s'assurer d'une copie indépendante
+        task_data = dict(task_data) if isinstance(task_data, dict) else {"task_id": task_id}
         task_data["result"] = result  # Ajouter le résultat
         self.completed_tasks.append(task_data)
 
@@ -376,27 +389,53 @@ class ProgressTracker:
 
         # Supprimer des tâches actives
         del self.active_tasks[task_id]
-        # 🔧 CORRECTION CRITIQUE: Notification WebSocket de completion
+        
+        # 🔧 CORRECTION CRITIQUE: Notification WebSocket de completion avec délai de fermeture
         try:
             from services.websocket_manager import websocket_manager
+            from datetime import datetime
             import asyncio
-            
-            # Créer la tâche de notification sans bloquer
-            asyncio.create_task(websocket_manager.broadcast_to_task(task_id, {
+            import threading
+
+            payload = {
                 "type": "completion",
                 "task_id": task_id,
                 "data": result,
                 "status": "completed",
                 "timestamp": datetime.now().isoformat()
-            }))
-            logger.info(f"🔔 Notification WebSocket de completion envoyée pour {task_id}")
-            # 🔧 FERMETURE PROPRE DES CONNEXIONS WEBSOCKET
-            asyncio.create_task(websocket_manager.close_task_connections(task_id))
-            logger.info(f"🔌 Fermeture des connexions WebSocket pour {task_id}")
+            }
+
+            async def _notify_and_close():
+                try:
+                    await websocket_manager.broadcast_to_task(task_id, payload)
+                    logger.info(f"🔔 Notification WebSocket de completion envoyée pour {task_id}")
+                except Exception as e:
+                    logger.error(f"Erreur broadcast WebSocket completion: {e}")
+                    return
+                try:
+                    await asyncio.sleep(2.0)  # Laisser le client traiter
+                    await websocket_manager.close_task_connections(task_id)
+                    logger.info(f"🔌 Fermeture des connexions WebSocket pour {task_id}")
+                except Exception as e:
+                    logger.error(f"Erreur fermeture WebSocket pour {task_id}: {e}")
+
+            # Fire-and-forget robuste (boucle existante ou non)
+            def _spawn(coro):
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(coro)
+                except RuntimeError:
+                    # Pas de boucle en cours: lancer un thread dédié avec asyncio.run
+                    threading.Thread(target=lambda: asyncio.run(coro), daemon=True).start()
+
+            _spawn(_notify_and_close())
+
         except Exception as e:
             logger.error(f"Erreur notification WebSocket completion: {e}")
+        
         logger.info(f"✅ Tâche {task_id} déplacée vers l'historique avec résultat")
         return True
+
     
     def fail_task(self, task_id: str, error: str):
         """Termine une tâche en erreur"""
