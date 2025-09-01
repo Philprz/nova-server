@@ -1348,14 +1348,14 @@ class DevisWorkflow:
             self._track_step_progress("sync_salesforce", 95, "Salesforce synchronisé")
             
             # Étape 4.4: Finalisation
-            self._track_step_complete("sync_salesforce", "Synchronisation terminée")
-            self._track_step_start("quote_finalized", "Finalisation...")
+            self._track_step_complete("sync_salesforce", "☁️ Synchronisation terminée")
+            self._track_step_start("create_quote", "🎯 Création du devis")
             
             # Construire la réponse finale
             response = self._build_response()
             response["task_id"] = self.task_id  # Ajouter l'ID de tâche
             
-            self._track_step_complete("quote_finalized", "Devis généré avec succès")
+            self._track_step_complete("create_quote", "✅ Devis créé avec succès")
             
             # Terminer la tâche
             if self.current_task:

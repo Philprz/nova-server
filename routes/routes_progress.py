@@ -435,7 +435,7 @@ async def get_task_validation(task_id: str):
                 "has_validation": True,
                 "validation_data": historical_task["validation_data"]
             }
-        raise HTTPException(status_code=404, detail="Tâche introuvable")
+        return {"has_validation": False, "message": "Aucune validation en attente"}
     
     if task.validation_data:
         # Vérifier aussi les messages WebSocket en attente
@@ -455,7 +455,11 @@ async def get_task_validation(task_id: str):
                 "validation_data": pending_validations
             }
     
-    return {"has_validation": False}
+    # Pas de validation en attente - réponse normale
+    return {
+        "has_validation": False,
+        "message": "Aucune validation requise pour cette tâche"
+    }
 
 @router.post("/task/{task_id}/validation/{step_id}")
 async def submit_validation(task_id: str, step_id: str, user_response: Dict[str, Any]):
