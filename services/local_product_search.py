@@ -206,11 +206,14 @@ class LocalProductSearchService:
             "ItemName": row.item_name,
             "U_Description": row.u_description or "",
             "AvgPrice": float(row.avg_price or 0),
+            "price": float(row.avg_price or 0),  # Propagation prix pour total
+            "unit_price": float(row.avg_price or 0),  # Alias compatibilité
             "OnHand": int(row.on_hand or 0),
-            "QuantityOnStock": int(row.on_hand or 0),  # Alias pour compatibilité
+            "QuantityOnStock": int(row.on_hand or 0),
             "ItemsGroupCode": row.items_group_code or "",
             "Manufacturer": row.manufacturer or "",
             "SalesUnit": row.sales_unit or "UN",
+            "currency": "EUR",  # Devise pour calculs
             "source": "local_db"
         }
 

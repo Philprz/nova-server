@@ -7448,120 +7448,340 @@ class DevisWorkflow:
                 "error": f"Exception: {str(e)}"
             }
     
+
     async def _sync_quote_to_systems(self, quote_result: Dict, target: str = None) -> Dict[str, Any]:
         """
-        Synchronisation vers SAP/Salesforce - VERSION PRODUCTION
+        Synchronisation vers SAP/Salesforce - VERSION PRODUCTION COMPLÈTE
+        
+        Args:
+            quote_result: Résultat contenant les données de devis consolidées
+            target: Système cible spécifique ('sap', 'salesforce') ou None pour les deux
+            
+        Returns:
+            Dict avec statut de synchronisation détaillé
         """
         try:
+            # === VALIDATIONS INITIALES ===
             quote_data = quote_result.get("quote_data", {})
-            # Gestion du paramètre target pour synchronisation spécifique
+            
+            # Validation du paramètre target
             if target and target not in ("sap", "salesforce"):
+                logger.error(f"❌ Target invalide: {target}")
                 return {
-                "status": "error",
-                "message": f"Target '{target}' non supporté. Utilisez 'sap' ou 'salesforce'"
+                    "status": "error",
+                    "message": f"Target '{target}' non supporté. Utilisez 'sap' ou 'salesforce'"
                 }
+            
+            # Validation des données de devis
             if not quote_data:
+                logger.error("❌ Aucune donnée de devis à synchroniser")
                 return {
                     "status": "error",
                     "message": "Pas de données de devis à synchroniser"
                 }
             
             quote_id = quote_data.get("quote_id")
-            logger.info(f"💾 Synchronisation production du devis {quote_id}")
+            if not quote_id:
+                logger.error("❌ Quote ID manquant")
+                return {
+                    "status": "error", 
+                    "message": "Quote ID manquant dans les données"
+                }
             
-            # === PRÉPARATION DONNÉES SAP ===
+            # === FLAG PRODUCTION CENTRALISÉ ===
+            NOVA_MODE = os.getenv("NOVA_MODE", "draft")
+            is_production_mode = NOVA_MODE == "production"
+            
+            if is_production_mode:
+                logger.info(f"🚀 MODE PRODUCTION - Synchronisation réelle du devis {quote_id}")
+            else:
+                logger.info(f"🎯 MODE DRAFT - Simulation synchronisation du devis {quote_id}")
+            
+            # === EXTRACTION ET VALIDATION DES DONNÉES ===
             client_data = quote_data.get("client", {})
             products_data = quote_data.get("products", [])
             
-            # Préparation structure SAP quotation_data
-            sap_quotation_data = {
-                "CardCode": client_data.get("CardCode") or client_data.get("sap_code"),
-                "CardName": client_data.get("CardName") or client_data.get("name"),
-                "DocDate": datetime.now().strftime("%Y-%m-%d"),
-                "DocDueDate": (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d"),
-                "DocumentLines": [
-                    {
-                        "ItemCode": product.get("ItemCode") or product.get("code"),
-                        "Quantity": product.get("Quantity") or product.get("quantity", 1),
-                        "UnitPrice": product.get("UnitPrice") or product.get("price", 0),
-                        "LineTotal": (product.get("UnitPrice") or product.get("price", 0)) * (product.get("Quantity") or product.get("quantity", 1))
-                    }
-                    for product in products_data
-                ]
+            # Validation données client
+            if not client_data:
+                logger.error("❌ Données client manquantes")
+                return {
+                    "status": "error",
+                    "message": "Données client manquantes pour la synchronisation"
+                }
+            # CardCode minimal pour SAP si SAP demandé
+            if (not target or target == "sap") and not (client_data.get("CardCode") or client_data.get("sap_code")):
+                logger.error("❌ Code client SAP manquant (CardCode/sap_code)")
+                return {
+                    "status": "error",
+                    "message": "Code client SAP manquant (CardCode/sap_code)"
+                }
+                
+            # Validation données produits
+            if not products_data:
+                logger.error("❌ Aucun produit à synchroniser")
+                return {
+                    "status": "error", 
+                    "message": "Aucun produit à synchroniser"
+                }
+
+            # Normalisation utilitaires internes (sans toucher à l’API externe)
+            def _to_number(v, default=0.0):
+                try:
+                    return float(v)
+                except (TypeError, ValueError):
+                    return float(default)
+
+            def _to_qty(v, default=1):
+                try:
+                    q = int(float(v))
+                    return q if q > 0 else default
+                except (TypeError, ValueError):
+                    return default
+            
+            now = datetime.now()
+            close_date_str = (now + timedelta(days=30)).strftime("%Y-%m-%d")
+            doc_date_str = now.strftime("%Y-%m-%d")
+
+            # Validation des prix produits + total calculé
+            total_amount_validation = 0.0
+            for product in products_data:
+                price = _to_number(product.get("UnitPrice", product.get("price", 0)), 0.0)
+                quantity = _to_qty(product.get("Quantity", product.get("quantity", 1)), 1)
+                if price <= 0:
+                    logger.warning(f"⚠️ Produit {product.get('ItemCode') or product.get('code') or 'UNKNOWN'} sans prix valide: {price}")
+                total_amount_validation += price * quantity
+            
+            if total_amount_validation <= 0:
+                logger.error(f"❌ Montant total invalide: {total_amount_validation}")
+                return {
+                    "status": "error",
+                    "message": f"Montant total invalide: {total_amount_validation}€"
+                }
+            
+            # === INITIALISATION DES RÉSULTATS ===
+            sync_results = {
+                "sap_sync": {
+                    "attempted": False,
+                    "success": False,
+                    "message": "Non tenté",
+                    "quote_sap_id": None,
+                    "doc_entry": None
+                },
+                "salesforce_sync": {
+                    "attempted": False,
+                    "success": False,
+                    "message": "Non tenté", 
+                    "opportunity_id": None
+                }
             }
             
             # === SYNCHRONISATION SAP ===
-            logger.info(f"📡 Appel SAP sap_create_quotation_complete")
-            sap_result = await self.mcp_connector.sap_create_quotation_complete(sap_quotation_data)
-            
-            # === PRÉPARATION DONNÉES SALESFORCE ===
-            sf_opportunity_data = {
-                "Name": f"Devis {client_data.get('name', 'Client')} - {datetime.now().strftime('%Y-%m-%d')}",
-                "AccountId": client_data.get("salesforce_id"),
-                "CloseDate": (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d"),
-                "StageName": "Quotation",
-                "Amount": quote_data.get("total_amount", 0),
-                "Description": f"Devis généré automatiquement - {quote_id}"
-            }
-            
-            sf_line_items = [
-                {
-                    "Product2Id": product.get("salesforce_id"),
-                    "Quantity": product.get("Quantity") or product.get("quantity", 1),
-                    "UnitPrice": product.get("UnitPrice") or product.get("price", 0)
+            if not target or target == "sap":
+                sync_results["sap_sync"]["attempted"] = True
+                logger.info(f"📡 Début synchronisation SAP pour {quote_id}")
+                
+                # Préparation structure SAP quotation_data
+                sap_quotation_data = {
+                    "CardCode": client_data.get("CardCode") or client_data.get("sap_code"),
+                    "CardName": client_data.get("CardName") or client_data.get("name"),
+                    "DocDate": doc_date_str,
+                    "DocDueDate": close_date_str,
+                    "Comments": f"Devis généré automatiquement NOVA - {quote_id}",
+                    "DocumentLines": []
                 }
-                for product in products_data
-                if product.get("salesforce_id")
-            ]
+                
+                # Construction des lignes de devis SAP
+                for product in products_data:
+                    item_code = product.get("ItemCode") or product.get("code")
+                    unit_price = _to_number(product.get("UnitPrice", product.get("price", 0)), 0.0)
+                    quantity = _to_qty(product.get("Quantity", product.get("quantity", 1)), 1)
+                    
+                    if not item_code:
+                        logger.warning(f"⚠️ Produit sans ItemCode ignoré: {product}")
+                        continue
+                        
+                    line_data = {
+                        "ItemCode": item_code,
+                        "Quantity": quantity,
+                        "UnitPrice": unit_price,
+                        "LineTotal": unit_price * quantity,
+                        "WarehouseCode": product.get("WarehouseCode", "01"),  # Entrepôt par défaut
+                        "VatGroup": product.get("VatGroup", "FR_VAT_20")      # TVA par défaut France
+                    }
+                    sap_quotation_data["DocumentLines"].append(line_data)
+                
+                # Validation finale des lignes SAP
+                if not sap_quotation_data["DocumentLines"]:
+                    sync_results["sap_sync"]["message"] = "Aucune ligne valide pour SAP"
+                    logger.error("❌ Aucune ligne valide pour le devis SAP")
+                else:
+                    # === APPEL SAP RÉEL OU SIMULATION ===
+                    if is_production_mode:
+                        logger.info(f"📡 Appel SAP RÉEL sap_create_quotation_complete")
+                        sap_result = await self.mcp_connector.sap_create_quotation_complete(sap_quotation_data)
+                        
+                        if sap_result.get("success"):
+                            sync_results["sap_sync"]["success"] = True
+                            sync_results["sap_sync"]["message"] = "Devis SAP créé avec succès"
+                            sync_results["sap_sync"]["quote_sap_id"] = sap_result.get("DocNum")
+                            sync_results["sap_sync"]["doc_entry"] = sap_result.get("DocEntry")
+                            logger.info(f"✅ Devis SAP créé: DocNum={sap_result.get('DocNum')}")
+                        else:
+                            sync_results["sap_sync"]["message"] = sap_result.get("error", "Erreur SAP inconnue")
+                            logger.error(f"❌ Erreur création devis SAP: {sync_results['sap_sync']['message']}")
+                    else:
+                        # MODE DRAFT - Simulation réaliste
+                        await asyncio.sleep(0.8)  # Simulation latence SAP
+                        sync_results["sap_sync"]["success"] = True
+                        sync_results["sap_sync"]["message"] = "Simulation SAP réussie (mode draft)"
+                        sync_results["sap_sync"]["quote_sap_id"] = f"DRAFT_SAP_{quote_id}"
+                        sync_results["sap_sync"]["doc_entry"] = f"ENTRY_DRAFT_{quote_id}"
+                        logger.info(f"🎯 Simulation SAP terminée pour {quote_id}")
             
             # === SYNCHRONISATION SALESFORCE ===
-            logger.info(f"📡 Appel Salesforce salesforce_create_opportunity_complete")
-            sf_result = await self.mcp_connector.salesforce_create_opportunity_complete(
-                sf_opportunity_data, sf_line_items
-            )
+            if not target or target == "salesforce":
+                sync_results["salesforce_sync"]["attempted"] = True
+                logger.info(f"☁️ Début synchronisation Salesforce pour {quote_id}")
+                
+                # Validation des prérequis Salesforce
+                if not client_data.get("salesforce_id") and not client_data.get("AccountId"):
+                    sync_results["salesforce_sync"]["message"] = "AccountId Salesforce manquant"
+                    logger.error("❌ AccountId Salesforce manquant pour l'opportunité")
+                else:
+                    # Préparation données opportunité Salesforce
+                    sf_opportunity_data = {
+                        "Name": f"Devis {client_data.get('name', client_data.get('CardName', 'Client'))} - {doc_date_str}",
+                        "AccountId": client_data.get("salesforce_id") or client_data.get("AccountId"),
+                        "CloseDate": close_date_str,
+                        "StageName": "Quotation",
+                        "Amount": quote_data.get("total_amount", total_amount_validation),
+                        "Description": f"Devis NOVA automatique - {quote_id}",
+                        "Type": "New Customer",
+                        "LeadSource": "NOVA System"
+                    }
+                    
+                    # Construction des line items Salesforce
+                    sf_line_items = []
+                    for product in products_data:
+                        salesforce_id = product.get("salesforce_id") or product.get("Product2Id")
+                        if salesforce_id:  # Seulement les produits mappés Salesforce
+                            line_item = {
+                                "Product2Id": salesforce_id,
+                                "Quantity": _to_qty(product.get("Quantity", product.get("quantity", 1)), 1),
+                                "UnitPrice": _to_number(product.get("UnitPrice", product.get("price", 0)), 0.0),
+                                "Description": product.get("ItemName") or product.get("name", "")
+                            }
+                            sf_line_items.append(line_item)
+                    
+                    # === APPEL SALESFORCE RÉEL OU SIMULATION ===
+                    if is_production_mode:
+                        logger.info(f"📡 Appel Salesforce RÉEL salesforce_create_opportunity_complete")
+                        sf_result = await self.mcp_connector.salesforce_create_opportunity_complete(
+                            sf_opportunity_data, sf_line_items
+                        )
+                        
+                        if sf_result.get("success"):
+                            sync_results["salesforce_sync"]["success"] = True
+                            sync_results["salesforce_sync"]["message"] = "Opportunité Salesforce créée avec succès"
+                            sync_results["salesforce_sync"]["opportunity_id"] = sf_result.get("id") or sf_result.get("opportunity_id")
+                            logger.info(f"✅ Opportunité Salesforce créée: {sync_results['salesforce_sync']['opportunity_id']}")
+                        else:
+                            sync_results["salesforce_sync"]["message"] = sf_result.get("error", "Erreur Salesforce inconnue")
+                            logger.error(f"❌ Erreur création opportunité Salesforce: {sync_results['salesforce_sync']['message']}")
+                    else:
+                        # MODE DRAFT - Simulation réaliste
+                        await asyncio.sleep(0.6)  # Simulation latence Salesforce
+                        sync_results["salesforce_sync"]["success"] = True
+                        sync_results["salesforce_sync"]["message"] = "Simulation Salesforce réussie (mode draft)"
+                        sync_results["salesforce_sync"]["opportunity_id"] = f"DRAFT_SF_{quote_id}"
+                        logger.info(f"🎯 Simulation Salesforce terminée pour {quote_id}")
             
-            # === TRAITEMENT DES RÉSULTATS ===
-            sync_results = {
-                "sap_sync": {
-                    "attempted": True,
-                    "success": sap_result.get("success", False),
-                    "message": sap_result.get("error", "Synchronisation SAP réussie") if not sap_result.get("success") else "Devis SAP créé",
-                    "quote_sap_id": sap_result.get("DocNum") or sap_result.get("DocEntry"),
-                    "doc_entry": sap_result.get("DocEntry")
-                },
-                "salesforce_sync": {
-                    "attempted": True,
-                    "success": sf_result.get("success", False),
-                    "message": sf_result.get("error", "Synchronisation Salesforce réussie") if not sf_result.get("success") else "Opportunité Salesforce créée",
-                    "opportunity_id": sf_result.get("id") or sf_result.get("opportunity_id")
-                }
-            }
+            # === DÉTERMINATION DU STATUT GLOBAL ===
+            sap_success = sync_results["sap_sync"]["success"]
+            sf_success = sync_results["salesforce_sync"]["success"]
+            sap_attempted = sync_results["sap_sync"]["attempted"]
+            sf_attempted = sync_results["salesforce_sync"]["attempted"]
             
-            # Détermination du statut global
-            if sync_results["sap_sync"]["success"] and sync_results["salesforce_sync"]["success"]:
-                status = "success"
-                message = f"Synchronisation complète réussie pour {quote_id}"
-            elif sync_results["sap_sync"]["success"] or sync_results["salesforce_sync"]["success"]:
-                status = "partial_success"
-                message = f"Synchronisation partielle pour {quote_id}"
+            # Logique de statut améliorée
+            if target == "sap":
+                if sap_success:
+                    status = "success"
+                    message = f"Synchronisation SAP réussie pour {quote_id}"
+                else:
+                    status = "error"
+                    message = f"Échec synchronisation SAP pour {quote_id}: {sync_results['sap_sync']['message']}"
+            elif target == "salesforce":
+                if sf_success:
+                    status = "success"
+                    message = f"Synchronisation Salesforce réussie pour {quote_id}"
+                else:
+                    status = "error"
+                    message = f"Échec synchronisation Salesforce pour {quote_id}: {sync_results['salesforce_sync']['message']}"
             else:
-                status = "error"
-                message = f"Échec synchronisation pour {quote_id}"
+                if sap_success and sf_success:
+                    status = "success"
+                    message = f"Synchronisation complète réussie pour {quote_id}"
+                elif (sap_attempted and sap_success) or (sf_attempted and sf_success):
+                    status = "partial_success"
+                    failed_systems = []
+                    if sap_attempted and not sap_success:
+                        failed_systems.append(f"SAP ({sync_results['sap_sync']['message']})")
+                    if sf_attempted and not sf_success:
+                        failed_systems.append(f"Salesforce ({sync_results['salesforce_sync']['message']})")
+                    message = f"Synchronisation partielle pour {quote_id}. Échecs: {', '.join(failed_systems)}"
+                else:
+                    status = "error"
+                    error_messages = []
+                    if sap_attempted:
+                        error_messages.append(f"SAP: {sync_results['sap_sync']['message']}")
+                    if sf_attempted:
+                        error_messages.append(f"Salesforce: {sync_results['salesforce_sync']['message']}")
+                    message = f"Échec synchronisation complète pour {quote_id}. Erreurs: {'; '.join(error_messages)}"
             
-            logger.info(f"✅ Synchronisation terminée: {status}")
+            # === LOG DE SYNTHÈSE ===
+            mode_display = "PRODUCTION" if is_production_mode else "DRAFT"
+            logger.info(f"✅ Synchronisation {mode_display} terminée - Statut: {status}")
             
-            return {
+            if sap_attempted:
+                sap_status = "✅" if sap_success else "❌"
+                logger.info(f"{sap_status} SAP: {sync_results['sap_sync']['message']}")
+            if sf_attempted:
+                sf_status = "✅" if sf_success else "❌"
+                logger.info(f"{sf_status} Salesforce: {sync_results['salesforce_sync']['message']}")
+            
+            # === CONSTRUCTION DE LA RÉPONSE FINALE ===
+            response = {
                 "status": status,
                 "sync_results": sync_results,
-                "message": message
+                "message": message,
+                "quote_id": quote_id,
+                "mode": "production" if is_production_mode else "draft",
+                "target_filter": target,
+                "timestamp": datetime.now().isoformat(),
+                "total_amount": total_amount_validation
             }
             
+            if sap_success:
+                response["sap_quote_number"] = sync_results["sap_sync"]["quote_sap_id"]
+                response["sap_doc_entry"] = sync_results["sap_sync"]["doc_entry"]
+            
+            if sf_success:
+                response["salesforce_opportunity_id"] = sync_results["salesforce_sync"]["opportunity_id"]
+            
+            return response
+            
         except Exception as e:
-            logger.exception(f"Erreur synchronisation: {str(e)}")
+            logger.exception(f"❌ Exception critique dans _sync_quote_to_systems: {str(e)}")
+            # sécurise l'accès à quote_id même si l'exception survient très tôt
+            _qd = locals().get("quote_data", {}) or {}
             return {
                 "status": "error",
-                "message": f"Erreur synchronisation: {str(e)}"
+                "message": f"Erreur système lors de la synchronisation: {str(e)}",
+                "quote_id": _qd.get("quote_id", "UNKNOWN"),
+                "timestamp": datetime.now().isoformat(),
+                "exception_type": type(e).__name__
             }
+
 
     def _initialize_task_tracking(self, prompt: str) -> str:
         """
