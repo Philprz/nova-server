@@ -1405,9 +1405,17 @@
                     const originalName = data.original_client_name || '';
                     addClientSelection(clients, originalName);
                 } else if (data.type === 'completion') {
+                    if (progressInterval) {
+                        clearInterval(progressInterval);
+                        progressInterval = null;
+                        }
                     handleTaskComplete(data.data);
                     websocket.close();
                 } else if (data.type === 'error') {
+                    if (progressInterval) {
+                        clearInterval(progressInterval);
+                        progressInterval = null;
+                        }
                     handleTaskError(data.error);
                     websocket.close();
                 } else if (data.type === 'log') {
