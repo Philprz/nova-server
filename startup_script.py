@@ -75,88 +75,87 @@ def check_python_version():
     if sys.version_info < (3, 8):
         logger.error(f"Python 3.8+ requis. Version actuelle: {sys.version}")
         return False
-    
-    logger.info(f"Version Python: {sys.version}")
+
+    # Plus besoin d'afficher la version ici car elle sera dans le résumé
     return True
 
 def check_environment():
-    """Vérifie la configuration de l'environnement"""
-    logger.info("Vérification de l'environnement...")
-    
+    """Vérifie l'environnement Python et les dépendances"""
+    # Plus de message "Vérification de l'environnement..." car déjà affiché dans run_pre_flight_checks
+
     # Vérification du fichier .env
     if not os.path.exists('.env'):
         logger.error("Fichier .env manquant!")
         logger.info("Créez le fichier .env à partir de .env.template")
         return False
-    
+
     # Création des dossiers requis
     required_dirs = ['logs', 'cache', 'static']
     for dir_name in required_dirs:
         if not os.path.exists(dir_name):
             os.makedirs(dir_name)
             logger.info(f"Dossier {dir_name} créé")
-    
+
     # Vérification des modules critiques
     critical_modules = ['fastapi', 'uvicorn', 'anthropic', 'httpx']
     missing_modules = []
-    
+
     for module in critical_modules:
         try:
             __import__(module)
         except ImportError:
             missing_modules.append(module)
-    
+
     if missing_modules:
         logger.error(f"Modules manquants: {', '.join(missing_modules)}")
         logger.info("Exécutez: python install_missing_modules.py")
         return False
-    
-    logger.info("Environnement vérifié avec succès")
+
+    # Retirer le message de succès car déjà géré dans run_pre_flight_checks
     return True
 
 def check_configuration():
     """Vérifie la configuration dans .env"""
-    logger.info("Vérification de la configuration...")
-    
+    # Plus de message "Vérification de la configuration..." car déjà affiché dans run_pre_flight_checks
+
     from dotenv import load_dotenv
     load_dotenv()
-    
+
     # Variables critiques
     critical_vars = [
         'ANTHROPIC_API_KEY',
-        'SALESFORCE_USERNAME', 
+        'SALESFORCE_USERNAME',
         'SAP_REST_BASE_URL'
     ]
-    
+
     missing_vars = []
     for var in critical_vars:
         if not os.getenv(var):
             missing_vars.append(var)
-    
+
     if missing_vars:
         logger.warning(f"Variables de configuration manquantes: {', '.join(missing_vars)}")
         logger.warning("Le système démarrera en mode dégradé")
-    else:
-        logger.info("Configuration complète détectée")
-    
+
     return True
 
 def start_mcp_services():
     """Démarre les services MCP SAP et MCP Salesforce"""
-    logger.info("Démarrage des services MCP...")
-    
+    services_started = []
+
     # Vérifier si les fichiers MCP existent avant de les démarrer
     if os.path.exists("sap_mcp.py"):
         subprocess.Popen(["python", "sap_mcp.py"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        logger.info("Serveur MCP SAP démarré")
-    else:
-        logger.warning("Fichier sap_mcp.py non trouvé")
-    
+        services_started.append("MCP SAP")
+
     if os.path.exists("salesforce_mcp.py"):
         subprocess.Popen(["python", "salesforce_mcp.py"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        logger.info("Serveur MCP Salesforce démarré")
+        services_started.append("MCP Salesforce")
+
+    if services_started:
+        logger.info(f"Services démarrés: {' | '.join(services_started)}")
     else:
-        logger.warning("Fichier salesforce_mcp.py non trouvé")
+        logger.warning("Aucun service MCP trouvé (sap_mcp.py, salesforce_mcp.py)")
     
 def start_claude_desktop():
     """Démarre Claude Desktop"""
@@ -186,60 +185,59 @@ def start_claude_desktop():
 def run_pre_flight_checks():
     """Exécute les vérifications avant démarrage"""
     logger.info("=== VÉRIFICATIONS PRÉLIMINAIRES ===")
-    
+
     checks = [
         ("Version Python", check_python_version),
         ("Environnement", check_environment),
         ("Configuration", check_configuration)
     ]
-    
+
+    # Afficher toutes les vérifications sur une seule ligne
+    check_status = []
     for check_name, check_func in checks:
-        logger.info(f"Vérification: {check_name}")
-        if not check_func():
-            logger.error(f"Échec: {check_name}")
+        if check_func():
+            check_status.append(f"✓ {check_name}")
+        else:
+            logger.error(f"✗ Échec: {check_name}")
             return False
-        logger.info(f"[OK] {check_name}")
-    
-    logger.info("Toutes les vérifications préliminaires réussies")
+
+    # Afficher le résumé des vérifications réussies
+    logger.info("Vérifications réussies: " + " | ".join(check_status))
     return True
 
 def start_nova_server():
     """Démarre le serveur NOVA"""
     logger.info("=== DÉMARRAGE DU SERVEUR NOVA ===")
-    
+
     try:
         # Correction: Vérifier l'existence de main.py avant l'import
         if not os.path.exists("main.py"):
             logger.error("Fichier main.py manquant!")
-            logger.error("Le fichier main.py contenant l'application FastAPI est requis")
             return False
-                
+
         # CORRECTION: Import conditionnel pour éviter les erreurs d'import circulaire
         try:
             from main import app  # Import de l'app FastAPI
         except NameError as ne:
             if 'WebSocket' in str(ne):
                 logger.error("Erreur d'import WebSocket - Correction requise dans les annotations de type")
-                logger.error("Solution temporaire: Redémarrage requis après correction des imports")
                 return False
             else:
                 raise ne
-                
+
         import uvicorn
-        logger.info("Lancement de NOVA sur http://localhost:8000")
-        logger.info("Documentation: http://localhost:8000/docs")
-        logger.info("Interface: http://localhost:8000/interface/itspirit")
-        logger.info("Santé: http://localhost:8000/health")
-        
+
+        # Afficher toutes les URLs sur une seule ligne
+        logger.info("NOVA démarré → http://localhost:8000 | Docs: /docs | Interface: /interface/itspirit | Santé: /health")
+
         # Correction: Configuration simplifiée pour éviter les conflits I/O
         uvicorn.run(
-            app, 
-            host="0.0.0.0", 
+            app,
+            host="0.0.0.0",
             port=8000,
-            log_level="info"
-            # Suppression de access_log=True qui peut causer des conflits
+            log_level="warning"  # Réduire le niveau de log pour moins de verbosité
         )
-        
+
     except ImportError as e:
         logger.error(f"Erreur d'import - Vérifiez que main.py existe et contient l'app FastAPI: {e}")
         logger.error("Détails: Le fichier main.py doit contenir une variable 'app' de type FastAPI")
