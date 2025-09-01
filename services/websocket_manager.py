@@ -390,5 +390,29 @@ class WebSocketManager:
             
 
 # Instance globale
+async def close_task_connections(self, task_id: str):
+    """Ferme proprement toutes les connexions WebSocket d'une tâche"""
+    if task_id not in self.task_connections:
+        return
+    
+    connections = self.task_connections[task_id].copy()
+    for websocket in connections:
+        try:
+            # Envoyer notification finale
+            await websocket.send_text(json.dumps({
+                "type": "task_completed",
+                "task_id": task_id,
+                "message": "Tâche terminée - connexion fermée",
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }, default=json_serializer))
+            # Fermer la connexion
+            await websocket.close()
+        except Exception as e:
+            logger.error(f"Erreur fermeture WebSocket: {e}")
+    
+    # Nettoyer les références
+    self.task_connections.pop(task_id, None)
+    self.pending_messages.pop(task_id, None)
+    logger.info(f"🧹 Connexions WebSocket fermées pour {task_id}")
 websocket_manager = WebSocketManager()
 

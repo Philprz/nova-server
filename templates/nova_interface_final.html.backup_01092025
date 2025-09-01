@@ -115,29 +115,30 @@
 
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #000000;
+            background-color: var(--bg-secondary);
             color: var(--text-primary);
             line-height: 1.6;
         }
 
         .main-container {
-            width: 41% !important;
+            max-width: 1600px;
+            width: min(98vw, 1600px);
             margin: 0 auto;
             padding: 20px;
             min-height: 100vh;
         }
 
-
-/*MARINA*/
         .header {
             background: var(--bg-primary);
-  border-radius: 8px;
-  padding: 0px 24px 0px 24px;
-  margin-bottom: 20px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
+            border-radius: 8px;
+            padding: 20px 24px 16px 24px;
+            margin-bottom: 20px;
+            box-shadow: var(--shadow);
+            border-left: 4px solid var(--primary-blue);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 12px;
         }
 
         .header > div.logo-container {
@@ -171,16 +172,15 @@
             text-align: center;
             margin-top: 4px;
         }
-/*MARINA*/
+
         .chat-container {
-            background: #0b1b29;
+            background: var(--bg-primary);
             border-radius: 8px;
             padding: 24px;
             box-shadow: var(--shadow);
             height: 70vh;
             display: flex;
             flex-direction: column;
-            border: 1px solid #832DFE;
         }
 
         .chat-messages {
@@ -218,19 +218,20 @@
             border-left: 3px solid var(--primary-blue);
         }
 
-/*MARINA*/
         .welcome-message {
             text-align: center;
-  padding: 4px;
-  border-radius: 1px;
-  margin-bottom: 4px;
+            padding: 4px;
+            background: var(--bg-secondary);
+            border-radius: 1px;
+            margin-bottom: 4px;
+            border: 1px solid var(--border-color);
         }
-/*MARINA*/
+
         .welcome-title {
-            font-size: 18px;
-  font-weight: 500;
-  color: #02B9FD;
-  margin-bottom: 12px;
+            font-size: 1.5rem;
+            font-weight: 500;
+            color: var(--primary-blue);
+            margin-bottom: 12px;
         }
 
         .welcome-subtitle {
@@ -405,17 +406,17 @@
             display: flex;
             gap: 12px;
             align-items: flex-end;
-            border-top: 1px solid #dee2e636;
+            border-top: 1px solid var(--border-color);
             padding-top: 16px;
         }
 
         .chat-input {
             flex: 1;
-            background: #0b1b29;
+            background: var(--bg-secondary);
             border: 1px solid var(--border-color);
-            border-radius: 26px;
+            border-radius: 6px;
             padding: 12px 16px;
-            color: #ffffff;
+            color: var(--text-primary);
             font-size: 0.9rem;
             resize: none;
             transition: border-color 0.2s ease;
@@ -427,18 +428,18 @@
         }
 
         .send-button {
-            background: linear-gradient(135deg, #02B9FD, #832DFE, #E220FB);
-  border: none;
-  border-radius: 30px;
-  width: 52px;
-  height: 52px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: white;
-  font-size: 1.1rem;
-  cursor: pointer;
-  transition: background-color 0.2s ease;
+            background: var(--primary-blue);
+            border: none;
+            border-radius: 6px;
+            width: 44px;
+            height: 44px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 1.1rem;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
         }
 
         .send-button:hover:not(:disabled) {
@@ -622,11 +623,17 @@
 
     <div class="main-container">
         <header class="header">
-            <div style="display: flex; align-items: center; justify-content: center; gap: 0px; flex-wrap: wrap;">
-                    <img src="/static/Covia_bann.png" alt="Covia_Banniere" style="height: 200px; display: block; border-radius: 8px;">
+            <div style="display: flex; align-items: center; justify-content: center; gap: 40px; flex-wrap: wrap;">
+                <a href="https://www.it-spirit.com" target="_blank" rel="noopener noreferrer">
+                    <img src="/static/Logo.png" alt="IT Spirit" style="height: 200px; display: block;">
                 </a>
-                
-
+                <div style="font-size: 1.4rem; color: var(--primary-violet); font-weight: bold; text-align: center; font-style: italic;">
+                    présente l'assistant<br> 
+                    commercial intelligent
+                </div>
+                <a href="http://178.33.233.120:8000/interface/itspirit" target="_blank" rel="noopener noreferrer">
+                    <img src="/static/covia_clair.png" alt="COVIA" style="height: 180px; display: block;">
+                </a>
             </div>
         </header>
 
@@ -1397,6 +1404,26 @@
         }
 
         // Connexion WebSocket
+        function handleTaskError(error) {
+                        hideProgress();
+                        addMessage(`❌ Erreur: ${error}`, 'system');
+                        console.error("Erreur de tâche:", error);
+                        isProcessing = false;
+                        updateSendButton();
+                    }
+
+                    function handleTaskComplete(data) {
+                        hideProgress();
+                        if (data && data.quote_content) {
+                            addMessage(`✅ Devis créé avec succès!\n\n${data.quote_content}`, 'system');
+                        } else if (data && data.message) {
+                            addMessage(`✅ ${data.message}`, 'system');
+                        } else {
+                            addMessage("✅ Tâche terminée avec succès", 'system');
+                        }
+                        isProcessing = false;
+                        updateSendButton();
+                    }
         function connectWebSocket(taskId) {
             if (websocket && websocket.readyState === WebSocket.OPEN) {
                 console.log("🌐 WebSocket déjà connecté.");
@@ -1443,6 +1470,7 @@
                 } else if (data.type === 'completion') {
                     handleTaskComplete(data.data);
                     websocket.close();
+                    
                 } else if (data.type === 'error') {
                     handleTaskError(data.error);
                     websocket.close();
