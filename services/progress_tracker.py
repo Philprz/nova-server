@@ -5,7 +5,7 @@ Réutilise et améliore le pattern du sync_dashboard
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any
 from enum import Enum
 import logging
@@ -371,6 +371,22 @@ class ProgressTracker:
 
         # Supprimer des tâches actives
         del self.active_tasks[task_id]
+        # 🔧 CORRECTION CRITIQUE: Notification WebSocket de completion
+        try:
+            from services.websocket_manager import websocket_manager
+            import asyncio
+            
+            # Créer la tâche de notification sans bloquer
+            asyncio.create_task(websocket_manager.broadcast_to_task(task_id, {
+                "type": "completion",
+                "task_id": task_id,
+                "data": result,
+                "status": "completed",
+                "timestamp": datetime.now().isoformat()
+            }))
+            logger.info(f"🔔 Notification WebSocket de completion envoyée pour {task_id}")
+        except Exception as e:
+            logger.error(f"Erreur notification WebSocket completion: {e}")
         logger.info(f"✅ Tâche {task_id} déplacée vers l'historique avec résultat")
         return True
     
@@ -387,6 +403,21 @@ class ProgressTracker:
         
         # Supprimer des tâches actives
         del self.active_tasks[task_id]
+        # 🔧 CORRECTION: Notification WebSocket d'échec
+        try:
+            from services.websocket_manager import websocket_manager
+            import asyncio
+            
+            asyncio.create_task(websocket_manager.broadcast_to_task(task_id, {
+                "type": "error",
+                "task_id": task_id,
+                "error": error,
+                "status": "failed",
+                "timestamp": datetime.now().isoformat()
+            }))
+            logger.info(f"🔔 Notification WebSocket d'erreur envoyée pour {task_id}")
+        except Exception as e:
+            logger.error(f"Erreur notification WebSocket échec: {e}")
         return True
     
     def get_all_active_tasks(self) -> List[Dict[str, Any]]:
