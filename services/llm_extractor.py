@@ -168,7 +168,7 @@ Réponds UNIQUEMENT au format JSON suivant:
         
         return ""
     async def extract_quote_info(self, prompt: str) -> Dict[str, Any]:
-        logger.error(f"🚨 FONCTION extract_quote_info APPELÉE AVEC: {prompt}")
+        logger.debug(f"FONCTION extract_quote_info APPELÉE AVEC: {prompt}")
         logger.info(f"Extraction d'informations de devis à partir de: {prompt}")
 
         try:
@@ -179,7 +179,7 @@ Réponds UNIQUEMENT au format JSON suivant:
             end_idx = claude_content.rfind("}") + 1
             if start_idx >= 0 and end_idx > start_idx:
                 json_str = claude_content[start_idx:end_idx]
-                logger.info(f"🔧 JSON EXTRAIT: {json_str}")
+                logger.info(f"JSON EXTRAIT: {json_str}")
                 extracted_data = json.loads(json_str)
                 logger.info(f"EXTRACTION RÉUSSIE: {extracted_data}")
                 
@@ -190,7 +190,7 @@ Réponds UNIQUEMENT au format JSON suivant:
                     client_match = self._extract_client_from_prompt(prompt)
                     if client_match:
                         extracted_data["client"] = client_match
-                        logger.info(f"🔧 CLIENT RÉCUPÉRÉ: {client_match}")
+                        logger.info(f"CLIENT RÉCUPÉRÉ: {client_match}")
                 logger.info(f"TYPE D'ACTION DÉTECTÉ: {action_type}")
                 if action_type == "RECHERCHE_PRODUIT":
                     search_criteria = extracted_data.get('search_criteria', {})
@@ -272,7 +272,7 @@ Réponds UNIQUEMENT au format JSON suivant:
                 # Filtrer les mots courts et les mots courants
                 if (len(client_name) >= 3 and 
                     client_name.upper() not in ['AVEC', 'POUR', 'DANS', 'SUR', 'PAR', 'DEVIS']):
-                    logger.info(f"🎯 Client détecté avec pattern '{pattern}': {client_name}")
+                    logger.info(f"Client détecté avec pattern '{pattern}': {client_name}")
                     return client_name
         
         return ""        
@@ -286,7 +286,7 @@ Réponds UNIQUEMENT au format JSON suivant:
             try:
                 return json.loads(json_str)
             except json.JSONDecodeError as e:
-                logger.error(f"❌ Erreur parsing JSON: {str(e)}")
+                logger.error(f"Erreur parsing JSON: {str(e)}")
                 return None
         else:
             logger.error("Impossible de trouver du JSON dans la réponse")
@@ -332,15 +332,15 @@ Réponds UNIQUEMENT au format JSON suivant:
                 content = response.get("content", [{}])[0].get("text", "")
                 extracted_json = self._extract_json_from_response(content)
                 if extracted_json:
-                    logger.info(f"✅ Extraction client réussie: {extracted_json}")
+                    logger.info(f"Extraction client réussie: {extracted_json}")
                     return extracted_json
                 else:
-                    logger.warning("⚠️ JSON non valide dans la réponse Claude")
+                    logger.warning("JSON non valide dans la réponse Claude")
                     return {"success": False, "error": "Format de réponse invalide"}
             else:
                 return {"success": False, "error": "Erreur communication LLM"}
         except Exception as e:
-            logger.error(f"❌ Erreur extraction client: {e}")
+            logger.error(f"Erreur extraction client: {e}")
             return {"success": False, "error": str(e)}
 
 
