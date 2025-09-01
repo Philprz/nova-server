@@ -740,7 +740,7 @@ class DevisWorkflow:
                         "total_amount": total_amount,
                         "sap_quote_number": sap_quote.get("quote_number"),
                         "salesforce_opportunity_id": sf_opportunity.get("opportunity_id"),
-                        "cache_performance": await self.cache_manager.get_cache_stats()
+                        "cache_performance": self.cache_manager.get_cache_stats()
                     }
                 }
             else:
