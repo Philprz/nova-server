@@ -325,11 +325,25 @@ class DevisWorkflow:
 
             if action == "select_existing":
                 # Récupérer selected_client_data AVANT utilisation
-                selected_client_data = user_input.get("selected_data")
-                # Initialiser client_name AVANT usage - TOUJOURS
-                client_name = (user_input.get("client_name") or 
-                            context.get("original_client_name") or
-                            "Client_Inconnu")
+                # CORRECTION: Récupérer aussi depuis selected_client si selected_data manque
+                if not selected_client_data:
+                    selected_client_data = user_input.get("selected_client")
+                
+                # CORRECTION: Préserver les données Salesforce si présentes
+                if selected_client_data and selected_client_data.get("sf_id"):
+                    # S'assurer que les données SF complètes sont disponibles
+                    sf_id = selected_client_data.get("sf_id")
+                    if sf_id and not selected_client_data.get("Id"):
+                        # Récupérer les données complètes depuis Salesforce
+                        try:
+                            sf_query = f"SELECT Id, Name, AccountNumber, Phone, BillingStreet, BillingCity, BillingPostalCode, BillingCountry FROM Account WHERE Id = '{sf_id}'"
+                            sf_result = await self.mcp_connector.call_mcp("salesforce_mcp", "salesforce_query", {"query": sf_query})
+                            if sf_result.get("totalSize", 0) > 0:
+                                sf_data = sf_result["records"][0]
+                                selected_client_data.update(sf_data)
+                                logger.info(f"✅ Données Salesforce récupérées pour {sf_data.get('Name')}")
+                        except Exception as e:
+                            logger.warning(f"⚠️ Erreur récupération données SF: {str(e)}")
 
                 if selected_client_data:
                     # Mettre à jour avec le nom réel depuis les données
@@ -2891,6 +2905,39 @@ class DevisWorkflow:
         
         logger.info(f"✅ Réponse finale enrichie construite avec nom client: {client_name}")
         response["workflow_steps"] = self.workflow_steps
+        # AJOUT: Données de visualisation du devis
+        if quote_result.get("success") and response.get("success"):
+            response["quote_visualization"] = {
+                "display_mode": "detailed",
+                "document_data": {
+                    "quote_number": response.get("quote_id", "NOVA-" + datetime.now().strftime('%Y%m%d-%H%M%S')),
+                    "issue_date": datetime.now().strftime("%d/%m/%Y"),
+                    "due_date": (datetime.now() + timedelta(days=30)).strftime("%d/%m/%Y"),
+                    "validity": "30 jours",
+                    "client_info": client_response,
+                    "products_list": products_response,
+                    "totals": {
+                        "subtotal_ht": response.get("total_amount", 0),
+                        "tva_rate": 20.0,
+                        "tva_amount": response.get("total_amount", 0) * 0.2,
+                        "total_ttc": response.get("total_amount", 0) * 1.2
+                    },
+                    "terms": "Devis valable 30 jours - Paiement à 30 jours",
+                    "created_by": "NOVA Assistant",
+                    "company_info": {
+                        "name": "IT SPIRIT",
+                        "address": "39, rue Carnot - 92100 BOULOGNE BILLANCOURT",
+                        "phone": "01 41 86 06 12",
+                        "website": "www.it-spirit.fr"
+                    }
+                },
+                "template": "nova_interface_final",
+                "actions": [
+                    {"id": "download_pdf", "label": "Télécharger PDF", "icon": "download"},
+                    {"id": "send_email", "label": "Envoyer par email", "icon": "mail"},
+                    {"id": "create_new", "label": "Nouveau devis", "icon": "plus"}
+                ]
+            }
         return response
     
     # ✅ MÉTHODE D'AIDE - Ajouter aussi cette méthode pour enrichir les données client
@@ -3968,7 +4015,30 @@ class DevisWorkflow:
             duration_ms = (datetime.now() - start_time).total_seconds() * 1000
             logger.error(f"❌ Erreur critique _smart_product_search après {duration_ms:.0f}ms: {str(e)}")
             return {"found": False, "products": [], "method": "error", "error": str(e), "duration_ms": duration_ms}
-
+    
+    def _is_generic_search(self, product_name: str) -> bool:
+        """Détecte si le terme de recherche est trop générique pour auto-sélection"""
+        if not product_name:
+            return False
+            
+        generic_terms = [
+            "imprimante", "ordinateur", "écran", "clavier", "souris", 
+            "scanner", "serveur", "switch", "routeur", "câble",
+            "cartouche", "toner", "papier", "moniteur", "pc"
+        ]
+        
+        # Vérifier si le nom contient seulement des termes génériques et des chiffres/unités
+        name_lower = product_name.lower()
+        words = name_lower.split()
+        
+        # Si tous les mots sont soit génériques, soit des nombres/unités
+        for word in words:
+            if not (any(term in word for term in generic_terms) or 
+                   word.isdigit() or 
+                   word in ["ppm", "go", "gb", "tb", "mo", "mb", "pouces", "inch"]):
+                return False
+        
+        return True
     async def _search_local_by_code(self, item_code: str) -> Optional[Dict[str, Any]]:
         """Recherche exacte par ItemCode en base locale PostgreSQL"""
         try:
@@ -5982,8 +6052,10 @@ class DevisWorkflow:
                     })
                     option_id += 1
                 logger.info(f"✅ {len(client_options)} options préparées (dédupliquées)")
+                # Si des clients dédupliqués existent, ne pas traiter séparément SF et SAP
+                return await self._finalize_client_selection(client_name, client_options)
             else:
-                logger.info("⚠️ Pas de déduplication disponible - traitement séparé")
+                logger.info("⚠️ Pas de déduplication disponible - traitement individuel")
 
             logger.info(f"🔧 Traitement de {len(all_sf_clients)} clients SF + {len(all_sap_clients)} clients SAP")
 
@@ -6184,7 +6256,63 @@ class DevisWorkflow:
             logger.error(f"❌ Traceback complet: {traceback.format_exc()}")
             return {"status": "error", "found": False, "error": str(e)}
 
-
+    async def _finalize_client_selection(self, client_name: str, client_options: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Finalise la sélection client avec les options dédupliquées uniquement"""
+        
+        try:
+            # Auto-sélection si un seul client
+            if len(client_options) == 1:
+                single_client = client_options[0]
+                client_display_name = single_client.get("name", "Client sans nom")
+                logger.info(f"✅ Auto-sélection client unique: {client_display_name}")
+                
+                # Mettre à jour le contexte
+                self.context.update({
+                    "client_info": {"data": single_client, "found": True},
+                    "client_validated": True,
+                    "selected_client_display": client_display_name
+                })
+                
+                return {
+                    "status": "auto_selected",
+                    "client_data": single_client,
+                    "message": f"Client unique sélectionné: {client_display_name}"
+                }
+            
+            # Plusieurs clients - demander sélection
+            validation_data = {
+                "options": client_options,
+                "clients": client_options,
+                "client_options": client_options,
+                "total_options": len(client_options),
+                "original_client_name": client_name,
+                "allow_create_new": True,
+                "interaction_type": "client_selection"
+            }
+            
+            if self.current_task:
+                self.current_task.require_user_validation("client_selection", "client_selection", validation_data)
+            
+            # Préparer le message d'interaction
+            interaction_message = {
+                "type": "client_selection",
+                "interaction_type": "client_selection",
+                **validation_data,
+                "message": f"Sélection client requise - {len(client_options)} options disponibles"
+            }
+            
+            # Envoyer via WebSocket
+            await websocket_manager.send_user_interaction_required(self.task_id, interaction_message)
+            
+            return {
+                "status": "user_interaction_required",
+                "interaction_data": interaction_message,
+                "message": f"Sélection parmi {len(client_options)} options disponibles"
+            }
+            
+        except Exception as e:
+            logger.exception(f"Erreur finalisation sélection client: {str(e)}")
+            return self._build_error_response("Erreur sélection client", str(e))
 
 
     async def _create_client_automatically(self, client_name: str) -> Dict[str, Any]:
@@ -6784,8 +6912,22 @@ class DevisWorkflow:
                     logger.error(f"❌ Erreur appel _smart_product_search: {str(e)}")
                     smart_search = {"found": False, "products": [], "method": "call_error", "error": str(e)}
                 if smart_search["found"] and smart_search["products"]:
-                    best_match = smart_search["products"][0]
-                    logger.info(f"✅ Produit trouvé via recherche intelligente: {best_match.get('ItemName')}")
+                    # NOUVELLE LOGIQUE: Demander confirmation si recherche générique
+                    products_found = smart_search["products"]
+                    if len(products_found) == 1 and self._is_generic_search(product_name):
+                        # Terme générique détecté, demander sélection utilisateur
+                        logger.info(f"⚠️ Terme générique détecté: '{product_name}' - Interaction requise")
+                        products_needing_selection.append({
+                            "original_name": product_name,
+                            "original_code": product_code,
+                            "quantity": quantity,
+                            "options": products_found,
+                            "search_method": smart_search["method"]
+                        })
+                        continue
+                    
+                    best_match = products_found[0]
+                    logger.info(f"✅ Produit spécifique trouvé: {best_match.get('ItemName')}")
                     found_products.append({
                         **self._format_product_data(best_match, quantity),
                         "search_method": smart_search["method"],
