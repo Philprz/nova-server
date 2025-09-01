@@ -7,17 +7,23 @@
 param(
     [Parameter(Mandatory=$false)]
     [string]$CommitMessage = "",
-    
+
     [Parameter(Mandatory=$false)]
     [switch]$UseAI,
-    
+
     [Parameter(Mandatory=$false)]
     [ValidateSet("OpenAI", "Claude", "Local")]
     [string]$AIProvider = "Local",
-    
+
     [Parameter(Mandatory=$false)]
     [string]$APIKey = ""
 )
+
+# Ajouter Git au PATH si nécessaire
+$gitPath = "C:\Program Files\Git\bin"
+if ((Test-Path $gitPath) -and ($env:PATH -notlike "*$gitPath*")) {
+    $env:PATH = "$gitPath;$env:PATH"
+}
 
 Write-Host "=== PUSH DUAL REPOSITORY NOVA POC - VERSION IA AVANCÉE ===" -ForegroundColor "Cyan"
 Write-Host ""
