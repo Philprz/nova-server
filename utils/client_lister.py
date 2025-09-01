@@ -427,7 +427,105 @@ class ClientLister:
             if idx not in used_sap_indices:
                 unique_clients.append({**sap_client, 'source': 'SAP'})
         
+        # Après la déduplication par identifiant, déduplication par nom similaire
+        unique_clients = self._merge_similar_clients(unique_clients)
+        
         return unique_clients
+    
+    def _normalize_company_name(self, name: str) -> str:
+        """Normalise le nom d'entreprise pour comparaison"""
+        if not name:
+            return ""
+        # Convertir en majuscules et supprimer les mots communs
+        normalized = name.upper().strip()
+        # Supprimer les mots génériques
+        words_to_remove = ['SA', 'SARL', 'SAS', 'EURL', 'GROUP', 'GROUPE', 'COMPANY', 'CO', 'LTD', 'LTEE']
+        for word in words_to_remove:
+            normalized = normalized.replace(f' {word}', '').replace(f'{word} ', '')
+        # Supprimer espaces multiples
+        return ' '.join(normalized.split())
+
+    def _find_similar_clients(self, clients: List[Dict]) -> List[List[int]]:
+        """Trouve les groupes de clients similaires par nom"""
+        groups = []
+        used_indices = set()
+        
+        for i, client1 in enumerate(clients):
+            if i in used_indices:
+                continue
+            
+            name1 = self._normalize_company_name(
+                client1.get('Name') or client1.get('CardName') or ''
+            )
+            if not name1:
+                continue
+                
+            group = [i]
+            used_indices.add(i)
+            
+            for j, client2 in enumerate(clients[i+1:], i+1):
+                if j in used_indices:
+                    continue
+                    
+                name2 = self._normalize_company_name(
+                    client2.get('Name') or client2.get('CardName') or ''
+                )
+                
+                # Similarité : un nom contient l'autre ou vice versa
+                if name1 and name2 and (name1 in name2 or name2 in name1):
+                    group.append(j)
+                    used_indices.add(j)
+            
+            if len(group) > 1:
+                groups.append(group)
+        
+        return groups
+
+    def _merge_similar_clients(self, clients: List[Dict]) -> List[Dict]:
+        """Fusionne les clients similaires après la déduplication par identifiant"""
+        if len(clients) <= 1:
+            return clients
+            
+        similar_groups = self._find_similar_clients(clients)
+        
+        if not similar_groups:
+            return clients
+            
+        result = []
+        processed_indices = set()
+        
+        # Traiter les groupes similaires
+        for group in similar_groups:
+            # Prendre le client avec le plus d'informations ou SAP & Salesforce
+            best_client = None
+            best_score = -1
+            
+            for idx in group:
+                client = clients[idx]
+                score = 0
+                
+                # Privilégier les clients fusionnés SAP & Salesforce
+                if client.get('source') == 'SAP & Salesforce':
+                    score += 10
+                
+                # Compter les champs remplis
+                score += sum(1 for v in client.values() if v and str(v).strip())
+                
+                if score > best_score:
+                    best_score = score
+                    best_client = client
+            
+            if best_client:
+                result.append(best_client)
+            
+            processed_indices.update(group)
+        
+        # Ajouter les clients non groupés
+        for i, client in enumerate(clients):
+            if i not in processed_indices:
+                result.append(client)
+        
+        return result
 # Instance globale
 client_lister = ClientLister()
 
