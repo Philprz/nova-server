@@ -133,6 +133,7 @@ app.include_router(progress_router, prefix="/progress", tags=["Suivi tâches"])
 app.include_router(quote_router, prefix="/api/assistant", tags=["Quote"])
 app.include_router(client_router, prefix="/api/assistant", tags=["Client"])
 app.include_router(client_listing_router, prefix="/api/clients", tags=["Client Listing"])
+app.include_router(websocket_router, tags=["WebSocket"])
 app.include_router(intelligent_assistant_router)
 # Route temporaire de débogage
 @app.get('/api/assistant/interface')
