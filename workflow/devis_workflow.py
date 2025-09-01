@@ -323,11 +323,14 @@ class DevisWorkflow:
             action = user_input.get("action")
 
             if action == "select_existing":
-                # Récupérer selected_client_data AVANT utilisation
+                # Initialisation des variables nécessaires
+                selected_client_data = user_input.get("selected_data")
+                client_name = context.get("original_client_name", "")
+
                 # CORRECTION: Récupérer aussi depuis selected_client si selected_data manque
                 if not selected_client_data:
                     selected_client_data = user_input.get("selected_client")
-                
+
                 # CORRECTION: Préserver les données Salesforce si présentes
                 if selected_client_data and selected_client_data.get("sf_id"):
                     # S'assurer que les données SF complètes sont disponibles
@@ -346,11 +349,11 @@ class DevisWorkflow:
 
                 if selected_client_data:
                     # Mettre à jour avec le nom réel depuis les données
-                    client_name = (selected_client_data.get("Name") or 
-                                selected_client_data.get("name") or 
+                    client_name = (selected_client_data.get("Name") or
+                                selected_client_data.get("name") or
                                 selected_client_data.get("CardName") or
                                 client_name)
-                    
+
                     await self.cache_manager.cache_client(client_name, selected_client_data)
                 else:
                     logger.warning("⚠️ selected_data manquant - utilisation nom par défaut")
@@ -5373,7 +5376,12 @@ class DevisWorkflow:
     def _generate_client_efficiency_tip(self, searched_name: str, found_client: Dict) -> str:
         """Génère des conseils d'efficacité pour l'utilisateur"""
         tips = []
-        
+        # Conseil spécifique si plusieurs clients avec noms similaires
+        if "group" in searched_name.lower() or "groupe" in searched_name.lower():
+            tips.append(f"💡 Astuce : Utilisez 'Group' ou 'Groupe' pour distinguer les filiales (ex: '{searched_name.replace('Group', '').strip()}' vs '{searched_name}')")
+        elif len(searched_name.split()) == 1:
+            # Client simple, vérifier s'il existe une version Group
+            tips.append(f"💡 Astuce : Si vous cherchez une filiale, essayez '{searched_name} Group' ou '{searched_name} Groupe'")
         # Conseil sur la ville
         client_city = (found_client.get("BillingCity") or 
                       found_client.get("City") or 
@@ -6118,7 +6126,17 @@ class DevisWorkflow:
 
             # 2) Auto-sélection si un seul client au total
             total_clients = len(all_sf_clients) + len(all_sap_clients)
-            if total_clients == 1:
+            # Vérifier si c'est vraiment un client unique ou si la déduplication a masqué des différences
+            if len(all_sf_clients) + len(all_sap_clients) > 1:
+                logger.warning(f"⚠️ Déduplication suspecte : {len(all_sf_clients)} SF + {len(all_sap_clients)} SAP réduits à 1 client")
+                # Forcer l'affichage des options pour les cas ambigus
+                if any("group" in (client.get("Name") or client.get("CardName", "")).lower() 
+                       for client in all_sf_clients + all_sap_clients):
+                    logger.info("🔍 Clients avec 'Group' détectés - Affichage forcé des options")
+                    # Continuer vers la sélection manuelle au lieu de l'auto-sélection
+                else:
+                    single_client = all_sf_clients[0] if all_sf_clients else all_sap_clients[0]
+            else:
                 single_client = all_sf_clients[0] if all_sf_clients else all_sap_clients[0]
                 client_display_name = single_client.get("Name") or single_client.get("CardName", "Client sans nom")
                 logger.info(f"✅ Auto-sélection client unique: {client_display_name}")

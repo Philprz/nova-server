@@ -438,8 +438,9 @@ class ClientLister:
             return ""
         # Convertir en majuscules et supprimer les mots communs
         normalized = name.upper().strip()
-        # Supprimer les mots génériques
-        words_to_remove = ['SA', 'SARL', 'SAS', 'EURL', 'GROUP', 'GROUPE', 'COMPANY', 'CO', 'LTD', 'LTEE']
+        # Supprimer les mots génériques SAUF si c'est la différence principale
+        words_to_remove = ['SA', 'SARL', 'SAS', 'EURL', 'COMPANY', 'CO', 'LTD', 'LTEE']
+        # Garder GROUP/GROUPE pour distinguer les entités (ex: RONDOT vs RONDOT Group)
         for word in words_to_remove:
             normalized = normalized.replace(f' {word}', '').replace(f'{word} ', '')
         # Supprimer espaces multiples
@@ -471,8 +472,10 @@ class ClientLister:
                     client2.get('Name') or client2.get('CardName') or ''
                 )
                 
-                # Similarité : un nom contient l'autre ou vice versa
-                if name1 and name2 and (name1 in name2 or name2 in name1):
+                # Similarité stricte : noms identiques après normalisation ET longueur similaire
+                if (name1 and name2 and 
+                    name1 == name2 and 
+                    abs(len(client1.get('Name', '')) - len(client2.get('Name', ''))) <= 3):
                     group.append(j)
                     used_indices.add(j)
             
