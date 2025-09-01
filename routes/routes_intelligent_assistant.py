@@ -47,6 +47,7 @@ class ProgressChatResponse(BaseModel):
     """Réponse avec support progression"""
     success: bool
     task_id: Optional[str] = None  # 🆕 NOUVEAU : ID pour le polling
+    
     response: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
     use_polling: bool = False  # 🆕 NOUVEAU : Indique si utiliser polling
@@ -120,6 +121,7 @@ class WorkflowCreateQuoteResponse(BaseModel):
     quote_id: Optional[str] = None
     error: Optional[str] = None
     message: Optional[str] = None
+    websocket_url: Optional[str] = None
     interaction_data: Optional[Dict[str, Any]] = None  # 🆕 NOUVEAU champ
     
 @router.post("/workflow/create_quote", response_model=WorkflowCreateQuoteResponse)
@@ -152,8 +154,9 @@ async def start_quote_workflow(
             success=True,
             task_id=task_id,
             status="started",
-            message="🚀 Workflow démarré en arrière-plan",
-            websocket_url=f"/ws/assistant/{task_id}"
+            websocket_url=f"/ws/assistant/{task_id}",
+            message="🚀 Workflow démarré en arrière-plan"
+            
         )
 
     except ImportError as e:

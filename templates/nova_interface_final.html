@@ -1404,6 +1404,26 @@
         }
 
         // Connexion WebSocket
+        function handleTaskError(error) {
+                        hideProgress();
+                        addMessage(`❌ Erreur: ${error}`, 'system');
+                        console.error("Erreur de tâche:", error);
+                        isProcessing = false;
+                        updateSendButton();
+                    }
+
+                    function handleTaskComplete(data) {
+                        hideProgress();
+                        if (data && data.quote_content) {
+                            addMessage(`✅ Devis créé avec succès!\n\n${data.quote_content}`, 'system');
+                        } else if (data && data.message) {
+                            addMessage(`✅ ${data.message}`, 'system');
+                        } else {
+                            addMessage("✅ Tâche terminée avec succès", 'system');
+                        }
+                        isProcessing = false;
+                        updateSendButton();
+                    }
         function connectWebSocket(taskId) {
             if (websocket && websocket.readyState === WebSocket.OPEN) {
                 console.log("🌐 WebSocket déjà connecté.");
@@ -1450,6 +1470,7 @@
                 } else if (data.type === 'completion') {
                     handleTaskComplete(data.data);
                     websocket.close();
+                    
                 } else if (data.type === 'error') {
                     handleTaskError(data.error);
                     websocket.close();

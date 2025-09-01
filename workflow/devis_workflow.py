@@ -868,6 +868,18 @@ class DevisWorkflow:
                 else:
                     # Workflow terminé normalement
                     progress_tracker.complete_task(self.task_id, result)
+        
+            # Assurer que le résultat final est envoyé via WebSocket
+            try:
+                await websocket_manager.broadcast_to_task(task_id, {
+                    "type": "completion",
+                    "task_id": task_id,
+                    "data": result,
+                    "status": "completed"
+                })
+            
+            except Exception as ws_error:
+                logger.error(f"Erreur envoi résultat WebSocket: {ws_error}")
             return result
             
         except Exception as e:
