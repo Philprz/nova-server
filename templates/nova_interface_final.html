@@ -1427,7 +1427,7 @@
             };
 
             websocket.onerror = (error) => {
-                ddMessage("Erreur: Problème de connexion WebSocket. Vérification en cours...", 'system');
+                addMessage("Erreur: Problème de connexion WebSocket. Vérification en cours...", 'system');
                 console.error("Détails erreur WebSocket:", error);
             };
 

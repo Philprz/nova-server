@@ -12,6 +12,7 @@ class PriceEngineService:
         self.login_url = f"{self.base_url}/Login"
         self.price_url = f"{self.base_url}/CompanyService_GetItemPrice"
         self.session_cookie = None
+        self.session_cookies = None  # Initialiser session_cookies
         
     async def authenticate(self):
         """Authentification SAP pour Price Engine"""
@@ -70,7 +71,7 @@ class PriceEngineService:
                     "Accept": "application/json",
                     "Cookie": f"B1SESSION={self.session_cookie}"
                 },
-                cookies=self.session_cookies,
+                cookies=self.session_cookies if self.session_cookies else {},
                 verify=False
             )
             response.raise_for_status()
