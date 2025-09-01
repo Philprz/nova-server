@@ -1283,11 +1283,6 @@ class DevisWorkflow:
             
             self._track_step_complete("get_products_info", f"{len(products_info)} produit(s) trouvé(s)")
 
-            # Étape 2: Calculer les prix avec le Price Engine
-            self._track_step_start("calculate_prices", "Calcul des prix avec Price Engine...")
-            products_info = await self._apply_price_calculations(products_info, client_info.get("data", {}))
-            self._track_step_complete("calculate_prices", "Prix calculés avec succès")
-
             # Étape 3: Calculer le total
             total_amount = sum(p.get("line_total", 0) for p in products_info if not p.get("error"))
             self.context["products_info"] = products_info

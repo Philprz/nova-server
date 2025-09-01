@@ -25,12 +25,20 @@ class PriceEngineService:
             response = requests.post(
                 self.login_url,
                 json=auth_data,
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json"
+                },
                 verify=False
             )
             response.raise_for_status()
             
+            # Récupérer session depuis cookies ET JSON
             session_data = response.json()
             self.session_cookie = session_data.get("SessionId")
+
+            # Stocker aussi les cookies complets pour les requêtes
+            self.session_cookies = response.cookies
             logger.info(f"✅ Price Engine authentifié: {self.session_cookie}")
             return True
             
@@ -57,7 +65,12 @@ class PriceEngineService:
             response = requests.post(
                 self.price_url,
                 json=price_params,
-                headers={"Cookie": f"B1SESSION={self.session_cookie}"},
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                    "Cookie": f"B1SESSION={self.session_cookie}"
+                },
+                cookies=self.session_cookies,
                 verify=False
             )
             response.raise_for_status()
