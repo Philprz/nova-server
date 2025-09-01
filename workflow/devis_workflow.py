@@ -2292,24 +2292,42 @@ class DevisWorkflow:
                 }
             logger.info(f"Produits valides: {len(valid_products)}")
             def _estimate_product_price(self, product_name: str) -> float:
-                """Estime un prix par défaut basé sur le nom du produit"""
+                """Estime un prix par défaut basé sur le nom du produit - Version améliorée"""
+                if not product_name:
+                    return 100.0
+                    
                 product_lower = product_name.lower()
                 
-                # Règles d'estimation basées sur des mots-clés
-                if "imprimante" in product_lower:
-                    if "laser" in product_lower or "bureau" in product_lower:
-                        return 300.0
+                # Règles d'estimation améliorées avec plus de catégories
+                if "imprimante" in product_lower or "printer" in product_lower:
+                    if any(word in product_lower for word in ["laser", "professional", "pro", "bureau"]):
+                        return 450.0
+                    elif "couleur" in product_lower or "color" in product_lower:
+                        return 320.0
                     else:
-                        return 150.0
-                elif "ordinateur" in product_lower or "pc" in product_lower:
-                    return 800.0
-                elif "écran" in product_lower or "moniteur" in product_lower:
-                    return 200.0
-                elif "clavier" in product_lower or "souris" in product_lower:
-                    return 25.0
+                        return 180.0
+                elif any(word in product_lower for word in ["ordinateur", "pc", "computer", "desktop"]):
+                    if "portable" in product_lower or "laptop" in product_lower:
+                        return 950.0
+                    else:
+                        return 750.0
+                elif any(word in product_lower for word in ["écran", "moniteur", "screen", "monitor"]):
+                    if "4k" in product_lower or "uhd" in product_lower:
+                        return 380.0
+                    else:
+                        return 220.0
+                elif any(word in product_lower for word in ["serveur", "server"]):
+                    return 2500.0
+                elif any(word in product_lower for word in ["switch", "routeur", "router", "réseau"]):
+                    return 180.0
+                elif any(word in product_lower for word in ["clavier", "keyboard", "souris", "mouse"]):
+                    return 45.0
                 else:
-                    # Prix par défaut générique
-                    return 100.0
+                    # Prix par défaut basé sur des mots-clés génériques
+                    if "enterprise" in product_lower or "professionnel" in product_lower:
+                        return 250.0
+                    else:
+                        return 120.0
             # Préparer les lignes pour SAP
             document_lines = []
             total_amount = 0.0
@@ -3540,18 +3558,37 @@ class DevisWorkflow:
 
     def _extract_fallback_price_from_sap(self, sap_data: Dict) -> float:
         """Extrait un prix de secours depuis les données SAP"""
-        # Votre logique actuelle de récupération de prix (extraite de l'ancienne version)
-        if "price_details" in sap_data and sap_data["price_details"].get("price_engine"):
-            pe = sap_data["price_details"]["price_engine"]
-            return float(pe.get("unit_price_after_discount", 0.0))
-        elif "Price" in sap_data:
-            return float(sap_data.get("Price", 0.0))
-        elif "ItemPrices" in sap_data and len(sap_data["ItemPrices"]) > 0:
-            return float(sap_data["ItemPrices"][0].get("Price", 0.0))
-        elif "LastPurchasePrice" in sap_data:
-            return float(sap_data.get("LastPurchasePrice", 0.0))
-        else:
-            return 100.0  # Prix par défaut
+        # Vérifier d'abord les données de prix structurées
+        if isinstance(sap_data, dict):
+            # Prix depuis Price Engine si disponible
+            if "price_details" in sap_data and sap_data["price_details"].get("price_engine"):
+                pe = sap_data["price_details"]["price_engine"]
+                price = float(pe.get("unit_price_after_discount", 0.0))
+                if price > 0:
+                    return price
+            
+            # Prix direct SAP
+            if sap_data.get("Price") is not None and float(sap_data.get("Price", 0)) > 0:
+                return float(sap_data.get("Price"))
+            
+            # Prix de liste SAP
+            if sap_data.get("AvgPrice") is not None and float(sap_data.get("AvgPrice", 0)) > 0:
+                return float(sap_data.get("AvgPrice"))
+            
+            # Prix dans ItemPrices
+            if "ItemPrices" in sap_data and len(sap_data["ItemPrices"]) > 0:
+                for price_entry in sap_data["ItemPrices"]:
+                    price = float(price_entry.get("Price", 0.0))
+                    if price > 0:
+                        return price
+            
+            # Prix de dernier achat
+            if sap_data.get("LastPurchasePrice") is not None and float(sap_data.get("LastPurchasePrice", 0)) > 0:
+                return float(sap_data.get("LastPurchasePrice"))
+        
+        # Si aucun prix trouvé, utiliser estimation par nom de produit
+        product_name = sap_data.get("ItemName", "") if isinstance(sap_data, dict) else ""
+        return self._estimate_product_price(product_name)
 
     def _get_standard_system_prompt(self) -> str:
         """Retourne le prompt système standard pour l'extraction"""
@@ -5849,8 +5886,22 @@ class DevisWorkflow:
             for system in ("sap", "salesforce"):
                 key = f"sync_to_{system}"
                 self._track_step_start(key, f"{'💾' if system=='sap' else '☁️'} Enregistrement dans {system.upper()}")
-                result = await self._sync_quote_to_systems(quote_result, target=system)
-                self._track_step_complete(key, f"✅ {system.upper()} mis à jour")
+                
+                # Ajouter simulation temporelle même en mode draft
+                if self.draft_mode:
+                    logger.info(f"🎯 MODE DRAFT - Simulation synchronisation {system.upper()}")
+                    await asyncio.sleep(0.5)  # Simulation réaliste
+                    result = {"status": "success", "simulated": True, "message": f"Simulation {system} réussie"}
+                else:
+                    result = await self._sync_quote_to_systems(quote_result, target=system)
+                
+                # Vérifier le résultat avant de marquer comme terminé
+                if result.get("status") == "success":
+                    self._track_step_complete(key, f"✅ {system.upper()} mis à jour")
+                else:
+                    error_msg = result.get("message", f"Erreur {system}")
+                    self._track_step_fail(key, f"❌ Erreur {system.upper()}", error_msg)
+                
                 sync_results[system] = result
 
             # Total
