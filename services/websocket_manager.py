@@ -77,18 +77,24 @@ class WebSocketManager:
             self.task_connections.setdefault(task_id, set()).add(websocket)
             logger.info(f"✅ WebSocket AJOUTÉ - Connexions pour {task_id}: {len(self.task_connections[task_id])}")
         
-        # Vérifier les messages en attente et les traiter
+        # Vérifier les messages en attente et les traiter (éviter duplications)
         if task_id in self.pending_messages and self.pending_messages[task_id]:
             logger.info(f"📨 {len(self.pending_messages[task_id])} messages en attente pour {task_id}")
-            # Récupérer et vider la liste immédiatement pour éviter les duplications
+            # Récupérer et vider la liste immédiatement 
             pending_msgs = self.pending_messages.pop(task_id, [])
-            # Envoyer chaque message
-            for msg in pending_msgs:
-                try:
-                    await self.broadcast_to_task(task_id, msg, wait=False)
-                    logger.info(f"📤 Message en attente envoyé et supprimé pour {task_id}")
-                except Exception as e:
-                    logger.error(f"Erreur lors de l'envoi du message en attente : {e}")
+            # Filtrer les messages déjà envoyés pour éviter duplications
+            unsent_msgs = [msg for msg in pending_msgs if not msg.get('_sent')]
+            if unsent_msgs:
+                logger.info(f"📤 Envoi de {len(unsent_msgs)} messages non envoyés (sur {len(pending_msgs)} total)")
+                # Envoyer uniquement les messages non envoyés
+                for msg in unsent_msgs:
+                    try:
+                        await self.broadcast_to_task(task_id, msg, wait=False)
+                        logger.info(f"📤 Message en attente envoyé pour {task_id}")
+                    except Exception as e:
+                        logger.error(f"Erreur lors de l'envoi du message en attente : {e}")
+            else:
+                logger.info(f"🚫 Tous les messages étaient déjà envoyés - aucune duplication")
         logger.info("WebSocket connecté", extra={"task_id": task_id})
 
     async def disconnect(self, websocket: "WebSocket", task_id: str):
@@ -281,10 +287,14 @@ class WebSocketManager:
             logger.info(f"🔗 Connexions actives pour {task_id}: {len(self.task_connections.get(task_id, []))}")
             await self.send_task_update(task_id, message)
             logger.info(f"✅ Interaction envoyée immédiatement pour {task_id}")
+            # CRUCIAL : Marquer comme envoyé pour éviter stockage ultérieur
+            message['_sent'] = True
         except Exception as e:
             logger.error(f"❌ Erreur envoi initial pour {task_id}: {e}")
-            self.pending_messages.setdefault(task_id, []).append(message)
-            self._schedule_retry(task_id)
+            # Seulement stocker si l'envoi a échoué
+            if not message.get('_sent'):
+                self.pending_messages.setdefault(task_id, []).append(message)
+                self._schedule_retry(task_id)
 
     async def _attempt_reconnection(self, task_id: str) -> None:
         """Tentative de reconnexion immédiate pour une tâche"""
@@ -323,15 +333,18 @@ class WebSocketManager:
             if sockets:
                 pending = self.pending_messages.pop(task_id, [])
                 for msg in pending:
-                    try:
-                        await self.send_task_update(task_id, msg)
-                        logger.info(
-                            f"✅ Message envoyé au retry {retry} pour {task_id}: {msg.get('type')}"
-                        )
-                    except Exception as e:
-                        logger.error(
-                            f"❌ Échec au retry {retry} pour {task_id}: {e}"
-                        )
+                    # Filtrer les messages déjà envoyés
+                    unsent_msgs = [msg for msg in pending if not msg.get('_sent')]
+                    for msg in unsent_msgs:
+                        try:
+                            await self.send_task_update(task_id, msg)
+                            logger.info(
+                                f"✅ Message envoyé au retry {retry} pour {task_id}: {msg.get('type')}"
+                            )
+                        except Exception as e:
+                            logger.error(
+                                f"❌ Échec au retry {retry} pour {task_id}: {e}"
+                            )
                 return
             delay = min(delay * 1.2, 15)  # Progression plus douce, maximum plus élevé
             logger.info(f"⏳ Retry {retry}/{MAX_RETRIES} après {delay:.1f}s – pas encore connecté")
