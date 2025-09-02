@@ -850,7 +850,8 @@
                         action: "select_existing",
                         client_id: client.id,
                         client_name: client.name,
-                        selected_index: index
+                        selected_index: index,
+                        selected_client: client  // Ajouter l'objet client complet
                     }
                 };
                 console.log("📤 Sélection client:", response);
@@ -1529,7 +1530,8 @@
             const wsUrl = `${wsProtocol}://${window.location.host}/ws/task/${taskId}`;
 
             console.log(`🔌 Tentative de connexion à ${wsUrl}`);
-
+            // Variables pour le heartbeat
+            let heartbeatInterval = null;
             try {
                 window.websocket = new WebSocket(wsUrl);
             } catch (error) {
@@ -1547,6 +1549,12 @@
                 if (typeof updateConnectionStatus === "function") {
                     updateConnectionStatus("connected", "WebSocket connecté");
                 }
+                // Démarrer le heartbeat pour maintenir la connexion
+                heartbeatInterval = setInterval(() => {
+                    if (websocket.readyState === WebSocket.OPEN) {
+                        websocket.send(JSON.stringify({ type: "ping" }));
+                    }
+                }, 30000); // Ping toutes les 30 secondes
                 if (window.reconnectInterval) {
                     clearInterval(window.reconnectInterval);
                     window.reconnectInterval = null;
@@ -1563,6 +1571,16 @@
                 }
 
                 console.log("📥 Message reçu:", data);
+
+                // Gestion spéciale pour client_selection via interaction_data
+                if (data.interaction_data && data.interaction_data.interaction_type === 'client_selection') {
+                    hideProgress();
+                    const opts = data.interaction_data.client_options || data.interaction_data.options || data.interaction_data.clients || [];
+                    const name = data.interaction_data.original_client_name || data.interaction_data.client_name || '';
+                    console.log(`🎯 Affichage sélection client: ${opts.length} options pour "${name}"`);
+                    addClientSelection(opts, name);
+                    return; // On sort pour ne pas entrer dans le switch
+                }
 
                 switch (data.type) {
                     case "progress": {
@@ -1581,6 +1599,19 @@
                             handleUserInteraction(data.data);
                         }
                         // on garde la connexion ouverte
+                        break;
+                    }
+
+                    case "client_selection_required": {
+                        if (data.interaction_data && data.interaction_data.interaction_type === 'client_selection') {
+                            if (typeof hideProgress === "function") hideProgress();
+                            const opts = data.interaction_data.client_options || data.interaction_data.options || data.interaction_data.clients || [];
+                            const name = data.interaction_data.original_client_name || data.interaction_data.client_name || '';
+                            console.log(`🎯 Affichage sélection client: ${opts.length} options pour "${name}"`);
+                            if (typeof addClientSelection === "function") {
+                                addClientSelection(opts, name);
+                            }
+                        }
                         break;
                     }
 
@@ -1647,6 +1678,12 @@
 
             websocket.onclose = (event) => {
                 console.warn(`🔌 WebSocket déconnecté. Code: ${event.code}, Raison: ${event.reason}`);
+                // Arrêter le heartbeat
+                if (heartbeatInterval) {
+                    clearInterval(heartbeatInterval);
+                    heartbeatInterval = null;
+                }
+                console.log('🔌 WebSocket fermé.');
                 window.websocket = null;
 
                 // Fermetures normales: ne rien faire
