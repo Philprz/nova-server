@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Debug NOVA</title>
+</head>
+<body>
+    <h1>Test de débogage pour NOVA</h1>
+    
+    <div style="margin: 20px; padding: 20px; border: 1px solid #ccc;">
+        <h2>Instructions de test:</h2>
+        <ol>
+            <li>Ouvrez l'interface NOVA</li>
+            <li>Ouvrez la console du navigateur (F12)</li>
+            <li>Tapez un message dans le champ de saisie</li>
+            <li>Observez les logs dans la console</li>
+            <li>Essayez d'envoyer avec Entrée et avec le bouton</li>
+        </ol>
+        
+        <h2>Points à vérifier dans la console:</h2>
+        <ul>
+            <li>🚀 Logs d'initialisation au chargement</li>
+            <li>⌨️ Logs lors de la frappe sur Entrée</li>
+            <li>📋 Logs lors de la soumission du formulaire</li>
+            <li>Vérifier si des erreurs JavaScript apparaissent</li>
+        </ul>
+        
+        <h2>Problèmes possibles:</h2>
+        <ul>
+            <li><strong>Le bouton est désactivé:</strong> Vérifiez que le message a au moins 3 caractères</li>
+            <li><strong>Erreur JavaScript:</strong> Vérifiez la console pour des erreurs de syntaxe</li>
+            <li><strong>Formulaire non trouvé:</strong> Les logs d'initialisation indiqueront si les éléments sont trouvés</li>
+            <li><strong>isProcessing bloqué à true:</strong> Un traitement précédent s'est mal terminé</li>
+        </ul>
+        
+        <h2>Solution temporaire:</h2>
+        <p>Si rien ne fonctionne, exécutez cette commande dans la console:</p>
+        <code style="background: #f0f0f0; padding: 10px; display: block;">
+            isProcessing = false; updateSendButton();
+        </code>
+    </div>
+</body>
+</html>
