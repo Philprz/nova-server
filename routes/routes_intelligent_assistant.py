@@ -201,9 +201,10 @@ async def websocket_endpoint(websocket: WebSocket, task_id: str):
         logger.info(f"✅ WebSocket - Connexion établie pour {task_id}")
         
         while True:
-            # Ping/pong pour maintenir la connexion + traitement user_response
+            # Timeout de 60 secondes pour éviter la déconnexion immédiate
             try:
-                data = await websocket.receive_text()
+                # Utiliser receive_text avec un timeout plus généreux
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=60.0)
                 logger.debug(f"📥 WebSocket - Message reçu de {task_id}: {data}")
                 
                 # Parse du message JSON
@@ -226,13 +227,26 @@ async def websocket_endpoint(websocket: WebSocket, task_id: str):
                         }))
                     else:
                         # Echo pour vérifier la connexion (ping/pong)
-                        await websocket.send_text(json.dumps({
-                            "type": "pong",
-                            "task_id": task_id,
-                            "timestamp": datetime.utcnow().isoformat()
-                        }))
+                        if message_type == "ping":
+                            # Répondre au ping pour maintenir la connexion
+                            await websocket.send_text(json.dumps({
+                                "type": "pong",
+                                "task_id": task_id,
+                                "timestamp": datetime.utcnow().isoformat()
+                            }))
+                        else:
+                            # Pour tout autre type de message, envoyer un echo générique
+                            await websocket.send_text(json.dumps({
+                                "type": "echo",
+                                "task_id": task_id,
+                                "received_type": message_type,
+                                "timestamp": datetime.utcnow().isoformat()
+                            }))
                 except json.JSONDecodeError:
                     logger.warning(f"⚠️ WebSocket - Message non JSON reçu de {task_id}")
+                except asyncio.TimeoutError:
+                    # Continuer la boucle si timeout (pas d'erreur)
+                    continue
                     
             except WebSocketDisconnect:
                 logger.warning(f"⚠️ WebSocket - Client déconnecté: {task_id}")
