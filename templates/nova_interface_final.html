@@ -1220,7 +1220,16 @@
         }
 
         function handleTaskError(error) {
-            addMessage(`Erreur lors du traitement: ${error}`, 'system');
+            hideProgress();
+            // Améliorer le message d'erreur avec plus de détails
+            const errorMsg = error && typeof error === 'string' ? error : 
+                           error && error.message ? error.message :
+                           error && error.error ? error.error :
+                           'Une erreur inattendue est survenue lors du traitement';
+            addMessage(`❌ Erreur: ${errorMsg}`, 'system');
+            console.error("Erreur de tâche:", error);
+            isProcessing = false;
+            updateSendButton();
         }
 
         function continuePreviousWorkflow() {
@@ -1359,7 +1368,23 @@
                 statusEl.innerHTML = '<i class="bi bi-wifi-off"></i> Erreur';
             }
         }
-
+        // Fonction pour mettre à jour l'indicateur de statut de connexion
+        function updateConnectionStatus(status, message) {
+            const statusEl = document.getElementById('connectionStatus');
+            if (statusEl) {
+                if (status === 'connected') {
+                    statusEl.className = 'connection-status connected';
+                    statusEl.innerHTML = '<i class="bi bi-wifi"></i> Connecté';
+                } else if (status === 'disconnected') {
+                    statusEl.className = 'connection-status disconnected';
+                    statusEl.innerHTML = '<i class="bi bi-wifi-off"></i> Déconnecté';
+                } else {
+                    statusEl.className = 'connection-status disconnected';
+                    statusEl.innerHTML = '<i class="bi bi-wifi-off"></i> Erreur';
+                }
+                console.log(`📡 Statut connexion: ${status} - ${message}`);
+            }
+        }
         // Connexion WebSocket
         function connectWebSocket(taskId) {
             if (websocket && websocket.readyState === WebSocket.OPEN) {
@@ -1375,11 +1400,13 @@
 
             websocket.onopen = () => {
                 console.log("✅ WebSocket connecté !");
-                // NE PAS cacher la progression automatiquement
-                // hideProgress(); // SUPPRIMÉ
-                addMessage("Connexion établie.", 'system');
+                // Mettre à jour l'indicateur de statut au lieu du chat
+                updateConnectionStatus('connected', 'WebSocket connecté');
                 if(reconnectInterval) clearInterval(reconnectInterval);
             };
+            websocket.onerror = (error) => {
+                console.error("❌ Erreur WebSocket:", error);
+                updateConnectionStatus('disconnected', 'Erreur de connexion WebSocket');
 
             websocket.onmessage = (event) => {
                 const data = JSON.parse(event.data);
@@ -1458,10 +1485,12 @@
             reconnectInterval = setInterval(() => {
                 attempts++;
                 console.log(`🔄 Tentative reconnexion ${attempts}/${maxAttempts}`);
+                updateConnectionStatus('disconnected', `Reconnexion ${attempts}/${maxAttempts}`);
 
                 if (attempts >= maxAttempts) {
                     clearInterval(reconnectInterval);
                     reconnectInterval = null;
+                    updateConnectionStatus('disconnected', 'Connexion échouée');
                     console.log("❌ Abandon reconnexion WebSocket");
                     return;
                 }
