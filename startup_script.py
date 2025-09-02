@@ -10,15 +10,9 @@ from datetime import datetime
 import asyncio
 from dotenv import load_dotenv
 load_dotenv()
+
 # Configuration de l'encodage pour Windows
 if sys.platform == "win32":
-    # Correction : La redéfinition manuelle de sys.stdout/stderr entre en conflit
-    # avec la gestion des I/O de uvicorn, causant l'erreur "I/O operation on closed file".
-    # La définition de PYTHONIOENCODING et l'utilisation de `chcp 65001` dans le .bat
-    # sont des méthodes plus sûres et suffisantes.
-    # import io
-    # sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
-    # sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
     os.environ["PYTHONIOENCODING"] = "utf-8"
 
 # Configuration du logging
@@ -27,14 +21,19 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler('startup.log', encoding='utf-8'),
-        # Correction: Utiliser explicitement sys.stdout pour le handler de la console.
-        # Le StreamHandler() par défaut utilise sys.stderr, qui peut causer des problèmes
-        # d'encodage sur Windows. sys.stdout a été configuré pour l'UTF-8 au début du script.
         logging.StreamHandler()
         ]
     )
 
 logger = logging.getLogger(__name__)
+
+def clear_terminal():
+    """Nettoie le terminal selon le système d'exploitation"""
+    if sys.platform == "win32":
+        os.system('cls')
+    else:
+        os.system('clear')
+
 async def initialize_server():
     """Initialise le serveur de manière asynchrone"""
     try:
@@ -99,102 +98,77 @@ def check_environment():
     # Vérification des modules critiques
     critical_modules = ['fastapi', 'uvicorn', 'anthropic', 'httpx']
     missing_modules = []
-
+    
     for module in critical_modules:
         try:
             __import__(module)
         except ImportError:
             missing_modules.append(module)
-
+    
     if missing_modules:
         logger.error(f"Modules manquants: {', '.join(missing_modules)}")
-        logger.info("Exécutez: python install_missing_modules.py")
+        logger.info("Installez avec: pip install -r requirements.txt")
         return False
-
-    # Retirer le message de succès car déjà géré dans run_pre_flight_checks
-    return True
-
-def check_configuration():
-    """Vérifie la configuration dans .env"""
-    # Plus de message "Vérification de la configuration..." car déjà affiché dans run_pre_flight_checks
-
-    from dotenv import load_dotenv
-    load_dotenv()
-
-    # Variables critiques
-    critical_vars = [
-        'ANTHROPIC_API_KEY',
-        'SALESFORCE_USERNAME',
-        'SAP_REST_BASE_URL'
-    ]
-
-    missing_vars = []
-    for var in critical_vars:
-        if not os.getenv(var):
-            missing_vars.append(var)
-
-    if missing_vars:
-        logger.warning(f"Variables de configuration manquantes: {', '.join(missing_vars)}")
-        logger.warning("Le système démarrera en mode dégradé")
-
+        
     return True
 
 def start_mcp_services():
-    """Démarre les services MCP SAP et MCP Salesforce"""
-    services_started = []
-
-    # Vérifier si les fichiers MCP existent avant de les démarrer
-    if os.path.exists("sap_mcp.py"):
-        subprocess.Popen(["python", "sap_mcp.py"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        services_started.append("MCP SAP")
-
-    if os.path.exists("salesforce_mcp.py"):
-        subprocess.Popen(["python", "salesforce_mcp.py"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        services_started.append("MCP Salesforce")
-
-    if services_started:
-        logger.info(f"Services démarrés: {' | '.join(services_started)}")
-    else:
-        logger.warning("Aucun service MCP trouvé (sap_mcp.py, salesforce_mcp.py)")
+    """Démarre les services MCP (Model Context Protocol)"""
+    logger.info("Démarrage des services MCP...")
     
-def start_claude_desktop():
-    """Démarre Claude Desktop"""
-    # Correction: charger le fichier .env d'abord
-    from dotenv import load_dotenv
-    load_dotenv()
-    
-    # Lire le chemin depuis le fichier .env en utilisant la variable corrigée
-    claude_desktop_path = os.getenv("CLAUDE_DESKTOP_PATH")
-    
-    # Si la variable n'est pas définie, on informe et on continue
-    if not claude_desktop_path:
-        logger.info("Variable CLAUDE_DESKTOP_PATH non définie, démarrage de Claude Desktop ignoré.")
+    # Vérifier l'environnement Salesforce
+    if not os.getenv('MCP_SALESFORCE_CLIENT_ID'):
+        logger.warning("Configuration Salesforce MCP manquante - Service désactivé")
         return
+        
+    # Ici on pourrait démarrer les services MCP si nécessaire
+    # Pour l'instant, on suppose qu'ils sont lancés séparément
+    logger.info("Services MCP prêts")
 
-    # Si le chemin existe, on tente de démarrer l'application
-    if os.path.exists(claude_desktop_path):
-        try:
-            subprocess.Popen([claude_desktop_path])
-            logger.info(f"Claude Desktop démarré depuis {claude_desktop_path}")
-        except Exception as e:
-            logger.error(f"Erreur lors du lancement de Claude Desktop: {e}")
-    else:
-        # Si le chemin n'existe pas, on affiche un avertissement clair
-        logger.warning(f"Claude Desktop non trouvé au chemin spécifié : {claude_desktop_path}")
-    
+def start_claude_desktop():
+    """Démarre Claude Desktop si disponible"""
+    if sys.platform == "win32":
+        claude_path = os.path.expandvars(r"%LOCALAPPDATA%\Programs\claude\Claude.exe")
+        if os.path.exists(claude_path):
+            try:
+                subprocess.Popen([claude_path], shell=True)
+                logger.info("Claude Desktop lancé")
+            except Exception as e:
+                logger.warning(f"Impossible de lancer Claude Desktop: {e}")
+        else:
+            logger.debug("Claude Desktop non installé")
+
+def test_api_health():
+    """Teste la santé de l'API"""
+    import httpx
+    try:
+        with httpx.Client() as client:
+            response = client.get("http://localhost:8000/health", timeout=5.0)
+            if response.status_code == 200:
+                return True
+    except:
+        pass
+    return False
+
 def run_pre_flight_checks():
-    """Exécute les vérifications avant démarrage"""
+    """Effectue toutes les vérifications préliminaires avec résumé compact"""
     logger.info("=== VÉRIFICATIONS PRÉLIMINAIRES ===")
-
+    
+    # Récupération des informations système
+    python_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+    system_info = f"{sys.platform.upper()} | Python {python_version}"
+    
+    # Liste des vérifications à effectuer
     checks = [
-        ("Version Python", check_python_version),
+        ("Python", check_python_version),
         ("Environnement", check_environment),
-        ("Configuration", check_configuration)
     ]
-
-    # Afficher toutes les vérifications sur une seule ligne
+    
     check_status = []
+    
+    # Effectuer chaque vérification
     for check_name, check_func in checks:
+        logger.info(f"Vérification: {check_name}...")
         if check_func():
             check_status.append(f"✓ {check_name}")
         else:
@@ -267,6 +241,13 @@ def main():
         
         # Démarrage de Claude Desktop
         start_claude_desktop()    
+        
+        # Nettoyage du terminal avant de démarrer le serveur si tout est OK
+        time.sleep(2)  # Pause pour permettre de lire les derniers messages
+        clear_terminal()
+        
+        # Réafficher la bannière après le nettoyage
+        print_banner()
         
         # Démarrage du serveur
         logger.info("Démarrage du serveur NOVA...")
