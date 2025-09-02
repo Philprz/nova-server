@@ -248,14 +248,17 @@ async def websocket_endpoint(websocket: WebSocket, task_id: str):
         logger.info(f"🔌 WebSocket - Déconnexion complète pour {task_id}")
 @router.get("/api/assistant/workflow/pending-interaction/{task_id}")
 async def get_pending_interaction(task_id: str):
-    """Récupère les interactions en attente pour un task_id"""
+    """Récupère les interactions en attente pour un task_id et les marque comme traités"""
     # Vérifier dans websocket_manager.pending_messages
     if task_id in websocket_manager.pending_messages:
         messages = websocket_manager.pending_messages[task_id]
         if messages:
-            # Retourner le premier message en attente
-            message = messages[0]
-            logger.info(f"📨 Interaction en attente trouvée pour {task_id}")
+            # Retourner le premier message en attente ET le supprimer pour éviter duplication
+            message = messages.pop(0)
+            # Si plus de messages, supprimer la clé si liste vide
+            if not messages:
+                websocket_manager.pending_messages.pop(task_id, None)
+            logger.info(f"📨 Interaction en attente récupérée et supprimée pour {task_id}")
             return JSONResponse(content=message)
     
     # Vérifier aussi dans progress_tracker

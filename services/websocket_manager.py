@@ -77,16 +77,18 @@ class WebSocketManager:
             self.task_connections.setdefault(task_id, set()).add(websocket)
             logger.info(f"✅ WebSocket AJOUTÉ - Connexions pour {task_id}: {len(self.task_connections[task_id])}")
         
-        # Vérifier les messages en attente
-        if task_id in self.pending_messages:
+        # Vérifier les messages en attente et les traiter
+        if task_id in self.pending_messages and self.pending_messages[task_id]:
             logger.info(f"📨 {len(self.pending_messages[task_id])} messages en attente pour {task_id}")
-            # Envoyer chaque message puis vider la liste
-            for msg in self.pending_messages[task_id]:
+            # Récupérer et vider la liste immédiatement pour éviter les duplications
+            pending_msgs = self.pending_messages.pop(task_id, [])
+            # Envoyer chaque message
+            for msg in pending_msgs:
                 try:
                     await self.broadcast_to_task(task_id, msg, wait=False)
+                    logger.info(f"📤 Message en attente envoyé et supprimé pour {task_id}")
                 except Exception as e:
                     logger.error(f"Erreur lors de l'envoi du message en attente : {e}")
-            self.pending_messages[task_id] = []
         logger.info("WebSocket connecté", extra={"task_id": task_id})
 
     async def disconnect(self, websocket: "WebSocket", task_id: str):
@@ -250,11 +252,24 @@ class WebSocketManager:
             message['timestamp'] = datetime.now(timezone.utc).isoformat()
 
 
-        # Si pas de connexions, stocker et planifier retry
+        # Si pas de connexions, stocker et planifier retry (éviter duplicatas)
         if not self.task_connections.get(task_id):
+            # Vérifier si le message n'existe pas déjà pour éviter les duplicatas
+            existing_messages = self.pending_messages.get(task_id, [])
+            # Vérifier si un message similaire existe déjà
+            message_exists = any(
+                existing_msg.get('type') == message.get('type') and
+                existing_msg.get('interaction_data', {}).get('interaction_type') == 
+                message.get('interaction_data', {}).get('interaction_type')
+                for existing_msg in existing_messages
+            )
             
-            logger.warning(f"⚠️ Pas de connexion active pour {task_id}, message stocké")
-            self.pending_messages.setdefault(task_id, []).append(message)
+            if not message_exists:
+                logger.warning(f"⚠️ Pas de connexion active pour {task_id}, message stocké")
+                self.pending_messages.setdefault(task_id, []).append(message)
+            else:
+                logger.info(f"📨 Message similaire déjà en attente pour {task_id}, ignorer duplication")
+                
             # Vérifier si la tâche existe dans le progress_tracker
             task = progress_tracker.get_task(task_id)
 
