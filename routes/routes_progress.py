@@ -240,12 +240,34 @@ async def handle_client_selection_task(task_id: str, response_data: dict):
         action = (response_data.get("action") or "").strip()
         client_name = (response_data.get("client_name") or "Client_Inconnu").strip()
 
-        # Données client possibles (formats variés)
+        # Récupérer le client sélectionné de plusieurs façons possibles
         selected_client = (
-            response_data.get("selected_client")
-            or response_data.get("client_data")
-            or response_data.get("selected_data")
+            response_data.get("selected_client") or 
+            response_data.get("client_data") or 
+            response_data.get("selected_data")
         )
+        
+        # Si pas d'objet client complet, essayer de le retrouver avec client_id et selected_index
+        if not selected_client:
+            client_id = response_data.get("client_id")
+            selected_index = response_data.get("selected_index")
+            
+            if client_id and client_options and isinstance(client_options, list):
+                # Chercher par ID
+                for option in client_options:
+                    if str(option.get("id")) == str(client_id):
+                        selected_client = option
+                        logger.info(f"✅ Client trouvé par ID: {client_id}")
+                        break
+            
+            if not selected_client and selected_index is not None and client_options:
+                # Chercher par index si ID non trouvé
+                try:
+                    if 0 <= selected_index < len(client_options):
+                        selected_client = client_options[selected_index]
+                        logger.info(f"✅ Client trouvé par index: {selected_index}")
+                except (ValueError, IndexError, TypeError):
+                    logger.warning(f"⚠️ Index invalide: {selected_index}")
 
         # 2) Si rien de fourni côté réponse, tenter de lire dans le cache de validation de la tâche
         task = progress_tracker.get_task(task_id)
@@ -359,6 +381,11 @@ async def handle_client_selection_task(task_id: str, response_data: dict):
             logger.info(f"➡️ Poursuite workflow (création client) pour {task_id}")
             await workflow.continue_after_user_input(user_input, context)
             logger.info(f"✅ Nouveau client demandé et workflow poursuivi pour {task_id}")
+            # Marquer la tâche comme complétée pour cette interaction
+            if task:
+                task.complete_user_validation("client_selection", response_data)
+                task.status = TaskStatus.RUNNING
+                logger.info(f"✅ Statut tâche mis à jour: RUNNING pour {task_id}")
             return
 
         elif action == "select_existing":
@@ -407,6 +434,11 @@ async def handle_client_selection_task(task_id: str, response_data: dict):
             logger.info(f"➡️ Poursuite workflow (sélection client existant) pour {task_id}")
             await workflow.continue_after_user_input(user_input, context)
             logger.info(f"✅ Client sélectionné et workflow poursuivi pour {task_id}")
+            # Marquer la tâche comme complétée pour cette interaction
+            if task:
+                task.complete_user_validation("client_selection", response_data)
+                task.status = TaskStatus.RUNNING
+                logger.info(f"✅ Statut tâche mis à jour: RUNNING pour {task_id}")
             return
 
         else:

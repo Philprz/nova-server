@@ -220,6 +220,7 @@ async def websocket_endpoint(websocket: WebSocket, task_id: str):
                         await handle_user_response_task(task_id, response_data)
                         
                         # Confirmer la réception
+                        logger.info(f"✅ user_response traité avec succès pour {task_id}")
                         await websocket.send_text(json.dumps({
                             "type": "user_response_processed",
                             "task_id": task_id,
