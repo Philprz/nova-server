@@ -1395,6 +1395,17 @@
                 } else if (data.type === 'user_interaction_required') {
                     console.log("🤝 Interaction utilisateur détectée:", data.interaction_data);
                     if (data.interaction_data && data.interaction_data.interaction_type === 'client_selection') {
+                        hideProgress();
+                        
+                        const opts = data.interaction_data.client_options || data.interaction_data.options || data.interaction_data.clients || [];
+                        const name = data.interaction_data.original_client_name || data.interaction_data.client_name || '';
+                        addClientSelection(opts, name);
+                        
+                        // Ne pas fermer la connexion WebSocket après réception d'une interaction
+                        return;
+                    }
+                    console.log("🤝 Interaction utilisateur détectée:", data.interaction_data);
+                    if (data.interaction_data && data.interaction_data.interaction_type === 'client_selection') {
                     hideProgress();
                     
                     { const opts = data.interaction_data.client_options || data.interaction_data.options || data.interaction_data.clients || []; const name = data.interaction_data.original_client_name || data.interaction_data.client_name || ''; addClientSelection(opts, name); }
@@ -1428,50 +1439,14 @@
             websocket.onclose = (event) => {
                 console.warn(`🔌 WebSocket déconnecté. Code: ${event.code}, Raison: ${event.reason}`);
                 console.log('🔌 WebSocket fermé. Code: ${event.code}, Raison: ${event.reason}');
-                if (event.code !== 1000 && event.code !== 1001) {
+                // Ne pas reconnecter automatiquement après une interaction utilisateur
+                if (event.code !== 1000 && event.code !== 1001 && event.code !== 1006) {
                     addMessage("La connexion a été perdue. Tentative de reconnexion...", 'system');
                     attemptReconnection(taskId);
                 }
             };
-
-            websocket.onerror = (error) => {
-                addMessage("Erreur: Problème de connexion WebSocket. Vérification en cours...", 'system');
-                console.error("Détails erreur WebSocket:", error);
-            };
-
             // Vérifier s'il y a des validations en attente après connexion
             setTimeout(() => checkPendingValidations(taskId), 1000);
-        }
-
-        // Fonction pour vérifier les validations en attente
-        async function checkPendingValidations(taskId) {
-            try {
-                const response = await fetch(`/progress/task/${taskId}/validation`);
-                if (response.ok) {
-                    const data = await response.json();
-                    console.log("📋 Vérification validations en attente:", data);
-
-                    if (data.has_validation && data.validation_data) {
-                        // Si client_selection est en attente
-                        const clientSelection = data.validation_data.client_selection;
-                        if (clientSelection && clientSelection.status === 'pending') {
-                            const validationData = clientSelection.data;
-                            console.log("🤝 Validation client en attente trouvée:", validationData);
-
-                            // Afficher la sélection client
-                            const clients = validationData.client_options || validationData.options || validationData.clients || [];
-                            const originalName = validationData.original_client_name || '';
-
-                            if (clients.length > 0) {
-                                hideProgress();
-                                addClientSelection(clients, originalName);
-                            }
-                        }
-                    }
-                }
-            } catch (error) {
-                console.error("❌ Erreur récupération validations:", error);
-            }
         }
 
         // Fonction de tentative de reconnexion WebSocket avec limitation
