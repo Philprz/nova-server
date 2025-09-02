@@ -179,7 +179,27 @@
         }
 
         .message.system {
-            background: var(--bg-tertiary);
+            /* Option 1: Couleur actuelle (gris clair) */
+            /* background: var(--bg-tertiary); */
+
+            /* Option 2: Bleu très clair */
+            /* background: rgba(2, 185, 253, 0.1); */
+
+            /* Option 3: Violet très clair */
+            /* background: rgba(131, 45, 254, 0.1); */
+
+            /* Option 4: Vert très clair (succès) */
+            /* background: rgba(45, 254, 131, 0.1); */
+
+            /* Option 5: Orange très clair (attention) */
+            /* background: rgba(253, 82, 2, 0.1); */
+
+            /* Option 6: Fond sombre pour contraste */
+            /* background: #1a2332; color: #ffffff; */
+
+            /* Option 7: Dégradé subtil */
+            background: linear-gradient(135deg, rgba(2, 185, 253, 0.05) 0%, rgba(131, 45, 254, 0.05) 100%);
+
             margin: 0 auto;
             text-align: center;
             max-width: 100%;
@@ -657,7 +677,7 @@
                     minlength="3"
                     maxlength="1000"
                 ></textarea>
-                <button id="sendButton" type="submit" class="send-button" disabled aria-label="Envoyer">
+                <button id="sendButton" type="submit" class="send-button" aria-label="Envoyer">
                     <i class="bi bi-send"></i>
                 </button>
             </form>
@@ -1300,10 +1320,13 @@
 
         // Gestion entrées et formulaire
         async function handleFormSubmit(event) {
+            console.log("📋 handleFormSubmit appelé");
             event.preventDefault();
 
             const input = document.getElementById('chatInput');
             const message = input.value.trim();
+
+            console.log("📋 Message:", message, "length:", message.length, "isProcessing:", isProcessing);
 
             // Validation côté client
             if (!message) {
@@ -1371,27 +1394,16 @@
             }
         }
         
-        // Fonction de gestion de l'input
-        function handleInput() {
-            console.log("✍️ Input changé");
-            updateSendButton();
-                autoResize();
-                
-                // Masquer l'erreur de validation si elle existe
-const errorDiv = document.getElementById('validationError');
-                if (errorDiv) {
-                errorDiv.style.display = 'none';
-                }
-                }
-                
-                // Fonction de gestion des touches pour le chat
-                function handleKeyPress(event) {
-                console.log("⌨️ Touche pressée:", event.key);
-                if (event.key === 'Enter' && !event.shiftKey) {
+        // Fonction de gestion des touches pour le chat
+        function handleKeyPress(event) {
+            console.log("⌨️ Touche pressée:", event.key, "shiftKey:", event.shiftKey);
+            if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault();
                 const form = document.getElementById('chatForm');
                 const button = document.getElementById('sendButton');
-                
+
+                console.log("⌨️ État actuel - isProcessing:", isProcessing, "button disabled:", button?.disabled);
+
                 // Si le bouton n'est pas désactivé, envoyer le message
                 if (button && !button.disabled) {
                     console.log("⌨️ Envoi via Enter");
@@ -1403,6 +1415,7 @@ const errorDiv = document.getElementById('validationError');
                     }
                 } else {
                     console.log("⌨️ Bouton désactivé, pas d'envoi");
+                    showValidationError('Veuillez entrer un message valide (3 caractères minimum)');
                 }
             }
         }
@@ -1447,76 +1460,6 @@ const errorDiv = document.getElementById('validationError');
         // Gestion connexion
         async function checkConnection() {
             try {
-                const response = await fetch('/health');
-                const data = await response.json();
-                
-                const statusEl = document.getElementById('connectionStatus');
-                if (data.status === 'healthy') {
-                    statusEl.className = 'connection-status connected';
-                    statusEl.innerHTML = '<i class="bi bi-wifi"></i> Connecté';
-                } else {
-                    statusEl.className = 'connection-status disconnected';
-                    statusEl.innerHTML = '<i class="bi bi-wifi-off"></i> Déconnecté';
-                }
-            } catch (error) {
-                const statusEl = document.getElementById('connectionStatus');
-                statusEl.className = 'connection-status disconnected';
-                statusEl.innerHTML = '<i class="bi bi-wifi-off"></i> Erreur';
-            }
-        }
-        // Fonction pour mettre à jour l'indicateur de statut de connexion
-        function updateConnectionStatus(status, message) {
-            const statusEl = document.getElementById('connectionStatus');
-            if (statusEl) {
-                if (status === 'connected') {
-                    statusEl.className = 'connection-status connected';
-                    statusEl.innerHTML = '<i class="bi bi-wifi"></i> Connecté';
-                } else if (status === 'disconnected') {
-                    statusEl.className = 'connection-status disconnected';
-                    statusEl.innerHTML = '<i class="bi bi-wifi-off"></i> Déconnecté';
-                } else {
-                    statusEl.className = 'connection-status disconnected';
-                    statusEl.innerHTML = '<i class="bi bi-wifi-off"></i> Erreur';
-                }
-                console.log(`📡 Statut connexion: ${status} - ${message}`);
-            }
-        }
-        // Connexion WebSocket
-        function connectWebSocket(taskId) {
-            // Fermer toute connexion existante avant d'en créer une nouvelle
-            if (websocket) {
-                if (websocket.readyState === WebSocket.OPEN || websocket.readyState === WebSocket.CONNECTING) {
-                    console.log("🔄 Fermeture de la connexion WebSocket existante");
-                    websocket.close();
-                }
-                websocket = null;
-            }
-
-            const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-            const wsUrl = `${wsProtocol}://${window.location.host}/ws/task/${taskId}`;
-
-            console.log(`🔌 Tentative de connexion à ${wsUrl}`);
-
-            try {
-                websocket = new WebSocket(wsUrl);
-            } catch (error) {
-                console.error("❌ Impossible de créer la connexion WebSocket:", error);
-                handleTaskError('Impossible d\'établir la connexion temps réel');
-                return;
-            }
-
-            websocket.onopen = () => {
-                console.log("✅ WebSocket connecté !");
-                updateConnectionStatus('connected', 'WebSocket connecté');
-                if (reconnectInterval) {
-                    clearInterval(reconnectInterval);
-                    reconnectInterval = null;
-                }
-            };
-
-        // Gestion connexion
-        async function checkConnection() {
-            try {
                 // Ajouter un timeout pour éviter d'attendre trop longtemps
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 secondes
@@ -1554,6 +1497,61 @@ const errorDiv = document.getElementById('validationError');
                 console.warn('Vérification connexion échouée:', error.message);
             }
         }
+        // Fonction pour mettre à jour l'indicateur de statut de connexion
+        function updateConnectionStatus(status, message) {
+            const statusEl = document.getElementById('connectionStatus');
+            if (statusEl) {
+                if (status === 'connected') {
+                    statusEl.className = 'connection-status connected';
+                    statusEl.innerHTML = '<i class="bi bi-wifi"></i> Connecté';
+                } else if (status === 'disconnected') {
+                    statusEl.className = 'connection-status disconnected';
+                    statusEl.innerHTML = '<i class="bi bi-wifi-off"></i> Déconnecté';
+                } else {
+                    statusEl.className = 'connection-status disconnected';
+                    statusEl.innerHTML = '<i class="bi bi-wifi-off"></i> Erreur';
+                }
+                console.log(`📡 Statut connexion: ${status} - ${message}`);
+            }
+        }
+        // Connexion WebSocket
+        function connectWebSocket(taskId) {
+            // Fermer toute connexion existante avant d'en créer une nouvelle
+            if (window.websocket) {
+                if (window.websocket.readyState === WebSocket.OPEN || window.websocket.readyState === WebSocket.CONNECTING) {
+                    console.log("🔄 Fermeture de la connexion WebSocket existante");
+                    window.websocket.close();
+                }
+                window.websocket = null;
+            }
+
+            const wsProtocol = window.location.protocol === "https:" ? "wss" : "ws";
+            const wsUrl = `${wsProtocol}://${window.location.host}/ws/task/${taskId}`;
+
+            console.log(`🔌 Tentative de connexion à ${wsUrl}`);
+
+            try {
+                window.websocket = new WebSocket(wsUrl);
+            } catch (error) {
+                console.error("❌ Impossible de créer la connexion WebSocket:", error);
+                if (typeof handleTaskError === "function") {
+                    handleTaskError("Impossible d'établir la connexion temps réel");
+                }
+                return;
+            }
+
+            const websocket = window.websocket; // alias local
+
+            websocket.onopen = () => {
+                console.log("✅ WebSocket connecté !");
+                if (typeof updateConnectionStatus === "function") {
+                    updateConnectionStatus("connected", "WebSocket connecté");
+                }
+                if (window.reconnectInterval) {
+                    clearInterval(window.reconnectInterval);
+                    window.reconnectInterval = null;
+                }
+            };
 
             websocket.onmessage = (event) => {
                 let data;
@@ -1566,112 +1564,132 @@ const errorDiv = document.getElementById('validationError');
 
                 console.log("📥 Message reçu:", data);
 
-                if (data.type === 'progress') {
-                    if (!document.getElementById('progressContainer').classList.contains('active')) {
-                        showProgress();
+                switch (data.type) {
+                    case "progress": {
+                        const container = document.getElementById("progressContainer");
+                        if (container && !container.classList.contains("active") && typeof showProgress === "function") {
+                            showProgress();
+                        }
+                        if (typeof updateProgress === "function") {
+                            updateProgress(data.progress, data.message, data.step);
+                        }
+                        break;
                     }
-                    updateProgress(data.progress, data.message, data.step);
-                } else if (data.type === 'interaction_required') {
-                    handleUserInteraction(data.data);
-                } else if (data.type === 'user_interaction_required') {
-                    console.log("🤝 Interaction utilisateur détectée:", data.interaction_data);
-                    if (data.interaction_data && data.interaction_data.interaction_type === 'client_selection') {
-                        hideProgress();
-                        const opts = data.interaction_data.client_options
-                                || data.interaction_data.options
-                                || data.interaction_data.clients
-                                || [];
-                        const name = data.interaction_data.original_client_name
-                                || data.interaction_data.client_name
-                                || '';
-                        addClientSelection(opts, name);
-                        return; // garder la connexion ouverte
+
+                    case "interaction_required": {
+                        if (typeof handleUserInteraction === "function") {
+                            handleUserInteraction(data.data);
+                        }
+                        // on garde la connexion ouverte
+                        break;
                     }
-                } else if (data.type === 'client_selection_required') {
-                    hideProgress();
-                    const clients = data.client_options || data.clients || [];
-                    const originalName = data.original_client_name || '';
-                    addClientSelection(clients, originalName);
-                } else if (data.type === 'completion') {
-                    if (progressInterval) {
-                        clearInterval(progressInterval);
-                        progressInterval = null;
+
+                    case "user_interaction_required": {
+                        console.log("🤝 Interaction utilisateur détectée:", data.interaction_data);
+                        const i = data.interaction_data || {};
+                        if (i.interaction_type === "client_selection") {
+                            if (typeof hideProgress === "function") hideProgress();
+                            const opts = i.client_options || i.options || i.clients || [];
+                            const name = i.original_client_name || i.client_name || "";
+                            if (typeof addClientSelection === "function") addClientSelection(opts, name);
+                            // on garde la connexion ouverte
+                        }
+                        break;
                     }
-                    handleTaskComplete(data.data);
-                    websocket.close();
-                } else if (data.type === 'error') {
-                    if (progressInterval) {
-                        clearInterval(progressInterval);
-                        progressInterval = null;
+
+                    case "client_selection_required": {
+                        if (typeof hideProgress === "function") hideProgress();
+                        const clients = data.client_options || data.clients || [];
+                        const originalName = data.original_client_name || "";
+                        if (typeof addClientSelection === "function") addClientSelection(clients, originalName);
+                        break;
                     }
-                    handleTaskError(data.error || data.message || data);
-                    websocket.close();
-                } else if (data.type === 'log') {
-                    addMessage(`[LOG] ${data.message}`, 'system');
-                } else if (data.type === 'message') {
-                    addMessage(data.message, 'system');
+
+                    case "completion": {
+                        if (window.progressInterval) {
+                            clearInterval(window.progressInterval);
+                            window.progressInterval = null;
+                        }
+                        if (typeof handleTaskComplete === "function") {
+                            handleTaskComplete(data.data);
+                        }
+                        try { websocket.close(1000, "Task completed"); } catch (_) {}
+                        break;
+                    }
+
+                    case "error": {
+                        if (window.progressInterval) {
+                            clearInterval(window.progressInterval);
+                            window.progressInterval = null;
+                        }
+                        if (typeof handleTaskError === "function") {
+                            handleTaskError(data.error || data.message || data);
+                        }
+                        try { websocket.close(1011, "Task error"); } catch (_) {}
+                        break;
+                    }
+
+                    case "log": {
+                        if (typeof addMessage === "function") addMessage(`[LOG] ${data.message}`, "system");
+                        break;
+                    }
+
+                    case "message": {
+                        if (typeof addMessage === "function") addMessage(data.message, "system");
+                        break;
+                    }
+
+                    default: {
+                        console.warn("Type de message non géré:", data.type);
+                    }
                 }
             };
 
             websocket.onclose = (event) => {
                 console.warn(`🔌 WebSocket déconnecté. Code: ${event.code}, Raison: ${event.reason}`);
-                websocket = null;
+                window.websocket = null;
 
-                // Codes de fermeture normaux
+                // Fermetures normales: ne rien faire
                 if (event.code === 1000 || event.code === 1001) {
-                    return; // Fermeture normale
-                }
-
-                // Si le code est 1006, c'est une déconnexion anormale
-                if (event.code === 1006 && !isProcessing) {
-                    updateConnectionStatus('disconnected', 'Connexion perdue');
-                    return; // Ne pas reconnecter si on n'est pas en train de traiter
-                }
-
-                // Si on est en train de traiter, essayer de reconnecter
-                if (isProcessing && currentTaskId) {
-                    addMessage("La connexion a été perdue. Tentative de reconnexion...", 'system');
-                    attemptReconnection(currentTaskId);
-                }
-            };
-        }
-                } else if (data.type === 'completion') {
-                    if (progressInterval) {
-                        clearInterval(progressInterval);
-                        progressInterval = null;
+                    if (typeof updateConnectionStatus === "function") {
+                        updateConnectionStatus("disconnected", "Connexion fermée");
                     }
-                    handleTaskComplete(data.data);
-                    websocket.close();
-                } else if (data.type === 'error') {
-                    if (progressInterval) {
-                        clearInterval(progressInterval);
-                        progressInterval = null;
+                    return;
+                }
+
+                // 1006 = déconnexion anormale (réseau). Si pas en traitement, juste marquer déconnecté.
+                if (event.code === 1006 && !window.isProcessing) {
+                    if (typeof updateConnectionStatus === "function") {
+                        updateConnectionStatus("disconnected", "Connexion perdue");
                     }
-                    handleTaskError(data.error);
-                    websocket.close();
-                } else if (data.type === 'log') {
-                    addMessage(`[LOG] ${data.message}`, 'system');
-                } else if (data.type === 'message') {
-                    addMessage(data.message, 'system');
+                    return;
+                }
+
+                // Si on traite encore, tenter une reconnexion
+                if (window.isProcessing && window.currentTaskId) {
+                    if (typeof addMessage === "function") {
+                        addMessage("La connexion a été perdue. Tentative de reconnexion...", "system");
+                    }
+                    if (typeof attemptReconnection === "function") {
+                        attemptReconnection(window.currentTaskId);
+                    }
                 }
             };
 
-            websocket.onclose = (event) => {
-                console.warn(`🔌 WebSocket déconnecté. Code: ${event.code}, Raison: ${event.reason}`);
-                // Ne pas reconnecter automatiquement après une interaction utilisateur
-                if (event.code !== 1000 && event.code !== 1001 && event.code !== 1006) {
-                    addMessage("La connexion a été perdue. Tentative de reconnexion...", 'system');
-                    attemptReconnection(taskId);
-                }
+            websocket.onerror = (err) => {
+                console.error("🌩️ Erreur WebSocket:", err);
+                // L'onclose gèrera l'état/reco; on évite les doublons ici.
             };
 
-            function checkPendingValidations(taskId) {
-                // TODO: implémenter si besoin
+            // Optionnel : vérification différée d'éventuelles validations en attente
+            function checkPendingValidations(id) {
+                // TODO: implémenter si nécessaire
+                void id; // no-op pour éviter l'avertissement
             }
-
-            // Éviter une ReferenceError si la fonction n'existe pas encore
             setTimeout(() => checkPendingValidations(taskId), 1000);
         }
+
+        
 
         // Fonction de tentative de reconnexion WebSocket avec limitation
         function attemptReconnection(taskId) {
@@ -1710,7 +1728,7 @@ const errorDiv = document.getElementById('validationError');
                 connectWebSocket(taskId);
             }, 3000);
         }
-        }
+        
 
         // Initialisation au chargement de la page, une seule fois !
         document.addEventListener('DOMContentLoaded', function () {
@@ -1787,8 +1805,14 @@ const errorDiv = document.getElementById('validationError');
                                 const taskId = taskIdMatch[0];
                                 console.log("🎯 Task ID détecté:", taskId);
                                 connectWebSocket(taskId);
+                            } else {
+                                console.log("⚠️ Aucun task_id détecté dans le dernier message.");
                             }
+                        } else {
+                            console.log("⚠️ Aucun message trouvé dans le container.");
                         }
+                    } else {
+                        console.log("⚠️ Container des messages introuvable.");
                     }
                 }, 1000);
             }
