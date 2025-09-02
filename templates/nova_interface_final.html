@@ -586,13 +586,10 @@
 
     <div class="main-container">
         <header class="header">
-            <div style="display: flex; align-items: center; justify-content: center; gap: 0px; flex-wrap: wrap;">
-                    <img src="/static/Covia_bann.png" alt="Covia_Banniere" style="height: 200px; display: block; border-radius: 8px;">
-                </a>
-                
-
+            <div style="display:flex;align-items:center;justify-content:center;gap:0px;flex-wrap:wrap;">
+                <img src="/static/Covia_bann.png" alt="Covia_Banniere" style="height:200px;display:block;border-radius:8px;">
             </div>
-        </header>
+            </header>
 
         <div class="chat-container">
             <div class="chat-messages" id="chatMessages" role="log" aria-live="polite">
@@ -933,10 +930,16 @@
                 try {
                     const response = await fetch(`/progress/task/${taskId}`);
                     if (!response.ok) {
+                        // Ne pas afficher d'erreur immédiatement si c'est une 404
+                        if (response.status === 404) {
+                            console.log('Tâche non trouvée, en attente de création...');
+                            return; // Continuer à essayer
+                        }
+
                         clearInterval(progressInterval);
                         progressInterval = null;
                         hideProgress();
-                        handleTaskError('Tâche introuvable ou erreur serveur');
+                        handleTaskError(`Erreur serveur: ${response.status} ${response.statusText}`);
                         return;
                     }
                     const data = await response.json();
@@ -950,20 +953,29 @@
                         clearInterval(progressInterval);
                         progressInterval = null;
                         hideProgress();
-                        handleTaskError(data.error || 'Tâche échouée');
+                        handleTaskError(data.error || data.message || 'Tâche échouée');
                     } else {
                         updateProgress(
-                            data.overall_progress,
+                            data.overall_progress || 0,
                             data.current_step_title || 'Traitement en cours...',
-                            data.completed_steps
+                            data.completed_steps || 0
                         );
                     }
                 } catch (error) {
+                    // Ne pas arrêter le polling pour les erreurs temporaires
+                    console.error('Erreur temporaire suivi progression :', error);
+
+                    // Si c'est une erreur réseau, continuer à essayer quelques fois
+                    if (error.name === 'TypeError' && error.message.includes('fetch')) {
+                        console.log('Erreur réseau, nouvelle tentative...');
+                        return;
+                    }
+
+                    // Sinon, arrêter après trop d'erreurs
                     clearInterval(progressInterval);
                     progressInterval = null;
                     hideProgress();
-                    handleTaskError('Erreur suivi progression : ' + error.message);
-                    console.error('Erreur suivi progression :', error);
+                    handleTaskError('Erreur de connexion au serveur');
                 }
             }, 1000);
         }
@@ -1124,6 +1136,10 @@
             showTyping();
 
             try {
+                // Créer un contrôleur d'annulation avec timeout
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 secondes de timeout
+
                 const resp = await fetch('/api/assistant/workflow/create_quote', {
                     method: 'POST',
                     headers: {
@@ -1131,7 +1147,10 @@
                         'X-Request-ID': generateUUID(),
                     },
                     body: JSON.stringify({ message, draft_mode: false }),
+                    signal: controller.signal
                 });
+
+                clearTimeout(timeoutId);
 
                 // Gestion des erreurs HTTP
                 if (!resp.ok) {
@@ -1146,7 +1165,6 @@
                     throw new Error(`HTTP ${resp.status} — ${details}`);
                 }
 
-
                 const result = await resp.json();
                 hideTyping();
 
@@ -1155,8 +1173,8 @@
                     showProgress();
                     // Attendre que la tâche soit créée côté serveur
                     setTimeout(() => {
-                    connectWebSocket(result.task_id);
-                    trackProgress(result.task_id);
+                        connectWebSocket(result.task_id);
+                        trackProgress(result.task_id);
                     }, 1500);
                 } else {
                     handleDirectResponse(result);
@@ -1164,8 +1182,25 @@
 
             } catch (error) {
                 hideTyping();
-                addMessage(`Erreur de connexion : ${error.message}`, 'system');
                 console.error('Erreur sendMessage:', error);
+
+                // Analyser le type d'erreur pour un message plus clair
+                let errorMessage = 'Erreur de connexion';
+                if (error.message) {
+                    if (error.message.includes('NetworkError') || error.message.includes('Failed to fetch')) {
+                        errorMessage = 'Impossible de contacter le serveur. Vérifiez votre connexion.';
+                    } else if (error.message.includes('404')) {
+                        errorMessage = 'Service non disponible. Contactez l\'administrateur.';
+                    } else if (error.message.includes('500')) {
+                        errorMessage = 'Erreur serveur. Veuillez réessayer plus tard.';
+                    } else if (error.message.includes('HTTP')) {
+                        errorMessage = error.message;
+                    } else {
+                        errorMessage = `Erreur: ${error.message}`;
+                    }
+                }
+
+                addMessage(`❌ ${errorMessage}`, 'system');
             } finally {
                 isProcessing = false;
                 updateSendButton();
@@ -1222,14 +1257,41 @@
         function handleTaskError(error) {
             hideProgress();
             // Améliorer le message d'erreur avec plus de détails
-            const errorMsg = error && typeof error === 'string' ? error : 
-                           error && error.message ? error.message :
-                           error && error.error ? error.error :
-                           'Une erreur inattendue est survenue lors du traitement';
+            let errorMsg = 'Une erreur inattendue est survenue lors du traitement';
+
+            if (error) {
+                if (typeof error === 'string') {
+                    errorMsg = error;
+                } else if (error.message) {
+                    errorMsg = error.message;
+                } else if (error.error) {
+                    errorMsg = error.error;
+                } else if (error.detail) {
+                    errorMsg = error.detail;
+                } else {
+                    // Si l'erreur est un objet, essayons de le convertir en string
+                    try {
+                        errorMsg = JSON.stringify(error);
+                    } catch (e) {
+                        errorMsg = 'Erreur complexe non identifiable';
+                    }
+                }
+            }
+
+            // Éviter d'afficher "Erreur: Erreur inconnue"
+            if (errorMsg === 'Erreur inconnue' || errorMsg === 'null' || errorMsg === 'undefined') {
+                errorMsg = 'Le serveur ne répond pas correctement. Veuillez réessayer.';
+            }
+
             addMessage(`❌ Erreur: ${errorMsg}`, 'system');
             console.error("Erreur de tâche:", error);
             isProcessing = false;
             updateSendButton();
+
+            // Fermer le WebSocket en cas d'erreur
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                websocket.close();
+            }
         }
 
         function continuePreviousWorkflow() {
@@ -1309,37 +1371,71 @@
             }
         }
         
-        // Fonction de gestion des touches pour le chat
-        function handleKeyPress(event) {
-            if (event.key === 'Enter' && !event.shiftKey) {
+        // Fonction de gestion de l'input
+        function handleInput() {
+            console.log("✍️ Input changé");
+            updateSendButton();
+                autoResize();
+                
+                // Masquer l'erreur de validation si elle existe
+const errorDiv = document.getElementById('validationError');
+                if (errorDiv) {
+                errorDiv.style.display = 'none';
+                }
+                }
+                
+                // Fonction de gestion des touches pour le chat
+                function handleKeyPress(event) {
+                console.log("⌨️ Touche pressée:", event.key);
+                if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault();
                 const form = document.getElementById('chatForm');
-            if (form) {
-                form.requestSubmit(); // Utiliser requestSubmit pour déclencher l'événement submit
-            }
+                const button = document.getElementById('sendButton');
+                
+                // Si le bouton n'est pas désactivé, envoyer le message
+                if (button && !button.disabled) {
+                    console.log("⌨️ Envoi via Enter");
+                    if (form) {
+                        form.requestSubmit(); // Utiliser requestSubmit pour déclencher l'événement submit
+                    } else {
+                        // Fallback : appeler directement sendMessage
+                        sendMessage();
+                    }
+                } else {
+                    console.log("⌨️ Bouton désactivé, pas d'envoi");
+                }
             }
         }
-
-        // Attendre que le DOM soit complètement chargé
-        document.addEventListener('DOMContentLoaded', function() {
-            // Ajouter un écouteur d'événements pour la gestion des touches
-            const chatInput = document.getElementById('chatInput');
-            if (chatInput) {
-                chatInput.addEventListener('keydown', handleKeyPress);
-            }
-        });
 
         function updateSendButton() {
             const input = document.getElementById('chatInput');
             const button = document.getElementById('sendButton');
+
+            if (!input || !button) {
+                console.error("❌ Éléments du formulaire non trouvés");
+                return;
+            }
+
             const message = input.value.trim();
 
             // Désactiver le bouton si :
             // - Pas de message ou message trop court
             // - Message trop long
             // - Traitement en cours
-            console.log("[updateSendButton] isProcessing:", isProcessing, "| value:", input.value, "| trim:", message, "| len:", message.length, "| disabled sera:", (!message || message.length < 3 || message.length > 1000 || isProcessing));
-            button.disabled = !message || message.length < 3 || message.length > 1000 || isProcessing;            
+            const shouldDisable = !message || message.length < 3 || message.length > 1000 || isProcessing;
+
+            console.log("[updateSendButton] isProcessing:", isProcessing, "| value:", input.value, "| trim:", message, "| len:", message.length, "| disabled sera:", shouldDisable);
+
+            button.disabled = shouldDisable;
+
+            // Changer le style du bouton selon son état
+            if (shouldDisable) {
+                button.style.opacity = '0.5';
+                button.style.cursor = 'not-allowed';
+            } else {
+                button.style.opacity = '1';
+                button.style.cursor = 'pointer';
+            }
         }
 
         function autoResize() {
@@ -1387,29 +1483,87 @@
         }
         // Connexion WebSocket
         function connectWebSocket(taskId) {
-            if (websocket && websocket.readyState === WebSocket.OPEN) {
-                console.log("🌐 WebSocket déjà connecté.");
-                return;
+            // Fermer toute connexion existante avant d'en créer une nouvelle
+            if (websocket) {
+                if (websocket.readyState === WebSocket.OPEN || websocket.readyState === WebSocket.CONNECTING) {
+                    console.log("🔄 Fermeture de la connexion WebSocket existante");
+                    websocket.close();
+                }
+                websocket = null;
             }
+
             const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
             const wsUrl = `${wsProtocol}://${window.location.host}/ws/task/${taskId}`;
 
-
             console.log(`🔌 Tentative de connexion à ${wsUrl}`);
-            websocket = new WebSocket(wsUrl);
+
+            try {
+                websocket = new WebSocket(wsUrl);
+            } catch (error) {
+                console.error("❌ Impossible de créer la connexion WebSocket:", error);
+                handleTaskError('Impossible d\'établir la connexion temps réel');
+                return;
+            }
 
             websocket.onopen = () => {
                 console.log("✅ WebSocket connecté !");
-                // Mettre à jour l'indicateur de statut au lieu du chat
                 updateConnectionStatus('connected', 'WebSocket connecté');
-                if(reconnectInterval) clearInterval(reconnectInterval);
+                if (reconnectInterval) {
+                    clearInterval(reconnectInterval);
+                    reconnectInterval = null;
+                }
             };
-            websocket.onerror = (error) => {
-                console.error("❌ Erreur WebSocket:", error);
-                updateConnectionStatus('disconnected', 'Erreur de connexion WebSocket');
+
+        // Gestion connexion
+        async function checkConnection() {
+            try {
+                // Ajouter un timeout pour éviter d'attendre trop longtemps
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 secondes
+
+                const response = await fetch('/health', {
+                    signal: controller.signal
+                });
+
+                clearTimeout(timeoutId);
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                const data = await response.json();
+
+                const statusEl = document.getElementById('connectionStatus');
+                if (data.status === 'healthy') {
+                    statusEl.className = 'connection-status connected';
+                    statusEl.innerHTML = '<i class="bi bi-wifi"></i> Connecté';
+                } else {
+                    statusEl.className = 'connection-status disconnected';
+                    statusEl.innerHTML = '<i class="bi bi-wifi-off"></i> Déconnecté';
+                }
+            } catch (error) {
+                const statusEl = document.getElementById('connectionStatus');
+                statusEl.className = 'connection-status disconnected';
+
+                if (error.name === 'AbortError') {
+                    statusEl.innerHTML = '<i class="bi bi-wifi-off"></i> Timeout';
+                } else {
+                    statusEl.innerHTML = '<i class="bi bi-wifi-off"></i> Hors ligne';
+                }
+
+                console.warn('Vérification connexion échouée:', error.message);
+            }
+        }
 
             websocket.onmessage = (event) => {
-                const data = JSON.parse(event.data);
+                let data;
+                try {
+                    data = JSON.parse(event.data);
+                } catch (error) {
+                    console.error("Erreur parsing message WebSocket:", error);
+                    return;
+                }
+
                 console.log("📥 Message reçu:", data);
 
                 if (data.type === 'progress') {
@@ -1423,20 +1577,16 @@
                     console.log("🤝 Interaction utilisateur détectée:", data.interaction_data);
                     if (data.interaction_data && data.interaction_data.interaction_type === 'client_selection') {
                         hideProgress();
-                        
-                        const opts = data.interaction_data.client_options || data.interaction_data.options || data.interaction_data.clients || [];
-                        const name = data.interaction_data.original_client_name || data.interaction_data.client_name || '';
+                        const opts = data.interaction_data.client_options
+                                || data.interaction_data.options
+                                || data.interaction_data.clients
+                                || [];
+                        const name = data.interaction_data.original_client_name
+                                || data.interaction_data.client_name
+                                || '';
                         addClientSelection(opts, name);
-                        
-                        // Ne pas fermer la connexion WebSocket après réception d'une interaction
-                        return;
+                        return; // garder la connexion ouverte
                     }
-                    console.log("🤝 Interaction utilisateur détectée:", data.interaction_data);
-                    if (data.interaction_data && data.interaction_data.interaction_type === 'client_selection') {
-                    hideProgress();
-                    
-                    { const opts = data.interaction_data.client_options || data.interaction_data.options || data.interaction_data.clients || []; const name = data.interaction_data.original_client_name || data.interaction_data.client_name || ''; addClientSelection(opts, name); }
-                    }  
                 } else if (data.type === 'client_selection_required') {
                     hideProgress();
                     const clients = data.client_options || data.clients || [];
@@ -1446,14 +1596,57 @@
                     if (progressInterval) {
                         clearInterval(progressInterval);
                         progressInterval = null;
-                        }
+                    }
                     handleTaskComplete(data.data);
                     websocket.close();
                 } else if (data.type === 'error') {
                     if (progressInterval) {
                         clearInterval(progressInterval);
                         progressInterval = null;
-                        }
+                    }
+                    handleTaskError(data.error || data.message || data);
+                    websocket.close();
+                } else if (data.type === 'log') {
+                    addMessage(`[LOG] ${data.message}`, 'system');
+                } else if (data.type === 'message') {
+                    addMessage(data.message, 'system');
+                }
+            };
+
+            websocket.onclose = (event) => {
+                console.warn(`🔌 WebSocket déconnecté. Code: ${event.code}, Raison: ${event.reason}`);
+                websocket = null;
+
+                // Codes de fermeture normaux
+                if (event.code === 1000 || event.code === 1001) {
+                    return; // Fermeture normale
+                }
+
+                // Si le code est 1006, c'est une déconnexion anormale
+                if (event.code === 1006 && !isProcessing) {
+                    updateConnectionStatus('disconnected', 'Connexion perdue');
+                    return; // Ne pas reconnecter si on n'est pas en train de traiter
+                }
+
+                // Si on est en train de traiter, essayer de reconnecter
+                if (isProcessing && currentTaskId) {
+                    addMessage("La connexion a été perdue. Tentative de reconnexion...", 'system');
+                    attemptReconnection(currentTaskId);
+                }
+            };
+        }
+                } else if (data.type === 'completion') {
+                    if (progressInterval) {
+                        clearInterval(progressInterval);
+                        progressInterval = null;
+                    }
+                    handleTaskComplete(data.data);
+                    websocket.close();
+                } else if (data.type === 'error') {
+                    if (progressInterval) {
+                        clearInterval(progressInterval);
+                        progressInterval = null;
+                    }
                     handleTaskError(data.error);
                     websocket.close();
                 } else if (data.type === 'log') {
@@ -1465,22 +1658,33 @@
 
             websocket.onclose = (event) => {
                 console.warn(`🔌 WebSocket déconnecté. Code: ${event.code}, Raison: ${event.reason}`);
-                console.log('🔌 WebSocket fermé. Code: ${event.code}, Raison: ${event.reason}');
                 // Ne pas reconnecter automatiquement après une interaction utilisateur
                 if (event.code !== 1000 && event.code !== 1001 && event.code !== 1006) {
                     addMessage("La connexion a été perdue. Tentative de reconnexion...", 'system');
                     attemptReconnection(taskId);
                 }
             };
-            // Vérifier s'il y a des validations en attente après connexion
+
+            function checkPendingValidations(taskId) {
+                // TODO: implémenter si besoin
+            }
+
+            // Éviter une ReferenceError si la fonction n'existe pas encore
             setTimeout(() => checkPendingValidations(taskId), 1000);
         }
 
         // Fonction de tentative de reconnexion WebSocket avec limitation
         function attemptReconnection(taskId) {
             if (reconnectInterval) return;
+
+            // Si on n'est plus en train de traiter, ne pas reconnecter
+            if (!isProcessing || !currentTaskId) {
+                console.log("Pas de reconnexion - traitement terminé");
+                return;
+            }
+
             let attempts = 0;
-            const maxAttempts = 5;
+            const maxAttempts = 3; // Réduire à 3 tentatives
 
             reconnectInterval = setInterval(() => {
                 attempts++;
@@ -1492,11 +1696,20 @@
                     reconnectInterval = null;
                     updateConnectionStatus('disconnected', 'Connexion échouée');
                     console.log("❌ Abandon reconnexion WebSocket");
+
+                    // Informer l'utilisateur
+                    addMessage("❌ Impossible de maintenir la connexion. Veuillez rafraîchir la page si le problème persiste.", 'system');
+
+                    // Arrêter le traitement
+                    isProcessing = false;
+                    hideProgress();
+                    updateSendButton();
                     return;
                 }
 
                 connectWebSocket(taskId);
             }, 3000);
+        }
         }
 
         // Initialisation au chargement de la page, une seule fois !
@@ -1529,11 +1742,29 @@
                 input.focus();
             }
 
+            // Ajouter un event listener de secours sur le bouton
+            const sendBtn = document.getElementById('sendButton');
+            if (sendBtn) {
+                sendBtn.addEventListener('click', function(e) {
+                    console.log("🔘 Bouton cliqué directement");
+                    if (!sendBtn.disabled) {
+                        e.preventDefault();
+                        sendMessage();
+                    }
+                });
+            }
+
             // Vérification de la connexion WebSocket régulière
             checkConnection();
             setInterval(checkConnection, 30000);
 
+            // Réinitialiser l'état au cas où
+            isProcessing = false;
             updateSendButton();
+
+            // Debug - vérifier l'état initial
+            console.log("🚀 Initialisation terminée - isProcessing:", isProcessing);
+            console.log("🚀 État du bouton:", document.getElementById('sendButton').disabled);
         });
 
         // Écouter toute soumission de formulaire pour détecter un nouveau task_id
