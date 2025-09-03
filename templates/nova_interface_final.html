@@ -1594,36 +1594,40 @@
                 }
 
                 console.log("📥 Message reçu:", data);
-                // Gestion des messages progress_update et initial_progress
-                switch (data.type) {
-                case "initial_progress": {
-                console.log("📊 Initial progress reçu:", data);
-                if (data.data) {
-                const progress = data.data;
-                if (progress.current_step && progress.progress !== undefined) {
-                updateProgress(progress.progress, progress.current_step.message || "Initialisation...", progress.current_step.id);
-                }
-                }
-                break;
-                }
-                case "progress_update": {
-                    console.log("🔄 Progress update reçu:", data);
-                    if (data.progress !== undefined) {
-                        updateProgress(data.progress, data.message || "Traitement en cours...", data.step_id);
+
+                // Vérifier d'abord si c'est un message task_update avec interaction_data
+                if (data.type === "task_update" && data.interaction_data) {
+                    if (data.interaction_data.interaction_type === 'client_selection') {
+                        console.log("🎯 Client selection via task_update détecté");
+                        hideProgress();
+                        const opts = data.interaction_data.client_options || data.interaction_data.options || data.interaction_data.clients || [];
+                        const name = data.interaction_data.original_client_name || data.interaction_data.client_name || '';
+                        console.log(`🎯 Affichage sélection client: ${opts.length} options pour "${name}"`);
+                        addClientSelection(opts, name);
+                        return;
                     }
-                    break;
-                }
-                // Gestion spéciale pour client_selection via interaction_data
-                if (data.interaction_data && data.interaction_data.interaction_type === 'client_selection') {
-                    hideProgress();
-                    const opts = data.interaction_data.client_options || data.interaction_data.options || data.interaction_data.clients || [];
-                    const name = data.interaction_data.original_client_name || data.interaction_data.client_name || '';
-                    console.log(`🎯 Affichage sélection client: ${opts.length} options pour "${name}"`);
-                    addClientSelection(opts, name);
-                    return; // On sort pour ne pas entrer dans le switch
                 }
 
+                // Gestion des messages progress_update et initial_progress
                 switch (data.type) {
+                    case "initial_progress": {
+                        console.log("📊 Initial progress reçu:", data);
+                        if (data.data) {
+                            const progress = data.data;
+                            if (progress.current_step && progress.progress !== undefined) {
+                                updateProgress(progress.progress, progress.current_step.message || "Initialisation...", progress.current_step.id);
+                            }
+                        }
+                        break;
+                    }
+                    case "progress_update": {
+                        console.log("🔄 Progress update reçu:", data);
+                        if (data.progress !== undefined) {
+                            updateProgress(data.progress, data.message || "Traitement en cours...", data.step_id);
+                        }
+                        break;
+                    }
+
                     case "progress": {
                         const container = document.getElementById("progressContainer");
                         if (container && !container.classList.contains("active") && typeof showProgress === "function") {
@@ -1657,23 +1661,38 @@
                     }
 
                     case "user_interaction_required": {
-                        console.log("🤝 Interaction utilisateur détectée:", data.interaction_data);
-                        const i = data.interaction_data || {};
-                        if (i.interaction_type === "client_selection") {
+                        console.log("🤝 Interaction utilisateur détectée:", data.interaction_data || "Aucune donnée d'interaction disponible");
+                        if (data.interaction_data && data.interaction_data.interaction_type === 'client_selection') {
                             if (typeof hideProgress === "function") hideProgress();
-                            const opts = i.client_options || i.options || i.clients || [];
-                            const name = i.original_client_name || i.client_name || "";
+                            const opts = data.interaction_data.client_options || data.interaction_data.options || data.interaction_data.clients || [];
+                            const name = data.interaction_data.original_client_name || data.interaction_data.client_name || '';
+                            console.log(`🎯 Affichage sélection client: ${opts.length} options pour "${name}"`);
                             if (typeof addClientSelection === "function") addClientSelection(opts, name);
-                            // on garde la connexion ouverte
+                        } else if (data.interaction_data && data.interaction_data.interaction_type === 'product_selection') {
+                            if (typeof hideProgress === "function") hideProgress();
+                            if (typeof handleProductSelection === "function") {
+                                handleProductSelection(data.interaction_data);
+                            }
+                        } else {
+                            console.warn("Type d'interaction non géré:", data.interaction_data);
+                            if (typeof handleUserInteraction === "function") {
+                                handleUserInteraction(data.interaction_data);
+                            }
                         }
                         break;
                     }
 
-                    case "client_selection_required": {
-                        if (typeof hideProgress === "function") hideProgress();
-                        const clients = data.client_options || data.clients || [];
-                        const originalName = data.original_client_name || "";
-                        if (typeof addClientSelection === "function") addClientSelection(clients, originalName);
+                    case "task_update": {
+                        console.log("🔄 Task update reçu:", data);
+                        // Gérer spécifiquement les task_update avec interaction_data
+                        if (data.interaction_data && data.interaction_data.interaction_type === 'client_selection') {
+                            console.log("🎯 Client selection via task_update détecté");
+                            if (typeof hideProgress === "function") hideProgress();
+                            const opts = data.interaction_data.client_options || data.interaction_data.options || data.interaction_data.clients || [];
+                            const name = data.interaction_data.original_client_name || data.interaction_data.client_name || '';
+                            console.log(`🎯 Affichage sélection client: ${opts.length} options pour "${name}"`);
+                            if (typeof addClientSelection === "function") addClientSelection(opts, name);
+                        }
                         break;
                     }
 
@@ -1710,27 +1729,7 @@
                         if (typeof addMessage === "function") addMessage(data.message, "system");
                         break;
                     }
-                    case "user_interaction_required": {
-                        console.log("🤝 Interaction utilisateur détectée:", data.interaction_data || "Aucune donnée d'interaction disponible");
-                        if (data.interaction_data && data.interaction_data.interaction_type === 'client_selection') {
-                            if (typeof hideProgress === "function") hideProgress();
-                            const opts = data.interaction_data.client_options || data.interaction_data.options || data.interaction_data.clients || [];
-                            const name = data.interaction_data.original_client_name || data.interaction_data.client_name || '';
-                            console.log(`🎯 Affichage sélection client: ${opts.length} options pour "${name}"`);
-                            if (typeof addClientSelection === "function") addClientSelection(opts, name);
-                        } else if (data.interaction_data && data.interaction_data.interaction_type === 'product_selection') {
-                            if (typeof hideProgress === "function") hideProgress();
-                            if (typeof handleProductSelection === "function") {
-                                handleProductSelection(data.interaction_data);
-                            }
-                        } else {
-                            console.warn("Type d'interaction non géré:", data.interaction_data);
-                            if (typeof handleUserInteraction === "function") {
-                                handleUserInteraction(data.interaction_data);
-                            }
-                        }
-                        break;
-                    }
+
                     default: {
                         console.warn("Type de message non géré:", data.type);
                         console.log("Données complètes:", data);
