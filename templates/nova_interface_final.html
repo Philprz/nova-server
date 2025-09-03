@@ -2026,7 +2026,10 @@
                         if (typeof addMessage === "function") addMessage(data.message, "system");
                         break;
                     }
-
+                    case 'quote_generation_completed':
+                        updateProgress('✅ Devis généré avec succès', 100);
+                        displayFinalQuoteResult(data.result);
+                        break;
                     default: {
                         console.warn("Type de message non géré:", data.type);
                         console.log("Données complètes:", data);
@@ -2212,7 +2215,36 @@
                 }, 1000);
             }
         });
-
+        function displayFinalQuoteResult(result) {
+            try {
+                const container = document.getElementById('progress-container');
+                
+                const resultHtml = `
+                    <div class="quote-result-success">
+                        <h3>✅ Devis créé avec succès</h3>
+                        <div class="quote-details">
+                            <div class="quote-info">
+                                <strong>Numéro de devis SAP :</strong> ${result.sap_doc_num || 'N/A'}<br>
+                                <strong>Opportunité Salesforce :</strong> ${result.salesforce_opportunity_id || 'N/A'}<br>
+                                <strong>Client :</strong> ${result.client?.name || 'N/A'}<br>
+                                <strong>Montant total :</strong> ${result.total_amount || 0}€
+                            </div>
+                            <div class="products-list">
+                                <h4>Produits inclus :</h4>
+                                ${result.products?.map(p => `<div>• ${p.name} x${p.quantity} - ${p.unit_price}€</div>`).join('') || 'Aucun produit'}
+                            </div>
+                        </div>
+                        <div class="quote-actions">
+                            <button onclick="resetInterface()" class="btn btn-primary">Nouveau devis</button>
+                        </div>
+                    </div>
+                `;
+                
+                container.innerHTML = resultHtml;
+            } catch (error) {
+                console.error('Erreur affichage résultat:', error);
+            }
+        }
     </script>
 </body>
 </html>
