@@ -253,9 +253,6 @@ class WebSocketManager:
         }
 
         logger.info(f"📨 Message WebSocket préparé: {json.dumps(message, indent=2, default=str)}")
-        # Toujours enrichir le message avec un timestamp
-        if 'timestamp' not in message:
-            message['timestamp'] = datetime.now(timezone.utc).isoformat()
 
 
         # Si pas de connexions, stocker et planifier retry (éviter duplicatas)
@@ -285,7 +282,8 @@ class WebSocketManager:
         # Tenter envoi immédiat
         try:
             logger.info(f"🔗 Connexions actives pour {task_id}: {len(self.task_connections.get(task_id, []))}")
-            await self.send_task_update(task_id, message)
+            # Utiliser broadcast_to_task au lieu de send_task_update pour éviter le double type
+            await self.broadcast_to_task(task_id, message, wait=False)
             logger.info(f"✅ Interaction envoyée immédiatement pour {task_id}")
             # CRUCIAL : Marquer comme envoyé pour éviter stockage ultérieur
             message['_sent'] = True
