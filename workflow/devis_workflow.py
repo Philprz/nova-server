@@ -1,4 +1,5 @@
 # workflow/devis_workflow.py - VERSION COMPLÈTE AVEC VALIDATEUR CLIENT
+from calendar import c
 import re
 import sys
 import io
@@ -2277,12 +2278,6 @@ class DevisWorkflow:
                 }
                 sap_client = self.context["sap_client"]
                 logger.info(f"✅ Client SAP disponible: {sap_client_result['client'].get('CardCode')}")
-            else:
-                logger.error("❌ AUCUN CLIENT SAP DISPONIBLE")
-                return {
-                    "success": False,
-                    "error": "Client SAP non disponible pour créer le devis"
-                }
             
             # Vérifier que nous avons un client SAP
             sap_card_code = None
@@ -2304,17 +2299,31 @@ class DevisWorkflow:
             found_products = [p for p in products_info if isinstance(p, dict) and p.get("found", False)]
             custom_products = [p for p in products_info if isinstance(p, dict) and p.get("custom_product", False)]
             
-            # Traiter les produits personnalisés avec prix par défaut
-            for product in custom_products:
-                if product.get("unit_price", 0) == 0:
-                    # Prix par défaut basé sur le nom du produit
+            # Traiter TOUS les produits pour s'assurer d'avoir des prix
+            all_products = found_products + custom_products
+            for product in all_products:
+                unit_price = product.get("unit_price", 0)
+
+                # Si prix = 0, essayer de récupérer depuis sap_data
+                if unit_price == 0 and product.get("sap_data"):
+                    sap_price = product["sap_data"].get("AvgPrice", 0)
+                    if sap_price > 0:
+                        unit_price = sap_price
+                        product["unit_price"] = unit_price
+                        product["total_price"] = unit_price * product.get("quantity", 1)
+                        logger.info(f"Prix SAP utilisé pour {product.get('name')}: {sap_price}€")
+                        continue
+
+                # Si toujours pas de prix, utiliser l'estimation
+                if unit_price == 0:
+                    logger.warning(f"⚠️ Produit sans prix détecté: {product.get('name')} - Utilisation estimation")
                     default_price = self._estimate_product_price(product.get("name", ""))
                     product["unit_price"] = default_price
                     product["total_price"] = default_price * product.get("quantity", 1)
                     logger.info(f"Prix estimé pour {product['name']}: {default_price}€")
-            
+
             # Combiner tous les produits
-            valid_products = found_products + custom_products
+            valid_products = all_products
             
             if not valid_products:
                 logger.error("❌ AUCUN PRODUIT VALIDE - Impossible de créer un devis")
@@ -2324,43 +2333,7 @@ class DevisWorkflow:
                     "requires_product_selection": True
                 }
             logger.info(f"Produits valides: {len(valid_products)}")
-            def _estimate_product_price(self, product_name: str) -> float:
-                """Estime un prix par défaut basé sur le nom du produit - Version améliorée"""
-                if not product_name:
-                    return 100.0
-                    
-                product_lower = product_name.lower()
-                
-                # Règles d'estimation améliorées avec plus de catégories
-                if "imprimante" in product_lower or "printer" in product_lower:
-                    if any(word in product_lower for word in ["laser", "professional", "pro", "bureau"]):
-                        return 450.0
-                    elif "couleur" in product_lower or "color" in product_lower:
-                        return 320.0
-                    else:
-                        return 180.0
-                elif any(word in product_lower for word in ["ordinateur", "pc", "computer", "desktop"]):
-                    if "portable" in product_lower or "laptop" in product_lower:
-                        return 950.0
-                    else:
-                        return 750.0
-                elif any(word in product_lower for word in ["écran", "moniteur", "screen", "monitor"]):
-                    if "4k" in product_lower or "uhd" in product_lower:
-                        return 380.0
-                    else:
-                        return 220.0
-                elif any(word in product_lower for word in ["serveur", "server"]):
-                    return 2500.0
-                elif any(word in product_lower for word in ["switch", "routeur", "router", "réseau"]):
-                    return 180.0
-                elif any(word in product_lower for word in ["clavier", "keyboard", "souris", "mouse"]):
-                    return 45.0
-                else:
-                    # Prix par défaut basé sur des mots-clés génériques
-                    if "enterprise" in product_lower or "professionnel" in product_lower:
-                        return 250.0
-                    else:
-                        return 120.0
+            
             # Préparer les lignes pour SAP
             document_lines = []
             total_amount = 0.0
@@ -2384,7 +2357,7 @@ class DevisWorkflow:
                 logger.info(f"Ligne {idx}: {product.get('code')} x{quantity} = {line_total}€")
             
             logger.info(f"Total calculé: {total_amount}€")
-            
+
             # ========== ÉTAPE 3: PRÉPARATION DES DONNÉES DEVIS SAP ==========
             
             logger.info("=== PRÉPARATION DONNÉES DEVIS SAP ===")
@@ -2610,15 +2583,15 @@ class DevisWorkflow:
             logger.info("=== CRÉATION DEVIS TERMINÉE ===")
             # Envoyer le résultat final via WebSocket
             await self._send_final_quote_result({
-                "success": True,
-                "quote_id": f"SAP-{sap_result.get('doc_num')}",
-                "sap_doc_num": sap_result.get('doc_num'),
-                "salesforce_opportunity_id": sf_result.get('id'),
-                "client": self.selected_client,
+                "success": overall_success,
+                "quote_id": result["quote_id"],
+                "sap_doc_num": sap_quote.get('doc_num') if sap_success else None,
+                "salesforce_opportunity_id": salesforce_quote.get('id') if sf_success else None,
+                "client": client_name,
                 "products": valid_products,
-                "total_amount": sap_result.get('total_amount', 0),
-                "message": "✅ Devis créé avec succès dans SAP et Salesforce"
-            })
+                "total_amount": total_amount,
+                "message": result["message"]
+                })
             logger.info(f"Succès global: {overall_success}")
             logger.info(f"SAP: {'✅' if sap_success else '❌'}")
             logger.info(f"Salesforce: {'✅' if sf_success else '❌'}")
@@ -2642,7 +2615,44 @@ class DevisWorkflow:
         except asyncio.CancelledError:
             logger.warning("⚠️ Création devis interrompue par l'utilisateur")
             return {"success": False, "error": "Opération interrompue", "cancelled": True}
-    
+        
+    def _estimate_product_price(self, product_name: str) -> float:
+        """Estime un prix par défaut basé sur le nom du produit"""
+        if not product_name:
+            return 100.0
+        product_lower = product_name.lower()
+
+        # Règles d'estimation améliorées
+        if "imprimante" in product_lower or "printer" in product_lower:
+            if any(word in product_lower for word in ["laser", "professional", "pro", "bureau"]):
+                return 450.0
+            elif "couleur" in product_lower or "color" in product_lower:
+                return 320.0
+            else:
+                return 180.0
+        elif any(word in product_lower for word in ["ordinateur", "pc", "computer", "desktop"]):
+            if "portable" in product_lower or "laptop" in product_lower:
+                return 950.0
+            else:
+                return 750.0
+        elif any(word in product_lower for word in ["écran", "moniteur", "screen", "monitor"]):
+            if "4k" in product_lower or "uhd" in product_lower:
+                return 380.0
+            else:
+                return 220.0
+        elif any(word in product_lower for word in ["serveur", "server"]):
+            return 2500.0
+        elif any(word in product_lower for word in ["switch", "routeur", "router", "réseau"]):
+            return 180.0
+        elif any(word in product_lower for word in ["clavier", "keyboard", "souris", "mouse"]):
+            return 45.0
+        else:
+            # Prix par défaut basé sur des mots-clés génériques
+            if "enterprise" in product_lower or "professionnel" in product_lower:
+                return 250.0
+            else:
+                return 120.0
+            
     async def _create_sap_client_if_needed(self, client_info: Dict) -> Dict:
         """Crée un client SAP si nécessaire - STRUCTURE DE RETOUR CORRIGÉE"""
         import logging
