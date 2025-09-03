@@ -9,7 +9,7 @@ import logging
 import asyncio
 from fastapi import APIRouter, HTTPException
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Any, Optional
 from difflib import SequenceMatcher
 from services.llm_extractor import LLMExtractor
