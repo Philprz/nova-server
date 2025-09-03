@@ -1539,6 +1539,7 @@
         }
         // Connexion WebSocket
         function connectWebSocket(taskId) {
+            
             // Fermer toute connexion existante avant d'en créer une nouvelle
             if (window.websocket) {
                 if (window.websocket.readyState === WebSocket.OPEN || window.websocket.readyState === WebSocket.CONNECTING) {
@@ -1724,8 +1725,7 @@
                     clearInterval(heartbeatInterval);
                     heartbeatInterval = null;
                 }
-                console.log('🔌 WebSocket fermé.');
-                console.log(🔌 WebSocket déconnecté. Code: ${event.code}, Raison: ${event.reason});
+                console.log(`🔌 WebSocket déconnecté. Code: ${event.code}, Raison: ${event.reason}`);
                 window.websocket = null;
 
                 // Fermetures normales: ne rien faire
@@ -1766,6 +1766,7 @@
                 void id; // no-op pour éviter l'avertissement
             }
             setTimeout(() => checkPendingValidations(taskId), 1000);
+            }
         }
 
         
