@@ -113,6 +113,70 @@
             border-color: var(--success-color);
         }
 
+        /* Styles pour la sélection de produit */
+        .product-selection-container {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-top: 12px;
+        }
+
+        .product-selection-button {
+            background-color: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 12px;
+            text-align: left;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .product-selection-button .product-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .product-selection-button .product-details {
+            font-size: 12px;
+            line-height: 1.4;
+            opacity: 0.9;
+            text-align: left;
+        }
+
+        .product-selection-button:hover .product-details {
+            opacity: 1;
+        }
+
+        .product-selection-button:hover {
+            background-color: var(--bg-primary);
+            border-color: var(--primary-blue);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.05);
+        }
+
+        .product-selection-button strong {
+            font-weight: 600;
+            color: var(--primary-blue);
+        }
+
+        .product-selection-button.create-new {
+            color: var(--success-color);
+            border-style: dashed;
+            align-items: center;
+            flex-direction: row;
+            gap: 8px;
+        }
+
+        .product-selection-button.create-new:hover {
+            color: white;
+            background-color: var(--success-color);
+            border-color: var(--success-color);
+        }
+
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background-color: #000000;
@@ -840,25 +904,50 @@
 
             addMessage(`Vous avez sélectionné : ${client.name}`, 'user');
 
-            // Envoyer la sélection au serveur
-            if (websocket && websocket.readyState === WebSocket.OPEN) {
+            // Utiliser le currentTaskId global ou window.currentTaskId
+            const taskId = currentTaskId || window.currentTaskId;
+
+            if (!taskId) {
+                console.error("❌ Pas de task_id disponible pour la sélection");
+                addMessage("❌ Erreur: Session non initialisée. Veuillez réessayer.", 'system');
+                return;
+            }
+
+            // Vérifier l'état du WebSocket
+            const ws = websocket || window.websocket;
+
+            if (ws && ws.readyState === WebSocket.OPEN) {
                 const response = {
                     type: "user_response",
-                    task_id: currentTaskId,
+                    task_id: taskId,
                     data: {
                         response_type: "client_selection",
                         action: "select_existing",
                         client_id: client.id,
                         client_name: client.name,
                         selected_index: index,
-                        selected_client: client  // Ajouter l'objet client complet
+                        selected_client: client
                     }
                 };
-                console.log("📤 Sélection client:", response);
-                websocket.send(JSON.stringify(response));
+                console.log("📤 Sélection client avec task_id:", taskId, response);
+                ws.send(JSON.stringify(response));
+
+                // Afficher la progression après envoi
+                showProgress();
+            } else if (!ws || ws.readyState === WebSocket.CLOSED) {
+                console.error("❌ WebSocket fermé, tentative de reconnexion...");
+                // Tenter de reconnecter
+                if (taskId) {
+                    connectWebSocket(taskId);
+                    // Réessayer après un délai
+                    setTimeout(() => selectClient(client, index), 1000);
+                }
+            } else if (ws && ws.readyState === WebSocket.CONNECTING) {
+                console.log("⏳ WebSocket en cours de connexion, réessai dans 500ms...");
+                setTimeout(() => selectClient(client, index), 500);
             } else {
-                // Fallback si pas de WebSocket
-                continueWithSelectedClient(client);
+                console.error("❌ WebSocket non disponible");
+                addMessage("❌ Erreur de connexion. Veuillez réessayer.", 'system');
             }
         }
 
@@ -868,22 +957,47 @@
 
             addMessage(`Vous avez choisi de créer un nouveau client : "${clientName}"`, 'user');
 
-            // Envoyer la demande de création au serveur
-            if (websocket && websocket.readyState === WebSocket.OPEN) {
+            // Utiliser le currentTaskId global ou window.currentTaskId
+            const taskId = currentTaskId || window.currentTaskId;
+
+            if (!taskId) {
+                console.error("❌ Pas de task_id disponible pour la création");
+                addMessage("❌ Erreur: Session non initialisée. Veuillez réessayer.", 'system');
+                return;
+            }
+
+            // Vérifier l'état du WebSocket
+            const ws = websocket || window.websocket;
+
+            if (ws && ws.readyState === WebSocket.OPEN) {
                 const response = {
                     type: "user_response",
-                    task_id: currentTaskId,
+                    task_id: taskId,
                     data: {
                         response_type: "client_selection",
                         action: "create_new",
                         client_name: clientName
                     }
                 };
-                console.log("📤 Création nouveau client:", response);
-                websocket.send(JSON.stringify(response));
+                console.log("📤 Création nouveau client avec task_id:", taskId, response);
+                ws.send(JSON.stringify(response));
+
+                // Afficher la progression après envoi
+                showProgress();
+            } else if (!ws || ws.readyState === WebSocket.CLOSED) {
+                console.error("❌ WebSocket fermé, tentative de reconnexion...");
+                // Tenter de reconnecter
+                if (taskId) {
+                    connectWebSocket(taskId);
+                    // Réessayer après un délai
+                    setTimeout(() => createNewClient(clientName), 1000);
+                }
+            } else if (ws && ws.readyState === WebSocket.CONNECTING) {
+                console.log("⏳ WebSocket en cours de connexion, réessai dans 500ms...");
+                setTimeout(() => createNewClient(clientName), 500);
             } else {
-                // Fallback si pas de WebSocket
-                continueWithNewClient(clientName);
+                console.error("❌ WebSocket non disponible");
+                addMessage("❌ Erreur de connexion. Veuillez réessayer.", 'system');
             }
         }
 
@@ -895,6 +1009,125 @@
         function continueWithNewClient(clientName) {
             addMessage(`Création du nouveau client "${clientName}" en cours...`, 'system');
             showProgress();
+        }
+
+        // Fonction pour gérer la sélection de produit
+        function handleProductSelection(data) {
+            console.log("📦 Sélection de produit requise:", data);
+
+            const products = data.products || data.product_options || [];
+            const searchTerm = data.search_term || data.product_name || '';
+
+            // Afficher le message système
+            if (searchTerm) {
+                addMessage(`Recherche de produits pour "${searchTerm}". Voici les produits disponibles :`, 'system');
+            } else {
+                addMessage(`Voici les produits disponibles :`, 'system');
+            }
+
+            // Créer le conteneur de sélection
+            const messagesContainer = document.getElementById('chatMessages');
+            const selectionDiv = document.createElement('div');
+            selectionDiv.className = 'product-selection-container';
+
+            // Afficher chaque produit
+            products.forEach((product, index) => {
+                const button = document.createElement('button');
+                button.className = 'product-selection-button';
+
+                // Construire les détails du produit
+                let productInfo = [];
+
+                if (product.sku || product.code) {
+                    productInfo.push(`🏷️ Code: ${product.sku || product.code}`);
+                }
+
+                if (product.price) {
+                    productInfo.push(`💰 Prix: ${product.price}€`);
+                }
+
+                if (product.unit) {
+                    productInfo.push(`📏 Unité: ${product.unit}`);
+                }
+
+                if (product.description) {
+                    productInfo.push(`📝 ${product.description}`);
+                }
+
+                const detailsHtml = productInfo.length > 0 ?
+                    `<div class="product-details">${productInfo.join('<br>')}</div>` :
+                    '<div class="product-details">Aucun détail disponible</div>';
+
+                button.innerHTML = `
+                    <div class="product-header">
+                        <strong>${product.name || product.product_name}</strong>
+                    </div>
+                    ${detailsHtml}
+                `;
+
+                button.onclick = () => selectProduct(product, index);
+                selectionDiv.appendChild(button);
+            });
+
+            // Option pour rechercher d'autres produits (si applicable)
+            if (data.allow_custom || data.allow_search) {
+                const customButton = document.createElement('button');
+                customButton.className = 'product-selection-button create-new';
+                customButton.innerHTML = `
+                    <i class="bi bi-search"></i> Rechercher un autre produit
+                `;
+                customButton.onclick = () => searchOtherProduct();
+                selectionDiv.appendChild(customButton);
+            }
+
+            messagesContainer.appendChild(selectionDiv);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+
+        // Fonction pour sélectionner un produit
+        function selectProduct(product, index) {
+            const productName = product.name || product.product_name;
+            addMessage(`Vous avez sélectionné : ${productName}`, 'user');
+
+            // Utiliser le currentTaskId global
+            const taskId = currentTaskId || window.currentTaskId;
+
+            if (!taskId) {
+                console.error("❌ Pas de task_id disponible pour la sélection de produit");
+                addMessage("❌ Erreur: Session non initialisée. Veuillez réessayer.", 'system');
+                return;
+            }
+
+            // Vérifier l'état du WebSocket
+            const ws = websocket || window.websocket;
+
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                const response = {
+                    type: "user_response",
+                    task_id: taskId,
+                    data: {
+                        response_type: "product_selection",
+                        action: "select_product",
+                        product_id: product.id,
+                        product_name: productName,
+                        selected_index: index,
+                        selected_product: product
+                    }
+                };
+                console.log("📤 Sélection produit avec task_id:", taskId, response);
+                ws.send(JSON.stringify(response));
+
+                // Afficher la progression
+                showProgress();
+            } else {
+                console.error("❌ WebSocket non disponible pour la sélection de produit");
+                addMessage("❌ Erreur de connexion. Veuillez réessayer.", 'system');
+            }
+        }
+
+        // Fonction pour rechercher d'autres produits
+        function searchOtherProduct() {
+            addMessage("Recherche d'autres produits non implémentée pour le moment.", 'system');
         }
 
         function handleUserInteraction(data) {
@@ -1140,7 +1373,7 @@
             const clientMatch = message.match(/devis.*pour\s+([A-Za-z\s]+?)(?:\s+pour|\s*$)/i);
             if (clientMatch) {
                 const clientName = clientMatch[1].trim();
-                
+
                 // Recherche immédiate des clients
                 try {
                     const searchResp = await fetch('/api/assistant/search_clients', {
@@ -1148,14 +1381,65 @@
                         headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify({client_name: clientName})
                     });
-                    
+
                     const searchResult = await searchResp.json();
-                    
+
                     if (searchResult.requires_selection) {
-                        // Afficher directement la sélection
+                        // Afficher le message de l'utilisateur
                         addMessage(message, 'user');
-                        addClientSelection(searchResult.clients, clientName);
                         if (input) input.value = '';
+
+                        // IMPORTANT: Créer une tâche même pour la sélection de client
+                        isProcessing = true;
+                        showTyping();
+
+                        // Créer la tâche avec le workflow normal
+                        try {
+                            const controller = new AbortController();
+                            const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+                            const resp = await fetch('/api/assistant/workflow/create_quote', {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'X-Request-ID': generateUUID(),
+                                },
+                                body: JSON.stringify({
+                                    message,
+                                    draft_mode: false,
+                                    client_search_result: searchResult // Inclure le résultat de recherche
+                                }),
+                                signal: controller.signal
+                            });
+
+                            clearTimeout(timeoutId);
+
+                            if (!resp.ok) {
+                                throw new Error(`HTTP ${resp.status}`);
+                            }
+
+                            const result = await resp.json();
+                            hideTyping();
+
+                            if (result?.task_id) {
+                                currentTaskId = result.task_id;
+                                window.currentTaskId = result.task_id; // S'assurer que c'est global
+
+                                // Connecter le WebSocket AVANT d'afficher la sélection
+                                connectWebSocket(result.task_id);
+
+                                // Attendre un peu que le WebSocket soit connecté
+                                setTimeout(() => {
+                                    addClientSelection(searchResult.clients, clientName);
+                                }, 500);
+                            }
+                        } catch (error) {
+                            hideTyping();
+                            isProcessing = false;
+                            console.error('Erreur création tâche:', error);
+                            addMessage('❌ Erreur lors de la création de la tâche', 'system');
+                        }
+
                         return;
                     }
                 } catch (e) {
@@ -1605,6 +1889,13 @@
                         console.log(`🎯 Affichage sélection client: ${opts.length} options pour "${name}"`);
                         addClientSelection(opts, name);
                         return;
+                    } else if (data.interaction_data.interaction_type === 'product_selection') {
+                        console.log("📦 Product selection via task_update détecté");
+                        hideProgress();
+                        if (typeof handleProductSelection === "function") {
+                            handleProductSelection(data.interaction_data);
+                        }
+                        return;
                     }
                 }
 
@@ -1692,6 +1983,12 @@
                             const name = data.interaction_data.original_client_name || data.interaction_data.client_name || '';
                             console.log(`🎯 Affichage sélection client: ${opts.length} options pour "${name}"`);
                             if (typeof addClientSelection === "function") addClientSelection(opts, name);
+                        } else if (data.interaction_data && data.interaction_data.interaction_type === 'product_selection') {
+                            console.log("📦 Product selection via task_update détecté");
+                            if (typeof hideProgress === "function") hideProgress();
+                            if (typeof handleProductSelection === "function") {
+                                handleProductSelection(data.interaction_data);
+                            }
                         }
                         break;
                     }
@@ -1785,10 +2082,9 @@
                 void id; // no-op pour éviter l'avertissement
             }
             setTimeout(() => checkPendingValidations(taskId), 1000);
-            }
         }
 
-        
+
 
         // Fonction de tentative de reconnexion WebSocket avec limitation
         function attemptReconnection(taskId) {
