@@ -2262,7 +2262,13 @@ class DevisWorkflow:
             client_id = sf_client_data.get("Id", "")
             
             logger.info(f"Client Salesforce: {client_name} (ID: {client_id})")
-            
+            # CORRECTION: Vérifier si le client a un code SAP dans ses données
+            client_sap_code = client_info.get("data", {}).get("sap_code") or client_info.get("sap_code")
+            if client_sap_code:
+                logger.info(f"Client SAP trouvé dans les données: {client_sap_code}")
+                sap_card_code = client_sap_code
+            else:
+                logger.info("Client SAP non trouvé, création nécessaire...")
             # Créer le client SAP si nécessaire
             logger.info("=== CRÉATION/VÉRIFICATION CLIENT SAP ===")
             if not sap_client.get("data"):
@@ -2292,7 +2298,13 @@ class DevisWorkflow:
                 }
             
             # ========== ÉTAPE 2: PRÉPARATION DES PRODUITS ==========
-            
+            # CORRECTION: Ne pas continuer si aucun produit valide
+            if not valid_products:
+                logger.error("❌ Aucun produit valide - Arrêt du processus de création de devis")
+                return {
+                    "status": "error",
+                    "message": "Impossible de créer le devis sans produits valides. Veuillez sélectionner des produits."
+                }
             logger.info("=== PRÉPARATION DES LIGNES PRODUITS ===")
             
             # Séparer les produits trouvés des produits personnalisés
@@ -5532,7 +5544,9 @@ class DevisWorkflow:
                 product_name = product.get("name", "")
                 product_code = product.get("code", "")
                 quantity = product.get("quantity", 1)
-
+                # CORRECTION: Générer immédiatement l'interaction WebSocket
+                if products_needing_interaction:
+                    await self._send_product_selection_interaction(products_needing_interaction)
                 # Progression
                 progress = int(20 + (i / len(products)) * 60)
                 self._track_step_progress("get_products_info", progress,
@@ -5717,7 +5731,31 @@ class DevisWorkflow:
             "interaction_data": validation_data
         }
     # 🆕 MÉTHODES AUXILIAIRES POUR LA VALIDATION SÉQUENTIELLE
-
+    async def _send_product_selection_interaction(self, products_needing_selection: List[Dict]) -> None:
+        """Envoie l'interaction de sélection de produits via WebSocket"""
+        try:
+            from services.websocket_manager import websocket_manager
+            
+            interaction_data = {
+                "type": "product_selection",
+                "interaction_type": "product_selection",
+                "products_needing_selection": products_needing_selection,
+                "message": f"{len(products_needing_selection)} produits nécessitent votre sélection",
+                "options": []
+            }
+            
+            for product_info in products_needing_selection:
+                interaction_data["options"].append({
+                    "name": product_info.get("original_name"),
+                    "quantity": product_info.get("quantity"),
+                    "choices": product_info.get("options", [])[:5]
+                })
+            
+            await websocket_manager.send_user_interaction_required(self.task_id, interaction_data)
+            logger.info(f"✅ Interaction produit envoyée pour {len(products_needing_selection)} produits")
+            
+        except Exception as e:
+            logger.error(f"❌ Erreur envoi interaction produit: {e}")
     async def _initiate_client_creation(self, client_name: str) -> Dict[str, Any]:
         """Initie le processus de création d'un nouveau client"""
         return {
@@ -7220,6 +7258,14 @@ class DevisWorkflow:
                             "selection_reason": f"Terme '{product_name}' trop générique - {len(products_found)} produits correspondent"
                         })
                         continue
+                    # AJOUT: Arrêter le workflow immédiatement pour demander la sélection
+                    if products_needing_selection:
+                        logger.warning(f"⏸️ Arrêt workflow - {len(products_needing_selection)} produit(s) nécessitent sélection")
+                        return {
+                            "status": "product_selection_required",
+                            "products": products_needing_selection,
+                            "message": "Sélection de produits requise"
+                        }
                     # Auto-sélection si 1 résultat, sinon on prend le 1er comme “best”
                     best_list = products_found[:1] if len(products_found) == 1 else products_found[:1]
                     if not best_list:
