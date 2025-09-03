@@ -920,19 +920,35 @@
         }
 
         function updateProgress(percentage, title, currentStep) {
-            document.getElementById('progressPercentage').textContent = `${percentage}%`;
-            document.getElementById('progressTitle').textContent = title;
-            document.getElementById('progressFill').style.width = `${percentage}%`;
-            
-            const steps = document.querySelectorAll('.progress-step');
-            steps.forEach((step, index) => {
-                step.classList.remove('active', 'completed');
-                if (index < currentStep) {
-                    step.classList.add('completed');
-                } else if (index === currentStep) {
-                    step.classList.add('active');
+            try {
+            const progressBar = document.getElementById('progressBar');
+            const progressText = document.getElementById('progressText');
+            const stepText = document.getElementById('stepText');
+                if (progressBar && progressText) {
+                    progressBar.style.width = `${Math.min(percentage, 100)}%`;
+                    progressText.textContent = `${Math.round(percentage)}%`;
                 }
-            });
+                
+                if (stepText && title) {
+                    stepText.textContent = title;
+                }
+                
+                // Afficher le conteneur de progression s'il n'est pas visible
+                if (percentage > 0 && !document.getElementById('progressContainer').classList.contains('active')) {
+                    showProgress();
+                }
+                
+                // Masquer à 100% sauf si c'est une étape intermédiaire
+                if (percentage >= 100 && !title.includes("sélection") && !title.includes("interaction")) {
+                    setTimeout(() => {
+                        if (document.getElementById('progressContainer').classList.contains('active')) {
+                            hideProgress();
+                        }
+                    }, 1000);
+                }
+            } catch (error) {
+                console.error("Erreur updateProgress:", error);
+            }
         }
 
         async function trackProgress(taskId) {
@@ -1496,6 +1512,12 @@
                 }
 
                 console.warn('Vérification connexion échouée:', error.message);
+                // Détail de l'erreur pour le débogage
+                console.error('Détails erreur connexion:', {
+                message: error.message,
+                name: error.name,
+                stack: error.stack
+                });
             }
         }
         // Fonction pour mettre à jour l'indicateur de statut de connexion
@@ -1571,7 +1593,25 @@
                 }
 
                 console.log("📥 Message reçu:", data);
-
+                // Gestion des messages progress_update et initial_progress
+                switch (data.type) {
+                case "initial_progress": {
+                console.log("📊 Initial progress reçu:", data);
+                if (data.data) {
+                const progress = data.data;
+                if (progress.current_step && progress.progress !== undefined) {
+                updateProgress(progress.progress, progress.current_step.message || "Initialisation...", progress.current_step.id);
+                }
+                }
+                break;
+                }
+                case "progress_update": {
+                    console.log("🔄 Progress update reçu:", data);
+                    if (data.progress !== undefined) {
+                        updateProgress(data.progress, data.message || "Traitement en cours...", data.step_id);
+                    }
+                    break;
+                }
                 // Gestion spéciale pour client_selection via interaction_data
                 if (data.interaction_data && data.interaction_data.interaction_type === 'client_selection') {
                     hideProgress();
@@ -1672,6 +1712,7 @@
 
                     default: {
                         console.warn("Type de message non géré:", data.type);
+                        console.log("Données complètes:", data);
                     }
                 }
             };
@@ -1684,6 +1725,7 @@
                     heartbeatInterval = null;
                 }
                 console.log('🔌 WebSocket fermé.');
+                console.log(🔌 WebSocket déconnecté. Code: ${event.code}, Raison: ${event.reason});
                 window.websocket = null;
 
                 // Fermetures normales: ne rien faire
