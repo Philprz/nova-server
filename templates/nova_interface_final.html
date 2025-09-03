@@ -48,17 +48,18 @@
             margin-top: 12px;
         }
 
-        .client-selection-button {
-            background-color: var(--bg-tertiary);
-            border: 1px solid var(--border-color);
-            border-radius: 6px;
-            padding: 12px;
-            text-align: left;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            display: flex;
-            flex-direction: column;
-        }
+.client-selection-button {
+    border: 1px solid #832dfe80;
+    border-radius: 6px;
+    padding: 12px;
+    text-align: left;
+    cursor: pointer !important;
+    transition: all 0.2s ease;
+    display: flex
+;
+    flex-direction: column;
+    background: none !important;
+}
         .client-selection-button .client-header {
             display: flex;
             justify-content: space-between;
@@ -66,34 +67,35 @@
             margin-bottom: 8px;
         }
         
-        .client-selection-button .client-source {
-            background: rgba(255, 255, 255, 0.2);
-            padding: 2px 8px;
-            border-radius: 12px;
-            font-size: 11px;
-            font-weight: bold;
-        }
+       .client-selection-button .client-source {
+    background: linear-gradient(135deg, #02B9FD, #832DFE, #E220FB);
+    padding: 2px 8px 0px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: normal;
+    color: white;
+}
         
         .client-selection-button .client-details {
             font-size: 12px;
             line-height: 1.4;
             opacity: 0.9;
             text-align: left;
+            color: white;
         }
         
         .client-selection-button:hover .client-details {
             opacity: 1;
         }
         .client-selection-button:hover {
-            background-color: var(--bg-primary);
-            border-color: var(--primary-blue);
-            transform: translateY(-2px);
-            box-shadow: 0 4px 8px rgba(0,0,0,0.05);
+                border-color: #832dfe;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.05);
         }
 
         .client-selection-button strong {
             font-weight: 600;
-            color: var(--primary-blue);
+            color: white;
         }
 
         .client-selection-button small {
@@ -103,7 +105,7 @@
         }
 
         .client-selection-button.create-new {
-            color: var(--success-color);
+            color: #02B9FD;
             border-style: dashed;
             align-items: center;
             flex-direction: row;
@@ -111,9 +113,9 @@
         }
 
         .client-selection-button.create-new:hover {
-            color: white;
+            color: #02B9FD;
             background-color: var(--success-color);
-            border-color: var(--success-color);
+            border-color: #02B9FD;
         }
 
         body {
@@ -194,8 +196,8 @@
 
 .message {
   margin-bottom: 16px;
-  padding: 12px 16px;
-  border-radius: 6px;
+  padding: 10px 16px;
+  border-radius: 30px;
   max-width: 85%;
   margin-top: 16px;
 }
@@ -206,17 +208,17 @@
         }
 
         .message.user {
-  color: white;
-  margin-left: auto;
-  border: solid 1px #0CABFE;
+    color: white;
+    margin-left: auto;
+    border-radius: 30px !important;
+    background: linear-gradient(135deg, #02b9fd2b, #832dfe0d, #e220fb26);
 }
 
 .message.system {
-  background: #3b4957;
-  margin: 0 auto;
-  text-align: center;
+  margin: 12px 0px 12px 0px;  text-align: center;
   max-width: 100%;
   color: #ffffff63;
+  font-style: italic;
 }
 /*MARINA*/
         .welcome-message {
@@ -227,9 +229,9 @@
         }
 /*MARINA*/
         .welcome-title {
-            font-size: 20px;
+  font-size: 20px;
   font-weight: 400;
-  color: #02B9FD;
+  color: #FFFFFF;
   margin-bottom: 12px;
         }
 
@@ -419,6 +421,7 @@
             font-size: 16px;
             resize: none;
             transition: border-color 0.2s ease;
+            font-style: italic;
         }
 
         .chat-input:focus {
@@ -510,7 +513,7 @@
         }
 
         .chat-input:invalid {
-            border-color: var(--warning-color);
+            border-color: grey;
             box-shadow: 0 0 0 2px rgba(253, 82, 2, 0.1);
         }
 
