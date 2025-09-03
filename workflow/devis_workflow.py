@@ -3590,7 +3590,74 @@ class DevisWorkflow:
             logger.error(f"❌ Erreur application Price Engine: {str(e)}")
             # En cas d'erreur, retourner les produits avec prix par défaut
             return self._apply_fallback_pricing(products_data)
-
+    async def continue_with_products(self, selected_products: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Continue le workflow après sélection de produits par l'utilisateur"""
+        try:
+            logger.info(f"🔄 Continuation workflow avec {len(selected_products)} produit(s) sélectionné(s)")
+            
+            if not selected_products:
+                return self._build_error_response("Aucun produit sélectionné", "Veuillez sélectionner au moins un produit")
+            
+            # Récupérer le contexte de la tâche
+            if not self.context:
+                logger.warning("⚠️ Contexte manquant, récupération depuis la tâche...")
+                task = progress_tracker.get_task(self.task_id) if self.task_id else None
+                if task and hasattr(task, 'context'):
+                    self.context = task.context or {}
+            
+            # Reformater les produits sélectionnés pour le workflow
+            formatted_products = []
+            for i, selected_product in enumerate(selected_products):
+                # Extraire les données du produit sélectionné
+                product_data = selected_product.get("product_data") or selected_product.get("data") or selected_product
+                quantity = selected_product.get("quantity", selected_product.get("requested_quantity", 1))
+                
+                formatted_product = {
+                    "code": product_data.get("ItemCode", ""),
+                    "name": product_data.get("ItemName", ""),
+                    "quantity": quantity,
+                    "unit_price": product_data.get("AvgPrice", 0) or product_data.get("unit_price", 0),
+                    "total_price": (product_data.get("AvgPrice", 0) or product_data.get("unit_price", 0)) * quantity,
+                    "currency": "EUR",
+                    "stock": product_data.get("OnHand", 0),
+                    "description": product_data.get("U_Description", ""),
+                    "sap_data": product_data,
+                    "search_method": "user_selected",
+                    "found": True
+                }
+                formatted_products.append(formatted_product)
+                logger.info(f"✅ Produit {i+1}: {formatted_product['name']} x{quantity}")
+            
+            # Mettre à jour le contexte avec les produits sélectionnés
+            self.context["products_info"] = formatted_products
+            self.context["products_selected"] = True
+            
+            # Préparer les données pour _create_quote_document
+            client_result = self.context.get("client_info", {})
+            products_result = {"products": formatted_products}
+            
+            # Continuer directement vers la création du devis
+            self._track_step_complete("lookup_products", f"✅ {len(formatted_products)} produit(s) sélectionné(s)")
+            
+            # Créer le devis
+            self._track_step_start("create_quote", "🧾 Création du devis")
+            quote_result = await self._create_quote_document(client_result, products_result)
+            
+            if not isinstance(quote_result, dict):
+                logger.error("❌ _create_quote_document a retourné un résultat invalide")
+                return self._build_error_response("Erreur création devis", "Résultat invalide")
+            
+            # Marquer la tâche comme terminée
+            self._track_step_complete("create_quote", "✅ Devis créé")
+            if self.current_task:
+                progress_tracker.complete_task(self.task_id, quote_result)
+            
+            return quote_result
+            
+        except Exception as e:
+            logger.exception(f"❌ Erreur continuation workflow avec produits: {str(e)}")
+            self._track_step_fail("continue_with_products", "Erreur continuation", str(e))
+            return self._build_error_response("Erreur continuation workflow", str(e))
     def _apply_fallback_pricing(self, products_data: List[Dict]) -> List[Dict]:
         """Prix de secours si le Price Engine échoue"""
         logger.warning("⚠️ Application des prix de secours...")
@@ -7091,6 +7158,14 @@ class DevisWorkflow:
         """
         Récupération des produits avec progression avancée
         """
+        ACCESSORY_TERMS = ('cartouche', 'encre', 'toner', 'cable', 'câble')
+
+        def _odata_escape(s: str) -> str:
+            try:
+                return str(s).replace("'", "''")
+            except Exception:
+                return str(s or "")
+
         try:
             if not products:
                 return {
@@ -7101,165 +7176,146 @@ class DevisWorkflow:
 
             self._track_step_progress("lookup_products", 10, f"🔍 Recherche de {len(products)} produit(s)...")
 
-            found_products = []
-
+            found_products: List[Dict[str, Any]] = []
+            products_needing_selection: List[Dict[str, Any]] = []
             total_products = len(products)
 
             for i, product in enumerate(products):
-                product_name = product.get("name", "")
-                product_code = product.get("code", "")
-                quantity = product.get("quantity", 1)
+                product_name = str(product.get("name", "") or "")
+                product_code = str(product.get("code", "") or "")
+                try:
+                    quantity = int(product.get("quantity", 1) or 1)
+                except Exception:
+                    quantity = 1
+                if quantity < 1:
+                    quantity = 1
 
-                # Progression
-                progress = int(20 + (i / total_products) * 70)
-                self._track_step_progress("lookup_products", progress,
-                                        f"📦 Recherche '{product_name}' ({i+1}/{total_products})")
+                # Progression (sur i+1 pour une montée plus régulière)
+                progress = int(20 + ((i + 1) / total_products) * 70)
+                self._track_step_progress("lookup_products", progress, f"📦 Recherche '{product_name}' ({i+1}/{total_products})")
 
-                # === RECHERCHE MULTI-CRITÈRES ===
                 # === RECHERCHE INTELLIGENTE ===
-                smart_search = await self._smart_product_search(product_name, product_code)
-                # Appel avec gestion d'erreur de sécurité
                 try:
                     smart_search = await self._smart_product_search(product_name, product_code)
-                    
-                    # Vérifier la structure du retour
                     if not isinstance(smart_search, dict):
                         smart_search = {"found": False, "products": [], "method": "invalid_response"}
-                    
-                    # S'assurer que les clés requises existent
-                    if "found" not in smart_search:
-                        smart_search["found"] = False
-                    if "products" not in smart_search:
-                        smart_search["products"] = []
-                        
+                    smart_search.setdefault("found", False)
+                    smart_search.setdefault("products", [])
+                    smart_search_method = smart_search.get("method")
                 except Exception as e:
                     logger.error(f"❌ Erreur appel _smart_product_search: {str(e)}")
                     smart_search = {"found": False, "products": [], "method": "call_error", "error": str(e)}
+                    smart_search_method = "call_error"
+
                 if smart_search["found"] and smart_search["products"]:
-                    # NOUVELLE LOGIQUE: Demander confirmation si recherche générique
-                    products_found = smart_search["products"]
+                    products_found = smart_search.get("products") or []
                     if self._is_generic_search(product_name) and len(products_found) > 1:
-                        # Terme générique détecté avec plusieurs options - Demander sélection utilisateur
                         logger.info(f"⚠️ Terme générique '{product_name}' avec {len(products_found)} options - Interaction requise")
                         products_needing_selection.append({
                             "original_name": product_name,
                             "original_code": product_code,
                             "quantity": quantity,
-                            "options": products_found[:5],  # Limiter à 5 options
-                            "search_method": smart_search["method"],
+                            "options": products_found[:5],
+                            "search_method": smart_search_method,
                             "selection_reason": f"Terme '{product_name}' trop générique - {len(products_found)} produits correspondent"
                         })
                         continue
-                    elif len(products_found) == 1:
-                        # Un seul produit trouvé - Auto-sélection possible même si générique
-                        # Terme générique détecté, demander sélection utilisateur
-                        logger.info(f"⚠️ Terme générique détecté: '{product_name}' - Interaction requise")
-                        products_needing_selection.append({
-                            "original_name": product_name,
-                            "original_code": product_code,
-                            "quantity": quantity,
-                            "options": products_found,
-                            "search_method": smart_search["method"]
+                    # Auto-sélection si 1 résultat, sinon on prend le 1er comme “best”
+                    best_list = products_found[:1] if len(products_found) == 1 else products_found[:1]
+                    if not best_list:
+                        # garde défensive ultra rare
+                        logger.debug("Aucun produit exploitable dans smart_search malgré found=True")
+                    else:
+                        best_match = best_list[0]
+                        logger.info(f"✅ Produit {'spécifique' if len(products_found)==1 else ''} trouvé: {best_match.get('ItemName')}")
+                        found_products.append({
+                            **self._format_product_data(best_match, quantity),
+                            "search_method": smart_search_method,
+                            "found": True
                         })
-                        continue
-                    
-                    best_match = products_found[0]
-                    logger.info(f"✅ Produit spécifique trouvé: {best_match.get('ItemName')}")
-                    found_products.append({
-                        **self._format_product_data(best_match, quantity),
-                        "search_method": smart_search["method"],
-                        "found": True
-                    })
                     continue
-                product_found = None
-                
+
+                # Recherche traditionnelle si recherche intelligente échoue
+                product_found = False
+
                 # Étape 1: Recherche exacte par code
                 if product_code:
-                    exact_search = await self.mcp_connector.call_sap_mcp(
-                        "sap_read",
-                        {
-                            "endpoint": f"/Items('{product_code}')",
-                            "method": "GET"
-                        }
-                    )
-                    if "error" not in exact_search and exact_search.get("ItemCode"):
-                        logger.info(f"✅ Produit trouvé par code exact: {product_code}")
-                        product_found = exact_search
-                        found_products.append({
-                            **self._format_product_data(exact_search, quantity),
-                            "search_method": "exact_code",
-                            "found": True
-                        })
-                        product_found = True
-                        continue
-                
-                # Étape 2: Recherche par nom exacte
+                    try:
+                        exact_search = await self.mcp_connector.call_sap_mcp(
+                            "sap_read",
+                            {"endpoint": f"/Items('{_odata_escape(product_code)}')", "method": "GET"}
+                        )
+                        if isinstance(exact_search, dict) and "error" not in exact_search and exact_search.get("ItemCode"):
+                            logger.info(f"✅ Produit trouvé par code exact: {product_code}")
+                            found_products.append({
+                                **self._format_product_data(exact_search, quantity),
+                                "search_method": "exact_code",
+                                "found": True
+                            })
+                            continue
+                    except Exception as e:
+                        logger.debug(f"Recherche par code exact échouée: {str(e)}")
+
+                # Étape 2: Recherche par nom exact
                 if product_name and not product_found:
-                    name_search = await self.mcp_connector.call_sap_mcp(
-                        "sap_read", 
-                        {
-                            "endpoint": f"/Items?$filter=ItemName eq '{product_name}'&$top=1",
-                            "method": "GET"
-                        }
-                    )
-                    if name_search.get("value") and len(name_search["value"]) > 0:
-                        logger.info(f"✅ Produit trouvé par nom exact: {product_name}")
-                        product_found = name_search["value"][0]
-                        found_products.append({
-                            **self._format_product_data(product_found, quantity),
-                            "search_method": "exact_name",
-                            "found": True
-                        })
-                        continue
+                    try:
+                        pn = _odata_escape(product_name)
+                        name_search = await self.mcp_connector.call_sap_mcp(
+                            "sap_read",
+                            {"endpoint": f"/Items?$filter=ItemName eq '{pn}'&$top=1", "method": "GET"}
+                        )
+                        values = (name_search or {}).get("value") or []
+                        if values:
+                            logger.info(f"✅ Produit trouvé par nom exact: {product_name}")
+                            found_products.append({
+                                **self._format_product_data(values[0], quantity),
+                                "search_method": "exact_name",
+                                "found": True
+                            })
+                            continue
+                    except Exception as e:
+                        logger.debug(f"Recherche nom exact échouée: {str(e)}")
+
                 # Étape 3: Recherches par mots-clés élargies
                 if not product_found:
-                    # Extraire des mots-clés intelligents du nom du produit
-                    search_keywords = self._extract_product_keywords(product_name)
-                    
-                    for keyword in search_keywords:
-                        if product_found:
-                            break
-                            
+                    for keyword in self._extract_product_keywords(product_name):
+                        if not keyword:
+                            continue
+                        kw = _odata_escape(keyword)
                         logger.info(f"🔎 Recherche avec mot-clé: '{keyword}'")
-                        
-                        # Recherche dans ItemName avec filtrage intelligent
+
+                        # Recherche filtrée (éviter accessoires)
                         try:
-                            # Étape 1: Recherche avec filtrage des accessoires
-                            filter_query = f"contains(tolower(ItemName),tolower('{keyword}')) and not contains(tolower(ItemName),'cartouche') and not contains(tolower(ItemName),'encre') and not contains(tolower(ItemName),'toner') and not contains(tolower(ItemName),'cable')"
+                            filter_query = (
+                                f"contains(tolower(ItemName),tolower('{kw}')) "
+                                f"and not contains(tolower(ItemName),'cartouche') "
+                                f"and not contains(tolower(ItemName),'encre') "
+                                f"and not contains(tolower(ItemName),'toner') "
+                                f"and not contains(tolower(ItemName),'cable')"
+                            )
                             result = await self.mcp_connector.call_sap_mcp(
                                 "sap_read",
-                                {
-                                    "endpoint": f"/Items?$filter={filter_query}&$top=5",
-                                    "method": "GET"
-                                }
+                                {"endpoint": f"/Items?$filter={filter_query}&$top=5", "method": "GET"}
                             )
-                            
-                            # Si pas de résultats avec filtrage, essayer sans
-                            if not result.get("value"):
+                            values = (result or {}).get("value") or []
+                            if not values:
+                                # Fallback simple
                                 result = await self.mcp_connector.call_sap_mcp(
                                     "sap_read",
-                                    {
-                                        "endpoint": f"/Items?$filter=contains(tolower(ItemName),tolower('{keyword}'))&$top=5",
-                                        "method": "GET"
-                                    }
+                                    {"endpoint": f"/Items?$filter=contains(tolower(ItemName),tolower('{kw}'))&$top=5", "method": "GET"}
                                 )
-                            
-                            if result.get("value"):
-                                # Prendre le premier résultat le plus pertinent
-                                matches = result["value"]
-                                # Sélectionner le meilleur match en évitant les accessoires
+                                values = (result or {}).get("value") or []
+
+                            if values:
                                 best_match = None
-                                for match in matches:
-                                    item_name_lower = match.get('ItemName', '').lower()
-                                    # Éviter cartouches, encre, toners, câbles
-                                    if not any(accessory in item_name_lower for accessory in ['cartouche', 'encre', 'toner', 'cable', 'câble']):
+                                for match in values:
+                                    item_name_lower = (match.get('ItemName') or '').lower()
+                                    if not any(acc in item_name_lower for acc in ACCESSORY_TERMS):
                                         best_match = match
                                         break
-                                
-                                # Si aucun produit principal trouvé, prendre le premier
                                 if not best_match:
-                                    best_match = matches[0]
-                                
+                                    best_match = values[0]
+
                                 logger.info(f"✅ Produit trouvé par mot-clé '{keyword}': {best_match.get('ItemName')}")
                                 found_products.append({
                                     **self._format_product_data(best_match, quantity),
@@ -7268,83 +7324,26 @@ class DevisWorkflow:
                                 })
                                 product_found = True
                                 break
-                                
                         except Exception as e:
                             logger.debug(f"Recherche '{keyword}' échouée: {str(e)}")
-                            continue
-                            
-                        # Si tolower() ne fonctionne pas, essayer recherche simple
-                        if not product_found:
-                            try:
-                                result = await self.mcp_connector.call_sap_mcp(
-                                    "sap_read",
-                                    {
-                                        "endpoint": f"/Items?$filter=contains(ItemName,'{keyword}')&$top=5",
-                                        "method": "GET"
-                                    }
-                                )
-                                
-                                if result.get("value"):
-                                    matches = result["value"]
-                                    best_match = matches[0]
-                                    
-                                    logger.info(f"✅ Produit trouvé par recherche simple '{keyword}': {best_match.get('ItemName')}")
-                                    product_found = first_match
-                                    found_products.append({
-                                        **self._format_product_data(best_match, quantity),
-                                        "search_method": f"simple_{keyword}",
-                                        "found": True
-                                    })
-                                    break
-                                    
-                            except Exception as e:
-                                logger.debug(f"Recherche simple '{keyword}' échouée: {str(e)}")
-                                continue
-                
-                # 3. Ajouter le produit aux résultats
-                if product_found:
-                    # Calculer le prix total
-                    unit_price = float(product_found.get("Price", 0) or 0)
-                    total_price = unit_price * quantity
-                    
-                    found_products.append({
-                        "code": product_found.get("ItemCode", product_code or "UNKNOWN"),
-                        "name": product_found.get("ItemName", product_name or "Produit inconnu"),
-                        "quantity": quantity,
-                        "unit_price": unit_price,
-                        "total_price": total_price,
-                        "currency": "EUR",
-                        "sap_data": product_found,
-                        "found": True,
-                        "search_method": "code" if product_code else "name"
-                    })
-                else:
-                    # Produit non trouvé - RECHERCHE INTELLIGENTE OBLIGATOIRE
+                            # on tente le tour suivant
+
+                # Si aucun produit trouvé, utiliser le système de suggestions
+                if not product_found:
                     logger.warning(f"❌ Produit non trouvé: {product_name or product_code}")
-                    
-                    # Utiliser le système de suggestions existant
                     logger.info(f"🔍 Recherche de suggestions pour: {product_name or product_code}")
-                    
-                    # Récupérer tous les produits pour suggestions
                     try:
-                        all_products_result = await self.mcp_connector.call_sap_mcp("sap_read", {
-                            "endpoint": "/Items?$select=ItemCode,ItemName,OnHand,Price&$top=500",
-                            "method": "GET"
-                        })
-                        
-                        if "error" not in all_products_result and "value" in all_products_result:
+                        all_products_result = await self.mcp_connector.call_sap_mcp(
+                            "sap_read",
+                            {"endpoint": "/Items?$select=ItemCode,ItemName,OnHand,Price&$top=500", "method": "GET"}
+                        )
+                        if isinstance(all_products_result, dict) and "error" not in all_products_result and "value" in all_products_result:
                             available_products = all_products_result["value"]
-                            
-                            # Utiliser le suggestion engine existant
                             from services.suggestion_engine import SuggestionEngine
                             suggestion_engine = SuggestionEngine()
-                            
-                            suggestion_result = await suggestion_engine.suggest_product(
-                                product_name or product_code, available_products
-                            )
-                            
-                            if suggestion_result.has_suggestions:
-                                # Produit avec suggestions à faire valider
+                            suggestion_result = await suggestion_engine.suggest_product(product_name or product_code, available_products)
+
+                            if getattr(suggestion_result, "has_suggestions", False):
                                 found_products.append({
                                     "code": product_code or f"UNKNOWN_{i}",
                                     "name": product_name or "Produit à identifier",
@@ -7360,7 +7359,6 @@ class DevisWorkflow:
                                 })
                                 logger.info(f"✅ Suggestions trouvées pour: {product_name or product_code}")
                             else:
-                                # Aucune suggestion - BLOQUER le processus
                                 found_products.append({
                                     "code": product_code or f"UNKNOWN_{i}",
                                     "name": product_name or "Produit inconnu",
@@ -7371,7 +7369,6 @@ class DevisWorkflow:
                                 })
                                 logger.error(f"❌ Aucune suggestion trouvée pour: {product_name or product_code}")
                         else:
-                            # Erreur accès catalogue SAP
                             found_products.append({
                                 "code": product_code or f"ERROR_{i}",
                                 "name": product_name or "Produit inaccessible",
@@ -7380,7 +7377,6 @@ class DevisWorkflow:
                                 "requires_manual_search": True,
                                 "original_request": product_name or product_code
                             })
-                            
                     except Exception as e:
                         logger.error(f"Erreur lors de la recherche de suggestions: {str(e)}")
                         found_products.append({
@@ -7393,25 +7389,23 @@ class DevisWorkflow:
                         })
 
             # Finaliser la progression
-            self._track_step_progress("lookup_products", 100, f"✅ Recherche terminée")
-            
+            self._track_step_progress("lookup_products", 100, "✅ Recherche terminée")
+
             # Statistiques et validation
-            found_count = len([p for p in found_products if p.get("found", False)])
-            suggestions_count = len([p for p in found_products if p.get("requires_selection", False)])
-            errors_count = len([p for p in found_products if p.get("error")])
-            total_amount = sum(p.get("total_price", 0) for p in found_products if p.get("found", False))
-            
-            logger.info(f"📊 Produits: {found_count}/{len(products)} trouvés, {suggestions_count} nécessitent sélection, {errors_count} erreurs")
-            
-            # CONTRÔLE : Si des produits nécessitent une sélection, interrompre le workflow
-            if suggestions_count > 0 or errors_count > 0:
+            found_count = sum(1 for p in found_products if p.get("found"))
+            selection_count = len(products_needing_selection)
+            suggestions_count = sum(1 for p in found_products if p.get("requires_selection"))
+            errors_count = sum(1 for p in found_products if p.get("error"))
+
+            logger.info(f"📊 Produits: {found_count}/{len(products)} trouvés, {selection_count + suggestions_count} nécessitent sélection, {errors_count} erreurs")
+
+            if products_needing_selection or suggestions_count > 0 or errors_count > 0:
                 logger.warning("⚠️ Sélection de produits requise - Interruption du workflow")
-                
-                # Retourner les suggestions/erreurs pour validation utilisateur
+                all_products_needing_action = products_needing_selection + [p for p in found_products if p.get("requires_selection") or p.get("error")]
                 return {
                     "status": "product_selection_required",
-                    "message": f"{suggestions_count} produit(s) nécessitent votre choix, {errors_count} produit(s) en erreur",
-                    "products": found_products,
+                    "message": f"{len(all_products_needing_action)} produit(s) nécessitent votre attention",
+                    "products": all_products_needing_action,
                     "workflow_context": {
                         "client_info": self.context.get("client_info", {}),
                         "task_id": self.task_id,
@@ -7419,11 +7413,8 @@ class DevisWorkflow:
                     },
                     "requires_user_action": True
                 }
-            found_count = len([p for p in found_products if p.get("found", False)])
-            total_amount = sum(p.get("total_price", 0) for p in found_products)
-            
-            logger.info(f"📊 Produits: {found_count}/{total_products} trouvés - Total: {total_amount}€")
-            
+
+            total_amount = sum(p.get("total_price", 0) for p in found_products if p.get("found"))
             return {
                 "status": "success",
                 "products": found_products,
@@ -7435,11 +7426,9 @@ class DevisWorkflow:
                 },
                 "message": f"{found_count}/{total_products} produit(s) trouvé(s)"
             }
-            
+
         except Exception as e:
             logger.exception(f"Erreur récupération produits: {str(e)}")
-            
-            # CORRECTION: Protection garantie du format de retour
             return {
                 "status": "error",
                 "products": [],
@@ -7451,6 +7440,7 @@ class DevisWorkflow:
                 },
                 "message": f"Erreur système: {str(e)}"
             }
+
     def _format_product_data(self, sap_product: Dict[str, Any], quantity: int) -> Dict[str, Any]:
             """Formate les données produit SAP en format standard"""
             return {
