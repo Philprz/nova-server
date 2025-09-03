@@ -5972,6 +5972,7 @@ class DevisWorkflow:
                     self.current_task.require_user_validation("quote_validation", "quote_validation", validation_data)
 
                 # Envoyer via WebSocket
+                from services.websocket_manager import websocket_manager
                 await websocket_manager.send_user_interaction_required(self.task_id, validation_data)
 
                 return {
@@ -6057,6 +6058,8 @@ class DevisWorkflow:
     async def _prepare_quote_preview(self, client_result: Dict[str, Any], products_result: Dict[str, Any]) -> Dict[str, Any]:
         """Prépare l'aperçu du devis pour validation utilisateur"""
         try:
+            from datetime import datetime, timedelta
+            
             client_data = client_result.get("data", {})
             products = products_result.get("products", [])
             
@@ -7135,7 +7138,20 @@ class DevisWorkflow:
                 if smart_search["found"] and smart_search["products"]:
                     # NOUVELLE LOGIQUE: Demander confirmation si recherche générique
                     products_found = smart_search["products"]
-                    if len(products_found) == 1 and self._is_generic_search(product_name):
+                    if self._is_generic_search(product_name) and len(products_found) > 1:
+                        # Terme générique détecté avec plusieurs options - Demander sélection utilisateur
+                        logger.info(f"⚠️ Terme générique '{product_name}' avec {len(products_found)} options - Interaction requise")
+                        products_needing_selection.append({
+                            "original_name": product_name,
+                            "original_code": product_code,
+                            "quantity": quantity,
+                            "options": products_found[:5],  # Limiter à 5 options
+                            "search_method": smart_search["method"],
+                            "selection_reason": f"Terme '{product_name}' trop générique - {len(products_found)} produits correspondent"
+                        })
+                        continue
+                    elif len(products_found) == 1:
+                        # Un seul produit trouvé - Auto-sélection possible même si générique
                         # Terme générique détecté, demander sélection utilisateur
                         logger.info(f"⚠️ Terme générique détecté: '{product_name}' - Interaction requise")
                         products_needing_selection.append({
