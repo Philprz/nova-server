@@ -5482,13 +5482,20 @@ class DevisWorkflow:
                 search_result = await self._process_products_retrieval(single_product_list)
                 found_products = search_result.get("products", [])
                 
-                if found_products and len(found_products) > 0:
-                    # Produit trouvé directement
+                if found_products and len(found_products) == 1:
+                    # Un seul produit trouvé - Auto-sélection
                     product_data = found_products[0]
                     product_result = {
                         "found": True,
                         "data": product_data,
                         "suggestions": []
+                    }
+                elif found_products and len(found_products) > 1:
+                    # Plusieurs produits trouvés - Proposer sélection
+                    product_result = {
+                        "found": False,
+                        "suggestions": found_products[:5],  # Limiter à 5 options
+                        "multiple_matches": True
                     }
                 else:
                     # Produit non trouvé
@@ -5520,6 +5527,22 @@ class DevisWorkflow:
                     })
                     auto_selected_count += 1
                     logger.info(f"✅ Produit auto-sélectionné depuis suggestion: {suggestion.get('ItemCode')}")
+                    
+                elif product_result.get("suggestions") and len(product_result["suggestions"]) > 1:
+                    # Plusieurs suggestions - Interaction requise
+                    products_needing_interaction.append({
+                        "original": product,
+                        "suggestions": product_result.get("suggestions", []),
+                        "efficiency_tip": self._generate_product_efficiency_tip(product_code, product_name)
+                    })
+                elif product_result.get("multiple_matches"):
+                    # Plusieurs correspondances exactes - Interaction requise
+                    products_needing_interaction.append({
+                        "original": product,
+                        "suggestions": product_result.get("suggestions", []),
+                        "multiple_matches": True,
+                        "efficiency_tip": f"💡 {len(product_result.get('suggestions', []))} produits correspondent à '{product_name}'. Précisez le modèle ou la référence exacte."
+                    })
                     
                 else:
                     # Nécessite interaction utilisateur
@@ -5925,7 +5948,41 @@ class DevisWorkflow:
             found = len(valid_products)  # Utiliser les produits réellement valides
             self._track_step_complete("lookup_products", f"✅ {found} produit(s) trouvé(s)")
 
-            # Étape 3 : création du devis
+            # Étape 3 : préparation et prévisualisation du devis
+            self._track_step_start("prepare_quote", "📋 Préparation du devis")
+            quote_preview = await self._prepare_quote_preview(client_result, products_result)
+            self._track_step_complete("prepare_quote", "✅ Devis préparé")
+
+            # Demander validation utilisateur avant création
+            if not quote_preview.get("error"):
+                validation_data = {
+                    "type": "quote_validation",
+                    "interaction_type": "quote_validation",
+                    "quote_preview": quote_preview,
+                    "client_info": client_result.get("data", {}),
+                    "products": products_result.get("products", []),
+                    "message": "Veuillez valider le devis avant création",
+                    "total_amount": quote_preview.get("total_amount", 0),
+                    "currency": quote_preview.get("currency", "EUR")
+                }
+
+                # Marquer la tâche en attente d'interaction
+                if self.current_task:
+                    self.current_task.status = TaskStatus.PENDING
+                    self.current_task.require_user_validation("quote_validation", "quote_validation", validation_data)
+
+                # Envoyer via WebSocket
+                await websocket_manager.send_user_interaction_required(self.task_id, validation_data)
+
+                return {
+                    "success": True,
+                    "status": "user_interaction_required",
+                    "type": "quote_validation",
+                    "message": "Validation du devis requise",
+                    "task_id": self.task_id,
+                    "interaction_data": validation_data
+                }
+            
             self._track_step_start("create_quote", "🧾 Création du devis")
             quote_result = await self._create_quote_document(client_result, products_result)
             if not isinstance(quote_result, dict):
@@ -5997,7 +6054,51 @@ class DevisWorkflow:
                 "error": str(e)
             }
 
+    async def _prepare_quote_preview(self, client_result: Dict[str, Any], products_result: Dict[str, Any]) -> Dict[str, Any]:
+        """Prépare l'aperçu du devis pour validation utilisateur"""
+        try:
+            client_data = client_result.get("data", {})
+            products = products_result.get("products", [])
+            
+            # Calculer totaux
+            subtotal = sum(p.get("total_price", 0) for p in products if p.get("found"))
+            tax_rate = 0.196  # TVA 19.6%
+            tax_amount = subtotal * tax_rate
+            total_amount = subtotal + tax_amount
+            
+            # Formatage des produits pour aperçu
+            formatted_products = []
+            for product in products:
+                if product.get("found") and product.get("data"):
+                    product_data = product["data"]
+                    formatted_products.append({
+                        "code": product_data.get("ItemCode", ""),
+                        "name": product_data.get("ItemName", ""),
+                        "quantity": product.get("quantity", 1),
+                        "unit_price": product.get("unit_price", 0),
+                        "total_price": product.get("total_price", 0),
+                        "stock": product_data.get("OnHand", 0)
+                    })
 
+            preview = {
+                "client_name": client_data.get("CardName") or client_data.get("Name", ""),
+                "client_code": client_data.get("CardCode") or client_data.get("AccountNumber", ""),
+                "products": formatted_products,
+                "subtotal": subtotal,
+                "tax_rate": tax_rate,
+                "tax_amount": tax_amount,
+                "total_amount": total_amount,
+                "currency": "EUR",
+                "doc_date": datetime.now().strftime("%Y-%m-%d"),
+                "due_date": (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
+            }
+            
+            logger.info(f"📋 Aperçu devis préparé - Total: {total_amount}€")
+            return preview
+            
+        except Exception as e:
+            logger.error(f"❌ Erreur préparation aperçu devis: {str(e)}")
+            return {"error": str(e)}
 
 
     async def _process_other_action(self, extracted_info: Dict[str, Any]) -> Dict[str, Any]:
