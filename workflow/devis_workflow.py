@@ -255,7 +255,7 @@ class DevisWorkflow:
             self._track_step_start("quote_workflow", "🚀 Démarrage du workflow de devis")
             workflow_result = await self._process_quote_workflow(extracted_info)
 
-            # Cas : interaction utilisateur nécessaire
+            # Cas : interaction utilisateur nécessaire - ARRÊT COMPLET DU WORKFLOW
             if workflow_result.get("status") == "user_interaction_required":
                 # Suivi d'étape
                 step = workflow_result.get("step")
@@ -270,6 +270,8 @@ class DevisWorkflow:
                     "user_prompt": user_prompt,
                     "draft_mode": draft_mode
                 })
+                # ARRÊT IMMÉDIAT - Ne pas continuer le workflow
+                logger.info(f"⏸️ Workflow suspendu en attente d'interaction utilisateur")
                 return workflow_result
 
             # Cas : workflow terminé normalement
@@ -868,21 +870,24 @@ class DevisWorkflow:
                 if result.get("status") == "user_interaction_required":
                     # Laisser la tâche en attente d'interaction - ne pas la terminer
                     logger.info(f"⏸️ Tâche {self.task_id} en attente d'interaction utilisateur")
+                    # ARRÊT COMPLET - Pas d'appel à complete_task ni de broadcast
+                    return result
                 else:
                     # Workflow terminé normalement
                     progress_tracker.complete_task(self.task_id, result)
         
-            # Assurer que le résultat final est envoyé via WebSocket
-            try:
-                await websocket_manager.broadcast_to_task(task_id, {
-                    "type": "completion",
-                    "task_id": task_id,
-                    "data": result,
-                    "status": "completed"
-                })
-            
-            except Exception as ws_error:
-                logger.error(f"Erreur envoi résultat WebSocket: {ws_error}")
+            # Assurer que le résultat final est envoyé via WebSocket SEULEMENT si terminé
+            if result.get("status") != "user_interaction_required":
+                try:
+                    await websocket_manager.broadcast_to_task(task_id, {
+                        "type": "completion",
+                        "task_id": task_id,
+                        "data": result,
+                        "status": "completed"
+                    })
+                
+                except Exception as ws_error:
+                    logger.error(f"Erreur envoi résultat WebSocket: {ws_error}")
             return result
             
         except Exception as e:
