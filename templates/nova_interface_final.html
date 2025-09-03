@@ -1710,7 +1710,27 @@
                         if (typeof addMessage === "function") addMessage(data.message, "system");
                         break;
                     }
-
+                    case "user_interaction_required": {
+                        console.log("🤝 Interaction utilisateur détectée:", data.interaction_data || "Aucune donnée d'interaction disponible");
+                        if (data.interaction_data && data.interaction_data.interaction_type === 'client_selection') {
+                            if (typeof hideProgress === "function") hideProgress();
+                            const opts = data.interaction_data.client_options || data.interaction_data.options || data.interaction_data.clients || [];
+                            const name = data.interaction_data.original_client_name || data.interaction_data.client_name || '';
+                            console.log(`🎯 Affichage sélection client: ${opts.length} options pour "${name}"`);
+                            if (typeof addClientSelection === "function") addClientSelection(opts, name);
+                        } else if (data.interaction_data && data.interaction_data.interaction_type === 'product_selection') {
+                            if (typeof hideProgress === "function") hideProgress();
+                            if (typeof handleProductSelection === "function") {
+                                handleProductSelection(data.interaction_data);
+                            }
+                        } else {
+                            console.warn("Type d'interaction non géré:", data.interaction_data);
+                            if (typeof handleUserInteraction === "function") {
+                                handleUserInteraction(data.interaction_data);
+                            }
+                        }
+                        break;
+                    }
                     default: {
                         console.warn("Type de message non géré:", data.type);
                         console.log("Données complètes:", data);
