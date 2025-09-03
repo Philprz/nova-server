@@ -226,6 +226,25 @@ class DevisWorkflow:
             response["context"] = context
 
         return response
+    async def _send_final_quote_result(self, result_data: dict):
+        """Envoie le résultat final du devis via WebSocket"""
+        try:
+            if hasattr(self, 'task_id') and self.task_id:
+                from services.websocket_manager import websocket_manager
+                
+                message = {
+                    "type": "quote_generation_completed",
+                    "task_id": self.task_id,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "result": result_data
+                }
+                
+                await websocket_manager.send_task_update(self.task_id, message)
+                logger.info(f"✅ Résultat final envoyé pour {self.task_id}")
+            else:
+                logger.warning("⚠️ Impossible d'envoyer le résultat - task_id manquant")
+        except Exception as e:
+            logger.error(f"❌ Erreur envoi résultat final: {e}")
     # 🔧 NOUVELLE MÉTHODE PRINCIPALE AVEC VALIDATION SÉQUENTIELLE
     async def process_quote_request(self, user_prompt: str, draft_mode: bool = False) -> Dict[str, Any]:
         """
@@ -2589,6 +2608,17 @@ class DevisWorkflow:
                 result["error"] = result["message"]
             
             logger.info("=== CRÉATION DEVIS TERMINÉE ===")
+            # Envoyer le résultat final via WebSocket
+            await self._send_final_quote_result({
+                "success": True,
+                "quote_id": f"SAP-{sap_result.get('doc_num')}",
+                "sap_doc_num": sap_result.get('doc_num'),
+                "salesforce_opportunity_id": sf_result.get('id'),
+                "client": self.selected_client,
+                "products": valid_products,
+                "total_amount": sap_result.get('total_amount', 0),
+                "message": "✅ Devis créé avec succès dans SAP et Salesforce"
+            })
             logger.info(f"Succès global: {overall_success}")
             logger.info(f"SAP: {'✅' if sap_success else '❌'}")
             logger.info(f"Salesforce: {'✅' if sf_success else '❌'}")

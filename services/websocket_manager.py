@@ -235,9 +235,15 @@ class WebSocketManager:
                 
         elif interaction_data.get('interaction_type') == 'product_selection':
             product_options = interaction_data.get('options', [])
-            if len(product_options) == 1:
-                logger.info(f"🚀 Auto-sélection détectée - 1 seul produit disponible, pas d'envoi WebSocket") 
+            if len(product_options) > 1:  # Changement de condition : > 1 au lieu de == 1
+                logger.info(f"🎯 Sélection produit requise - {len(product_options)} options disponibles")
+                # Envoyer l'interaction pour sélection utilisateur
+            elif len(product_options) == 1:
+                logger.info(f"🚀 Auto-sélection détectée - 1 seul produit disponible, pas d'envoi WebSocket")
                 return  # Ne pas envoyer d'interaction si auto-sélection possible
+            else:
+                logger.warning(f"⚠️ Aucune option produit disponible")
+                return
         if interaction_data.get('client_options'):
             logger.info(f"📊 Nombre de clients: {len(interaction_data.get('client_options', []))}")
             for i, client in enumerate(interaction_data.get('client_options', [])):
