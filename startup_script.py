@@ -117,7 +117,7 @@ def start_mcp_services():
     logger.info("Démarrage des services MCP...")
     
     # Vérifier l'environnement Salesforce
-    if not os.getenv('MCP_SALESFORCE_CLIENT_ID'):
+    if not all([os.getenv('SALESFORCE_USERNAME'), os.getenv('SALESFORCE_PASSWORD'), os.getenv('SALESFORCE_SECURITY_TOKEN')]):
         logger.warning("Configuration Salesforce MCP manquante - Service désactivé")
         return
         
@@ -245,10 +245,7 @@ def main():
         # Nettoyage du terminal avant de démarrer le serveur si tout est OK
         time.sleep(2)  # Pause pour permettre de lire les derniers messages
         clear_terminal()
-        
-        # Réafficher la bannière après le nettoyage
-        print_banner()
-        
+                
         # Démarrage du serveur
         logger.info("Démarrage du serveur NOVA...")
         success = start_nova_server()

@@ -15,9 +15,6 @@
         rel="stylesheet"
         crossorigin="anonymous"
     >
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=League+Spartan:wght@100..900&display=swap" rel="stylesheet">
     <style>
         :root {
             --primary-blue: #02B9FD;
@@ -116,15 +113,79 @@
             border-color: var(--success-color);
         }
 
+        /* Styles pour la sélection de produit */
+        .product-selection-container {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-top: 12px;
+        }
+
+        .product-selection-button {
+            background-color: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 12px;
+            text-align: left;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .product-selection-button .product-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .product-selection-button .product-details {
+            font-size: 12px;
+            line-height: 1.4;
+            opacity: 0.9;
+            text-align: left;
+        }
+
+        .product-selection-button:hover .product-details {
+            opacity: 1;
+        }
+
+        .product-selection-button:hover {
+            background-color: var(--bg-primary);
+            border-color: var(--primary-blue);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.05);
+        }
+
+        .product-selection-button strong {
+            font-weight: 600;
+            color: var(--primary-blue);
+        }
+
+        .product-selection-button.create-new {
+            color: var(--success-color);
+            border-style: dashed;
+            align-items: center;
+            flex-direction: row;
+            gap: 8px;
+        }
+
+        .product-selection-button.create-new:hover {
+            color: white;
+            background-color: var(--success-color);
+            border-color: var(--success-color);
+        }
+
         body {
-            font-family: 'League Spartan', sans-serif;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background-color: #000000;
             color: var(--text-primary);
             line-height: 1.6;
         }
 
         .main-container {
-            width: 860px !important;
+            width: 800px;
             margin: 0 auto;
             min-height: 100vh;
         }
@@ -142,42 +203,11 @@
   gap: 12px;
         }
 
-        .header > div.logo-container {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 40px;
-            flex-wrap: wrap;
-            width: 100%;
-            max-width: 1200px;
-        }
 
-        .header > div.logo-container a img {
-            height: 140px;
-            display: block;
-        }
-
-        .header > div.tagline-main {
-            font-size: 1.6rem;
-            color: var(--primary-blue);
-            font-style: italic;
-            font-weight: 700;
-            text-align: center;
-            margin: 0;
-        }
-
-        .tagline {
-            font-size: 1.1rem;
-            color: var(--text-secondary);
-            font-weight: 400;
-            text-align: center;
-            margin-top: 4px;
-        }
 /*MARINA*/
         .chat-container {
             background: #0b1b29;
             border-radius: 8px;
-            padding: 24px;
             box-shadow: var(--shadow);
             height: 70vh;
             display: flex;
@@ -192,32 +222,54 @@
             margin-bottom: 20px;
         }
 
-.message {
-  margin-bottom: 16px;
-  padding: 12px 16px;
-  border-radius: 6px;
-  max-width: 85%;
-  margin-top: 16px;
-}
+        .message {
+            margin-bottom: 16px;
+            padding: 12px 16px;
+            border-radius: 6px;
+            max-width: 85%;
+            border: 1px solid var(--border-color);
+        }
+
+        .message.user {
+            background: var(--primary-blue);
+            color: white;
+            margin-left: auto;
+            border: none;
+        }
 
         .message.assistant {
             background: var(--bg-secondary);
             margin-right: auto;
         }
 
-        .message.user {
-  color: white;
-  margin-left: auto;
-  border: solid 1px #0CABFE;
-}
+        .message.system {
+            /* Option 1: Couleur actuelle (gris clair) */
+            /* background: var(--bg-tertiary); */
 
-.message.system {
-  background: #3b4957;
-  margin: 0 auto;
-  text-align: center;
-  max-width: 100%;
-  color: #ffffff63;
-}
+            /* Option 2: Bleu très clair */
+            /* background: rgba(2, 185, 253, 0.1); */
+
+            /* Option 3: Violet très clair */
+            /* background: rgba(131, 45, 254, 0.1); */
+
+            /* Option 4: Vert très clair (succès) */
+            /* background: rgba(45, 254, 131, 0.1); */
+
+            /* Option 5: Orange très clair (attention) */
+            /* background: rgba(253, 82, 2, 0.1); */
+
+            /* Option 6: Fond sombre pour contraste */
+            /* background: #1a2332; color: #ffffff; */
+
+            /* Option 7: Dégradé subtil */
+            background: linear-gradient(135deg, rgba(2, 185, 253, 0.05) 0%, rgba(131, 45, 254, 0.05) 100%);
+
+            margin: 0 auto;
+            text-align: center;
+            max-width: 100%;
+            border-left: 3px solid var(--primary-blue);
+        }
+
 /*MARINA*/
         .welcome-message {
             text-align: center;
@@ -227,8 +279,8 @@
         }
 /*MARINA*/
         .welcome-title {
-            font-size: 20px;
-  font-weight: 400;
+            font-size: 18px;
+  font-weight: 500;
   color: #02B9FD;
   margin-bottom: 12px;
         }
@@ -416,7 +468,7 @@
             border-radius: 26px;
             padding: 12px 16px;
             color: #ffffff;
-            font-size: 16px;
+            font-size: 0.9rem;
             resize: none;
             transition: border-color 0.2s ease;
         }
@@ -439,7 +491,6 @@
   font-size: 1.1rem;
   cursor: pointer;
   transition: background-color 0.2s ease;
-  padding-top: 5px;
         }
 
         .send-button:hover:not(:disabled) {
@@ -587,8 +638,7 @@
             .main-container {
                 padding: 12px;
             }
-
-            
+                        
             .logo {
                 font-size: 2rem;
             }
@@ -620,13 +670,10 @@
 
     <div class="main-container">
         <header class="header">
-            <div style="display: flex; align-items: center; justify-content: center; gap: 0px; flex-wrap: wrap;">
-                    <img src="/static/Nova.png" alt="Nova" style="height: 200px; display: block; border-radius: 8px;">
-                </a>
-                
-
+            <div style="display:flex;align-items:center;justify-content:center;gap:0px;flex-wrap:wrap;">
+                <img src="/static/Covia_bann.png" alt="Covia_Banniere" style="height:200px;display:block;border-radius:8px;">
             </div>
-        </header>
+            </header>
 
         <div class="chat-container">
             <div class="chat-messages" id="chatMessages" role="log" aria-live="polite">
@@ -694,7 +741,7 @@
                     minlength="3"
                     maxlength="1000"
                 ></textarea>
-                <button id="sendButton" type="submit" class="send-button" disabled aria-label="Envoyer">
+                <button id="sendButton" type="submit" class="send-button" aria-label="Envoyer">
                     <i class="bi bi-send"></i>
                 </button>
             </form>
@@ -857,24 +904,50 @@
 
             addMessage(`Vous avez sélectionné : ${client.name}`, 'user');
 
-            // Envoyer la sélection au serveur
-            if (websocket && websocket.readyState === WebSocket.OPEN) {
+            // Utiliser le currentTaskId global ou window.currentTaskId
+            const taskId = currentTaskId || window.currentTaskId;
+
+            if (!taskId) {
+                console.error("❌ Pas de task_id disponible pour la sélection");
+                addMessage("❌ Erreur: Session non initialisée. Veuillez réessayer.", 'system');
+                return;
+            }
+
+            // Vérifier l'état du WebSocket
+            const ws = websocket || window.websocket;
+
+            if (ws && ws.readyState === WebSocket.OPEN) {
                 const response = {
                     type: "user_response",
-                    task_id: currentTaskId,
+                    task_id: taskId,
                     data: {
                         response_type: "client_selection",
                         action: "select_existing",
                         client_id: client.id,
                         client_name: client.name,
-                        selected_index: index
+                        selected_index: index,
+                        selected_client: client
                     }
                 };
-                console.log("📤 Sélection client:", response);
-                websocket.send(JSON.stringify(response));
+                console.log("📤 Sélection client avec task_id:", taskId, response);
+                ws.send(JSON.stringify(response));
+
+                // Afficher la progression après envoi
+                showProgress();
+            } else if (!ws || ws.readyState === WebSocket.CLOSED) {
+                console.error("❌ WebSocket fermé, tentative de reconnexion...");
+                // Tenter de reconnecter
+                if (taskId) {
+                    connectWebSocket(taskId);
+                    // Réessayer après un délai
+                    setTimeout(() => selectClient(client, index), 1000);
+                }
+            } else if (ws && ws.readyState === WebSocket.CONNECTING) {
+                console.log("⏳ WebSocket en cours de connexion, réessai dans 500ms...");
+                setTimeout(() => selectClient(client, index), 500);
             } else {
-                // Fallback si pas de WebSocket
-                continueWithSelectedClient(client);
+                console.error("❌ WebSocket non disponible");
+                addMessage("❌ Erreur de connexion. Veuillez réessayer.", 'system');
             }
         }
 
@@ -884,22 +957,47 @@
 
             addMessage(`Vous avez choisi de créer un nouveau client : "${clientName}"`, 'user');
 
-            // Envoyer la demande de création au serveur
-            if (websocket && websocket.readyState === WebSocket.OPEN) {
+            // Utiliser le currentTaskId global ou window.currentTaskId
+            const taskId = currentTaskId || window.currentTaskId;
+
+            if (!taskId) {
+                console.error("❌ Pas de task_id disponible pour la création");
+                addMessage("❌ Erreur: Session non initialisée. Veuillez réessayer.", 'system');
+                return;
+            }
+
+            // Vérifier l'état du WebSocket
+            const ws = websocket || window.websocket;
+
+            if (ws && ws.readyState === WebSocket.OPEN) {
                 const response = {
                     type: "user_response",
-                    task_id: currentTaskId,
+                    task_id: taskId,
                     data: {
                         response_type: "client_selection",
                         action: "create_new",
                         client_name: clientName
                     }
                 };
-                console.log("📤 Création nouveau client:", response);
-                websocket.send(JSON.stringify(response));
+                console.log("📤 Création nouveau client avec task_id:", taskId, response);
+                ws.send(JSON.stringify(response));
+
+                // Afficher la progression après envoi
+                showProgress();
+            } else if (!ws || ws.readyState === WebSocket.CLOSED) {
+                console.error("❌ WebSocket fermé, tentative de reconnexion...");
+                // Tenter de reconnecter
+                if (taskId) {
+                    connectWebSocket(taskId);
+                    // Réessayer après un délai
+                    setTimeout(() => createNewClient(clientName), 1000);
+                }
+            } else if (ws && ws.readyState === WebSocket.CONNECTING) {
+                console.log("⏳ WebSocket en cours de connexion, réessai dans 500ms...");
+                setTimeout(() => createNewClient(clientName), 500);
             } else {
-                // Fallback si pas de WebSocket
-                continueWithNewClient(clientName);
+                console.error("❌ WebSocket non disponible");
+                addMessage("❌ Erreur de connexion. Veuillez réessayer.", 'system');
             }
         }
 
@@ -911,6 +1009,125 @@
         function continueWithNewClient(clientName) {
             addMessage(`Création du nouveau client "${clientName}" en cours...`, 'system');
             showProgress();
+        }
+
+        // Fonction pour gérer la sélection de produit
+        function handleProductSelection(data) {
+            console.log("📦 Sélection de produit requise:", data);
+
+            const products = data.products || data.product_options || [];
+            const searchTerm = data.search_term || data.product_name || '';
+
+            // Afficher le message système
+            if (searchTerm) {
+                addMessage(`Recherche de produits pour "${searchTerm}". Voici les produits disponibles :`, 'system');
+            } else {
+                addMessage(`Voici les produits disponibles :`, 'system');
+            }
+
+            // Créer le conteneur de sélection
+            const messagesContainer = document.getElementById('chatMessages');
+            const selectionDiv = document.createElement('div');
+            selectionDiv.className = 'product-selection-container';
+
+            // Afficher chaque produit
+            products.forEach((product, index) => {
+                const button = document.createElement('button');
+                button.className = 'product-selection-button';
+
+                // Construire les détails du produit
+                let productInfo = [];
+
+                if (product.sku || product.code) {
+                    productInfo.push(`🏷️ Code: ${product.sku || product.code}`);
+                }
+
+                if (product.price) {
+                    productInfo.push(`💰 Prix: ${product.price}€`);
+                }
+
+                if (product.unit) {
+                    productInfo.push(`📏 Unité: ${product.unit}`);
+                }
+
+                if (product.description) {
+                    productInfo.push(`📝 ${product.description}`);
+                }
+
+                const detailsHtml = productInfo.length > 0 ?
+                    `<div class="product-details">${productInfo.join('<br>')}</div>` :
+                    '<div class="product-details">Aucun détail disponible</div>';
+
+                button.innerHTML = `
+                    <div class="product-header">
+                        <strong>${product.name || product.product_name}</strong>
+                    </div>
+                    ${detailsHtml}
+                `;
+
+                button.onclick = () => selectProduct(product, index);
+                selectionDiv.appendChild(button);
+            });
+
+            // Option pour rechercher d'autres produits (si applicable)
+            if (data.allow_custom || data.allow_search) {
+                const customButton = document.createElement('button');
+                customButton.className = 'product-selection-button create-new';
+                customButton.innerHTML = `
+                    <i class="bi bi-search"></i> Rechercher un autre produit
+                `;
+                customButton.onclick = () => searchOtherProduct();
+                selectionDiv.appendChild(customButton);
+            }
+
+            messagesContainer.appendChild(selectionDiv);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+
+        // Fonction pour sélectionner un produit
+        function selectProduct(product, index) {
+            const productName = product.name || product.product_name;
+            addMessage(`Vous avez sélectionné : ${productName}`, 'user');
+
+            // Utiliser le currentTaskId global
+            const taskId = currentTaskId || window.currentTaskId;
+
+            if (!taskId) {
+                console.error("❌ Pas de task_id disponible pour la sélection de produit");
+                addMessage("❌ Erreur: Session non initialisée. Veuillez réessayer.", 'system');
+                return;
+            }
+
+            // Vérifier l'état du WebSocket
+            const ws = websocket || window.websocket;
+
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                const response = {
+                    type: "user_response",
+                    task_id: taskId,
+                    data: {
+                        response_type: "product_selection",
+                        action: "select_product",
+                        product_id: product.id,
+                        product_name: productName,
+                        selected_index: index,
+                        selected_product: product
+                    }
+                };
+                console.log("📤 Sélection produit avec task_id:", taskId, response);
+                ws.send(JSON.stringify(response));
+
+                // Afficher la progression
+                showProgress();
+            } else {
+                console.error("❌ WebSocket non disponible pour la sélection de produit");
+                addMessage("❌ Erreur de connexion. Veuillez réessayer.", 'system');
+            }
+        }
+
+        // Fonction pour rechercher d'autres produits
+        function searchOtherProduct() {
+            addMessage("Recherche d'autres produits non implémentée pour le moment.", 'system');
         }
 
         function handleUserInteraction(data) {
@@ -936,19 +1153,35 @@
         }
 
         function updateProgress(percentage, title, currentStep) {
-            document.getElementById('progressPercentage').textContent = `${percentage}%`;
-            document.getElementById('progressTitle').textContent = title;
-            document.getElementById('progressFill').style.width = `${percentage}%`;
-            
-            const steps = document.querySelectorAll('.progress-step');
-            steps.forEach((step, index) => {
-                step.classList.remove('active', 'completed');
-                if (index < currentStep) {
-                    step.classList.add('completed');
-                } else if (index === currentStep) {
-                    step.classList.add('active');
+            try {
+            const progressBar = document.getElementById('progressBar');
+            const progressText = document.getElementById('progressText');
+            const stepText = document.getElementById('stepText');
+                if (progressBar && progressText) {
+                    progressBar.style.width = `${Math.min(percentage, 100)}%`;
+                    progressText.textContent = `${Math.round(percentage)}%`;
                 }
-            });
+                
+                if (stepText && title) {
+                    stepText.textContent = title;
+                }
+                
+                // Afficher le conteneur de progression s'il n'est pas visible
+                if (percentage > 0 && !document.getElementById('progressContainer').classList.contains('active')) {
+                    showProgress();
+                }
+                
+                // Masquer à 100% sauf si c'est une étape intermédiaire
+                if (percentage >= 100 && !title.includes("sélection") && !title.includes("interaction")) {
+                    setTimeout(() => {
+                        if (document.getElementById('progressContainer').classList.contains('active')) {
+                            hideProgress();
+                        }
+                    }, 1000);
+                }
+            } catch (error) {
+                console.error("Erreur updateProgress:", error);
+            }
         }
 
         async function trackProgress(taskId) {
@@ -967,10 +1200,16 @@
                 try {
                     const response = await fetch(`/progress/task/${taskId}`);
                     if (!response.ok) {
+                        // Ne pas afficher d'erreur immédiatement si c'est une 404
+                        if (response.status === 404) {
+                            console.log('Tâche non trouvée, en attente de création...');
+                            return; // Continuer à essayer
+                        }
+
                         clearInterval(progressInterval);
                         progressInterval = null;
                         hideProgress();
-                        handleTaskError('Tâche introuvable ou erreur serveur');
+                        handleTaskError(`Erreur serveur: ${response.status} ${response.statusText}`);
                         return;
                     }
                     const data = await response.json();
@@ -984,20 +1223,29 @@
                         clearInterval(progressInterval);
                         progressInterval = null;
                         hideProgress();
-                        handleTaskError(data.error || 'Tâche échouée');
+                        handleTaskError(data.error || data.message || 'Tâche échouée');
                     } else {
                         updateProgress(
-                            data.overall_progress,
+                            data.overall_progress || 0,
                             data.current_step_title || 'Traitement en cours...',
-                            data.completed_steps
+                            data.completed_steps || 0
                         );
                     }
                 } catch (error) {
+                    // Ne pas arrêter le polling pour les erreurs temporaires
+                    console.error('Erreur temporaire suivi progression :', error);
+
+                    // Si c'est une erreur réseau, continuer à essayer quelques fois
+                    if (error.name === 'TypeError' && error.message.includes('fetch')) {
+                        console.log('Erreur réseau, nouvelle tentative...');
+                        return;
+                    }
+
+                    // Sinon, arrêter après trop d'erreurs
                     clearInterval(progressInterval);
                     progressInterval = null;
                     hideProgress();
-                    handleTaskError('Erreur suivi progression : ' + error.message);
-                    console.error('Erreur suivi progression :', error);
+                    handleTaskError('Erreur de connexion au serveur');
                 }
             }, 1000);
         }
@@ -1125,7 +1373,7 @@
             const clientMatch = message.match(/devis.*pour\s+([A-Za-z\s]+?)(?:\s+pour|\s*$)/i);
             if (clientMatch) {
                 const clientName = clientMatch[1].trim();
-                
+
                 // Recherche immédiate des clients
                 try {
                     const searchResp = await fetch('/api/assistant/search_clients', {
@@ -1133,14 +1381,65 @@
                         headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify({client_name: clientName})
                     });
-                    
+
                     const searchResult = await searchResp.json();
-                    
+
                     if (searchResult.requires_selection) {
-                        // Afficher directement la sélection
+                        // Afficher le message de l'utilisateur
                         addMessage(message, 'user');
-                        addClientSelection(searchResult.clients, clientName);
                         if (input) input.value = '';
+
+                        // IMPORTANT: Créer une tâche même pour la sélection de client
+                        isProcessing = true;
+                        showTyping();
+
+                        // Créer la tâche avec le workflow normal
+                        try {
+                            const controller = new AbortController();
+                            const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+                            const resp = await fetch('/api/assistant/workflow/create_quote', {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'X-Request-ID': generateUUID(),
+                                },
+                                body: JSON.stringify({
+                                    message,
+                                    draft_mode: false,
+                                    client_search_result: searchResult // Inclure le résultat de recherche
+                                }),
+                                signal: controller.signal
+                            });
+
+                            clearTimeout(timeoutId);
+
+                            if (!resp.ok) {
+                                throw new Error(`HTTP ${resp.status}`);
+                            }
+
+                            const result = await resp.json();
+                            hideTyping();
+
+                            if (result?.task_id) {
+                                currentTaskId = result.task_id;
+                                window.currentTaskId = result.task_id; // S'assurer que c'est global
+
+                                // Connecter le WebSocket AVANT d'afficher la sélection
+                                connectWebSocket(result.task_id);
+
+                                // Attendre un peu que le WebSocket soit connecté
+                                setTimeout(() => {
+                                    addClientSelection(searchResult.clients, clientName);
+                                }, 500);
+                            }
+                        } catch (error) {
+                            hideTyping();
+                            isProcessing = false;
+                            console.error('Erreur création tâche:', error);
+                            addMessage('❌ Erreur lors de la création de la tâche', 'system');
+                        }
+
                         return;
                     }
                 } catch (e) {
@@ -1158,6 +1457,10 @@
             showTyping();
 
             try {
+                // Créer un contrôleur d'annulation avec timeout
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 secondes de timeout
+
                 const resp = await fetch('/api/assistant/workflow/create_quote', {
                     method: 'POST',
                     headers: {
@@ -1165,7 +1468,10 @@
                         'X-Request-ID': generateUUID(),
                     },
                     body: JSON.stringify({ message, draft_mode: false }),
+                    signal: controller.signal
                 });
+
+                clearTimeout(timeoutId);
 
                 // Gestion des erreurs HTTP
                 if (!resp.ok) {
@@ -1180,7 +1486,6 @@
                     throw new Error(`HTTP ${resp.status} — ${details}`);
                 }
 
-
                 const result = await resp.json();
                 hideTyping();
 
@@ -1189,8 +1494,8 @@
                     showProgress();
                     // Attendre que la tâche soit créée côté serveur
                     setTimeout(() => {
-                    connectWebSocket(result.task_id);
-                    trackProgress(result.task_id);
+                        connectWebSocket(result.task_id);
+                        trackProgress(result.task_id);
                     }, 1500);
                 } else {
                     handleDirectResponse(result);
@@ -1198,8 +1503,25 @@
 
             } catch (error) {
                 hideTyping();
-                addMessage(`Erreur de connexion : ${error.message}`, 'system');
                 console.error('Erreur sendMessage:', error);
+
+                // Analyser le type d'erreur pour un message plus clair
+                let errorMessage = 'Erreur de connexion';
+                if (error.message) {
+                    if (error.message.includes('NetworkError') || error.message.includes('Failed to fetch')) {
+                        errorMessage = 'Impossible de contacter le serveur. Vérifiez votre connexion.';
+                    } else if (error.message.includes('404')) {
+                        errorMessage = 'Service non disponible. Contactez l\'administrateur.';
+                    } else if (error.message.includes('500')) {
+                        errorMessage = 'Erreur serveur. Veuillez réessayer plus tard.';
+                    } else if (error.message.includes('HTTP')) {
+                        errorMessage = error.message;
+                    } else {
+                        errorMessage = `Erreur: ${error.message}`;
+                    }
+                }
+
+                addMessage(`❌ ${errorMessage}`, 'system');
             } finally {
                 isProcessing = false;
                 updateSendButton();
@@ -1254,7 +1576,43 @@
         }
 
         function handleTaskError(error) {
-            addMessage(`Erreur lors du traitement: ${error}`, 'system');
+            hideProgress();
+            // Améliorer le message d'erreur avec plus de détails
+            let errorMsg = 'Une erreur inattendue est survenue lors du traitement';
+
+            if (error) {
+                if (typeof error === 'string') {
+                    errorMsg = error;
+                } else if (error.message) {
+                    errorMsg = error.message;
+                } else if (error.error) {
+                    errorMsg = error.error;
+                } else if (error.detail) {
+                    errorMsg = error.detail;
+                } else {
+                    // Si l'erreur est un objet, essayons de le convertir en string
+                    try {
+                        errorMsg = JSON.stringify(error);
+                    } catch (e) {
+                        errorMsg = 'Erreur complexe non identifiable';
+                    }
+                }
+            }
+
+            // Éviter d'afficher "Erreur: Erreur inconnue"
+            if (errorMsg === 'Erreur inconnue' || errorMsg === 'null' || errorMsg === 'undefined') {
+                errorMsg = 'Le serveur ne répond pas correctement. Veuillez réessayer.';
+            }
+
+            addMessage(`❌ Erreur: ${errorMsg}`, 'system');
+            console.error("Erreur de tâche:", error);
+            isProcessing = false;
+            updateSendButton();
+
+            // Fermer le WebSocket en cas d'erreur
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                websocket.close();
+            }
         }
 
         function continuePreviousWorkflow() {
@@ -1263,10 +1621,13 @@
 
         // Gestion entrées et formulaire
         async function handleFormSubmit(event) {
+            console.log("📋 handleFormSubmit appelé");
             event.preventDefault();
 
             const input = document.getElementById('chatInput');
             const message = input.value.trim();
+
+            console.log("📋 Message:", message, "length:", message.length, "isProcessing:", isProcessing);
 
             // Validation côté client
             if (!message) {
@@ -1336,35 +1697,59 @@
         
         // Fonction de gestion des touches pour le chat
         function handleKeyPress(event) {
+            console.log("⌨️ Touche pressée:", event.key, "shiftKey:", event.shiftKey);
             if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault();
                 const form = document.getElementById('chatForm');
-            if (form) {
-                form.requestSubmit(); // Utiliser requestSubmit pour déclencher l'événement submit
-            }
+                const button = document.getElementById('sendButton');
+
+                console.log("⌨️ État actuel - isProcessing:", isProcessing, "button disabled:", button?.disabled);
+
+                // Si le bouton n'est pas désactivé, envoyer le message
+                if (button && !button.disabled) {
+                    console.log("⌨️ Envoi via Enter");
+                    if (form) {
+                        form.requestSubmit(); // Utiliser requestSubmit pour déclencher l'événement submit
+                    } else {
+                        // Fallback : appeler directement sendMessage
+                        sendMessage();
+                    }
+                } else {
+                    console.log("⌨️ Bouton désactivé, pas d'envoi");
+                    showValidationError('Veuillez entrer un message valide (3 caractères minimum)');
+                }
             }
         }
-
-        // Attendre que le DOM soit complètement chargé
-        document.addEventListener('DOMContentLoaded', function() {
-            // Ajouter un écouteur d'événements pour la gestion des touches
-            const chatInput = document.getElementById('chatInput');
-            if (chatInput) {
-                chatInput.addEventListener('keydown', handleKeyPress);
-            }
-        });
 
         function updateSendButton() {
             const input = document.getElementById('chatInput');
             const button = document.getElementById('sendButton');
+
+            if (!input || !button) {
+                console.error("❌ Éléments du formulaire non trouvés");
+                return;
+            }
+
             const message = input.value.trim();
 
             // Désactiver le bouton si :
             // - Pas de message ou message trop court
             // - Message trop long
             // - Traitement en cours
-            console.log("[updateSendButton] isProcessing:", isProcessing, "| value:", input.value, "| trim:", message, "| len:", message.length, "| disabled sera:", (!message || message.length < 3 || message.length > 1000 || isProcessing));
-            button.disabled = !message || message.length < 3 || message.length > 1000 || isProcessing;            
+            const shouldDisable = !message || message.length < 3 || message.length > 1000 || isProcessing;
+
+            console.log("[updateSendButton] isProcessing:", isProcessing, "| value:", input.value, "| trim:", message, "| len:", message.length, "| disabled sera:", shouldDisable);
+
+            button.disabled = shouldDisable;
+
+            // Changer le style du bouton selon son état
+            if (shouldDisable) {
+                button.style.opacity = '0.5';
+                button.style.cursor = 'not-allowed';
+            } else {
+                button.style.opacity = '1';
+                button.style.cursor = 'pointer';
+            }
         }
 
         function autoResize() {
@@ -1376,9 +1761,22 @@
         // Gestion connexion
         async function checkConnection() {
             try {
-                const response = await fetch('/health');
+                // Ajouter un timeout pour éviter d'attendre trop longtemps
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 secondes
+
+                const response = await fetch('/health', {
+                    signal: controller.signal
+                });
+
+                clearTimeout(timeoutId);
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
                 const data = await response.json();
-                
+
                 const statusEl = document.getElementById('connectionStatus');
                 if (data.status === 'healthy') {
                     statusEl.className = 'connection-status connected';
@@ -1390,136 +1788,345 @@
             } catch (error) {
                 const statusEl = document.getElementById('connectionStatus');
                 statusEl.className = 'connection-status disconnected';
-                statusEl.innerHTML = '<i class="bi bi-wifi-off"></i> Erreur';
+
+                if (error.name === 'AbortError') {
+                    statusEl.innerHTML = '<i class="bi bi-wifi-off"></i> Timeout';
+                } else {
+                    statusEl.innerHTML = '<i class="bi bi-wifi-off"></i> Hors ligne';
+                }
+
+                console.warn('Vérification connexion échouée:', error.message);
+                // Détail de l'erreur pour le débogage
+                console.error('Détails erreur connexion:', {
+                message: error.message,
+                name: error.name,
+                stack: error.stack
+                });
             }
         }
-
+        // Fonction pour mettre à jour l'indicateur de statut de connexion
+        function updateConnectionStatus(status, message) {
+            const statusEl = document.getElementById('connectionStatus');
+            if (statusEl) {
+                if (status === 'connected') {
+                    statusEl.className = 'connection-status connected';
+                    statusEl.innerHTML = '<i class="bi bi-wifi"></i> Connecté';
+                } else if (status === 'disconnected') {
+                    statusEl.className = 'connection-status disconnected';
+                    statusEl.innerHTML = '<i class="bi bi-wifi-off"></i> Déconnecté';
+                } else {
+                    statusEl.className = 'connection-status disconnected';
+                    statusEl.innerHTML = '<i class="bi bi-wifi-off"></i> Erreur';
+                }
+                console.log(`📡 Statut connexion: ${status} - ${message}`);
+            }
+        }
         // Connexion WebSocket
         function connectWebSocket(taskId) {
-            if (websocket && websocket.readyState === WebSocket.OPEN) {
-                console.log("🌐 WebSocket déjà connecté.");
-                return;
+            
+            // Fermer toute connexion existante avant d'en créer une nouvelle
+            if (window.websocket) {
+                if (window.websocket.readyState === WebSocket.OPEN || window.websocket.readyState === WebSocket.CONNECTING) {
+                    console.log("🔄 Fermeture de la connexion WebSocket existante");
+                    window.websocket.close();
+                }
+                window.websocket = null;
             }
-            const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-            const wsUrl = `${wsProtocol}://${window.location.host}/ws/assistant/${taskId}`;
 
+            const wsProtocol = window.location.protocol === "https:" ? "wss" : "ws";
+            const wsUrl = `${wsProtocol}://${window.location.host}/ws/task/${taskId}`;
 
             console.log(`🔌 Tentative de connexion à ${wsUrl}`);
-            websocket = new WebSocket(wsUrl);
+            // Variables pour le heartbeat
+            let heartbeatInterval = null;
+            try {
+                window.websocket = new WebSocket(wsUrl);
+            } catch (error) {
+                console.error("❌ Impossible de créer la connexion WebSocket:", error);
+                if (typeof handleTaskError === "function") {
+                    handleTaskError("Impossible d'établir la connexion temps réel");
+                }
+                return;
+            }
+
+            const websocket = window.websocket; // alias local
 
             websocket.onopen = () => {
                 console.log("✅ WebSocket connecté !");
-                // NE PAS cacher la progression automatiquement
-                // hideProgress(); // SUPPRIMÉ
-                addMessage("Connexion établie.", 'system');
-                if(reconnectInterval) clearInterval(reconnectInterval);
+                if (typeof updateConnectionStatus === "function") {
+                    updateConnectionStatus("connected", "WebSocket connecté");
+                }
+                // Démarrer le heartbeat pour maintenir la connexion
+                heartbeatInterval = setInterval(() => {
+                    if (websocket.readyState === WebSocket.OPEN) {
+                        websocket.send(JSON.stringify({ type: "ping" }));
+                    }
+                }, 30000); // Ping toutes les 30 secondes
+                if (window.reconnectInterval) {
+                    clearInterval(window.reconnectInterval);
+                    window.reconnectInterval = null;
+                }
             };
 
             websocket.onmessage = (event) => {
-                const data = JSON.parse(event.data);
+                let data;
+                try {
+                    data = JSON.parse(event.data);
+                } catch (error) {
+                    console.error("Erreur parsing message WebSocket:", error);
+                    return;
+                }
+
                 console.log("📥 Message reçu:", data);
 
-                if (data.type === 'progress') {
-                    if (!document.getElementById('progressContainer').classList.contains('active')) {
-                        showProgress();
+                // Vérifier d'abord si c'est un message task_update avec interaction_data
+                if (data.type === "task_update" && data.interaction_data) {
+                    if (data.interaction_data.interaction_type === 'client_selection') {
+                        console.log("🎯 Client selection via task_update détecté");
+                        hideProgress();
+                        const opts = data.interaction_data.client_options || data.interaction_data.options || data.interaction_data.clients || [];
+                        const name = data.interaction_data.original_client_name || data.interaction_data.client_name || '';
+                        console.log(`🎯 Affichage sélection client: ${opts.length} options pour "${name}"`);
+                        addClientSelection(opts, name);
+                        return;
+                    } else if (data.interaction_data.interaction_type === 'product_selection') {
+                        console.log("📦 Product selection via task_update détecté");
+                        hideProgress();
+                        if (typeof handleProductSelection === "function") {
+                            handleProductSelection(data.interaction_data);
+                        }
+                        return;
                     }
-                    updateProgress(data.progress, data.message, data.step);
-                } else if (data.type === 'interaction_required') {
-                    handleUserInteraction(data.data);
-                } else if (data.type === 'user_interaction_required') {
-                    console.log("🤝 Interaction utilisateur détectée:", data.interaction_data);
-                    if (data.interaction_data && data.interaction_data.interaction_type === 'client_selection') {
-                    hideProgress();
-                    
-                    { const opts = data.interaction_data.client_options || data.interaction_data.options || data.interaction_data.clients || []; const name = data.interaction_data.original_client_name || data.interaction_data.client_name || ''; addClientSelection(opts, name); }
-                    }  
-                } else if (data.type === 'client_selection_required') {
-                    hideProgress();
-                    const clients = data.client_options || data.clients || [];
-                    const originalName = data.original_client_name || '';
-                    addClientSelection(clients, originalName);
-                } else if (data.type === 'completion') {
-                    handleTaskComplete(data.data);
-                    websocket.close();
-                } else if (data.type === 'error') {
-                    handleTaskError(data.error);
-                    websocket.close();
-                } else if (data.type === 'log') {
-                    addMessage(`[LOG] ${data.message}`, 'system');
-                } else if (data.type === 'message') {
-                    addMessage(data.message, 'system');
+                }
+
+                // Gestion des messages progress_update et initial_progress
+                switch (data.type) {
+                    case "initial_progress": {
+                        console.log("📊 Initial progress reçu:", data);
+                        if (data.data) {
+                            const progress = data.data;
+                            if (progress.current_step && progress.progress !== undefined) {
+                                updateProgress(progress.progress, progress.current_step.message || "Initialisation...", progress.current_step.id);
+                            }
+                        }
+                        break;
+                    }
+                    case "progress_update": {
+                        console.log("🔄 Progress update reçu:", data);
+                        if (data.progress !== undefined) {
+                            updateProgress(data.progress, data.message || "Traitement en cours...", data.step_id);
+                        }
+                        break;
+                    }
+
+                    case "progress": {
+                        const container = document.getElementById("progressContainer");
+                        if (container && !container.classList.contains("active") && typeof showProgress === "function") {
+                            showProgress();
+                        }
+                        if (typeof updateProgress === "function") {
+                            updateProgress(data.progress, data.message, data.step);
+                        }
+                        break;
+                    }
+
+                    case "interaction_required": {
+                        if (typeof handleUserInteraction === "function") {
+                            handleUserInteraction(data.data);
+                        }
+                        // on garde la connexion ouverte
+                        break;
+                    }
+
+                    case "client_selection_required": {
+                        if (data.interaction_data && data.interaction_data.interaction_type === 'client_selection') {
+                            if (typeof hideProgress === "function") hideProgress();
+                            const opts = data.interaction_data.client_options || data.interaction_data.options || data.interaction_data.clients || [];
+                            const name = data.interaction_data.original_client_name || data.interaction_data.client_name || '';
+                            console.log(`🎯 Affichage sélection client: ${opts.length} options pour "${name}"`);
+                            if (typeof addClientSelection === "function") {
+                                addClientSelection(opts, name);
+                            }
+                        }
+                        break;
+                    }
+
+                    case "user_interaction_required": {
+                        console.log("🤝 Interaction utilisateur détectée:", data.interaction_data || "Aucune donnée d'interaction disponible");
+                        if (data.interaction_data && data.interaction_data.interaction_type === 'client_selection') {
+                            if (typeof hideProgress === "function") hideProgress();
+                            const opts = data.interaction_data.client_options || data.interaction_data.options || data.interaction_data.clients || [];
+                            const name = data.interaction_data.original_client_name || data.interaction_data.client_name || '';
+                            console.log(`🎯 Affichage sélection client: ${opts.length} options pour "${name}"`);
+                            if (typeof addClientSelection === "function") addClientSelection(opts, name);
+                        } else if (data.interaction_data && data.interaction_data.interaction_type === 'product_selection') {
+                            if (typeof hideProgress === "function") hideProgress();
+                            if (typeof handleProductSelection === "function") {
+                                handleProductSelection(data.interaction_data);
+                            }
+                        } else {
+                            console.warn("Type d'interaction non géré:", data.interaction_data);
+                            if (typeof handleUserInteraction === "function") {
+                                handleUserInteraction(data.interaction_data);
+                            }
+                        }
+                        break;
+                    }
+
+                    case "task_update": {
+                        console.log("🔄 Task update reçu:", data);
+                        // Gérer spécifiquement les task_update avec interaction_data
+                        if (data.interaction_data && data.interaction_data.interaction_type === 'client_selection') {
+                            console.log("🎯 Client selection via task_update détecté");
+                            if (typeof hideProgress === "function") hideProgress();
+                            const opts = data.interaction_data.client_options || data.interaction_data.options || data.interaction_data.clients || [];
+                            const name = data.interaction_data.original_client_name || data.interaction_data.client_name || '';
+                            console.log(`🎯 Affichage sélection client: ${opts.length} options pour "${name}"`);
+                            if (typeof addClientSelection === "function") addClientSelection(opts, name);
+                        } else if (data.interaction_data && data.interaction_data.interaction_type === 'product_selection') {
+                            console.log("📦 Product selection via task_update détecté");
+                            if (typeof hideProgress === "function") hideProgress();
+                            if (typeof handleProductSelection === "function") {
+                                handleProductSelection(data.interaction_data);
+                            }
+                        }
+                        break;
+                    }
+
+                    case "completion": {
+                        if (window.progressInterval) {
+                            clearInterval(window.progressInterval);
+                            window.progressInterval = null;
+                        }
+                        if (typeof handleTaskComplete === "function") {
+                            handleTaskComplete(data.data);
+                        }
+                        try { websocket.close(1000, "Task completed"); } catch (_) {}
+                        break;
+                    }
+
+                    case "error": {
+                        if (window.progressInterval) {
+                            clearInterval(window.progressInterval);
+                            window.progressInterval = null;
+                        }
+                        if (typeof handleTaskError === "function") {
+                            handleTaskError(data.error || data.message || data);
+                        }
+                        try { websocket.close(1011, "Task error"); } catch (_) {}
+                        break;
+                    }
+
+                    case "log": {
+                        if (typeof addMessage === "function") addMessage(`[LOG] ${data.message}`, "system");
+                        break;
+                    }
+
+                    case "message": {
+                        if (typeof addMessage === "function") addMessage(data.message, "system");
+                        break;
+                    }
+                    case 'quote_generation_completed':
+                        updateProgress('✅ Devis généré avec succès', 100);
+                        displayFinalQuoteResult(data.result);
+                        break;
+                    default: {
+                        console.warn("Type de message non géré:", data.type);
+                        console.log("Données complètes:", data);
+                    }
                 }
             };
 
             websocket.onclose = (event) => {
                 console.warn(`🔌 WebSocket déconnecté. Code: ${event.code}, Raison: ${event.reason}`);
-                console.log('🔌 WebSocket fermé. Code: ${event.code}, Raison: ${event.reason}');
-                if (event.code !== 1000 && event.code !== 1001) {
-                    addMessage("La connexion a été perdue. Tentative de reconnexion...", 'system');
-                    attemptReconnection(taskId);
+                // Arrêter le heartbeat
+                if (heartbeatInterval) {
+                    clearInterval(heartbeatInterval);
+                    heartbeatInterval = null;
+                }
+                console.log(`🔌 WebSocket déconnecté. Code: ${event.code}, Raison: ${event.reason}`);
+                window.websocket = null;
+
+                // Fermetures normales: ne rien faire
+                if (event.code === 1000 || event.code === 1001) {
+                    if (typeof updateConnectionStatus === "function") {
+                        updateConnectionStatus("disconnected", "Connexion fermée");
+                    }
+                    return;
+                }
+
+                // 1006 = déconnexion anormale (réseau). Si pas en traitement, juste marquer déconnecté.
+                if (event.code === 1006 && !window.isProcessing) {
+                    if (typeof updateConnectionStatus === "function") {
+                        updateConnectionStatus("disconnected", "Connexion perdue");
+                    }
+                    return;
+                }
+
+                // Si on traite encore, tenter une reconnexion
+                if (window.isProcessing && window.currentTaskId) {
+                    if (typeof addMessage === "function") {
+                        addMessage("La connexion a été perdue. Tentative de reconnexion...", "system");
+                    }
+                    if (typeof attemptReconnection === "function") {
+                        attemptReconnection(window.currentTaskId);
+                    }
                 }
             };
 
-            websocket.onerror = (error) => {
-                console.error("❌ Erreur WebSocket:", error);
-                addMessage("Une erreur de connexion est survenue.", 'system');
+            websocket.onerror = (err) => {
+                console.error("🌩️ Erreur WebSocket:", err);
+                // L'onclose gèrera l'état/reco; on évite les doublons ici.
             };
 
-            // Vérifier s'il y a des validations en attente après connexion
+            // Optionnel : vérification différée d'éventuelles validations en attente
+            function checkPendingValidations(id) {
+                // TODO: implémenter si nécessaire
+                void id; // no-op pour éviter l'avertissement
+            }
             setTimeout(() => checkPendingValidations(taskId), 1000);
         }
 
-        // Fonction pour vérifier les validations en attente
-        async function checkPendingValidations(taskId) {
-            try {
-                const response = await fetch(`/progress/task/${taskId}/validation`);
-                if (response.ok) {
-                    const data = await response.json();
-                    console.log("📋 Vérification validations en attente:", data);
 
-                    if (data.has_validation && data.validation_data) {
-                        // Si client_selection est en attente
-                        const clientSelection = data.validation_data.client_selection;
-                        if (clientSelection && clientSelection.status === 'pending') {
-                            const validationData = clientSelection.data;
-                            console.log("🤝 Validation client en attente trouvée:", validationData);
-
-                            // Afficher la sélection client
-                            const clients = validationData.client_options || validationData.options || validationData.clients || [];
-                            const originalName = validationData.original_client_name || '';
-
-                            if (clients.length > 0) {
-                                hideProgress();
-                                addClientSelection(clients, originalName);
-                            }
-                        }
-                    }
-                }
-            } catch (error) {
-                console.error("❌ Erreur récupération validations:", error);
-            }
-        }
 
         // Fonction de tentative de reconnexion WebSocket avec limitation
         function attemptReconnection(taskId) {
             if (reconnectInterval) return;
+
+            // Si on n'est plus en train de traiter, ne pas reconnecter
+            if (!isProcessing || !currentTaskId) {
+                console.log("Pas de reconnexion - traitement terminé");
+                return;
+            }
+
             let attempts = 0;
-            const maxAttempts = 5;
+            const maxAttempts = 3; // Réduire à 3 tentatives
 
             reconnectInterval = setInterval(() => {
                 attempts++;
                 console.log(`🔄 Tentative reconnexion ${attempts}/${maxAttempts}`);
+                updateConnectionStatus('disconnected', `Reconnexion ${attempts}/${maxAttempts}`);
 
                 if (attempts >= maxAttempts) {
                     clearInterval(reconnectInterval);
                     reconnectInterval = null;
+                    updateConnectionStatus('disconnected', 'Connexion échouée');
                     console.log("❌ Abandon reconnexion WebSocket");
+
+                    // Informer l'utilisateur
+                    addMessage("❌ Impossible de maintenir la connexion. Veuillez rafraîchir la page si le problème persiste.", 'system');
+
+                    // Arrêter le traitement
+                    isProcessing = false;
+                    hideProgress();
+                    updateSendButton();
                     return;
                 }
 
                 connectWebSocket(taskId);
             }, 3000);
         }
+        
 
         // Initialisation au chargement de la page, une seule fois !
         document.addEventListener('DOMContentLoaded', function () {
@@ -1551,11 +2158,29 @@
                 input.focus();
             }
 
+            // Ajouter un event listener de secours sur le bouton
+            const sendBtn = document.getElementById('sendButton');
+            if (sendBtn) {
+                sendBtn.addEventListener('click', function(e) {
+                    console.log("🔘 Bouton cliqué directement");
+                    if (!sendBtn.disabled) {
+                        e.preventDefault();
+                        sendMessage();
+                    }
+                });
+            }
+
             // Vérification de la connexion WebSocket régulière
             checkConnection();
             setInterval(checkConnection, 30000);
 
+            // Réinitialiser l'état au cas où
+            isProcessing = false;
             updateSendButton();
+
+            // Debug - vérifier l'état initial
+            console.log("🚀 Initialisation terminée - isProcessing:", isProcessing);
+            console.log("🚀 État du bouton:", document.getElementById('sendButton').disabled);
         });
 
         // Écouter toute soumission de formulaire pour détecter un nouveau task_id
@@ -1578,13 +2203,48 @@
                                 const taskId = taskIdMatch[0];
                                 console.log("🎯 Task ID détecté:", taskId);
                                 connectWebSocket(taskId);
+                            } else {
+                                console.log("⚠️ Aucun task_id détecté dans le dernier message.");
                             }
+                        } else {
+                            console.log("⚠️ Aucun message trouvé dans le container.");
                         }
+                    } else {
+                        console.log("⚠️ Container des messages introuvable.");
                     }
                 }, 1000);
             }
         });
-
+        function displayFinalQuoteResult(result) {
+            try {
+                const container = document.getElementById('progress-container');
+                
+                const resultHtml = `
+                    <div class="quote-result-success">
+                        <h3>✅ Devis créé avec succès</h3>
+                        <div class="quote-details">
+                            <div class="quote-info">
+                                <strong>Numéro de devis SAP :</strong> ${result.sap_doc_num || 'N/A'}<br>
+                                <strong>Opportunité Salesforce :</strong> ${result.salesforce_opportunity_id || 'N/A'}<br>
+                                <strong>Client :</strong> ${result.client?.name || 'N/A'}<br>
+                                <strong>Montant total :</strong> ${result.total_amount || 0}€
+                            </div>
+                            <div class="products-list">
+                                <h4>Produits inclus :</h4>
+                                ${result.products?.map(p => `<div>• ${p.name} x${p.quantity} - ${p.unit_price}€</div>`).join('') || 'Aucun produit'}
+                            </div>
+                        </div>
+                        <div class="quote-actions">
+                            <button onclick="resetInterface()" class="btn btn-primary">Nouveau devis</button>
+                        </div>
+                    </div>
+                `;
+                
+                container.innerHTML = resultHtml;
+            } catch (error) {
+                console.error('Erreur affichage résultat:', error);
+            }
+        }
     </script>
 </body>
 </html>
