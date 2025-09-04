@@ -664,31 +664,30 @@ def _calculate_relevance_score(item: dict, keyword: str, search_fields: list) ->
     return score
 
 @mcp.tool(name="sap_get_product_details")
-async def sap_get_product_details(item_code: str) -> dict:
+async def sap_get_product_details(item_code: str, context=None) -> dict:
     """Récupère les détails complets d'un produit avec le VRAI stock SAP."""
+    from services.price_engine import PriceEngineService
     try:
         log(f"Récupération des détails du produit: {item_code}")
-        
+
         # Récupérer les informations de base du produit
         product = await call_sap(f"/Items('{item_code}')")
-        
+
         if "error" in product:
             log(f"❌ Produit {item_code} non trouvé: {product['error']}", "ERROR")
             return product
-        
+
         # Extraire le stock total depuis QuantityOnStock (c'est le vrai stock total !)
         total_stock = float(product.get("QuantityOnStock", 0))
-        
+
         # Extraire le prix depuis ItemPrices
-        price = 0.0
+        price_from_item_prices = 0.0
         if product.get("ItemPrices") and len(product["ItemPrices"]) > 0:
-            price = float(product["ItemPrices"][0].get("Price", 0))
+            price_from_item_prices = float(product["ItemPrices"][0].get("Price", 0))
 
         # Utiliser PriceEngineService pour prix client-spécifique
-        # Note: CardCode sera passé depuis le contexte du devis
-
         # Initialisations sûres
-        price: float | None = None
+        price: float = price_from_item_prices  # Fallback par défaut
         price_method: str = "ItemPrices"
         price_engine_details: dict | None = None
 
@@ -706,7 +705,6 @@ async def sap_get_product_details(item_code: str) -> dict:
 
         if card_code:
             try:
-                from services.price_engine import PriceEngineService
                 price_engine = PriceEngineService()
 
                 # Quantité = 1 pour obtenir unitaire (cohérent avec méthode)
@@ -734,7 +732,7 @@ async def sap_get_product_details(item_code: str) -> dict:
                     elif unit_before is not None:
                         price = float(unit_before)
 
-                    if price is not None:
+                    if price != price_from_item_prices:  # Prix mis à jour par PriceEngine
                         price_method = "PriceEngine_v2"
                         price_engine_details = {
                             "price": float(total_price) if total_price is not None else None,
@@ -743,7 +741,7 @@ async def sap_get_product_details(item_code: str) -> dict:
                             "unit_price_after_discount": float(unit_after) if unit_after is not None else float(price),
                         }
                     else:
-                        # Impossible de déterminer unitaire -> fallback
+                        # Pas de changement -> garder fallback
                         price_method = "ItemPrices"
                         price_engine_details = None
                 else:
