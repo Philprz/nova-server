@@ -913,9 +913,9 @@ class DevisWorkflow:
             # Assurer que le résultat final est envoyé via WebSocket SEULEMENT si terminé
             if result.get("status") != "user_interaction_required":
                 try:
-                    await websocket_manager.broadcast_to_task(task_id, {
+                    await websocket_manager.broadcast_to_task(self.task_id, {
                         "type": "completion",
-                        "task_id": task_id,
+                        "task_id": self.task_id,
                         "data": result,
                         "status": "completed"
                     })
@@ -1692,13 +1692,17 @@ class DevisWorkflow:
         products_result = await self._process_products_retrieval(products)
         if products_result.get("status") == "product_selection_required":
             # Préparer l'interaction WebSocket pour sélection produits
-            from services.websocket_manager import websocket_manager
-            await websocket_manager.send_user_interaction_required(self.task_id, {
-                "type": "product_selection",
-                "products": products_result.get("products", []),
-                "message": "Sélection de produits requise"
-            })
+            try:
+                from services.websocket_manager import websocket_manager
+                await websocket_manager.send_user_interaction_required(self.task_id, {
+                    "type": "product_selection",
+                    "products": products_result.get("products", []),
+                    "message": "Sélection de produits requise"
+                })
+            except Exception as ws_error:
+                logger.warning(f"⚠️ Erreur envoi WebSocket (non bloquant): {ws_error}")
             return products_result
+        return products_result
         return products_result
 
 
@@ -5305,14 +5309,17 @@ class DevisWorkflow:
                 "products": results,
                 "message": "Sélectionnez les produits appropriés"
             }
-            
+
             self.current_task.require_user_validation("product_validation", "product_selection", validation_data)
-            
-            await websocket_manager.send_user_interaction_required(self.task_id, {
-                "type": "product_selection",
-                "message": "Certains produits nécessitent votre attention",
-                "data": validation_data
-            })
+
+            try:
+                await websocket_manager.send_user_interaction_required(self.task_id, {
+                    "type": "product_selection",
+                    "message": "Certains produits nécessitent votre attention",
+                    "data": validation_data
+                })
+            except Exception as ws_error:
+                logger.warning(f"⚠️ Erreur envoi WebSocket (non bloquant): {ws_error}")
             
             return {
                 "found": False,
@@ -5724,14 +5731,17 @@ class DevisWorkflow:
             if not products_needing_interaction:
                 # Tous les produits auto-sélectionnés
                 efficiency_tip = f"✨ {auto_selected_count} produit(s) automatiquement identifié(s) ! Pour plus d'efficacité, utilisez les codes de référence précis."
-                
-                await websocket_manager.send_task_update(self.task_id, {
-                    "type": "auto_selection",
-                    "step": "products_auto_selected", 
-                    "message": f"✅ {auto_selected_count} produit(s) automatiquement sélectionné(s)",
-                    "efficiency_tip": efficiency_tip,
-                    "show_tip": True
-                })
+
+                try:
+                    await websocket_manager.send_task_update(self.task_id, {
+                        "type": "auto_selection",
+                        "step": "products_auto_selected",
+                        "message": f"✅ {auto_selected_count} produit(s) automatiquement sélectionné(s)",
+                        "efficiency_tip": efficiency_tip,
+                        "show_tip": True
+                    })
+                except Exception as ws_error:
+                    logger.warning(f"⚠️ Erreur envoi WebSocket (non bloquant): {ws_error}")
                 
                 self.context["products_info"] = [p["data"] for p in validated_products]
                 self._track_step_complete("get_products_info", f"{len(validated_products)} produit(s) validé(s)")
@@ -5826,7 +5836,10 @@ class DevisWorkflow:
             self.current_task.require_user_validation("product_selection", "product_selection", validation_data)
         
         # Envoyer via WebSocket
-        await websocket_manager.send_user_interaction_required(self.task_id, validation_data)
+        try:
+            await websocket_manager.send_user_interaction_required(self.task_id, validation_data)
+        except Exception as ws_error:
+            logger.warning(f"⚠️ Erreur envoi WebSocket (non bloquant): {ws_error}")
         
         return {
             "success": True,
@@ -6183,8 +6196,11 @@ class DevisWorkflow:
                     self.current_task.require_user_validation("quote_validation", "quote_validation", validation_data)
 
                 # Envoyer via WebSocket
-                from services.websocket_manager import websocket_manager
-                await websocket_manager.send_user_interaction_required(self.task_id, validation_data)
+                try:
+                    from services.websocket_manager import websocket_manager
+                    await websocket_manager.send_user_interaction_required(self.task_id, validation_data)
+                except Exception as ws_error:
+                    logger.warning(f"⚠️ Erreur envoi WebSocket (non bloquant): {ws_error}")
 
                 return {
                     "success": True,
@@ -6737,7 +6753,10 @@ class DevisWorkflow:
             }
             
             # Envoyer via WebSocket
-            await websocket_manager.send_user_interaction_required(self.task_id, interaction_message)
+            try:
+                await websocket_manager.send_user_interaction_required(self.task_id, interaction_message)
+            except Exception as ws_error:
+                logger.warning(f"⚠️ Erreur envoi WebSocket (non bloquant): {ws_error}")
             
             return {
                 "status": "user_interaction_required",
