@@ -800,7 +800,7 @@ class DevisWorkflow:
             self.context["client_info"] = {"data": client_data, "found": True}
             self.context["products_info"] = products_data
 
-            result = await self._create_quote_in_salesforce()
+            result = await self._create_quote_in_salesforce(client_info, products_data)
             return {
                 "success": result.get("success", False),
                 "quote_number": result.get("sap_quote_number"),
@@ -1701,8 +1701,6 @@ class DevisWorkflow:
         self.product_suggestions = []
         
         for i, product in enumerate(products):
-            product_code = product.get("code", "")
-            quantity = product.get("quantity", 1)
             
             logger.info(f"🔍 Validation produit {i+1}: {product_code}")
             
@@ -2256,7 +2254,12 @@ class DevisWorkflow:
         # CORRECTION: Définir valid_products au début
         valid_products = []
         try:
-            """Crée le devis dans SAP ET Salesforce - VERSION COMPLÈTEMENT RÉÉCRITE"""
+            """Crée un devis dans Salesforce"""
+            # CORRECTION: Utiliser les paramètres fournis si disponibles, sinon récupérer du contexte
+            if not client_info:
+                client_info = self.context.get("client_info", {})
+            if not products_info:
+                products_info = self.context.get("products_info", [])
             logger.info("=== DÉBUT CRÉATION DEVIS SAP ET SALESFORCE ===")
             
             # Récupération des données du contexte
@@ -5570,11 +5573,8 @@ class DevisWorkflow:
                 product_name = product.get("name", "")
                 product_code = product.get("code", "")
                 quantity = product.get("quantity", 1)
-                # CORRECTION: Générer immédiatement l'interaction WebSocket
-                if products_needing_interaction:
-                    await self._send_product_selection_interaction(products_needing_interaction)
-                # Progression
                 progress = int(20 + (i / len(products)) * 60)
+                # Progression
                 self._track_step_progress("get_products_info", progress,
                                         f"📦 Recherche '{product_name}' ({i+1}/{len(products)})")
 
@@ -5586,6 +5586,8 @@ class DevisWorkflow:
                 }]
                 
                 # Utiliser _process_products_retrieval qui existe
+                # Initialiser le résultat du produit
+                product_result = {"found": False, "suggestions": [], "error": None}
                 search_result = await self._process_products_retrieval(single_product_list)
                 found_products = search_result.get("products", [])
                 
@@ -5597,6 +5599,8 @@ class DevisWorkflow:
                         "data": product_data,
                         "suggestions": []
                     }
+                    auto_selected_count += 1
+                    logger.info(f"✅ Produit auto-sélectionné: {product_code}")
                 elif found_products and len(found_products) > 1:
                     # Plusieurs produits trouvés - Proposer sélection
                     product_result = {
@@ -5604,6 +5608,16 @@ class DevisWorkflow:
                         "suggestions": found_products[:5],  # Limiter à 5 options
                         "multiple_matches": True
                     }
+                    # Ajouter à la liste d'interaction
+                    products_needing_interaction.append({
+                        "original_name": product_name,
+                        "original_code": product_code,
+                        "quantity": quantity,
+                        "options": found_products[:5],
+                        "search_method": "intelligent_local",
+                        "selection_reason": f"Terme '{product_name}' trop générique - {len(found_products)} produits correspondent"
+                    })
+                    logger.info(f"🔍 Produit '{product_name}' nécessite sélection: {len(found_products)} options")
                 else:
                     # Produit non trouvé
                     product_result = {
@@ -5611,6 +5625,11 @@ class DevisWorkflow:
                         "suggestions": [],
                         "error": "Produit non trouvé"
                     }
+                    products_needing_interaction.append({
+                        "original": product,
+                        "suggestions": [],
+                        "efficiency_tip": self._generate_product_efficiency_tip(product_code, product_name)
+                    })
                 if product_result.get("found"):
                     # Produit trouvé directement
                     validated_products.append({
@@ -5619,46 +5638,8 @@ class DevisWorkflow:
                         "quantity": quantity,
                         "auto_selected": True
                     })
-                    auto_selected_count += 1
                     logger.info(f"✅ Produit auto-sélectionné: {product_code}")
-                    
-                elif product_result.get("suggestions") and len(product_result["suggestions"]) == 1:
-                    # Une seule suggestion - Auto-sélection
-                    suggestion = product_result["suggestions"][0]
-                    validated_products.append({
-                        "found": True,
-                        "data": suggestion,
-                        "quantity": quantity,
-                        "auto_selected": True,
-                        "was_suggested": True
-                    })
-                    auto_selected_count += 1
-                    logger.info(f"✅ Produit auto-sélectionné depuis suggestion: {suggestion.get('ItemCode')}")
-                    
-                elif product_result.get("suggestions") and len(product_result["suggestions"]) > 1:
-                    # Plusieurs suggestions - Interaction requise
-                    products_needing_interaction.append({
-                        "original": product,
-                        "suggestions": product_result.get("suggestions", []),
-                        "efficiency_tip": self._generate_product_efficiency_tip(product_code, product_name)
-                    })
-                elif product_result.get("multiple_matches"):
-                    # Plusieurs correspondances exactes - Interaction requise
-                    products_needing_interaction.append({
-                        "original": product,
-                        "suggestions": product_result.get("suggestions", []),
-                        "multiple_matches": True,
-                        "efficiency_tip": f"💡 {len(product_result.get('suggestions', []))} produits correspondent à '{product_name}'. Précisez le modèle ou la référence exacte."
-                    })
-                    
-                else:
-                    # Nécessite interaction utilisateur
-                    products_needing_interaction.append({
-                        "original": product,
-                        "suggestions": product_result.get("suggestions", []),
-                        "efficiency_tip": self._generate_product_efficiency_tip(product_code, product_name)
-                    })
-
+                                                            
             # Traitement des résultats
             if not products_needing_interaction:
                 # Tous les produits auto-sélectionnés
@@ -5679,11 +5660,18 @@ class DevisWorkflow:
                 # Transformer les produits validés en format attendu par _continue_quote_generation
                 products_for_generation = {"products": [p.get("data", p) for p in validated_products]}
                 return await self._continue_quote_generation(products_for_generation)
-
                 
             else:
                 # Certains produits nécessitent une interaction
-                return await self._handle_mixed_product_validation(validated_products, products_needing_interaction)
+                logger.info(f"⚠️ {len(products_needing_interaction)} produit(s) nécessite(nt) sélection utilisateur")
+                await self._send_product_selection_interaction(products_needing_interaction)
+                return {
+                    "status": "user_interaction_required",
+                    "interaction_type": "product_selection", 
+                    "products": products_needing_interaction,
+                    "task_id": self.task_id,
+                    "message": f"{len(products_needing_interaction)} produit(s) nécessite(nt) votre sélection"
+                }
         except asyncio.CancelledError:
             logger.warning("⚠️ Recherche produits interrompue")
             return {"error": "Recherche interrompue", "cancelled": True}        
