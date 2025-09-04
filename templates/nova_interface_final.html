@@ -1107,16 +1107,12 @@
                     // - une petite ligne récap (style initial avec <small> et "•")
                     // - un bloc détaillé (style initial avec <div class="product-details"><br>)
                     const bullets = productDetails.join(' • ');
-                    const linesHtml = productDetails.map(d => `<div>${d}</div>`).join('');
 
                     button.innerHTML = `
                         <div class="product-header">
                             <strong>${itemName}</strong>
                         </div>
                         <small>${bullets}</small>
-                        <div class="product-details">
-                            ${linesHtml}
-                        </div>
                     `;
 
                     // Callback de sélection (inchangé conceptuellement)
