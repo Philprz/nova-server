@@ -395,8 +395,12 @@ async def handle_client_selection_task(task_id: str, response_data: dict):
             }
 
             logger.info(f"➡️ Poursuite workflow (sélection client existant) pour {task_id}: {selected_client_name}")
+            # Rcupérer le code SAP si nécessaire
+            if selected_client.get("sap_code"):
+                workflow.context["client_sap_code"] = selected_client.get("sap_code")
             # CORRECTION: Récupérer le code SAP si le client sélectionné est un client Salesforce 
             if selected_client.get("source_raw") == "salesforce" and not selected_client.get("sap_code"):
+                workflow.context["client_sap_code"] = selected_client.get("sap_code", "")
                 # Le client sélectionné est Salesforce, chercher le client SAP existant
                 logger.info(f"🔍 Recherche du client SAP correspondant à {selected_client_name}")
                 from utils.client_lister import find_client_everywhere

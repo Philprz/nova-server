@@ -5591,9 +5591,19 @@ class DevisWorkflow:
         original_products = original_context.get("extracted_info", {}).get("products", [])
         
         if original_products:
-            # Passer directement à la récupération des produits avec auto-sélection
-            self._track_step_start("get_products_info", "🔍 Récupération des informations produits")
-            return await self._get_products_info_with_auto_selection(original_products)
+            # Passer à la recherche et validation des produits
+            self._track_step_start("lookup_products", f"📦 Recherche de {len(original_products)} produit(s)")
+            products_result = await self._process_products_retrieval(original_products)
+            
+            # Vérifier si sélection produits requise
+            if products_result.get("status") == "product_selection_required":
+                logger.info("⚠️ Sélection produits requise après sélection client")
+                # Envoyer l'interaction WebSocket
+                await self._send_product_selection_interaction(products_result.get("products", []))
+                return products_result
+                
+            # Si produits validés, continuer vers génération devis
+            return await self._continue_quote_generation(products_result)
         else:
             # Si pas de produits, demander à l'utilisateur
             return self._build_product_selection_interface(client_data.get("Name", ""))
@@ -5637,6 +5647,8 @@ class DevisWorkflow:
             self._track_step_progress("get_products_info", 10, f"🔍 Recherche de {len(products)} produit(s)...")
 
             validated_products = []
+            products_found = []
+            products_needing_selection = []
             products_needing_interaction = []
             auto_selected_count = 0
 
@@ -5664,31 +5676,28 @@ class DevisWorkflow:
                 
                 if found_products and len(found_products) == 1:
                     # Un seul produit trouvé - Auto-sélection
-                    product_data = found_products[0]
-                    product_result = {
-                        "found": True,
-                        "data": product_data,
-                        "suggestions": []
-                    }
+                    validated_products.append(found_products[0])
                     auto_selected_count += 1
-                    logger.info(f"✅ Produit auto-sélectionné: {product_code}")
+                    # Restaure la traçabilité sans alourdir
+                    code = (found_products[0].get("code") if isinstance(found_products[0], dict) else None) or product_code
+                    logger.info(f"✅ Produit auto-sélectionné: {code}")
+
                 elif found_products and len(found_products) > 1:
-                    # Plusieurs produits trouvés - Proposer sélection
-                    product_result = {
-                        "found": False,
-                        "suggestions": found_products[:5],  # Limiter à 5 options
-                        "multiple_matches": True
-                    }
-                    # Ajouter à la liste d'interaction
-                    products_needing_interaction.append({
+                    # Plusieurs produits trouvés - Demande sélection
+                    options = found_products[:5]
+                    products_needing_selection.append({
                         "original_name": product_name,
-                        "original_code": product_code,
+                        "original_code": product_code,               # réintroduit (utile pour la suite)
                         "quantity": quantity,
-                        "options": found_products[:5],
-                        "search_method": "intelligent_local",
-                        "selection_reason": f"Terme '{product_name}' trop générique - {len(found_products)} produits correspondent"
+                        "options": options,
+                        "search_method": "intelligent_local",        # réintroduit (diagnostic/UX)
+                        "selection_reason": (
+                            f"Terme '{product_name}' trop générique - {len(found_products)} produits correspondent"
+                        ),
+                        "multiple_matches": True                     # réintroduit (signal explicite)
                     })
-                    logger.info(f"🔍 Produit '{product_name}' nécessite sélection: {len(found_products)} options")
+                    logger.info(f"⚠️ {len(found_products)} options pour '{product_name}' - Sélection requise")
+
                 else:
                     # Produit non trouvé
                     product_result = {
@@ -5728,6 +5737,18 @@ class DevisWorkflow:
                 self._track_step_complete("get_products_info", f"{len(validated_products)} produit(s) validé(s)")
                 
                 # Continuer vers la génération du devis
+                # Vérifier si des produits nécessitent sélection
+                if products_needing_selection:
+                    logger.info(f"⚠️ {len(products_needing_selection)} produit(s) nécessite(nt) sélection")
+                    await self._send_product_selection_interaction(products_needing_selection)
+                    return {
+                        "status": "product_selection_required",
+                        "products": products_needing_selection,
+                        "task_id": self.task_id,
+                        "message": f"{len(products_needing_selection)} produit(s) nécessite(nt) votre sélection"
+                    }
+                
+                # Si tous les produits sont validés, continuer
                 # Transformer les produits validés en format attendu par _continue_quote_generation
                 products_for_generation = {"products": [p.get("data", p) for p in validated_products]}
                 return await self._continue_quote_generation(products_for_generation)
