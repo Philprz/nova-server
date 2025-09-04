@@ -227,6 +227,9 @@ async def handle_user_response_task(task_id: str, response_data: dict):
             await handle_client_selection_task(task_id, response_data)
         elif response_type == "client_validation":
             await handle_client_selection_task(task_id, response_data)
+        elif response_type == "product_selection":
+            # Traiter la sélection produit
+            await handle_product_selection_task(task_id, response_data)
             
     except Exception as e:
         logger.error(f"❌ Erreur traitement réponse task {task_id}: {e}")
@@ -433,7 +436,51 @@ async def handle_client_selection_task(task_id: str, response_data: dict):
         except Exception:
             pass
 
-
+async def handle_product_selection_task(task_id: str, response_data: dict):
+    """Traite la sélection produit pour une tâche donnée."""
+    try:
+        logger.info(f"🎯 Traitement sélection produit task {task_id}: {response_data}")
+        
+        # Récupérer la tâche
+        task = progress_tracker.get_task(task_id)
+        if not task:
+            logger.error(f"❌ Tâche {task_id} introuvable")
+            return
+        
+        # Créer instance workflow
+        from workflow.devis_workflow import DevisWorkflow
+        workflow = DevisWorkflow(task_id=task_id, force_production=True)
+        
+        # Construire l'entrée utilisateur pour le workflow
+        selected_product = response_data.get("selected_product", {})
+        user_input = {
+            "action": "select_product",
+            "selected_data": selected_product,
+            "product_code": response_data.get("product_code"),
+            "product_name": response_data.get("product_name")
+        }
+        context = {"interaction_type": "product_selection"}
+        
+        # Continuer le workflow
+        continuation_result = await workflow.continue_after_user_input(user_input, context)
+        
+        # Notifier via WebSocket
+        await websocket_manager.send_task_update(task_id, {
+            "type": "product_selection_processed",
+            "result": continuation_result
+        })
+        
+        # Marquer complété
+        task.complete_user_validation("product_selection", response_data)
+        
+        logger.info(f"✅ Produit sélectionné et workflow poursuivi pour {task_id}")
+        
+    except Exception as e:
+        logger.exception(f"❌ Erreur traitement sélection produit {task_id}: {e}")
+        await websocket_manager.send_task_update(task_id, {
+            "type": "validation_error",
+            "error": str(e)
+        })
 
 
 # =============================================
