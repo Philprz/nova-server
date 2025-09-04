@@ -664,32 +664,54 @@ class DevisWorkflow:
     async def _handle_product_selection(self, user_input: Dict, context: Dict) -> Dict[str, Any]:
         """Gère la sélection de produit par l'utilisateur"""
 
-        selected_product_data = user_input.get("selected_data")
-        product_code = user_input.get("product_code") 
+        # Récupérer les données du produit sélectionné
+        # L'interface envoie 'selected_product', pas 'selected_data'
+        selected_product_data = user_input.get("selected_product") or user_input.get("selected_data")
+        product_code = user_input.get("product_code")
         quantity = user_input.get("quantity", 10)  # Récupérer la quantité depuis la demande initiale
         current_context = context.get("validation_context", {})
+
+        # Logs détaillés pour debug
+        logger.info(f"📦 _handle_product_selection - user_input complet: {user_input}")
+        logger.info(f"📦 _handle_product_selection - selected_product_data: {selected_product_data}")
 
         if selected_product_data:
             # Récupérer le client depuis le contexte
             client_info = self.context.get("client_info", {})
-            
+
             # Formater le produit sélectionné pour la génération du devis
+            # Utiliser les noms de champs attendus par _create_quote_in_salesforce
             formatted_product = {
+                "code": selected_product_data.get("ItemCode"),
+                "name": selected_product_data.get("ItemName"),
+                "quantity": quantity,
+                # Le prix peut venir de différents champs selon la source
+                "unit_price": selected_product_data.get("AvgPrice") or selected_product_data.get("Price") or selected_product_data.get("unit_price") or 0,
+                "total_price": 0,  # Sera calculé plus tard
+                "found": True,  # Marquer comme produit trouvé
+                "OnHand": selected_product_data.get("OnHand", 0),
+                # Garder aussi les champs SAP originaux pour compatibilité
                 "ItemCode": selected_product_data.get("ItemCode"),
                 "ItemName": selected_product_data.get("ItemName"),
-                "Quantity": quantity,
-                "UnitPrice": selected_product_data.get("AvgPrice", 0),
-                "OnHand": selected_product_data.get("OnHand", 0)
+                "UnitPrice": selected_product_data.get("AvgPrice") or selected_product_data.get("Price") or selected_product_data.get("unit_price") or 0,
             }
-            
+
+            # Calculer le prix total
+            formatted_product["total_price"] = formatted_product["unit_price"] * quantity
+
+            # Log pour debug
+            logger.info(f"✅ Produit formaté: {formatted_product['name']} - Code: {formatted_product['code']} - Prix: {formatted_product['unit_price']}€ - Quantité: {formatted_product['quantity']}")
+
             # Préparer les données validées pour la génération
             validated_data = {
                 "client": client_info.get("data"),
                 "products": [formatted_product]
             }
-            
+
+            logger.info(f"📦 validated_data pour génération: {validated_data}")
+
             # Continuer directement vers la génération du devis
-            logger.info(f"✅ Produit sélectionné, génération du devis...")
+            logger.info(f"✅ Produit sélectionné avec prix {formatted_product['UnitPrice']}€, génération du devis...")
             return await self._continue_quote_generation(validated_data)
             
 
@@ -738,45 +760,70 @@ class DevisWorkflow:
             if not isinstance(products_data, list):
                 logger.warning("⚠️ products_data n'est pas une liste, correction...")
                 products_data = []
-                # Initialiser la liste des produits validés
-                validated_products_data = []        
+
+            # Initialiser la liste des produits validés
+            validated_products_data = []
+
+            # Normaliser et valider chaque produit
             for product in products_data:
-                # Vérifier après la normalisation qu'au moins un produit est valide
-                validated_products_data = (self.context.get("validated_products_data")
-                    or self.context.get("validated_products")
-                    or self.context.get("products_info")
-                    or [])
-                if not validated_products_data:
-                    logger.error("❌ Aucun produit valide après normalisation des prix")
-                    return {
-                    "success": False,
-                    "error": "Aucun produit valide trouvé. Vérifiez que tous les produits ont un prix."
-                    }
+                logger.info(f"🔍 Traitement du produit: {product}")
+
                 # Normaliser les champs de prix pour tous types de produits
                 normalized_product = dict(product)
-                
-                # Gérer les différents formats de prix (SAP vs générique)
-                if product.get("AvgPrice") is not None and product.get("Price") is None:
-                    normalized_product["Price"] = product.get("AvgPrice")
-                
-                # Si toujours pas de prix, essayer unit_price ou estimer
-                if normalized_product.get("Price", 0) == 0:
-                    unit_price = product.get("unit_price", 0)
-                    if unit_price > 0:
-                        normalized_product["Price"] = unit_price
-                    else:
-                        # Estimation en dernier recours
-                        estimated = self._estimate_product_price(product.get("ItemName", product.get("name", "")))
-                        normalized_product["Price"] = estimated
-                        logger.info(f"Prix estimé appliqué: {estimated}€ pour {product.get('ItemName', 'produit')}")
-                
+
+                # Gérer les différents formats de prix
+                # D'abord essayer UnitPrice (depuis la sélection)
+                price = product.get("UnitPrice", 0) or product.get("unit_price", 0)
+
+                # Si pas de UnitPrice/unit_price, essayer AvgPrice
+                if not price and product.get("AvgPrice") is not None:
+                    price = product.get("AvgPrice")
+
+                # Puis essayer Price
+                if not price and product.get("Price") is not None:
+                    price = product.get("Price")
+
+                # Convertir en float et s'assurer que c'est un nombre valide
+                try:
+                    price = float(price) if price else 0
+                except:
+                    price = 0
+
+                # Définir le prix normalisé
+                normalized_product["Price"] = price
+                normalized_product["UnitPrice"] = price
+                normalized_product["unit_price"] = price  # Pour compatibilité avec _create_quote_in_salesforce
+
+                # Si toujours pas de prix, essayer une estimation
+                if price == 0:
+                    # Estimation en dernier recours
+                    estimated = self._estimate_product_price(product.get("ItemName", product.get("name", "")))
+                    normalized_product["Price"] = estimated
+                    normalized_product["UnitPrice"] = estimated
+                    normalized_product["unit_price"] = estimated
+                    logger.info(f"Prix estimé appliqué: {estimated}€ pour {product.get('ItemName', product.get('name', 'produit'))}")
+
+                # Calculer le LineTotal
+                quantity = float(product.get("Quantity", product.get("quantity", 1)))
+                normalized_product["LineTotal"] = normalized_product["Price"] * quantity
+                normalized_product["total_price"] = normalized_product["Price"] * quantity  # Pour compatibilité
+
                 # Vérifier les champs requis après normalisation
                 if isinstance(normalized_product, dict) and normalized_product.get("Price", 0) > 0:
                     validated_products_data.append(normalized_product)
+                    logger.info(f"✅ Produit validé: {normalized_product.get('ItemName', normalized_product.get('name'))} - Prix: {normalized_product.get('Price')}€")
                 else:
-                    logger.warning(f"⚠️ Produit sans prix ignoré: {product}")
-                # NE PAS IGNORER - Signaler l'erreur pour forcer la sélection
-            
+                    logger.warning(f"⚠️ Produit sans prix valide ignoré: {product}")
+
+            # Vérifier qu'au moins un produit est valide
+            if not validated_products_data:
+                logger.error("❌ Aucun produit valide après normalisation des prix")
+                return {
+                    "success": False,
+                    "error": "Aucun produit valide trouvé. Vérifiez que tous les produits ont un prix."
+                }
+
+            # Utiliser les produits validés pour la suite
             products_data = validated_products_data
             total_amount = sum(p.get("LineTotal", 0) for p in products_data)
 

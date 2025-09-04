@@ -480,6 +480,8 @@ async def handle_product_selection_task(task_id: str, response_data: Dict[str, A
         user_input = {
             "action": "select_product",
             "selected_data": selected_product,
+            # Ajouter aussi selected_product pour compatibilité
+            "selected_product": selected_product,
             "product_code": product_code,
             "product_name": product_name,
             "quantity": response_data.get("meta", {}).get("quantity", 10)  # Récupérer la quantité
