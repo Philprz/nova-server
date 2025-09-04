@@ -800,7 +800,7 @@ class DevisWorkflow:
             self.context["client_info"] = {"data": client_data, "found": True}
             self.context["products_info"] = products_data
 
-            result = await self._create_quote_in_salesforce(client_info, products_data)
+            result = await self._create_quote_in_salesforce(client_data, products_data)
             return {
                 "success": result.get("success", False),
                 "quote_number": result.get("sap_quote_number"),
