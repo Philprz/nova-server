@@ -1442,11 +1442,22 @@
                     const originalName = data.original_client_name || '';
                     addClientSelection(clients, originalName);
                 } else if (data.type === 'completion') {
-                    handleTaskComplete(data.data);
-                    websocket.close();
+                    setTimeout(() => {
+                        try { 
+                            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                                websocket.close(1000, "Task completed"); 
+                            }
+                        } catch (_) {}
+                    }, 500);
                 } else if (data.type === 'error') {
                     handleTaskError(data.error);
-                    websocket.close();
+                    setTimeout(() => {
+                        try { 
+                            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                                websocket.close(1011, "Task error"); 
+                            }
+                        } catch (_) {}
+                    }, 500);
                 } else if (data.type === 'log') {
                     addMessage(`[LOG] ${data.message}`, 'system');
                 } else if (data.type === 'message') {
@@ -1455,6 +1466,10 @@
             };
 
             websocket.onclose = (event) => {
+                // Nettoyer les références
+                if (websocket === window.websocket) {
+                    window.websocket = null;
+                }
                 console.warn(`🔌 WebSocket déconnecté. Code: ${event.code}, Raison: ${event.reason}`);
                 console.log('🔌 WebSocket fermé. Code: ${event.code}, Raison: ${event.reason}');
                 if (event.code !== 1000 && event.code !== 1001) {
@@ -1530,6 +1545,12 @@
             const form = document.getElementById('chatForm');
             const errorDiv = document.getElementById('validationError');
 
+            // Éviter les listeners multiples
+            if (document._initializationComplete) {
+                return;
+            }
+            document._initializationComplete = true;
+
             // Écouteur de validation formulaire sur submit
             if (form) {
                 form.addEventListener('submit', handleFormSubmit);
@@ -1559,33 +1580,33 @@
             setInterval(checkConnection, 30000);
 
             updateSendButton();
-        });
 
-        // Écouter toute soumission de formulaire pour détecter un nouveau task_id
-        document.addEventListener('submit', function (e) {
-            if (e.target.id === 'chatForm') {
-                // handleFormSubmit gère la logique principale
-                return;
-            }
+            // Écouteur global pour détecter les task_id
+            document.addEventListener('submit', function (e) {
+                if (e.target.id === 'chatForm') {
+                    // handleFormSubmit gère la logique principale
+                    return;
+                }
 
-            if (e.target.closest('.input-container')) {
-                setTimeout(() => {
-                    const messagesContainer = document.getElementById('chatMessages');
-                    if (messagesContainer) {
-                        // Cherche un task_id dans le dernier message
-                        const lastMessages = messagesContainer.querySelectorAll('.message');
-                        if (lastMessages.length > 0) {
-                            const lastMessage = lastMessages[lastMessages.length - 1];
-                            const taskIdMatch = lastMessage.textContent.match(/quote_\d{8}_\d{6}_\w+/);
-                            if (taskIdMatch) {
-                                const taskId = taskIdMatch[0];
-                                console.log("🎯 Task ID détecté:", taskId);
-                                connectWebSocket(taskId);
+                if (e.target.closest('.input-container')) {
+                    setTimeout(() => {
+                        const messagesContainer = document.getElementById('chatMessages');
+                        if (messagesContainer) {
+                            // Cherche un task_id dans le dernier message
+                            const lastMessages = messagesContainer.querySelectorAll('.message');
+                            if (lastMessages.length > 0) {
+                                const lastMessage = lastMessages[lastMessages.length - 1];
+                                const taskIdMatch = lastMessage.textContent.match(/quote_\d{8}_\d{6}_\w+/);
+                                if (taskIdMatch) {
+                                    const taskId = taskIdMatch[0];
+                                    console.log("🎯 Task ID détecté:", taskId);
+                                    connectWebSocket(taskId);
+                                }
                             }
                         }
-                    }
-                }, 1000);
-            }
+                    }, 1000);
+                }
+            });
         });
 
     </script>
