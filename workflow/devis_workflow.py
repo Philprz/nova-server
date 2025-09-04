@@ -348,7 +348,10 @@ class DevisWorkflow:
                 # Initialisation des variables nécessaires
                 selected_client_data = user_input.get("selected_data")
                 client_name = context.get("original_client_name", "")
-
+                # CORRECTION: Récupérer le code SAP depuis selected_data
+                if selected_client_data and selected_client_data.get("sap_code"):
+                    self.context["client_sap_code"] = selected_client_data["sap_code"]
+                    logger.info(f"✅ Code SAP récupéré depuis client sélectionné: {selected_client_data['sap_code']}")
                 # CORRECTION: Récupérer aussi depuis selected_client si selected_data manque
                 if not selected_client_data:
                     selected_client_data = user_input.get("selected_client")
@@ -1674,10 +1677,18 @@ class DevisWorkflow:
                 "error": str(e)
             }
     async def _continue_workflow_after_client_selection(self, client_data, original_context):
-        """Continuation automatique après sélection client"""
-        self.context["client_info"] = {"data": client_data, "found": True}
-        products = original_context.get("extracted_info", {}).get("products", [])
-        return await self._get_products_info_with_auto_selection(products)
+        # CORRECTION: Utiliser _process_products_retrieval qui gère les sélections
+        products_result = await self._process_products_retrieval(products)
+        if products_result.get("status") == "product_selection_required":
+            # Préparer l'interaction WebSocket pour sélection produits
+            from services.websocket_manager import websocket_manager
+            await websocket_manager.send_user_interaction_required(self.task_id, {
+                "type": "product_selection",
+                "products": products_result.get("products", []),
+                "message": "Sélection de produits requise"
+            })
+            return products_result
+        return products_result
 
 
     async def _validate_products_with_suggestions(self, products: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -2239,394 +2250,409 @@ class DevisWorkflow:
             logger.exception(f"Erreur création client SAP: {str(e)}")
             return {"created": False, "error": str(e)}
     
-    async def _create_quote_in_salesforce(self) -> Dict[str, Any]:
-        """Crée le devis dans SAP ET Salesforce - VERSION COMPLÈTEMENT RÉÉCRITE"""
-        logger.info("=== DÉBUT CRÉATION DEVIS SAP ET SALESFORCE ===")
-        
-        # Récupération des données du contexte
-        client_info = self.context.get("client_info", {})
-        products_info = self.context.get("products_info", [])
-        sap_client = self.context.get("sap_client", {})
-        
-        # Log du contexte disponible
-        logger.info(f"Client info disponible: {bool(client_info.get('found'))}")
-        logger.info(f"Produits disponibles: {len(products_info)}")
-        logger.info(f"Client SAP disponible: {bool(sap_client.get('data'))}")
-        
+    async def _create_quote_in_salesforce(self, client_info: Dict, products_info: List[Dict], 
+                                     quote_data: Optional[Dict] = None) -> Dict[str, Any]:
+        """Crée un devis dans Salesforce"""
+        # CORRECTION: Définir valid_products au début
+        valid_products = []
         try:
-            # ========== ÉTAPE 1: PRÉPARATION DES DONNÉES DE BASE ==========
+            """Crée le devis dans SAP ET Salesforce - VERSION COMPLÈTEMENT RÉÉCRITE"""
+            logger.info("=== DÉBUT CRÉATION DEVIS SAP ET SALESFORCE ===")
             
-            # Récupérer les données client Salesforce
-            sf_client_data = client_info.get("data", {})
-            client_name = sf_client_data.get("Name", "Client Unknown")
-            client_id = sf_client_data.get("Id", "")
+            # Récupération des données du contexte
+            client_info = self.context.get("client_info", {})
+            products_info = self.context.get("products_info", [])
+            sap_client = self.context.get("sap_client", {})
             
-            logger.info(f"Client Salesforce: {client_name} (ID: {client_id})")
-            # CORRECTION: Vérifier si le client a un code SAP dans ses données
-            client_sap_code = client_info.get("data", {}).get("sap_code") or client_info.get("sap_code")
-            if client_sap_code:
-                logger.info(f"Client SAP trouvé dans les données: {client_sap_code}")
-                sap_card_code = client_sap_code
-            else:
-                logger.info("Client SAP non trouvé, création nécessaire...")
-            # Créer le client SAP si nécessaire
-            logger.info("=== CRÉATION/VÉRIFICATION CLIENT SAP ===")
-            if not sap_client.get("data"):
-                logger.info("Client SAP non trouvé, création nécessaire...")
-            sap_client_result = await self._create_sap_client_if_needed(client_info)
-            
-            # CORRECTION : Traiter le résultat correctement
-            if sap_client_result.get("success") and sap_client_result.get("client"):
-                # Mettre à jour le contexte avec le client SAP trouvé/créé
-                self.context["sap_client"] = {
-                    "data": sap_client_result["client"],
-                    "created": True  # ou False si trouvé
-                }
-                sap_client = self.context["sap_client"]
-                logger.info(f"✅ Client SAP disponible: {sap_client_result['client'].get('CardCode')}")
-            
-            # Vérifier que nous avons un client SAP
-            sap_card_code = None
-            if sap_client.get("data") and sap_client["data"].get("CardCode"):
-                sap_card_code = sap_client["data"]["CardCode"]
-                logger.info(f"Client SAP confirmé: {sap_card_code}")
-            else:
-                logger.error("❌ AUCUN CLIENT SAP DISPONIBLE")
-                return {
-                    "success": False,
-                    "error": "Client SAP non disponible pour créer le devis"
-                }
-            
-            # ========== ÉTAPE 2: PRÉPARATION DES PRODUITS ==========
-            # CORRECTION: Ne pas continuer si aucun produit valide
-            if not valid_products:
-                logger.error("❌ Aucun produit valide - Arrêt du processus de création de devis")
-                return {
-                    "status": "error",
-                    "message": "Impossible de créer le devis sans produits valides. Veuillez sélectionner des produits."
-                }
-            logger.info("=== PRÉPARATION DES LIGNES PRODUITS ===")
-            
-            # Séparer les produits trouvés des produits personnalisés
-            found_products = [p for p in products_info if isinstance(p, dict) and p.get("found", False)]
-            custom_products = [p for p in products_info if isinstance(p, dict) and p.get("custom_product", False)]
-            
-            # Traiter TOUS les produits pour s'assurer d'avoir des prix
-            all_products = found_products + custom_products
-            for product in all_products:
-                unit_price = product.get("unit_price", 0)
-
-                # Si prix = 0, essayer de récupérer depuis sap_data
-                if unit_price == 0 and product.get("sap_data"):
-                    sap_price = product["sap_data"].get("AvgPrice", 0)
-                    if sap_price > 0:
-                        unit_price = sap_price
-                        product["unit_price"] = unit_price
-                        product["total_price"] = unit_price * product.get("quantity", 1)
-                        logger.info(f"Prix SAP utilisé pour {product.get('name')}: {sap_price}€")
-                        continue
-
-                # Si toujours pas de prix, utiliser l'estimation
-                if unit_price == 0:
-                    logger.warning(f"⚠️ Produit sans prix détecté: {product.get('name')} - Utilisation estimation")
-                    default_price = self._estimate_product_price(product.get("name", ""))
-                    product["unit_price"] = default_price
-                    product["total_price"] = default_price * product.get("quantity", 1)
-                    logger.info(f"Prix estimé pour {product['name']}: {default_price}€")
-
-            # Combiner tous les produits
-            valid_products = all_products
-            
-            if not valid_products:
-                logger.error("❌ AUCUN PRODUIT VALIDE - Impossible de créer un devis")
-                return {
-                    "success": False,
-                    "error": "Aucun produit valide disponible pour créer le devis. Veuillez sélectionner des produits du catalogue.",
-                    "requires_product_selection": True
-                }
-            logger.info(f"Produits valides: {len(valid_products)}")
-            
-            # Préparer les lignes pour SAP
-            document_lines = []
-            total_amount = 0.0
-            
-            for idx, product in enumerate(valid_products):
-                quantity = float(product.get("quantity", 1))
-                unit_price = float(product.get("unit_price", 0))
-                line_total = quantity * unit_price
-                total_amount += line_total
-                
-                line = {
-                    "ItemCode": product.get("code"),
-                    "Quantity": quantity,
-                    "Price": unit_price,
-                    "DiscountPercent": 0.0,
-                    "TaxCode": "S1",
-                    "LineNum": idx
-                }
-                document_lines.append(line)
-                
-                logger.info(f"Ligne {idx}: {product.get('code')} x{quantity} = {line_total}€")
-            
-            logger.info(f"Total calculé: {total_amount}€")
-
-            # ========== ÉTAPE 3: PRÉPARATION DES DONNÉES DEVIS SAP ==========
-            
-            logger.info("=== PRÉPARATION DONNÉES DEVIS SAP ===")
-            
-            # Préparer les dates
-            today = datetime.now()
-            doc_date = today.strftime("%Y-%m-%d")
-            due_date = (today + timedelta(days=30)).strftime("%Y-%m-%d")
-            
-            # Préparer les données complètes du devis SAP
-            quotation_data = {
-                "CardCode": sap_card_code,
-                "DocDate": doc_date,
-                "DocDueDate": due_date,
-                "DocCurrency": "EUR",
-                "Comments": f"Devis créé automatiquement via NOVA le {today.strftime('%d/%m/%Y %H:%M')} - Mode: {'DRAFT' if self.draft_mode else 'NORMAL'}",
-                "SalesPersonCode": -1,
-                "DocumentLines": document_lines,
-                "DocTotal": total_amount,
-                "VatSum": 0.0,
-                "DiscountPercent": 0.0
-            }
-            
-            # Ajouter des champs spécifiques au mode Draft si nécessaire
-            if self.draft_mode:
-                quotation_data["Comments"] = f"[BROUILLON] {quotation_data['Comments']}"
-                quotation_data["Remarks"] = "Devis en mode brouillon - Non validé"
-            
-            logger.info("Données devis SAP préparées:")
-            logger.info(f"  - Client: {sap_card_code}")
-            logger.info(f"  - Lignes: {len(document_lines)}")
-            logger.info(f"  - Total: {total_amount}€")
-            logger.info(f"  - Mode: {'DRAFT' if self.draft_mode else 'NORMAL'}")
-            
-            # ========== ÉTAPE 4: APPEL SAP ==========
-            
-            logger.info("=== APPEL SAP POUR CRÉATION DEVIS ===")
-            logger.info("Données complètes envoyées à SAP:")
-            logger.info(json.dumps(quotation_data, indent=2, ensure_ascii=False))
-            
-            sap_quote = None
+            # Log du contexte disponible
+            logger.info(f"Client info disponible: {bool(client_info.get('found'))}")
+            logger.info(f"Produits disponibles: {len(products_info)}")
+            logger.info(f"Client SAP disponible: {bool(sap_client.get('data'))}")
             
             try:
-                # Choisir la méthode SAP selon le mode
-                if self.draft_mode:
-                    logger.info("Appel SAP en mode DRAFT...")
-                    sap_quote = await MCPConnector.call_sap_mcp("sap_create_quotation_draft", {
-                        "quotation_data": quotation_data
-                    })
+                # ========== ÉTAPE 1: PRÉPARATION DES DONNÉES DE BASE ==========
+                
+                # Récupérer les données client Salesforce
+                sf_client_data = client_info.get("data", {})
+                client_name = sf_client_data.get("Name", "Client Unknown")
+                client_id = sf_client_data.get("Id", "")
+                
+                logger.info(f"Client Salesforce: {client_name} (ID: {client_id})")
+                # Vérifier si le client a un code SAP dans ses données
+                # CORRECTION: Vérifier dans plusieurs emplacements possibles
+                
+                client_sap_code = (
+                    client_info.get("data", {}).get("sap_code") 
+                    or client_info.get("sap_code")
+                    or self.context.get("client_sap_code")
+                    or (client_info.get("data", {}).get("details", {}) or {}).get("sap_code")
+                )
+                if client_sap_code:
+                    logger.info(f"Client SAP trouvé dans les données: {client_sap_code}")
                 else:
-                    logger.info("Appel SAP en mode NORMAL...")
-                    sap_quote = await MCPConnector.call_sap_mcp("sap_create_quotation_complete", {
-                        "quotation_data": quotation_data
-                    })
-                
-                logger.info("=== RÉSULTAT APPEL SAP ===")
-                logger.info(f"Type retourné: {type(sap_quote)}")
-                logger.info(f"Contenu: {sap_quote}")
-                
-                # Vérifier le résultat SAP
-                if sap_quote is None:
-                    logger.error("❌ SAP a retourné None!")
-                    sap_quote = {"success": False, "error": "SAP a retourné None - problème de communication"}
-                elif not isinstance(sap_quote, dict):
-                    logger.error(f"❌ SAP a retourné un type inattendu: {type(sap_quote)}")
-                    sap_quote = {"success": False, "error": f"Type de retour SAP inattendu: {type(sap_quote)}"}
-                elif not sap_quote.get("success", False):
-                    logger.error(f"❌ SAP a signalé un échec: {sap_quote.get('error', 'Erreur non spécifiée')}")
-                else:
-                    logger.info(f"✅ Devis SAP créé avec succès: DocNum {sap_quote.get('doc_num')}")
-                    
-            except Exception as e:
-                logger.exception(f"❌ EXCEPTION lors de l'appel SAP: {str(e)}")
-                sap_quote = {"success": False, "error": f"Exception lors de l'appel SAP: {str(e)}"}
-            
-            # ========== ÉTAPE 5: CRÉATION SALESFORCE ==========
-            
-            # Données minimales pour éviter erreurs de validation
-            opportunity_data = {
-                'Name': f'NOVA-{today.strftime("%Y%m%d-%H%M%S")}',
-                'StageName': 'Prospecting',  # Étape standard qui existe toujours
-                'CloseDate': due_date,
-                'Type': 'New Customer'
-            }
-            
-            # Ajouter AccountId seulement si client valide
-            if client_id and client_id != "":
-                opportunity_data['AccountId'] = client_id
-            else:
-                # Créer avec compte générique ou utiliser un compte par défaut
-                logger.warning("⚠️ Pas de client Salesforce - création avec compte générique")
-                # Utiliser un compte par défaut ou créer l'opportunité sans compte
-                pass
-            
-            # Ajouter montant seulement si positif
-            if total_amount > 0:
-                opportunity_data['Amount'] = total_amount
-            
-            # Ajouter description avec gestion d'erreurs
-            try:
-                # CORRECTION: Définir sap_ref correctement
-                sap_ref = ""
-                if sap_quote and sap_quote.get('doc_num'):
-                    sap_ref = f" (SAP DocNum: {sap_quote.get('doc_num')})"
-                
-                opportunity_data['Description'] = f'Devis généré automatiquement via NOVA{sap_ref} - Mode: {"Brouillon" if self.draft_mode else "Définitif"}'
-                opportunity_data['LeadSource'] = 'NOVA Middleware'
-                opportunity_data['Probability'] = 50 if not self.draft_mode else 25
-            except Exception as e:
-                logger.warning(f"⚠️ Erreur ajout métadonnées: {e}")
-            
-            logger.info("Création opportunité Salesforce...")
-            logger.info(f"Données: {json.dumps(opportunity_data, indent=2, ensure_ascii=False)}")
-            
-            salesforce_quote = None
-            
-            try:
-                # Utiliser try/catch spécifique pour Salesforce
-                opportunity_result = await MCPConnector.call_salesforce_mcp("salesforce_create_record", {
-                    "sobject": "Opportunity",
-                    "data": opportunity_data
-                })
-                
-                logger.info(f"📊 Résultat brut Salesforce: {opportunity_result}")
-                
-                # Validation robuste du résultat
-                if opportunity_result is None:
-                    raise Exception("Salesforce a retourné None")
-                
-                if not isinstance(opportunity_result, dict):
-                    raise Exception(f"Salesforce a retourné un type inattendu: {type(opportunity_result)}")
-                
-                # Vérifier succès avec plusieurs critères
-                success_indicators = [
-                    opportunity_result.get("success") is True,
-                    "id" in opportunity_result and opportunity_result["id"],
-                    "error" not in opportunity_result
-                ]
-                
-                if any(success_indicators) and opportunity_result.get("id"):
-                    opportunity_id = opportunity_result.get("id")
-                    logger.info(f"✅ Opportunité Salesforce créée: {opportunity_id}")
-                    
-                    salesforce_quote = {
-                        "success": True,
-                        "id": opportunity_id,
-                        "opportunity_id": opportunity_id,
-                        "lines_created": len(document_lines),
-                        "total_amount": total_amount,
-                        "message": f"Opportunité Salesforce créée avec succès: {opportunity_id}"
+                    logger.info("Client SAP non trouvé, création nécessaire...")
+                # Créer le client SAP si nécessaire
+                logger.info("=== CRÉATION/VÉRIFICATION CLIENT SAP ===")
+                sap_card_code = client_sap_code  # Initialisation explicite
+
+                if not sap_client.get("data"):
+                    if sap_card_code:
+                        logger.info(f"✅ Client SAP existant utilisé: {sap_card_code}")
+                    else:
+                        logger.info("Client SAP non trouvé, création nécessaire...")
+                sap_client_result = await self._create_sap_client_if_needed(client_info)
+                # CORRECTION : Traiter le résultat correctement
+                if sap_client_result.get("success") and sap_client_result.get("client"):
+                    # Mettre à jour le contexte avec le client SAP trouvé/créé
+                    self.context["sap_client"] = {
+                        "data": sap_client_result["client"],
+                        "created": True  # ou False si trouvé
                     }
+                    sap_client = self.context["sap_client"]
+                    logger.info(f"✅ Client SAP disponible: {sap_client_result['client'].get('CardCode')}")
+                
+                # Vérifier que nous avons un client SAP
+                sap_card_code = None
+                if sap_client.get("data") and sap_client["data"].get("CardCode"):
+                    sap_card_code = sap_client["data"]["CardCode"]
+                    logger.info(f"Client SAP confirmé: {sap_card_code}")
                 else:
-                    # Analyser l'erreur spécifique
-                    error_msg = opportunity_result.get("error", "Erreur Salesforce non spécifiée")
-                    logger.error(f"❌ Erreur création opportunité Salesforce: {error_msg}")
+                    logger.error("❌ AUCUN CLIENT SAP DISPONIBLE")
+                    return {
+                        "success": False,
+                        "error": "Client SAP non disponible pour créer le devis"
+                    }
+                
+                # ========== ÉTAPE 2: PRÉPARATION DES PRODUITS ==========
+                logger.info("=== PRÉPARATION DES LIGNES PRODUITS ===")
+                
+                # Séparer les produits trouvés des produits personnalisés
+                found_products = [p for p in products_info if isinstance(p, dict) and p.get("found", False)]
+                custom_products = [p for p in products_info if isinstance(p, dict) and p.get("custom_product", False)]
+                
+                # Traiter TOUS les produits pour s'assurer d'avoir des prix
+                all_products = found_products + custom_products
+                for product in all_products:
+                    unit_price = product.get("unit_price", 0)
+
+                    # Si prix = 0, essayer de récupérer depuis sap_data
+                    if unit_price == 0 and product.get("sap_data"):
+                        sap_price = product["sap_data"].get("AvgPrice", 0)
+                        if sap_price > 0:
+                            unit_price = sap_price
+                            product["unit_price"] = unit_price
+                            product["total_price"] = unit_price * product.get("quantity", 1)
+                            logger.info(f"Prix SAP utilisé pour {product.get('name')}: {sap_price}€")
+                            continue
+
+                    # Si toujours pas de prix, utiliser l'estimation
+                    if unit_price == 0:
+                        logger.warning(f"⚠️ Produit sans prix détecté: {product.get('name')} - Utilisation estimation")
+                        default_price = self._estimate_product_price(product.get("name", ""))
+                        product["unit_price"] = default_price
+                        product["total_price"] = default_price * product.get("quantity", 1)
+                        logger.info(f"Prix estimé pour {product['name']}: {default_price}€")
+
+                # Combiner tous les produits
+                valid_products = all_products
+                
+                if not valid_products:
+                    logger.error("❌ AUCUN PRODUIT VALIDE - Impossible de créer un devis")
+                    return {
+                        "success": False,
+                        "error": "Aucun produit valide disponible pour créer le devis. Veuillez sélectionner des produits du catalogue.",
+                        "requires_product_selection": True
+                    }
+                logger.info(f"Produits valides: {len(valid_products)}")
+                
+                # Préparer les lignes pour SAP
+                document_lines = []
+                total_amount = 0.0
+                
+                for idx, product in enumerate(valid_products):
+                    quantity = float(product.get("quantity", 1))
+                    unit_price = float(product.get("unit_price", 0))
+                    line_total = quantity * unit_price
+                    total_amount += line_total
                     
+                    line = {
+                        "ItemCode": product.get("code") or f"UNKNOWN-{idx}",
+                        "Quantity": quantity,
+                        "Price": unit_price,
+                        "DiscountPercent": 0.0,
+                        "TaxCode": "S1",
+                        "LineNum": idx
+                    }
+                    document_lines.append(line)
+                    
+                    logger.info(f"Ligne {idx}: {product.get('code')} x{quantity} = {line_total}€")
+                
+                logger.info(f"Total calculé: {total_amount}€")
+
+                # ========== ÉTAPE 3: PRÉPARATION DES DONNÉES DEVIS SAP ==========
+                
+                logger.info("=== PRÉPARATION DONNÉES DEVIS SAP ===")
+                if not sap_card_code:
+                    logger.error("❌ CardCode SAP manquant")
+                    return {"success": False, "error": "Code client SAP requis"}
+                if not document_lines:
+                    logger.error("❌ Aucune ligne de produit")
+                    return {"success": False, "error": "Au moins un produit requis"}
+                # Préparer les dates
+                today = datetime.now()
+                doc_date = today.strftime("%Y-%m-%d")
+                due_date = (today + timedelta(days=30)).strftime("%Y-%m-%d")
+                
+                # Préparer les données complètes du devis SAP
+                quotation_data = {
+                    "CardCode": sap_card_code,
+                    "DocDate": doc_date,
+                    "DocDueDate": due_date,
+                    "DocCurrency": "EUR",
+                    "Comments": f"Devis créé automatiquement via NOVA le {today.strftime('%d/%m/%Y %H:%M')} - Mode: {'DRAFT' if self.draft_mode else 'NORMAL'}",
+                    "SalesPersonCode": -1,
+                    "DocumentLines": document_lines,
+                    "DocTotal": total_amount,
+                    "VatSum": 0.0,
+                    "DiscountPercent": 0.0
+                }
+                
+                # Ajouter des champs spécifiques au mode Draft si nécessaire
+                if self.draft_mode:
+                    quotation_data["Comments"] = f"[BROUILLON] {quotation_data['Comments']}"
+                    quotation_data["Remarks"] = "Devis en mode brouillon - Non validé"
+                
+                logger.info("Données devis SAP préparées:")
+                logger.info(f"  - Client: {sap_card_code}")
+                logger.info(f"  - Lignes: {len(document_lines)}")
+                logger.info(f"  - Total: {total_amount}€")
+                logger.info(f"  - Mode: {'DRAFT' if self.draft_mode else 'NORMAL'}")
+                
+                # ========== ÉTAPE 4: APPEL SAP ==========
+                
+                logger.info("=== APPEL SAP POUR CRÉATION DEVIS ===")
+                logger.info("Données complètes envoyées à SAP:")
+                logger.info(json.dumps(quotation_data, indent=2, ensure_ascii=False))
+                
+                sap_quote = None
+                
+                try:
+                    # Choisir la méthode SAP selon le mode
+                    if self.draft_mode:
+                        logger.info("Appel SAP en mode DRAFT...")
+                        sap_quote = await MCPConnector.call_sap_mcp("sap_create_quotation_draft", {
+                            "quotation_data": quotation_data
+                        })
+                    else:
+                        logger.info("Appel SAP en mode NORMAL...")
+                        sap_quote = await MCPConnector.call_sap_mcp("sap_create_quotation_complete", {
+                            "quotation_data": quotation_data
+                        })
+                    
+                    logger.info("=== RÉSULTAT APPEL SAP ===")
+                    logger.info(f"Type retourné: {type(sap_quote)}")
+                    logger.info(f"Contenu: {sap_quote}")
+                    
+                    # Vérifier le résultat SAP
+                    if sap_quote is None:
+                        logger.error("❌ SAP a retourné None!")
+                        sap_quote = {"success": False, "error": "SAP a retourné None - problème de communication"}
+                    elif not isinstance(sap_quote, dict):
+                        logger.error(f"❌ SAP a retourné un type inattendu: {type(sap_quote)}")
+                        sap_quote = {"success": False, "error": f"Type de retour SAP inattendu: {type(sap_quote)}"}
+                    elif not sap_quote.get("success", False):
+                        logger.error(f"❌ SAP a signalé un échec: {sap_quote.get('error', 'Erreur non spécifiée')}")
+                    else:
+                        logger.info(f"✅ Devis SAP créé avec succès: DocNum {sap_quote.get('doc_num')}")
+                        
+                except Exception as e:
+                    logger.exception(f"❌ EXCEPTION lors de l'appel SAP: {str(e)}")
+                    sap_quote = {"success": False, "error": f"Exception lors de l'appel SAP: {str(e)}"}
+                
+                # ========== ÉTAPE 5: CRÉATION SALESFORCE ==========
+                
+                # Données minimales pour éviter erreurs de validation
+                opportunity_data = {
+                    'Name': f'NOVA-{today.strftime("%Y%m%d-%H%M%S")}',
+                    'StageName': 'Prospecting',  # Étape standard qui existe toujours
+                    'CloseDate': due_date,
+                    'Type': 'New Customer'
+                }
+                
+                # Ajouter AccountId seulement si client valide
+                if client_id and client_id != "":
+                    opportunity_data['AccountId'] = client_id
+                else:
+                    # Créer avec compte générique ou utiliser un compte par défaut
+                    logger.warning("⚠️ Pas de client Salesforce - création avec compte générique")
+                    # Utiliser un compte par défaut ou créer l'opportunité sans compte
+                    pass
+                
+                # Ajouter montant seulement si positif
+                if total_amount > 0:
+                    opportunity_data['Amount'] = total_amount
+                
+                # Ajouter description avec gestion d'erreurs
+                try:
+                    # CORRECTION: Définir sap_ref correctement
+                    sap_ref = ""
+                    if sap_quote and sap_quote.get('doc_num'):
+                        sap_ref = f" (SAP DocNum: {sap_quote.get('doc_num')})"
+                    
+                    opportunity_data['Description'] = f'Devis généré automatiquement via NOVA{sap_ref} - Mode: {"Brouillon" if self.draft_mode else "Définitif"}'
+                    opportunity_data['LeadSource'] = 'NOVA Middleware'
+                    opportunity_data['Probability'] = 50 if not self.draft_mode else 25
+                except Exception as e:
+                    logger.warning(f"⚠️ Erreur ajout métadonnées: {e}")
+                
+                logger.info("Création opportunité Salesforce...")
+                logger.info(f"Données: {json.dumps(opportunity_data, indent=2, ensure_ascii=False)}")
+                
+                salesforce_quote = None
+                
+                try:
+                    # Utiliser try/catch spécifique pour Salesforce
+                    opportunity_result = await MCPConnector.call_salesforce_mcp("salesforce_create_record", {
+                        "sobject": "Opportunity",
+                        "data": opportunity_data
+                    })
+                    
+                    logger.info(f"📊 Résultat brut Salesforce: {opportunity_result}")
+                    
+                    # Validation robuste du résultat
+                    if opportunity_result is None:
+                        raise Exception("Salesforce a retourné None")
+                    
+                    if not isinstance(opportunity_result, dict):
+                        raise Exception(f"Salesforce a retourné un type inattendu: {type(opportunity_result)}")
+                    
+                    # Vérifier succès avec plusieurs critères
+                    success_indicators = [
+                        opportunity_result.get("success") is True,
+                        "id" in opportunity_result and opportunity_result["id"],
+                        "error" not in opportunity_result
+                    ]
+                    
+                    if any(success_indicators) and opportunity_result.get("id"):
+                        opportunity_id = opportunity_result.get("id")
+                        logger.info(f"✅ Opportunité Salesforce créée: {opportunity_id}")
+                        
+                        salesforce_quote = {
+                            "success": True,
+                            "id": opportunity_id,
+                            "opportunity_id": opportunity_id,
+                            "lines_created": len(document_lines),
+                            "total_amount": total_amount,
+                            "message": f"Opportunité Salesforce créée avec succès: {opportunity_id}"
+                        }
+                    else:
+                        # Analyser l'erreur spécifique
+                        error_msg = opportunity_result.get("error", "Erreur Salesforce non spécifiée")
+                        logger.error(f"❌ Erreur création opportunité Salesforce: {error_msg}")
+                        
+                        salesforce_quote = {
+                            "success": False,
+                            "error": error_msg,
+                            "raw_response": opportunity_result,
+                            "attempted_data": opportunity_data
+                        }
+                            
+                except Exception as e:
+                    logger.exception(f"❌ EXCEPTION lors de la création Salesforce: {str(e)}")
                     salesforce_quote = {
                         "success": False,
-                        "error": error_msg,
-                        "raw_response": opportunity_result,
-                        "attempted_data": opportunity_data
+                        "error": f"Exception Salesforce: {str(e)}",
+                        "exception_type": type(e).__name__
                     }
-                        
+                
+                # ========== ÉTAPE 6: CONSTRUCTION DE LA RÉPONSE ==========
+                
+                logger.info("=== CONSTRUCTION RÉPONSE FINALE ===")
+                
+                # Déterminer le succès global
+                sap_success = sap_quote and sap_quote.get("success", False)
+                sf_success = salesforce_quote and salesforce_quote.get("success", False)
+                
+                # Pour le POC, on considère que le succès = au moins SAP OU Salesforce
+                overall_success = sap_success or sf_success
+                
+                # Construire la réponse finale
+                result = {
+                    "success": overall_success,
+                    "quote_id": f"SAP-{sap_quote.get('doc_num', 'FAILED')}" if sap_success else f"SF-{salesforce_quote.get('id', 'FAILED')}" if sf_success else f"FAILED-{today.strftime('%Y%m%d-%H%M%S')}",
+                    "sap_doc_entry": sap_quote.get("doc_entry") if sap_success else None,
+                    "sap_doc_num": sap_quote.get("doc_num") if sap_success else None,
+                    "salesforce_quote_id": salesforce_quote.get("id") if sf_success else None,
+                    "opportunity_id": salesforce_quote.get("id") if sf_success else None,
+                    "status": "Created" if overall_success else "Failed",
+                    "total_amount": total_amount,
+                    "currency": "EUR",
+                    "draft_mode": self.draft_mode,
+                    "sap_result": sap_quote,
+                    "salesforce_result": salesforce_quote,
+                    "creation_details": {
+                        "sap_success": sap_success,
+                        "salesforce_success": sf_success,
+                        "client_code": sap_card_code,
+                        "lines_count": len(document_lines),
+                        "creation_timestamp": today.isoformat()
+                    }
+                }
+                
+                # Message de statut
+                if overall_success:
+                    messages = []
+                    if sap_success:
+                        messages.append(f"SAP DocNum: {sap_quote.get('doc_num')}")
+                    if sf_success:
+                        messages.append(f"Salesforce ID: {salesforce_quote.get('id')}")
+                    result["message"] = f"Devis créé avec succès - {', '.join(messages)}"
+                else:
+                    errors = []
+                    if not sap_success:
+                        errors.append(f"SAP: {sap_quote.get('error', 'Erreur inconnue') if sap_quote else 'Aucune réponse'}")
+                    if not sf_success:
+                        errors.append(f"Salesforce: {salesforce_quote.get('error', 'Erreur inconnue') if salesforce_quote else 'Aucune réponse'}")
+                    result["message"] = f"Échec création devis - {'; '.join(errors)}"
+                    result["error"] = result["message"]
+                
+                logger.info("=== CRÉATION DEVIS TERMINÉE ===")
+                # Envoyer le résultat final via WebSocket
+                await self._send_final_quote_result({
+                    "success": overall_success,
+                    "quote_id": result["quote_id"],
+                    "sap_doc_num": sap_quote.get('doc_num') if sap_success else None,
+                    "salesforce_opportunity_id": salesforce_quote.get('id') if sf_success else None,
+                    "client": client_name,
+                    "products": valid_products,
+                    "total_amount": total_amount,
+                    "message": result["message"]
+                    })
+                logger.info(f"Succès global: {overall_success}")
+                logger.info(f"SAP: {'✅' if sap_success else '❌'}")
+                logger.info(f"Salesforce: {'✅' if sf_success else '❌'}")
+                logger.info(f"Quote ID: {result['quote_id']}")
+                
+                return result
+                
             except Exception as e:
-                logger.exception(f"❌ EXCEPTION lors de la création Salesforce: {str(e)}")
-                salesforce_quote = {
+                logger.exception(f"❌ ERREUR CRITIQUE dans _create_quote_in_salesforce: {str(e)}")
+                return {
                     "success": False,
-                    "error": f"Exception Salesforce: {str(e)}",
-                    "exception_type": type(e).__name__
+                    "error": f"Erreur critique lors de la création du devis: {str(e)}",
+                    "quote_id": f"ERROR-{datetime.now().strftime('%Y%m%d-%H%M%S')}",
+                    "status": "Failed",
+                    "draft_mode": self.draft_mode,
+                    "creation_details": {
+                        "error_type": "critical_exception",
+                        "error_timestamp": datetime.now().isoformat()
+                    }
                 }
-            
-            # ========== ÉTAPE 6: CONSTRUCTION DE LA RÉPONSE ==========
-            
-            logger.info("=== CONSTRUCTION RÉPONSE FINALE ===")
-            
-            # Déterminer le succès global
-            sap_success = sap_quote and sap_quote.get("success", False)
-            sf_success = salesforce_quote and salesforce_quote.get("success", False)
-            
-            # Pour le POC, on considère que le succès = au moins SAP OU Salesforce
-            overall_success = sap_success or sf_success
-            
-            # Construire la réponse finale
-            result = {
-                "success": overall_success,
-                "quote_id": f"SAP-{sap_quote.get('doc_num', 'FAILED')}" if sap_success else f"SF-{salesforce_quote.get('id', 'FAILED')}" if sf_success else f"FAILED-{today.strftime('%Y%m%d-%H%M%S')}",
-                "sap_doc_entry": sap_quote.get("doc_entry") if sap_success else None,
-                "sap_doc_num": sap_quote.get("doc_num") if sap_success else None,
-                "salesforce_quote_id": salesforce_quote.get("id") if sf_success else None,
-                "opportunity_id": salesforce_quote.get("id") if sf_success else None,
-                "status": "Created" if overall_success else "Failed",
-                "total_amount": total_amount,
-                "currency": "EUR",
-                "draft_mode": self.draft_mode,
-                "sap_result": sap_quote,
-                "salesforce_result": salesforce_quote,
-                "creation_details": {
-                    "sap_success": sap_success,
-                    "salesforce_success": sf_success,
-                    "client_code": sap_card_code,
-                    "lines_count": len(document_lines),
-                    "creation_timestamp": today.isoformat()
-                }
-            }
-            
-            # Message de statut
-            if overall_success:
-                messages = []
-                if sap_success:
-                    messages.append(f"SAP DocNum: {sap_quote.get('doc_num')}")
-                if sf_success:
-                    messages.append(f"Salesforce ID: {salesforce_quote.get('id')}")
-                result["message"] = f"Devis créé avec succès - {', '.join(messages)}"
-            else:
-                errors = []
-                if not sap_success:
-                    errors.append(f"SAP: {sap_quote.get('error', 'Erreur inconnue') if sap_quote else 'Aucune réponse'}")
-                if not sf_success:
-                    errors.append(f"Salesforce: {salesforce_quote.get('error', 'Erreur inconnue') if salesforce_quote else 'Aucune réponse'}")
-                result["message"] = f"Échec création devis - {'; '.join(errors)}"
-                result["error"] = result["message"]
-            
-            logger.info("=== CRÉATION DEVIS TERMINÉE ===")
-            # Envoyer le résultat final via WebSocket
-            await self._send_final_quote_result({
-                "success": overall_success,
-                "quote_id": result["quote_id"],
-                "sap_doc_num": sap_quote.get('doc_num') if sap_success else None,
-                "salesforce_opportunity_id": salesforce_quote.get('id') if sf_success else None,
-                "client": client_name,
-                "products": valid_products,
-                "total_amount": total_amount,
-                "message": result["message"]
-                })
-            logger.info(f"Succès global: {overall_success}")
-            logger.info(f"SAP: {'✅' if sap_success else '❌'}")
-            logger.info(f"Salesforce: {'✅' if sf_success else '❌'}")
-            logger.info(f"Quote ID: {result['quote_id']}")
-            
-            return result
-            
+            except asyncio.CancelledError:
+                logger.warning("⚠️ Création devis interrompue par l'utilisateur")
+                return {"success": False, "error": "Opération interrompue", "cancelled": True}
         except Exception as e:
-            logger.exception(f"❌ ERREUR CRITIQUE dans _create_quote_in_salesforce: {str(e)}")
-            return {
-                "success": False,
-                "error": f"Erreur critique lors de la création du devis: {str(e)}",
-                "quote_id": f"ERROR-{datetime.now().strftime('%Y%m%d-%H%M%S')}",
-                "status": "Failed",
-                "draft_mode": self.draft_mode,
-                "creation_details": {
-                    "error_type": "critical_exception",
-                    "error_timestamp": datetime.now().isoformat()
-                }
-            }
-        except asyncio.CancelledError:
-            logger.warning("⚠️ Création devis interrompue par l'utilisateur")
-            return {"success": False, "error": "Opération interrompue", "cancelled": True}
+                logger.exception(f"❌ ERREUR CRITIQUE dans _create_quote_in_salesforce: {str(e)}")
         
     def _estimate_product_price(self, product_name: str) -> float:
         """Estime un prix par défaut basé sur le nom du produit"""
