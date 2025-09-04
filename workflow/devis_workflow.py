@@ -6149,6 +6149,11 @@ class DevisWorkflow:
             products_result = await self._process_products_retrieval(products)
             # VÉRIFICATION CRITIQUE : Arrêter le workflow si sélection de produits requise  
             if products_result.get("status") == "product_selection_required":
+                # Envoyer l'interaction WebSocket avant de s'arrêter
+                try:
+                    await self._send_product_selection_interaction(products_result.get("products", []))
+                except Exception as ws_error:
+                    logger.warning(f"⚠️ Erreur envoi WebSocket interaction produits: {ws_error}")
                 logger.warning("⚠️ Sélection de produits requise - Arrêt du workflow")
                 self._track_step_fail("lookup_products", "Produits non trouvés", "Sélection manuelle requise")
                 return {
