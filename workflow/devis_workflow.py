@@ -231,7 +231,6 @@ class DevisWorkflow:
         """Envoie le résultat final du devis via WebSocket"""
         try:
             if hasattr(self, 'task_id') and self.task_id:
-                from services.websocket_manager import websocket_manager
                 
                 message = {
                     "type": "quote_generation_completed",
@@ -1691,9 +1690,13 @@ class DevisWorkflow:
         # CORRECTION: Utiliser _process_products_retrieval qui gère les sélections
         products_result = await self._process_products_retrieval(products)
         if products_result.get("status") == "product_selection_required":
+             # Envoyer l'interaction WebSocket avant de s'arrêter
+            try:
+                await self._send_product_selection_interaction(products_result.get("products", []))
+            except Exception as ws_error:
+                logger.warning(f"⚠️ Erreur envoi WebSocket interaction produits: {ws_error}")
             # Préparer l'interaction WebSocket pour sélection produits
             try:
-                from services.websocket_manager import websocket_manager
                 await websocket_manager.send_user_interaction_required(self.task_id, {
                     "type": "product_selection",
                     "products": products_result.get("products", []),
@@ -5853,7 +5856,6 @@ class DevisWorkflow:
     async def _send_product_selection_interaction(self, products_needing_selection: List[Dict]) -> None:
         """Envoie l'interaction de sélection de produits via WebSocket"""
         try:
-            from services.websocket_manager import websocket_manager
             
             interaction_data = {
                 "type": "product_selection",
@@ -5867,7 +5869,7 @@ class DevisWorkflow:
                 interaction_data["options"].append({
                     "name": product_info.get("original_name"),
                     "quantity": product_info.get("quantity"),
-                    "choices": product_info.get("options", [])[:5]
+                    "choices": product_info.get("options", [])# Suppression de [:5]
                 })
             
             await websocket_manager.send_user_interaction_required(self.task_id, interaction_data)
@@ -6197,7 +6199,6 @@ class DevisWorkflow:
 
                 # Envoyer via WebSocket
                 try:
-                    from services.websocket_manager import websocket_manager
                     await websocket_manager.send_user_interaction_required(self.task_id, validation_data)
                 except Exception as ws_error:
                     logger.warning(f"⚠️ Erreur envoi WebSocket (non bloquant): {ws_error}")
