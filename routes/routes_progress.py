@@ -436,51 +436,85 @@ async def handle_client_selection_task(task_id: str, response_data: dict):
         except Exception:
             pass
 
-async def handle_product_selection_task(task_id: str, response_data: dict):
-    """Traite la sélection produit pour une tâche donnée."""
+async def handle_product_selection_task(task_id: str, response_data: Dict[str, Any]):
+    """Traite la sélection produit par l'utilisateur (amélioré, même structure)."""
     try:
         logger.info(f"🎯 Traitement sélection produit task {task_id}: {response_data}")
-        
+
         # Récupérer la tâche
         task = progress_tracker.get_task(task_id)
         if not task:
             logger.error(f"❌ Tâche {task_id} introuvable")
+            # informer le front plutôt que de retourner silencieusement
+            try:
+                await websocket_manager.send_task_update(task_id, {
+                    "type": "validation_error",
+                    "error": f"Tâche {task_id} introuvable"
+                })
+            except Exception as ws_err:
+                logger.exception(f"⚠️ Échec notification WebSocket (task inexistante): {ws_err}")
             return
-        
+
         # Créer instance workflow
         from workflow.devis_workflow import DevisWorkflow
         workflow = DevisWorkflow(task_id=task_id, force_production=True)
-        
+
         # Construire l'entrée utilisateur pour le workflow
-        selected_product = response_data.get("selected_product", {})
+        selected_product = response_data.get("selected_product", {}) or {}
+        product_code = response_data.get("product_code")
+        product_name = response_data.get("product_name")
+
+        # Validation minimale des entrées
+        if not (product_code or selected_product):
+            msg = "Aucun produit sélectionné (product_code ou selected_product requis)"
+            logger.warning(f"⚠️ {msg} pour task {task_id}")
+            try:
+                await websocket_manager.send_task_update(task_id, {
+                    "type": "validation_error",
+                    "error": msg
+                })
+            except Exception as ws_err:
+                logger.exception(f"⚠️ Échec notification WebSocket: {ws_err}")
+            return
+
         user_input = {
             "action": "select_product",
             "selected_data": selected_product,
-            "product_code": response_data.get("product_code"),
-            "product_name": response_data.get("product_name")
+            "product_code": product_code,
+            "product_name": product_name,
         }
         context = {"interaction_type": "product_selection"}
-        
+
         # Continuer le workflow
         continuation_result = await workflow.continue_after_user_input(user_input, context)
-        
+
         # Notifier via WebSocket
-        await websocket_manager.send_task_update(task_id, {
-            "type": "product_selection_processed",
-            "result": continuation_result
-        })
-        
+        try:
+            await websocket_manager.send_task_update(task_id, {
+                "type": "product_selection_processed",
+                "result": continuation_result
+            })
+        except Exception as ws_err:
+            logger.exception(f"⚠️ Échec notification WebSocket (processed): {ws_err}")
+
         # Marquer complété
-        task.complete_user_validation("product_selection", response_data)
-        
+        try:
+            task.complete_user_validation("product_selection", response_data)
+        except Exception as mark_err:
+            logger.exception(f"⚠️ Échec marquage validation utilisateur: {mark_err}")
+
         logger.info(f"✅ Produit sélectionné et workflow poursuivi pour {task_id}")
-        
+        return continuation_result
+
     except Exception as e:
         logger.exception(f"❌ Erreur traitement sélection produit {task_id}: {e}")
-        await websocket_manager.send_task_update(task_id, {
-            "type": "validation_error",
-            "error": str(e)
-        })
+        try:
+            await websocket_manager.send_task_update(task_id, {
+                "type": "validation_error",
+                "error": str(e)
+            })
+        except Exception as ws_err:
+            logger.exception(f"⚠️ Échec notification WebSocket en erreur: {ws_err}")
 
 
 # =============================================
