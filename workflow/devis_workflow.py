@@ -5869,7 +5869,7 @@ class DevisWorkflow:
                 interaction_data["options"].append({
                     "name": product_info.get("original_name"),
                     "quantity": product_info.get("quantity"),
-                    "choices": product_info.get("options", [])# Suppression de [:5]
+                    "choices": all_options  # Retirer toute limitation
                 })
             
             await websocket_manager.send_user_interaction_required(self.task_id, interaction_data)

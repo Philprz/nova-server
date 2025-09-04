@@ -204,7 +204,7 @@ async def websocket_endpoint(websocket: WebSocket, task_id: str):
             # Timeout de 60 secondes pour éviter la déconnexion immédiate
             try:
                 # Utiliser receive_text avec un timeout plus généreux
-                data = await asyncio.wait_for(websocket.receive_text(), timeout=60.0)
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=300.0)
                 logger.debug(f"📥 WebSocket - Message reçu de {task_id}: {data}")
                 
                 # Parse du message JSON
@@ -246,8 +246,17 @@ async def websocket_endpoint(websocket: WebSocket, task_id: str):
                 except json.JSONDecodeError:
                     logger.warning(f"⚠️ WebSocket - Message non JSON reçu de {task_id}")
                 except asyncio.TimeoutError:
-                    # Continuer la boucle si timeout (pas d'erreur)
-                    continue
+                    # Envoyer un ping pour maintenir la connexion
+                    try:
+                        await websocket.send_text(json.dumps({
+                            "type": "ping",
+                            "task_id": task_id,
+                            "timestamp": datetime.utcnow().isoformat()
+                        }))
+                        continue
+                    except Exception:
+                        logger.warning(f"⚠️ WebSocket ping failed pour {task_id}")
+                        break
                     
             except WebSocketDisconnect:
                 logger.warning(f"⚠️ WebSocket - Client déconnecté: {task_id}")
@@ -1812,8 +1821,17 @@ async def continue_workflow_with_choice(request: Request):
         return await workflow.handle_client_selection_and_continue(client_data, context)
 
     elif choice_type == "product_selected":
-        product_choices = data.get("products")
-        return await workflow.apply_product_choices(product_choices, context)
+        try:
+            product_choices = data.get("products", [])
+            if not product_choices:
+                # Fallback pour format alternatif
+                product_choices = [data.get("product_data")] if data.get("product_data") else []
+            
+            logger.info(f"🔧 Traitement sélection produit: {len(product_choices)} produit(s)")
+            return await workflow.apply_product_choices(product_choices, context)
+        except Exception as e:
+            logger.error(f"❌ Erreur traitement produit sélectionné: {e}")
+            raise HTTPException(status_code=500, detail=f"Erreur sélection produit: {str(e)}")
 @router.post("/assistant/workflow/select_client")
 async def select_client_and_continue(request: Request):
     """Sélection client et continuation workflow - SANS WebSocket"""

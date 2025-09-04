@@ -1155,10 +1155,25 @@
                 return;
             }
 
-            if (!websocket || (websocket.readyState !== WebSocket.OPEN && websocket.readyState !== WebSocket.CONNECTING)) {
-                console.error("❌ WebSocket non disponible pour la sélection de produit");
-                addMessage("❌ Erreur de connexion. Veuillez réessayer.", 'system');
-                return;
+            // Vérification WebSocket avec reconnexion automatique
+            if (!websocket || websocket.readyState !== WebSocket.OPEN) {
+                console.warn("⚠️ WebSocket non disponible - tentative de reconnexion");
+                try {
+                    connectWebSocket(currentTaskId);
+                    // Attendre un peu pour la connexion
+                    setTimeout(() => {
+                        if (websocket && websocket.readyState === WebSocket.OPEN) {
+                            selectProduct(product, index);
+                        } else {
+                            addMessage("❌ Erreur de connexion persistante. Rechargez la page.", 'system');
+                        }
+                    }, 500);
+                    return;
+                } catch (e) {
+                    console.error("❌ Erreur reconnexion WebSocket:", e);
+                    addMessage("❌ Erreur de connexion. Veuillez réessayer.", 'system');
+                    return;
+                }
             }
 
             // Extraction d'infos complémentaires utiles (si présentes)
