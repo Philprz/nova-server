@@ -684,20 +684,77 @@ async def sap_get_product_details(item_code: str) -> dict:
         if product.get("ItemPrices") and len(product["ItemPrices"]) > 0:
             price = float(product["ItemPrices"][0].get("Price", 0))
 
-        # Interroger PriceEngine pour un prix actualisé
-        pe_data = await call_price_engine(item_code)
-        if pe_data:
-            stock_qty = total_stock if total_stock > 0 else 1
-            pe_unit = pe_data["price"] / stock_qty
-            pe_unit_after = pe_unit * (1 - pe_data["discount"] / 100)
-            price = pe_unit_after
-            price_method = "PriceEngine"
-            price_engine_details = {
-                "price": pe_data["price"],
-                "discount": pe_data["discount"],
-                "unit_price_before_discount": pe_unit,
-                "unit_price_after_discount": pe_unit_after
-            }
+        # Utiliser PriceEngineService pour prix client-spécifique
+        # Note: CardCode sera passé depuis le contexte du devis
+
+        # Initialisations sûres
+        price: float | None = None
+        price_method: str = "ItemPrices"
+        price_engine_details: dict | None = None
+
+        card_code = None  # À récupérer depuis le contexte client
+        try:
+            # Support dict-like ou objet avec attribut
+            if context is not None:
+                if hasattr(context, "get"):
+                    card_code = context.get("client_sap_code") or None
+                elif hasattr(context, "client_sap_code"):
+                    card_code = getattr(context, "client_sap_code", None)
+        except Exception:
+            # On reste silencieux, fallback ItemPrices
+            card_code = None
+
+        if card_code:
+            try:
+                from services.price_engine import PriceEngineService
+                price_engine = PriceEngineService()
+
+                # Quantité = 1 pour obtenir unitaire (cohérent avec méthode)
+                pe_result = await price_engine.get_item_price(
+                    card_code=card_code,
+                    item_code=item_code,
+                    quantity=1
+                )
+
+                if pe_result and pe_result.get("success"):
+                    # Sécurisation des clés attendues
+                    unit_before = pe_result.get("unit_price_before_discount")
+                    unit_after = pe_result.get("unit_price_after_discount")
+                    discount_pct = pe_result.get("discount_percent")
+                    total_price = pe_result.get("total_price")
+
+                    # Choix prioritaire : prix unitaire après remise
+                    if unit_after is not None:
+                        price = float(unit_after)
+                    elif unit_before is not None and discount_pct is not None:
+                        try:
+                            price = float(unit_before) * (1 - float(discount_pct) / 100.0)
+                        except Exception:
+                            price = float(unit_before)
+                    elif unit_before is not None:
+                        price = float(unit_before)
+
+                    if price is not None:
+                        price_method = "PriceEngine_v2"
+                        price_engine_details = {
+                            "price": float(total_price) if total_price is not None else None,
+                            "discount": float(discount_pct) if discount_pct is not None else None,
+                            "unit_price_before_discount": float(unit_before) if unit_before is not None else None,
+                            "unit_price_after_discount": float(unit_after) if unit_after is not None else float(price),
+                        }
+                    else:
+                        # Impossible de déterminer unitaire -> fallback
+                        price_method = "ItemPrices"
+                        price_engine_details = None
+                else:
+                    price_method = "ItemPrices"  # Fallback service
+                    price_engine_details = None
+
+            except Exception:
+                # Protéger le flux en cas d'erreur réseau/service
+                price_method = "ItemPrices"
+                price_engine_details = None
+
         else:
             price_method = "ItemPrices"
             price_engine_details = None

@@ -3631,20 +3631,45 @@ class DevisWorkflow:
             logger.error(f"❌ Erreur application Price Engine: {str(e)}")
             # En cas d'erreur, retourner les produits avec prix par défaut
             return self._apply_fallback_pricing(products_data)
+        
     async def continue_with_products(self, selected_products: List[Dict[str, Any]]) -> Dict[str, Any]:
+        # Initialisation sécurisée du contexte
+        if not hasattr(self, 'context') or self.context is None:
+            self.context = {}
         """Continue le workflow après sélection de produits par l'utilisateur"""
         try:
             logger.info(f"🔄 Continuation workflow avec {len(selected_products)} produit(s) sélectionné(s)")
             
-            if not selected_products:
-                return self._build_error_response("Aucun produit sélectionné", "Veuillez sélectionner au moins un produit")
+            if not selected_products or not isinstance(selected_products, list):
+                return self._build_error_response("Données invalides", "selected_products doit être une liste non vide")
             
             # Récupérer le contexte de la tâche
             if not self.context:
                 logger.warning("⚠️ Contexte manquant, récupération depuis la tâche...")
                 task = progress_tracker.get_task(self.task_id) if self.task_id else None
-                if task and hasattr(task, 'context'):
-                    self.context = task.context or {}
+                if task and hasattr(task, 'context') and task.context:
+                    self.context = task.context
+                else:
+                    self.context = {}
+            
+            # Import unique du Price Engine
+            price_engine = None
+            try:
+                from services.price_engine import price_engine
+                logger.info("✅ Price Engine disponible")
+            except ImportError:
+                logger.warning("⚠️ Price Engine non disponible, utilisation des prix de fallback")
+            
+            # Récupération unique du CardCode client pour tous les produits
+            client_sap_code = None
+            if self.context.get("client_info"):
+                client_data = self.context["client_info"].get("data", {})
+                client_sap_code = (
+                    client_data.get("sap_code") or 
+                    self.context.get("selected_client", {}).get("sap_code")
+                )
+                if client_sap_code:
+                    logger.info(f"✅ CardCode client trouvé: {client_sap_code}")
             
             # Reformater les produits sélectionnés pour le workflow
             formatted_products = []
@@ -3653,12 +3678,36 @@ class DevisWorkflow:
                 product_data = selected_product.get("product_data") or selected_product.get("data") or selected_product
                 quantity = selected_product.get("quantity", selected_product.get("requested_quantity", 1))
                 
+                # Calcul du prix avec Price Engine si disponible
+                unit_price = 0
+                if price_engine and client_sap_code and product_data.get("ItemCode"):
+                    try:
+                        price_result = await price_engine.get_item_price(
+                            card_code=client_sap_code,
+                            item_code=product_data["ItemCode"], 
+                            quantity=quantity
+                        )
+                        if price_result.get("success"):
+                            unit_price = price_result["unit_price_after_discount"]
+                            logger.info(f"✅ Prix Price Engine {product_data['ItemCode']}: {unit_price}€")
+                        else:
+                            logger.warning(f"⚠️ Price Engine échec {product_data['ItemCode']}: {price_result.get('error')}")
+                    except Exception as pe_error:
+                        logger.warning(f"⚠️ Erreur Price Engine {product_data['ItemCode']}: {pe_error}")
+                
+                # Fallback sur AvgPrice puis estimation
+                if unit_price == 0:
+                    unit_price = product_data.get("AvgPrice", 0) or product_data.get("unit_price", 0)
+                    if unit_price == 0:
+                        unit_price = self._estimate_product_price(product_data.get("ItemName", ""))
+                        logger.info(f"💰 Prix estimé {product_data.get('ItemName')}: {unit_price}€")
+                
                 formatted_product = {
                     "code": product_data.get("ItemCode", ""),
                     "name": product_data.get("ItemName", ""),
                     "quantity": quantity,
-                    "unit_price": product_data.get("AvgPrice", 0) or product_data.get("unit_price", 0),
-                    "total_price": (product_data.get("AvgPrice", 0) or product_data.get("unit_price", 0)) * quantity,
+                    "unit_price": unit_price,
+                    "total_price": unit_price * quantity,
                     "currency": "EUR",
                     "stock": product_data.get("OnHand", 0),
                     "description": product_data.get("U_Description", ""),
@@ -3695,10 +3744,19 @@ class DevisWorkflow:
             
             return quote_result
             
+        except (AttributeError, KeyError, TypeError, ValueError) as e:
+            logger.exception(f"❌ Erreur données continuation workflow: {str(e)}")
+            self._track_step_fail("continue_with_products", "Erreur données", str(e))
+            return self._build_error_response("Erreur données workflow", str(e))
+        except ImportError as e:
+            logger.exception(f"❌ Erreur import continuation workflow: {str(e)}")
+            self._track_step_fail("continue_with_products", "Erreur import", str(e))
+            return self._build_error_response("Service indisponible", str(e))
         except Exception as e:
-            logger.exception(f"❌ Erreur continuation workflow avec produits: {str(e)}")
-            self._track_step_fail("continue_with_products", "Erreur continuation", str(e))
-            return self._build_error_response("Erreur continuation workflow", str(e))
+            logger.exception(f"❌ Erreur inattendue continuation workflow: {str(e)}")
+            self._track_step_fail("continue_with_products", "Erreur inattendue", str(e))
+            return self._build_error_response("Erreur système", str(e))
+        
     def _apply_fallback_pricing(self, products_data: List[Dict]) -> List[Dict]:
         """Prix de secours si le Price Engine échoue"""
         logger.warning("⚠️ Application des prix de secours...")
