@@ -482,6 +482,7 @@ async def handle_product_selection_task(task_id: str, response_data: Dict[str, A
             "selected_data": selected_product,
             "product_code": product_code,
             "product_name": product_name,
+            "quantity": response_data.get("meta", {}).get("quantity", 10)  # Récupérer la quantité
         }
         context = {"interaction_type": "product_selection"}
 

@@ -665,27 +665,33 @@ class DevisWorkflow:
         """Gère la sélection de produit par l'utilisateur"""
 
         selected_product_data = user_input.get("selected_data")
+        product_code = user_input.get("product_code") 
+        quantity = user_input.get("quantity", 10)  # Récupérer la quantité depuis la demande initiale
         current_context = context.get("validation_context", {})
 
         if selected_product_data:
-            # Ajouter le produit sélectionné aux produits validés
-            validated_products = current_context.get("validated_products", [])
-            validated_products.append({
-                "product_data": selected_product_data,
-                "requested_quantity": user_input.get("quantity", 1),
-                "resolution_type": "user_selected"
-            })
-
-            # Vérifier s'il reste des produits à résoudre
-            unresolved_products = current_context.get("unresolved_products", [])
-
-            if len(unresolved_products) > 1:
-                # Il reste des produits à traiter
-                remaining_products = unresolved_products[1:]
-                return await self._continue_product_resolution(validated_products, remaining_products)
-            else:
-                # Tous les produits sont résolus - passer à la validation des quantités
-                return await self._continue_quantity_validation(validated_products)
+            # Récupérer le client depuis le contexte
+            client_info = self.context.get("client_info", {})
+            
+            # Formater le produit sélectionné pour la génération du devis
+            formatted_product = {
+                "ItemCode": selected_product_data.get("ItemCode"),
+                "ItemName": selected_product_data.get("ItemName"),
+                "Quantity": quantity,
+                "UnitPrice": selected_product_data.get("AvgPrice", 0),
+                "OnHand": selected_product_data.get("OnHand", 0)
+            }
+            
+            # Préparer les données validées pour la génération
+            validated_data = {
+                "client": client_info.get("data"),
+                "products": [formatted_product]
+            }
+            
+            # Continuer directement vers la génération du devis
+            logger.info(f"✅ Produit sélectionné, génération du devis...")
+            return await self._continue_quote_generation(validated_data)
+            
 
     async def _handle_quantity_adjustment(self, user_input: Dict, context: Dict) -> Dict[str, Any]:
         """Gère l'ajustement des quantités"""
