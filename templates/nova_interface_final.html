@@ -979,95 +979,218 @@
         }
         // Fonction pour gérer la sélection de produit
         function handleProductSelection(data) {
+            // Log d'entrée
             console.log("📦 Sélection de produit requise:", data);
 
-            const products = data.options || data.products || data.product_options || [];
-            const searchTerm = data.search_term || data.product_name || '';
+            // 1) Récupération robuste de la liste de produits depuis différentes structures possibles
+            let products = [];
+            if (Array.isArray(data?.options) && data.options.length > 0 && Array.isArray(data.options[0]?.choices)) {
+                // Cas: data.options[0].choices (structure type "choices")
+                products = data.options[0].choices;
+            } else if (Array.isArray(data?.products_needing_selection) && data.products_needing_selection.length > 0) {
+                // Cas: data.products_needing_selection[0].options
+                products = data.products_needing_selection[0]?.options || [];
+            } else if (Array.isArray(data?.options) || Array.isArray(data?.products) || Array.isArray(data?.product_options)) {
+                // Cas: data.options || data.products || data.product_options
+                products = data.options || data.products || data.product_options || [];
+            }
 
-            // Afficher le message système
+            // 2) Terme de recherche affiché (prend en compte toutes les variantes vues dans le code initial)
+            const searchTerm =
+                data?.options?.[0]?.name ||
+                data?.search_term ||
+                data?.product_name ||
+                'produit';
+
+            // 3) Message système (avec comptage des options si pertinent)
             if (searchTerm) {
-                addMessage(`Recherche de produits pour "${searchTerm}". Voici les produits disponibles :`, 'system');
+                const prefix = (Array.isArray(products)) ? ` (${products.length} options disponibles)` : '';
+                addMessage(`Sélection requise pour "${searchTerm}"${prefix}:`, 'system');
             } else {
                 addMessage(`Voici les produits disponibles :`, 'system');
             }
 
-            // Créer le conteneur de sélection
+            // 4) Création du conteneur dans la zone de messages
             const messagesContainer = document.getElementById('chatMessages');
             const selectionDiv = document.createElement('div');
-            selectionDiv.className = 'product-selection-container';
+            // Conserve les deux classes possibles rencontrées dans le code fourni
+            selectionDiv.className = 'client-selection-container product-selection-container';
 
-            // Afficher chaque produit
-            products.forEach((product, index) => {
-                const button = document.createElement('button');
-                button.className = 'product-selection-button';
+            // 5) Affichage de chaque produit sous forme de bouton sélectionnable
+            //    (gère à la fois les champs SAP et les champs "génériques")
+            if (!Array.isArray(products) || products.length === 0) {
+                const emptyInfo = document.createElement('div');
+                emptyInfo.className = 'product-empty-state';
+                emptyInfo.textContent = 'Aucune option disponible pour le moment.';
+                selectionDiv.appendChild(emptyInfo);
+            } else {
+                products.forEach((product, index) => {
+                    const button = document.createElement('button');
+                    // Conserve les deux classes possibles rencontrées dans le code fourni
+                    button.className = 'client-selection-button product-selection-button';
 
-                // Construire les détails du produit
-                let productInfo = [];
+                    // Normalisation des champs potentiels
+                    const itemCode =
+                        product?.ItemCode ??
+                        product?.value ??
+                        product?.id ??
+                        product?.code ??
+                        null;
 
-                if (product.value || product.id) {
-                    productInfo.push(`🏷️ Code: ${product.value || product.id}`);
-                }
+                    const itemName =
+                        product?.ItemName ??
+                        product?.label ??
+                        product?.name ??
+                        itemCode ??
+                        'Produit';
 
-                if (product.data && product.data.Price) {
-                    productInfo.push(`💰 Prix: ${product.data.Price}€`);
-                }
+                    // Détails côté SAP (quand présents)
+                    const sapStock = (product?.OnHand ?? product?.data?.OnHand);
+                    const sapUnit = (product?.SalesUnit ?? product?.data?.SalesUnit ?? product?.data?.UnitMsr);
+                    const sapPrice = (product?.AvgPrice ?? product?.data?.AvgPrice ?? product?.data?.Price);
 
-                if (product.data && product.data.UnitMsr) {
-                    productInfo.push(`📏 Unité: ${product.data.UnitMsr}`);
-                }
+                    // Construction des lignes d'info
+                    const productDetails = [];
 
-                const detailsHtml = productInfo.length > 0 ?
-                    `<div class="product-details">${productInfo.join('<br>')}</div>` :
-                    '<div class="product-details">Aucun détail disponible</div>';
+                    if (itemCode) {
+                        productDetails.push(`🏷️ Code: ${itemCode}`);
+                    }
 
-                button.innerHTML = `
-                    <div class="product-header">
-                        <strong>${product.label || product.name}</strong>
-                    </div>
-                    ${detailsHtml}
-                `;
+                    if (sapStock !== undefined) {
+                        productDetails.push(`📦 Stock: ${sapStock} ${sapUnit || 'unités'}`);
+                    }
 
-                button.onclick = () => selectProduct(product, index);
-                selectionDiv.appendChild(button);
-            });
+                    if (sapPrice !== undefined && sapPrice !== null && sapPrice !== '') {
+                        const priceNum = Number(sapPrice);
+                        const priceStr = Number.isFinite(priceNum) ? priceNum.toString() : `${sapPrice}`;
+                        productDetails.push(`💰 Prix: ${priceStr}€`);
+                    }
 
+                    if (sapUnit && !productDetails.some(d => d.includes('Unité:'))) {
+                        // Si l’unité n’a pas déjà été incluse via la ligne de stock
+                        productDetails.push(`📏 Unité: ${sapUnit}`);
+                    }
+
+                    // Fallback si aucun détail
+                    if (productDetails.length === 0) {
+                        productDetails.push('Aucun détail disponible');
+                    }
+
+                    // Rendu HTML :
+                    // - un header avec le nom
+                    // - une petite ligne récap (style initial avec <small> et "•")
+                    // - un bloc détaillé (style initial avec <div class="product-details"><br>)
+                    const bullets = productDetails.join(' • ');
+                    const linesHtml = productDetails.map(d => `<div>${d}</div>`).join('');
+
+                    button.innerHTML = `
+                        <div class="product-header">
+                            <strong>${itemName}</strong>
+                        </div>
+                        <small>${bullets}</small>
+                        <div class="product-details">
+                            ${linesHtml}
+                        </div>
+                    `;
+
+                    // Callback de sélection (inchangé conceptuellement)
+                    button.onclick = () => selectProduct(product, index);
+
+                    selectionDiv.appendChild(button);
+                });
+            }
+
+            // 6) Ajout au flux et scroll bas
             messagesContainer.appendChild(selectionDiv);
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
         }
 
+
         // Fonction pour sélectionner un produit
         function selectProduct(product, index) {
-            const productName = product.label || product.name;
+            // Normalisation des champs principaux
+            const productCode =
+                product?.ItemCode ??
+                product?.value ??
+                product?.id ??
+                product?.code ??
+                null;
+
+            const productName =
+                product?.ItemName ??
+                product?.label ??
+                product?.name ??
+                productCode ??
+                'Produit';
+
+            // Feedback utilisateur
             addMessage(`Vous avez sélectionné : ${productName}`, 'user');
 
+            // Vérifications préalables
             if (!currentTaskId) {
                 console.error("❌ Pas de task_id disponible pour la sélection de produit");
                 addMessage("❌ Erreur: Session non initialisée. Veuillez réessayer.", 'system');
                 return;
             }
 
-            if (websocket && websocket.readyState === WebSocket.OPEN) {
-                const response = {
-                    type: "user_response",
-                    task_id: currentTaskId,
-                    data: {
-                        response_type: "product_selection",
-                        action: "select_product",
-                        product_id: product.value || product.id,
-                        product_name: productName,
-                        selected_index: index,
-                        selected_product: product
-                    }
-                };
-                console.log("📤 Sélection produit avec task_id:", currentTaskId, response);
-                websocket.send(JSON.stringify(response));
-
-                showProgress();
-            } else {
+            if (!websocket || (websocket.readyState !== WebSocket.OPEN && websocket.readyState !== WebSocket.CONNECTING)) {
                 console.error("❌ WebSocket non disponible pour la sélection de produit");
                 addMessage("❌ Erreur de connexion. Veuillez réessayer.", 'system');
+                return;
+            }
+
+            // Extraction d'infos complémentaires utiles (si présentes)
+            const stock = product?.OnHand ?? product?.data?.OnHand;
+            const unit = product?.SalesUnit ?? product?.data?.SalesUnit ?? product?.data?.UnitMsr;
+            const price = product?.AvgPrice ?? product?.data?.AvgPrice ?? product?.data?.Price;
+
+            // Sérialisation prudente du produit (évite fonctions/références circulaires)
+            let selectedProductSafe = null;
+            try {
+                selectedProductSafe = JSON.parse(JSON.stringify(product));
+            } catch (e) {
+                console.warn("⚠️ Produit non entièrement sérialisable, envoi des champs normalisés uniquement.", e);
+                selectedProductSafe = {
+                    ItemCode: productCode,
+                    ItemName: productName,
+                    OnHand: stock,
+                    SalesUnit: unit,
+                    AvgPrice: price
+                };
+            }
+
+            // Construction de la réponse
+            const response = {
+                type: "user_response",
+                task_id: currentTaskId,
+                data: {
+                    response_type: "product_selection",
+                    action: "select_product",
+                    // Champs normalisés
+                    product_code: productCode,
+                    product_name: productName,
+                    selected_index: index,
+                    selected_product: selectedProductSafe,
+                    // Métadonnées utiles côté serveur
+                    meta: {
+                        stock: stock,
+                        unit: unit,
+                        price: price
+                    }
+                }
+            };
+
+            // Envoi via WebSocket (si en cours de connexion, l’API JS bufferise généralement)
+            try {
+                console.log("📤 Sélection produit avec task_id:", currentTaskId, response);
+                websocket.send(JSON.stringify(response));
+                showProgress();
+            } catch (err) {
+                console.error("❌ Échec d'envoi WebSocket:", err);
+                addMessage("❌ Erreur lors de l’envoi de la sélection. Veuillez réessayer.", 'system');
             }
         }
+
         function handleUserInteraction(data) {
             console.log("🤝 Interaction utilisateur requise:", data);
 
