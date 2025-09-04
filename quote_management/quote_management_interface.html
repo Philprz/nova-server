@@ -1,0 +1,786 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestion des Devis SAP/Salesforce</title>
+    <style>
+        :root {
+            --primary-color: #2563eb;
+            --secondary-color: #64748b;
+            --success-color: #10b981;
+            --warning-color: #f59e0b;
+            --danger-color: #ef4444;
+            --background-color: #f8fafc;
+            --card-background: #ffffff;
+            --border-color: #e2e8f0;
+            --text-primary: #1e293b;
+            --text-secondary: #64748b;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: var(--background-color);
+            color: var(--text-primary);
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            background-color: var(--card-background);
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 24px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        .header h1 {
+            font-size: 28px;
+            margin-bottom: 8px;
+            color: var(--text-primary);
+        }
+
+        .header p {
+            color: var(--text-secondary);
+            font-size: 16px;
+        }
+
+        .filters {
+            background-color: var(--card-background);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 24px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            display: flex;
+            gap: 16px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .filter-group {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .filter-group label {
+            font-size: 14px;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        .filter-group select,
+        .filter-group input {
+            padding: 8px 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            font-size: 14px;
+            background-color: white;
+        }
+
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn-primary {
+            background-color: var(--primary-color);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background-color: #1d4ed8;
+        }
+
+        .btn-danger {
+            background-color: var(--danger-color);
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background-color: #dc2626;
+        }
+
+        .btn-secondary {
+            background-color: var(--secondary-color);
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background-color: #475569;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .stat-card {
+            background-color: var(--card-background);
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        .stat-card h3 {
+            font-size: 14px;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+
+        .stat-card .value {
+            font-size: 28px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .stat-card.synced {
+            border-left: 4px solid var(--success-color);
+        }
+
+        .stat-card.only-sap {
+            border-left: 4px solid var(--warning-color);
+        }
+
+        .stat-card.only-salesforce {
+            border-left: 4px solid var(--primary-color);
+        }
+
+        .stat-card.mismatch {
+            border-left: 4px solid var(--danger-color);
+        }
+
+        .table-container {
+            background-color: var(--card-background);
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        .table-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .table-header h2 {
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        thead th {
+            background-color: #f9fafb;
+            padding: 12px 16px;
+            text-align: left;
+            font-weight: 600;
+            font-size: 14px;
+            color: var(--text-secondary);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        tbody td {
+            padding: 16px;
+            border-bottom: 1px solid var(--border-color);
+            font-size: 14px;
+        }
+
+        tbody tr:last-child td {
+            border-bottom: none;
+        }
+
+        tbody tr:hover {
+            background-color: #f9fafb;
+        }
+
+        .checkbox-cell {
+            width: 40px;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .status-badge.synced {
+            background-color: #d1fae5;
+            color: #065f46;
+        }
+
+        .status-badge.only_sap {
+            background-color: #fef3c7;
+            color: #92400e;
+        }
+
+        .status-badge.only_salesforce {
+            background-color: #dbeafe;
+            color: #1e40af;
+        }
+
+        .status-badge.mismatch {
+            background-color: #fee2e2;
+            color: #991b1b;
+        }
+
+        .differences {
+            margin-top: 4px;
+            font-size: 12px;
+            color: var(--danger-color);
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: var(--text-secondary);
+        }
+
+        .loading::after {
+            content: "...";
+            animation: dots 1.5s steps(4, end) infinite;
+        }
+
+        @keyframes dots {
+            0%, 20% {
+                content: ".";
+            }
+            40% {
+                content: "..";
+            }
+            60%, 100% {
+                content: "...";
+            }
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px;
+            color: var(--text-secondary);
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-content {
+            background-color: white;
+            border-radius: 12px;
+            padding: 24px;
+            max-width: 500px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .modal-header h3 {
+            font-size: 20px;
+            font-weight: 600;
+        }
+
+        .modal-close {
+            width: 32px;
+            height: 32px;
+            border: none;
+            background: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 6px;
+            transition: background-color 0.2s;
+        }
+
+        .modal-close:hover {
+            background-color: #f3f4f6;
+        }
+
+        .modal-body {
+            margin-bottom: 20px;
+        }
+
+        .modal-footer {
+            display: flex;
+            gap: 12px;
+            justify-content: flex-end;
+        }
+
+        .alert {
+            padding: 16px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .alert-success {
+            background-color: #d1fae5;
+            color: #065f46;
+        }
+
+        .alert-error {
+            background-color: #fee2e2;
+            color: #991b1b;
+        }
+
+        .alert-warning {
+            background-color: #fef3c7;
+            color: #92400e;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>🔄 Gestion des Devis SAP/Salesforce</h1>
+            <p>Synchronisation et gestion des devis entre SAP Business One et Salesforce</p>
+        </div>
+
+        <!-- Filtres -->
+        <div class="filters">
+            <div class="filter-group">
+                <label for="daysBack">Période</label>
+                <select id="daysBack">
+                    <option value="7">7 derniers jours</option>
+                    <option value="30" selected>30 derniers jours</option>
+                    <option value="60">60 derniers jours</option>
+                    <option value="90">90 derniers jours</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label for="statusFilter">Statut</label>
+                <select id="statusFilter">
+                    <option value="">Tous les statuts</option>
+                    <option value="synced">Synchronisés</option>
+                    <option value="only_sap">Uniquement SAP</option>
+                    <option value="only_salesforce">Uniquement Salesforce</option>
+                    <option value="mismatch">Avec différences</option>
+                </select>
+            </div>
+            <button class="btn btn-primary" onclick="loadQuotes()">
+                🔍 Actualiser
+            </button>
+            <button class="btn btn-danger" onclick="deleteSelected()" id="deleteBtn" style="display: none;">
+                🗑️ Supprimer la sélection
+            </button>
+        </div>
+
+        <!-- Statistiques -->
+        <div class="stats-grid" id="statsGrid">
+            <!-- Les stats seront ajoutées dynamiquement -->
+        </div>
+
+        <!-- Table des devis -->
+        <div class="table-container">
+            <div class="table-header">
+                <h2>Liste des devis</h2>
+                <div id="selectedCount" style="color: var(--text-secondary); font-size: 14px;"></div>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th class="checkbox-cell">
+                            <input type="checkbox" id="selectAll" onchange="toggleSelectAll()">
+                        </th>
+                        <th>N° SAP</th>
+                        <th>ID Salesforce</th>
+                        <th>Client</th>
+                        <th>Date</th>
+                        <th>Montant</th>
+                        <th>Statut</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="quotesTableBody">
+                    <tr>
+                        <td colspan="8" class="loading">Chargement des devis</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Modal de confirmation -->
+    <div class="modal" id="confirmModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Confirmer la suppression</h3>
+                <button class="modal-close" onclick="closeModal()">✕</button>
+            </div>
+            <div class="modal-body" id="modalBody">
+                <!-- Le contenu sera ajouté dynamiquement -->
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal()">Annuler</button>
+                <button class="btn btn-danger" onclick="confirmDelete()">Confirmer la suppression</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let quotesData = [];
+        let selectedQuotes = new Set();
+        let quotesToDelete = [];
+
+        // Charger les devis au démarrage
+        document.addEventListener('DOMContentLoaded', () => {
+            loadQuotes();
+        });
+
+        async function loadQuotes() {
+            const daysBack = document.getElementById('daysBack').value;
+            const statusFilter = document.getElementById('statusFilter').value;
+            
+            try {
+                const params = new URLSearchParams();
+                params.append('days_back', daysBack);
+                if (statusFilter) {
+                    params.append('status_filter', statusFilter);
+                }
+                
+                const response = await fetch(`/api/quote-management/quotes?${params}`);
+                if (!response.ok) {
+                    throw new Error(`Erreur HTTP: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                quotesData = data.quotes;
+                
+                // Mettre à jour les statistiques
+                updateStats(data);
+                
+                // Mettre à jour le tableau
+                updateTable(data.quotes);
+                
+                // Réinitialiser la sélection
+                selectedQuotes.clear();
+                updateSelectionCount();
+                
+            } catch (error) {
+                console.error('Erreur lors du chargement des devis:', error);
+                showAlert('Erreur lors du chargement des devis', 'error');
+            }
+        }
+
+        function updateStats(data) {
+            const statsGrid = document.getElementById('statsGrid');
+            statsGrid.innerHTML = `
+                <div class="stat-card">
+                    <h3>Total des devis</h3>
+                    <div class="value">${data.total_quotes}</div>
+                </div>
+                <div class="stat-card synced">
+                    <h3>Synchronisés</h3>
+                    <div class="value">${data.synced}</div>
+                </div>
+                <div class="stat-card only-sap">
+                    <h3>Uniquement SAP</h3>
+                    <div class="value">${data.only_sap}</div>
+                </div>
+                <div class="stat-card only-salesforce">
+                    <h3>Uniquement Salesforce</h3>
+                    <div class="value">${data.only_salesforce}</div>
+                </div>
+                <div class="stat-card mismatch">
+                    <h3>Avec différences</h3>
+                    <div class="value">${data.with_differences}</div>
+                </div>
+            `;
+        }
+
+        function updateTable(quotes) {
+            const tbody = document.getElementById('quotesTableBody');
+            
+            if (quotes.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="8" class="empty-state">Aucun devis trouvé pour cette période</td></tr>';
+                return;
+            }
+            
+            tbody.innerHTML = quotes.map((quote, index) => `
+                <tr>
+                    <td class="checkbox-cell">
+                        ${(quote.can_delete_sap || quote.can_delete_salesforce) ? 
+                            `<input type="checkbox" data-index="${index}" onchange="toggleSelection(${index})">` : 
+                            '-'
+                        }
+                    </td>
+                    <td>${quote.doc_num || '-'}</td>
+                    <td>${quote.opportunity_id || '-'}</td>
+                    <td>${quote.client_name || '-'}</td>
+                    <td>${quote.doc_date ? formatDate(quote.doc_date) : '-'}</td>
+                    <td>${formatAmount(quote.total)}</td>
+                    <td>
+                        <span class="status-badge ${quote.status}">${getStatusLabel(quote.status)}</span>
+                        ${quote.differences ? `<div class="differences">${quote.differences.join('<br>')}</div>` : ''}
+                    </td>
+                    <td>
+                        ${getActionButtons(quote, index)}
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        function getStatusLabel(status) {
+            const labels = {
+                'synced': 'Synchronisé',
+                'only_sap': 'SAP uniquement',
+                'only_salesforce': 'Salesforce uniquement',
+                'mismatch': 'Différences'
+            };
+            return labels[status] || status;
+        }
+
+        function formatDate(dateStr) {
+            const date = new Date(dateStr);
+            return date.toLocaleDateString('fr-FR');
+        }
+
+        function formatAmount(amount) {
+            return new Intl.NumberFormat('fr-FR', {
+                style: 'currency',
+                currency: 'EUR'
+            }).format(amount);
+        }
+
+        function getActionButtons(quote, index) {
+            const buttons = [];
+            
+            if (quote.can_delete_sap) {
+                buttons.push(`<button class="btn btn-danger btn-sm" onclick="deleteSingle(${index}, 'sap')">Suppr. SAP</button>`);
+            }
+            
+            if (quote.can_delete_salesforce) {
+                buttons.push(`<button class="btn btn-danger btn-sm" onclick="deleteSingle(${index}, 'salesforce')">Suppr. SF</button>`);
+            }
+            
+            return buttons.join(' ') || '-';
+        }
+
+        function toggleSelectAll() {
+            const selectAll = document.getElementById('selectAll').checked;
+            const checkboxes = document.querySelectorAll('#quotesTableBody input[type="checkbox"]');
+            
+            checkboxes.forEach(cb => {
+                cb.checked = selectAll;
+                const index = parseInt(cb.dataset.index);
+                if (selectAll) {
+                    selectedQuotes.add(index);
+                } else {
+                    selectedQuotes.delete(index);
+                }
+            });
+            
+            updateSelectionCount();
+        }
+
+        function toggleSelection(index) {
+            if (selectedQuotes.has(index)) {
+                selectedQuotes.delete(index);
+            } else {
+                selectedQuotes.add(index);
+            }
+            updateSelectionCount();
+        }
+
+        function updateSelectionCount() {
+            const count = selectedQuotes.size;
+            const selectedCount = document.getElementById('selectedCount');
+            const deleteBtn = document.getElementById('deleteBtn');
+            
+            if (count > 0) {
+                selectedCount.textContent = `${count} devis sélectionné${count > 1 ? 's' : ''}`;
+                deleteBtn.style.display = 'inline-flex';
+            } else {
+                selectedCount.textContent = '';
+                deleteBtn.style.display = 'none';
+            }
+        }
+
+        async function deleteSelected() {
+            if (selectedQuotes.size === 0) return;
+            
+            quotesToDelete = [];
+            selectedQuotes.forEach(index => {
+                const quote = quotesData[index];
+                const deleteInfo = {};
+                
+                if (quote.can_delete_sap && quote.doc_entry) {
+                    deleteInfo.sap_doc_entry = quote.doc_entry;
+                }
+                
+                if (quote.can_delete_salesforce && quote.opportunity_id) {
+                    deleteInfo.sf_opportunity_id = quote.opportunity_id;
+                }
+                
+                if (Object.keys(deleteInfo).length > 0) {
+                    quotesToDelete.push({
+                        ...deleteInfo,
+                        display: quote
+                    });
+                }
+            });
+            
+            showDeleteConfirmation();
+        }
+
+        async function deleteSingle(index, system) {
+            const quote = quotesData[index];
+            quotesToDelete = [];
+            
+            const deleteInfo = { display: quote };
+            
+            if (system === 'sap' && quote.doc_entry) {
+                deleteInfo.sap_doc_entry = quote.doc_entry;
+            } else if (system === 'salesforce' && quote.opportunity_id) {
+                deleteInfo.sf_opportunity_id = quote.opportunity_id;
+            }
+            
+            quotesToDelete.push(deleteInfo);
+            showDeleteConfirmation();
+        }
+
+        function showDeleteConfirmation() {
+            const modal = document.getElementById('confirmModal');
+            const modalBody = document.getElementById('modalBody');
+            
+            let html = '<p>Vous êtes sur le point de supprimer les devis suivants :</p><ul>';
+            
+            quotesToDelete.forEach(item => {
+                const systems = [];
+                if (item.sap_doc_entry) systems.push('SAP');
+                if (item.sf_opportunity_id) systems.push('Salesforce');
+                
+                html += `<li>
+                    <strong>${item.display.client_name}</strong> - 
+                    N° ${item.display.doc_num || 'N/A'} - 
+                    ${formatAmount(item.display.total)} - 
+                    Suppression dans : ${systems.join(' et ')}
+                </li>`;
+            });
+            
+            html += '</ul><p style="margin-top: 16px; color: var(--danger-color);">⚠️ Cette action est irréversible.</p>';
+            
+            modalBody.innerHTML = html;
+            modal.style.display = 'flex';
+        }
+
+        function closeModal() {
+            document.getElementById('confirmModal').style.display = 'none';
+        }
+
+        async function confirmDelete() {
+            closeModal();
+            
+            const deleteData = quotesToDelete.map(item => {
+                const { display, ...deleteInfo } = item;
+                return deleteInfo;
+            });
+            
+            try {
+                const response = await fetch('/api/quote-management/quotes/delete', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ quotes: deleteData })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`Erreur HTTP: ${response.status}`);
+                }
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showAlert(
+                        `Suppression réussie : ${result.deleted_sap} devis SAP, ${result.deleted_salesforce} opportunités Salesforce`, 
+                        'success'
+                    );
+                } else {
+                    showAlert(
+                        `Erreurs lors de la suppression : ${result.errors.join(', ')}`, 
+                        'error'
+                    );
+                }
+                
+                // Recharger les devis
+                loadQuotes();
+                
+            } catch (error) {
+                console.error('Erreur lors de la suppression:', error);
+                showAlert('Erreur lors de la suppression des devis', 'error');
+            }
+        }
+
+        function showAlert(message, type) {
+            // Simple alerte pour cet exemple, vous pouvez améliorer avec une notification toast
+            const alertDiv = document.createElement('div');
+            alertDiv.className = `alert alert-${type}`;
+            alertDiv.textContent = message;
+            
+            document.body.insertBefore(alertDiv, document.body.firstChild);
+            
+            setTimeout(() => {
+                alertDiv.remove();
+            }, 5000);
+        }
+
+        // Style pour les petits boutons
+        const style = document.createElement('style');
+        style.textContent = `
+            .btn-sm {
+                padding: 4px 8px;
+                font-size: 12px;
+            }
+        `;
+        document.head.appendChild(style);
+    </script>
+</body>
+</html>

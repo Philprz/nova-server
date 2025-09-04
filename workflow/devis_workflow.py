@@ -4305,7 +4305,6 @@ class DevisWorkflow:
             if not db_url:
                 logger.warning("DATABASE_URL manquant pour recherche locale par code")
                 return None
-            engine = create_engine(db_url, pool_pre_ping=True)
             # Recherche simple et directe d'abord
             simple_results = session.execute(
                 text("""
