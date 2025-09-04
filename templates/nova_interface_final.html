@@ -111,7 +111,69 @@
             flex-direction: row;
             gap: 8px;
         }
+        /* Styles pour la sélection de produit */
+        .product-selection-container {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-top: 12px;
+        }
 
+        .product-selection-button {
+            background-color: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 12px;
+            text-align: left;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .product-selection-button .product-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .product-selection-button .product-details {
+            font-size: 12px;
+            line-height: 1.4;
+            opacity: 0.9;
+            text-align: left;
+        }
+
+        .product-selection-button:hover .product-details {
+            opacity: 1;
+        }
+
+        .product-selection-button:hover {
+            background-color: var(--bg-primary);
+            border-color: var(--primary-blue);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.05);
+        }
+
+        .product-selection-button strong {
+            font-weight: 600;
+            color: var(--primary-blue);
+        }
+
+        .product-selection-button.create-new {
+            color: var(--success-color);
+            border-style: dashed;
+            align-items: center;
+            flex-direction: row;
+            gap: 8px;
+        }
+
+        .product-selection-button.create-new:hover {
+            color: white;
+            background-color: var(--success-color);
+            border-color: var(--success-color);
+        }
         .client-selection-button.create-new:hover {
             color: #02B9FD;
             background-color: var(--success-color);
@@ -915,7 +977,97 @@
             addMessage(`Création du nouveau client "${clientName}" en cours...`, 'system');
             showProgress();
         }
+        // Fonction pour gérer la sélection de produit
+        function handleProductSelection(data) {
+            console.log("📦 Sélection de produit requise:", data);
 
+            const products = data.options || data.products || data.product_options || [];
+            const searchTerm = data.search_term || data.product_name || '';
+
+            // Afficher le message système
+            if (searchTerm) {
+                addMessage(`Recherche de produits pour "${searchTerm}". Voici les produits disponibles :`, 'system');
+            } else {
+                addMessage(`Voici les produits disponibles :`, 'system');
+            }
+
+            // Créer le conteneur de sélection
+            const messagesContainer = document.getElementById('chatMessages');
+            const selectionDiv = document.createElement('div');
+            selectionDiv.className = 'product-selection-container';
+
+            // Afficher chaque produit
+            products.forEach((product, index) => {
+                const button = document.createElement('button');
+                button.className = 'product-selection-button';
+
+                // Construire les détails du produit
+                let productInfo = [];
+
+                if (product.value || product.id) {
+                    productInfo.push(`🏷️ Code: ${product.value || product.id}`);
+                }
+
+                if (product.data && product.data.Price) {
+                    productInfo.push(`💰 Prix: ${product.data.Price}€`);
+                }
+
+                if (product.data && product.data.UnitMsr) {
+                    productInfo.push(`📏 Unité: ${product.data.UnitMsr}`);
+                }
+
+                const detailsHtml = productInfo.length > 0 ?
+                    `<div class="product-details">${productInfo.join('<br>')}</div>` :
+                    '<div class="product-details">Aucun détail disponible</div>';
+
+                button.innerHTML = `
+                    <div class="product-header">
+                        <strong>${product.label || product.name}</strong>
+                    </div>
+                    ${detailsHtml}
+                `;
+
+                button.onclick = () => selectProduct(product, index);
+                selectionDiv.appendChild(button);
+            });
+
+            messagesContainer.appendChild(selectionDiv);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+
+        // Fonction pour sélectionner un produit
+        function selectProduct(product, index) {
+            const productName = product.label || product.name;
+            addMessage(`Vous avez sélectionné : ${productName}`, 'user');
+
+            if (!currentTaskId) {
+                console.error("❌ Pas de task_id disponible pour la sélection de produit");
+                addMessage("❌ Erreur: Session non initialisée. Veuillez réessayer.", 'system');
+                return;
+            }
+
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                const response = {
+                    type: "user_response",
+                    task_id: currentTaskId,
+                    data: {
+                        response_type: "product_selection",
+                        action: "select_product",
+                        product_id: product.value || product.id,
+                        product_name: productName,
+                        selected_index: index,
+                        selected_product: product
+                    }
+                };
+                console.log("📤 Sélection produit avec task_id:", currentTaskId, response);
+                websocket.send(JSON.stringify(response));
+
+                showProgress();
+            } else {
+                console.error("❌ WebSocket non disponible pour la sélection de produit");
+                addMessage("❌ Erreur de connexion. Veuillez réessayer.", 'system');
+            }
+        }
         function handleUserInteraction(data) {
             console.log("🤝 Interaction utilisateur requise:", data);
 
@@ -1436,6 +1588,10 @@
                     
                     { const opts = data.interaction_data.client_options || data.interaction_data.options || data.interaction_data.clients || []; const name = data.interaction_data.original_client_name || data.interaction_data.client_name || ''; addClientSelection(opts, name); }
                     }  
+                } else if (data.interaction_data && data.interaction_data.interaction_type === 'product_selection') {
+                    console.log("📦 Product selection détecté");
+                    hideProgress();
+                    handleProductSelection(data.interaction_data);
                 } else if (data.type === 'client_selection_required') {
                     hideProgress();
                     const clients = data.client_options || data.clients || [];
