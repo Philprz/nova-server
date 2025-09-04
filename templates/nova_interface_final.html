@@ -1558,7 +1558,6 @@
             const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
             const wsUrl = `${wsProtocol}://${window.location.host}/ws/assistant/${taskId}`;
 
-
             console.log(`🔌 Tentative de connexion à ${wsUrl}`);
             websocket = new WebSocket(wsUrl);
 
@@ -1584,10 +1583,15 @@
                 } else if (data.type === 'user_interaction_required') {
                     console.log("🤝 Interaction utilisateur détectée:", data.interaction_data);
                     if (data.interaction_data && data.interaction_data.interaction_type === 'client_selection') {
-                    hideProgress();
-                    
-                    { const opts = data.interaction_data.client_options || data.interaction_data.options || data.interaction_data.clients || []; const name = data.interaction_data.original_client_name || data.interaction_data.client_name || ''; addClientSelection(opts, name); }
-                    }  
+                        hideProgress();
+                        const opts = data.interaction_data.client_options || data.interaction_data.options || data.interaction_data.clients || [];
+                        const name = data.interaction_data.original_client_name || data.interaction_data.client_name || '';
+                        addClientSelection(opts, name);
+                    } else if (data.interaction_data && data.interaction_data.interaction_type === 'product_selection') {
+                        console.log("📦 Product selection via user_interaction_required détecté");
+                        hideProgress();
+                        handleProductSelection(data.interaction_data);
+                    }
                 } else if (data.interaction_data && data.interaction_data.interaction_type === 'product_selection') {
                     console.log("📦 Product selection détecté");
                     hideProgress();
