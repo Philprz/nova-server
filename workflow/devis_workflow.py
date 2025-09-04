@@ -754,8 +754,19 @@ class DevisWorkflow:
                 if product.get("AvgPrice") is not None and product.get("Price") is None:
                     normalized_product["Price"] = product.get("AvgPrice")
                 
+                # Si toujours pas de prix, essayer unit_price ou estimer
+                if normalized_product.get("Price", 0) == 0:
+                    unit_price = product.get("unit_price", 0)
+                    if unit_price > 0:
+                        normalized_product["Price"] = unit_price
+                    else:
+                        # Estimation en dernier recours
+                        estimated = self._estimate_product_price(product.get("ItemName", product.get("name", "")))
+                        normalized_product["Price"] = estimated
+                        logger.info(f"Prix estimé appliqué: {estimated}€ pour {product.get('ItemName', 'produit')}")
+                
                 # Vérifier les champs requis après normalisation
-                if isinstance(normalized_product, dict) and normalized_product.get("Price") is not None:
+                if isinstance(normalized_product, dict) and normalized_product.get("Price", 0) > 0:
                     validated_products_data.append(normalized_product)
                 else:
                     logger.warning(f"⚠️ Produit sans prix ignoré: {product}")
@@ -2353,6 +2364,7 @@ class DevisWorkflow:
                         logger.warning(f"⚠️ Produit sans prix détecté: {product.get('name')} - Utilisation estimation")
                         default_price = self._estimate_product_price(product.get("name", ""))
                         product["unit_price"] = default_price
+                        product["Price"] = default_price  # AJOUT: Définir aussi le champ Price pour la validation
                         product["total_price"] = default_price * product.get("quantity", 1)
                         logger.info(f"Prix estimé pour {product['name']}: {default_price}€")
 
@@ -3706,8 +3718,8 @@ class DevisWorkflow:
                     "code": product_data.get("ItemCode", ""),
                     "name": product_data.get("ItemName", ""),
                     "quantity": quantity,
-                    "unit_price": unit_price,
-                    "total_price": unit_price * quantity,
+                    "unit_price": product_data.get("AvgPrice", 0) or product_data.get("unit_price", 0) or self._estimate_product_price(product_data.get("ItemName", "")),
+                    "total_price": 0,  # Sera calculé après
                     "currency": "EUR",
                     "stock": product_data.get("OnHand", 0),
                     "description": product_data.get("U_Description", ""),
@@ -3715,6 +3727,8 @@ class DevisWorkflow:
                     "search_method": "user_selected",
                     "found": True
                 }
+                # Recalculer total_price avec le prix final
+                formatted_product["total_price"] = formatted_product["unit_price"] * quantity
                 formatted_products.append(formatted_product)
                 logger.info(f"✅ Produit {i+1}: {formatted_product['name']} x{quantity}")
             
