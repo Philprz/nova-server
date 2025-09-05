@@ -730,6 +730,7 @@ class DevisWorkflow:
             logger.info(f"   - client_info.data présent: {bool(self.context.get('client_info', {}).get('data'))}")
             logger.info(f"   - clés contexte: {list(self.context.keys())}")
             # CORRECTION CRITIQUE: S'assurer que les données client sont bien présentes avant la création du devis
+            client_info = context.get("client_info")
             if not client_info or not client_info.get("data"):
                 # Tenter de récupérer depuis validated_client ou selected_client
                 if self.context.get("validated_client"):
