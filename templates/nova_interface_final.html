@@ -1690,7 +1690,10 @@
                 addMessage(`ID: ${result.quote_id}`, 'system');
                 addMessage(`Client: ${result.client.name}`, 'system');
                 addMessage(`Montant: ${result.total_amount}€`, 'system');
-                
+                //Créer et afficher le devis complet
+                if (result.quote_data || result.sap_quote || result.quote_id) {
+                    displayQuoteResult(result);
+                }                
                 const suggestions = ['Voir le devis', 'Créer un nouveau devis', 'Modifier le devis'];
                 addSuggestions(suggestions);
             } else {
@@ -2204,7 +2207,136 @@
                 }
             });
         });
+        function displayQuoteResult(result) {
+            console.log("🎯 Affichage résultat devis:", result);
+            
+            // Extraire les données du devis
+            const quoteId = result.quote_id || result.sap_quote?.doc_num || 'NOVA-' + Date.now().toString().slice(-6);
+            const clientName = result.client?.name || result.client_name || 'Client non défini';
+            const totalAmount = result.total_amount || result.sap_quote?.total_amount || 0;
+            const currency = result.currency || 'EUR';
+            
+            // Formater le montant
+            const formattedAmount = totalAmount.toLocaleString('fr-FR', {
+                style: 'currency',
+                currency: currency
+            });
+            
+            // Produits
+            const products = result.products || result.quote_data?.products || [];
+            let productsHtml = '';
+            
+            if (products.length > 0) {
+                productsHtml = `
+                    <table style="width: 100%; border-collapse: collapse; margin: 15px 0; font-size: 0.9em;">
+                        <thead>
+                            <tr style="background: #f8fafc; border-bottom: 2px solid #e2e8f0;">
+                                <th style="padding: 8px; text-align: left; border: 1px solid #e2e8f0;">Produit</th>
+                                <th style="padding: 8px; text-align: center; border: 1px solid #e2e8f0;">Qté</th>
+                                <th style="padding: 8px; text-align: right; border: 1px solid #e2e8f0;">Prix Unit.</th>
+                                <th style="padding: 8px; text-align: right; border: 1px solid #e2e8f0;">Total</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                `;
+                
+                products.forEach(product => {
+                    const unitPrice = product.unit_price || product.price || 0;
+                    const qty = product.quantity || 1;
+                    const total = unitPrice * qty;
+                    
+                    productsHtml += `
+                        <tr style="border-bottom: 1px solid #e2e8f0;">
+                            <td style="padding: 8px; border: 1px solid #e2e8f0;">
+                                <strong>${product.name || product.ItemName}</strong><br>
+                                <small style="color: #6b7280;">Code: ${product.code || product.ItemCode}</small>
+                            </td>
+                            <td style="padding: 8px; text-align: center; border: 1px solid #e2e8f0;">${qty}</td>
+                            <td style="padding: 8px; text-align: right; border: 1px solid #e2e8f0;">${unitPrice.toLocaleString('fr-FR', { style: 'currency', currency: currency })}</td>
+                            <td style="padding: 8px; text-align: right; border: 1px solid #e2e8f0; font-weight: bold;">${total.toLocaleString('fr-FR', { style: 'currency', currency: currency })}</td>
+                        </tr>
+                    `;
+                });
+                
+                productsHtml += `
+                        </tbody>
+                    </table>
+                `;
+            }
+            
+            // Créer le message de résultat complet
+            const resultMessage = document.createElement('div');
+            resultMessage.className = 'message system-message';
+            resultMessage.innerHTML = `
+                <div style="background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%); padding: 20px; border-radius: 12px; margin: 10px 0;">
+                    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 15px;">
+                        <div style="background: #059669; color: white; border-radius: 50%; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; font-size: 1.2em;">✅</div>
+                        <h3 style="color: #0369a1; margin: 0; font-size: 1.3em;">Devis généré avec succès</h3>
+                    </div>
+                    
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px;">
+                        <div style="background: white; padding: 15px; border-radius: 8px; border-left: 4px solid #02B9FD;">
+                            <strong style="color: #0369a1;">📋 Devis N°</strong><br>
+                            <span style="font-size: 1.1em; font-weight: bold;">${quoteId}</span>
+                        </div>
+                        <div style="background: white; padding: 15px; border-radius: 8px; border-left: 4px solid #832DFE;">
+                            <strong style="color: #7c3aed;">🏢 Client</strong><br>
+                            <span style="font-size: 1.1em; font-weight: bold;">${clientName}</span>
+                        </div>
+                        <div style="background: white; padding: 15px; border-radius: 8px; border-left: 4px solid #059669;">
+                            <strong style="color: #059669;">💰 Montant Total</strong><br>
+                            <span style="font-size: 1.2em; font-weight: bold; color: #059669;">${formattedAmount}</span>
+                        </div>
+                    </div>
+                    
+                    ${products.length > 0 ? `
+                        <div style="background: white; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                            <h4 style="color: #374151; margin: 0 0 10px 0;">📦 Détail des produits</h4>
+                            ${productsHtml}
+                        </div>
+                    ` : ''}
+                    
+                    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                        <button onclick="window.open('/pdf/quote/${quoteId}', '_blank')" style="background: #dc2626; color: white; border: none; padding: 10px 15px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 5px;">
+                            📄 Télécharger PDF
+                        </button>
+                        <button onclick="window.open('/edit/quote/${quoteId}', '_blank')" style="background: #7c3aed; color: white; border: none; padding: 10px 15px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 5px;">
+                            ✏️ Modifier
+                        </button>
+                        <button onclick="newQuote()" style="background: #059669; color: white; border: none; padding: 10px 15px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 5px;">
+                            ➕ Nouveau devis
+                        </button>
+                    </div>
+                </div>
+            `;
+            
+            // Ajouter le message au chat
+            const chatMessages = document.getElementById('chat-messages');
+            if (chatMessages) {
+                chatMessages.appendChild(resultMessage);
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            }
+        }
 
+        function newQuote() {
+            // Réinitialiser l'interface
+            const input = document.getElementById('message-input');
+            if (input) {
+                input.value = '';
+                input.focus();
+            }
+            
+            // Masquer la progression
+            hideProgress();
+            
+            // Déconnecter WebSocket si actif
+            if (currentWebSocket) {
+                currentWebSocket.close();
+                currentWebSocket = null;
+            }
+            
+            currentTaskId = null;
+        }
     </script>
 </body>
 </html>
