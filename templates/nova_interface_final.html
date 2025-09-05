@@ -1685,21 +1685,43 @@
         }
 
         function handleTaskComplete(result) {
-            if (result.status === 'success') {
+            if (result.status === 'success' || result.success === true) {
+                // Déterminer les informations du devis
+                const clientName = result.client?.name ||
+                                result.client_name ||
+                                result.validated_data?.client?.name ||
+                                'Client non identifié';
+
+                const quoteId = result.quote_id ||
+                            result.sap_quote?.doc_num ||
+                            result.validated_data?.quote_id ||
+                            `NOVA-${Date.now().toString().slice(-6)}`;
+
+                const totalAmount = result.total_amount ||
+                                result.sap_quote?.total_amount ||
+                                result.validated_data?.total_amount ||
+                                0;
+
+                // Afficher les messages système
                 addMessage(`Devis créé avec succès !`, 'system');
-                addMessage(`ID: ${result.quote_id}`, 'system');
-                addMessage(`Client: ${result.client.name}`, 'system');
-                addMessage(`Montant: ${result.total_amount}€`, 'system');
-                //Créer et afficher le devis complet
+                addMessage(`Client: ${clientName}`, 'system');
+                addMessage(`ID: ${quoteId}`, 'system');
+                addMessage(`Montant: ${totalAmount}€`, 'system');
+
+                // Créer et afficher le devis complet si les données sont disponibles
                 if (result.quote_data || result.sap_quote || result.quote_id) {
                     displayQuoteResult(result);
-                }                
+                }
+
+                // Ajouter des suggestions
                 const suggestions = ['Voir le devis', 'Créer un nouveau devis', 'Modifier le devis'];
                 addSuggestions(suggestions);
             } else {
+                // Gérer les erreurs
                 addMessage(`Erreur: ${result.error || 'Erreur inconnue'}`, 'system');
             }
         }
+
 
         function handleTaskError(error) {
             addMessage(`Erreur lors du traitement: ${error}`, 'system');
@@ -1968,6 +1990,9 @@
                 } else if (data.type === 'log') {
                     addMessage(`[LOG] ${data.message}`, 'system');
                 } else if (data.type === 'message') {
+                    } else if (data.type === 'completion') {
+                    hideProgress();
+                    handleTaskComplete(data.data);
                     addMessage(data.message, 'system');
                 }
             };
