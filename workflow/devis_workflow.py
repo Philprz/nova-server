@@ -1883,11 +1883,11 @@ class DevisWorkflow:
             
             try:
                 # === RECHERCHE CLASSIQUE (code existant) ===
-                sap_result = await self.mcp_connector.call_sap_mcp("sap_get_product_details", {"item_code": product_code})
+                sap_results = await self.mcp_connector.call_sap_mcp("sap_get_product_details", {"item_code": product_code})
                 
-                if "error" not in sap_result and sap_result.get("ItemCode"):
-                    # Produit trouvé directement - CORRECTION: sap_result contient directement les données, pas de clé "data"
-                    product_data = sap_result
+                if "error" not in sap_results and sap_results.get("ItemCode"):
+                    # Produit trouvé directement - CORRECTION: sap_results contient directement les données, pas de clé "data"
+                    product_data = sap_results
                     validated_products.append({
                         "found": True,
                         "data": product_data,
@@ -2750,7 +2750,7 @@ class DevisWorkflow:
                             "type": "quote_created",
                             "status": "success",
                             "quote_data": {
-                                "sap_doc_num": sap_result.get("doc_num"),
+                                "sap_doc_num": sap_quote.get("doc_num"),
                                 "sf_opportunity_id": sf_result.get("id") if sf_result else None,
                                 "total": validated_data.get("products", [{}])[0].get("total_price", 0) * validated_data.get("products", [{}])[0].get("quantity", 1)
                             }
@@ -2878,7 +2878,7 @@ class DevisWorkflow:
                     "total_amount": total_amount,
                     "currency": "EUR",
                     "draft_mode": self.draft_mode,
-                    "sap_result": sap_quote,
+                    "sap_results": sap_quote,
                     "salesforce_result": salesforce_quote,
                     "creation_details": {
                         "sap_success": sap_success,
@@ -3231,8 +3231,8 @@ class DevisWorkflow:
             logger.info(f"✅ Nom client depuis extraction LLM: {client_name}")
         
         # 5. NOUVEAU: Utiliser les données SAP brutes depuis le résultat du devis
-        elif quote_result.get("sap_result", {}).get("raw_result", {}).get("CardName"):
-            sap_card_name = quote_result["sap_result"]["raw_result"]["CardName"]
+        elif quote_result.get("sap_results", {}).get("raw_result", {}).get("CardName"):
+            sap_card_name = quote_result["sap_results"]["raw_result"]["CardName"]
             client_name = sap_card_name
             logger.info(f"✅ Nom client depuis SAP raw result: {client_name}")
         
@@ -7136,17 +7136,17 @@ class DevisWorkflow:
                 # 3. Création dans SAP d'abord
                 self._track_step_progress("search_client", 30, f"Création client SAP {card_code}...")
                 
-                sap_result = await self.mcp_connector.call_mcp(
+                sap_results = await self.mcp_connector.call_mcp(
                     "sap_mcp",
                     "sap_create_customer_complete",
                     {"customer_data": sap_client_data}
                 )
 
-                if not sap_result.get("success", False):
-                    logger.error(f"❌ Échec création SAP: {sap_result.get('error')}")
+                if not sap_results.get("success", False):
+                    logger.error(f"❌ Échec création SAP: {sap_results.get('error')}")
                     return {
                         "created": False,
-                        "error": f"Erreur SAP: {sap_result.get('error', 'Erreur inconnue')}"
+                        "error": f"Erreur SAP: {sap_results.get('error', 'Erreur inconnue')}"
                     }
 
                 logger.info(f"✅ Client SAP créé: {card_code}")
@@ -7319,14 +7319,14 @@ class DevisWorkflow:
 
             # === ÉTAPE 4: RECHERCHE DANS SAP ===
             self._track_step_progress("search_client", 60, "🔍 Recherche dans SAP")
-            sap_result = await self.mcp_connector.call_mcp("sap_mcp", "sap_search", {
+            sap_results = await self.mcp_connector.call_mcp("sap_mcp", "sap_search", {
                 "query": client_name,
                 "entity_type": "BusinessPartners",
                 "limit": 5
             })
 
-            if sap_result.get("success") and sap_result.get("count", 0) > 0:
-                for sap_client in sap_result.get("results", []):
+            if sap_results.get("success") and sap_results.get("count", 0) > 0:
+                for sap_client in sap_results.get("results", []):
                     if sap_client.get("CardName", "").upper() == client_name.upper():
                         logger.info(f"✅ Client trouvé dans SAP: {sap_client['CardName']}")
                         sf_creation = await self._create_salesforce_from_sap(sap_client)
@@ -8279,16 +8279,16 @@ class DevisWorkflow:
                     # === APPEL SAP RÉEL OU SIMULATION ===
                     if is_production_mode:
                         logger.info(f"📡 Appel SAP RÉEL sap_create_quotation_complete")
-                        sap_result = await self.mcp_connector.sap_create_quotation_complete(sap_quotation_data)
+                        sap_results = await self.mcp_connector.sap_create_quotation_complete(sap_quotation_data)
                         
-                        if sap_result.get("success"):
+                        if sap_results.get("success"):
                             sync_results["sap_sync"]["success"] = True
                             sync_results["sap_sync"]["message"] = "Devis SAP créé avec succès"
-                            sync_results["sap_sync"]["quote_sap_id"] = sap_result.get("DocNum")
-                            sync_results["sap_sync"]["doc_entry"] = sap_result.get("DocEntry")
-                            logger.info(f"✅ Devis SAP créé: DocNum={sap_result.get('DocNum')}")
+                            sync_results["sap_sync"]["quote_sap_id"] = sap_results.get("DocNum")
+                            sync_results["sap_sync"]["doc_entry"] = sap_results.get("DocEntry")
+                            logger.info(f"✅ Devis SAP créé: DocNum={sap_results.get('DocNum')}")
                         else:
-                            sync_results["sap_sync"]["message"] = sap_result.get("error", "Erreur SAP inconnue")
+                            sync_results["sap_sync"]["message"] = sap_results.get("error", "Erreur SAP inconnue")
                             logger.error(f"❌ Erreur création devis SAP: {sync_results['sap_sync']['message']}")
                     else:
                         # MODE DRAFT - Simulation réaliste
@@ -8734,11 +8734,11 @@ class EnhancedDevisWorkflow(DevisWorkflow):
                 {"customer_data": sap_data}
             )
             
-            if not sap_result.get("success", False):
-                logger.error(f"❌ Échec création SAP: {sap_result.get('error')}")
+            if not sap_results.get("success", False):
+                logger.error(f"❌ Échec création SAP: {sap_results.get('error')}")
                 return {
                     "created": False,
-                    "error": f"Erreur SAP: {sap_result.get('error', 'Erreur inconnue')}"
+                    "error": f"Erreur SAP: {sap_results.get('error', 'Erreur inconnue')}"
                 }
             
             logger.info(f"✅ Client SAP créé: {card_code}")
@@ -8960,15 +8960,15 @@ class EnhancedDevisWorkflow(DevisWorkflow):
             })
             
             # Recherche SAP
-            sap_result = await self._search_sap_product(product.get("code", ""), product_name)
+            sap_results = await self._search_sap_product(product.get("code", ""), product_name)
             
-            if sap_result.get("found"):
+            if sap_results.get("found"):
                 await self._notify_websocket("product_found", {
                     "product_index": i,
-                    "product_data": sap_result["data"],
+                    "product_data": sap_results["data"],
                     "message": f"Produit '{product_name}' trouvé"
                 })
-                results.append({"index": i, "found": True, "data": sap_result["data"]})
+                results.append({"index": i, "found": True, "data": sap_results["data"]})
             else:
                 await self._notify_websocket("product_not_found", {
                     "product_index": i,
