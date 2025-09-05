@@ -2751,7 +2751,7 @@ class DevisWorkflow:
                             "status": "success",
                             "quote_data": {
                                 "sap_doc_num": sap_quote.get("doc_num"),
-                                "sf_opportunity_id": sf_result.get("id") if sf_result else None,
+                                "sf_opportunity_id": salesforce_quote.get("id") if salesforce_quote else None,
                                 "total": validated_data.get("products", [{}])[0].get("total_price", 0) * validated_data.get("products", [{}])[0].get("quantity", 1)
                             }
                         })
