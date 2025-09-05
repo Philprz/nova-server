@@ -803,6 +803,33 @@
         let clientSelectionMode = false;
         let availableClients = [];
         let originalClientName = '';
+        
+        function sendWebSocketMessage(message) {
+            // Vérifie si le WebSocket est disponible et ouvert
+            if (!websocket || websocket.readyState !== WebSocket.OPEN) {
+                console.error("❌ WebSocket non disponible ou non connecté.");
+                addMessage("❌ Erreur : Connexion WebSocket indisponible. Veuillez vérifier votre connexion.", 'system');
+                return false;
+            }
+
+            // Vérifie si le message est valide (optionnel mais recommandé)
+            if (!message || typeof message !== 'object') {
+                console.error("❌ Message invalide : le message doit être un objet.");
+                addMessage("❌ Erreur : Message invalide. Veuillez réessayer.", 'system');
+                return false;
+            }
+
+            try {
+                // Envoie le message via WebSocket
+                websocket.send(JSON.stringify(message));
+                return true;
+            } catch (error) {
+                // Gestion des erreurs lors de l'envoi
+                console.error("❌ Erreur lors de l'envoi du message WebSocket :", error);
+                addMessage("❌ Erreur lors de l'envoi du message. Veuillez réessayer plus tard.", 'system');
+                return false;
+            }
+        }
 
         // Fonction de génération d'UUID compatible avec tous les navigateurs
         function generateUUID() {
@@ -962,7 +989,7 @@
                     }
                 };
                 console.log("📤 Sélection client:", response);
-                websocket.send(JSON.stringify(response));
+                sendWebSocketMessage(response);
             } else {
                 // Fallback si pas de WebSocket
                 continueWithSelectedClient(client);
@@ -987,7 +1014,7 @@
                     }
                 };
                 console.log("📤 Création nouveau client:", response);
-                websocket.send(JSON.stringify(response));
+                sendWebSocketMessage(response);
             } else {
                 // Fallback si pas de WebSocket
                 continueWithNewClient(clientName);
@@ -1127,106 +1154,130 @@
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
         }
 
+        // --- Helpers --- //
+        function normalizeProductData(product) {
+        if (!product) return null;
+        return {
+            code: product.ItemCode || product.value || product.id || product.code || null,
+            name: product.ItemName || product.label || product.name || 'Produit',
+            stock: product.OnHand || product.data?.OnHand || 0,
+            unit: product.SalesUnit || product.data?.SalesUnit || product.data?.UnitMsr || 'unité',
+            price: product.AvgPrice || product.data?.AvgPrice || product.data?.Price || 0
+        };
+        }
 
+        function safeSerialize(obj, fallback = {}) {
+        try {
+            if (typeof structuredClone === 'function') return structuredClone(obj);
+        } catch (_) {}
+        try {
+            return JSON.parse(JSON.stringify(obj));
+        } catch (_) {
+            return fallback;
+        }
+        }
         // Fonction pour sélectionner un produit
         function selectProduct(product, index) {
-            // Normalisation des champs principaux
-            const productCode =
-                product?.ItemCode ??
-                product?.value ??
-                product?.id ??
-                product?.code ??
-                null;
+            // Polyfill minimal si safeSerialize absent
+            const _safeSerialize = (typeof safeSerialize === 'function')
+                ? safeSerialize
+                : (obj, fallback) => {
+                    try { return JSON.parse(JSON.stringify(obj)); }
+                    catch { return fallback; }
+                };
 
-            const productName =
-                product?.ItemName ??
-                product?.label ??
-                product?.name ??
-                productCode ??
-                'Produit';
+            const norm = (typeof normalizeProductData === 'function'
+                ? normalizeProductData(product)
+                : null) || { code: null, name: 'Produit', stock: 0, unit: 'unité', price: 0 };
 
-            // Feedback utilisateur
-            addMessage(`Vous avez sélectionné : ${productName}`, 'user');
+            addMessage(`Vous avez sélectionné : ${norm.name}`, 'user');
 
-            // Vérifications préalables
             if (!currentTaskId) {
                 console.error("❌ Pas de task_id disponible pour la sélection de produit");
                 addMessage("❌ Erreur: Session non initialisée. Veuillez réessayer.", 'system');
-                return;
+                return false;
             }
 
-            // Vérification WebSocket avec reconnexion automatique
-            if (!websocket || websocket.readyState !== WebSocket.OPEN) {
-                console.warn("⚠️ WebSocket non disponible - tentative de reconnexion");
-                try {
-                    connectWebSocket(currentTaskId);
-                    // Attendre un peu pour la connexion
-                    setTimeout(() => {
-                        if (websocket && websocket.readyState === WebSocket.OPEN) {
-                            selectProduct(product, index);
-                        } else {
-                            addMessage("❌ Erreur de connexion persistante. Rechargez la page.", 'system');
-                        }
-                    }, 500);
-                    return;
-                } catch (e) {
-                    console.error("❌ Erreur reconnexion WebSocket:", e);
-                    addMessage("❌ Erreur de connexion. Veuillez réessayer.", 'system');
-                    return;
-                }
-            }
+            const buildPayload = () => {
+                const selectedProductSafe = _safeSerialize(product, {
+                ItemCode: norm.code,
+                ItemName: norm.name,
+                OnHand: norm.stock,
+                SalesUnit: norm.unit,
+                AvgPrice: norm.price
+                });
 
-            // Extraction d'infos complémentaires utiles (si présentes)
-            const stock = product?.OnHand ?? product?.data?.OnHand;
-            const unit = product?.SalesUnit ?? product?.data?.SalesUnit ?? product?.data?.UnitMsr;
-            const price = product?.AvgPrice ?? product?.data?.AvgPrice ?? product?.data?.Price;
-
-            // Sérialisation prudente du produit (évite fonctions/références circulaires)
-            let selectedProductSafe = null;
-            try {
-                selectedProductSafe = JSON.parse(JSON.stringify(product));
-            } catch (e) {
-                console.warn("⚠️ Produit non entièrement sérialisable, envoi des champs normalisés uniquement.", e);
-                selectedProductSafe = {
-                    ItemCode: productCode,
-                    ItemName: productName,
-                    OnHand: stock,
-                    SalesUnit: unit,
-                    AvgPrice: price
-                };
-            }
-
-            // Construction de la réponse
-            const response = {
+                return {
                 type: "user_response",
                 task_id: currentTaskId,
                 data: {
                     response_type: "product_selection",
                     action: "select_product",
-                    // Champs normalisés
-                    product_code: productCode,
-                    product_name: productName,
+                    product_code: norm.code,
+                    product_name: norm.name,
                     selected_index: index,
                     selected_product: selectedProductSafe,
-                    // Métadonnées utiles côté serveur
-                    meta: {
-                        stock: stock,
-                        unit: unit,
-                        price: price
-                    }
+                    meta: { stock: norm.stock, unit: norm.unit, price: norm.price }
+                }
+                };
+            };
+
+            const sendSelection = () => {
+                const response = buildPayload();
+                try {
+                console.log("📤 Sélection produit avec task_id:", currentTaskId, response);
+                sendWebSocketMessage(response);
+                showProgress();
+                return true;
+                } catch (err) {
+                console.error("❌ Échec d'envoi WebSocket:", err);
+                addMessage("❌ Erreur lors de l’envoi de la sélection. Veuillez réessayer.", 'system');
+                return false;
                 }
             };
 
-            // Envoi via WebSocket (si en cours de connexion, l’API JS bufferise généralement)
-            try {
-                console.log("📤 Sélection produit avec task_id:", currentTaskId, response);
-                websocket.send(JSON.stringify(response));
-                showProgress();
-            } catch (err) {
-                console.error("❌ Échec d'envoi WebSocket:", err);
-                addMessage("❌ Erreur lors de l’envoi de la sélection. Veuillez réessayer.", 'system');
+            // Socket déjà ouverte
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                return sendSelection();
             }
-        }
+
+            console.warn("⚠️ WebSocket non disponible - tentative de reconnexion");
+            try {
+                connectWebSocket(currentTaskId);
+            } catch (e) {
+                console.error("❌ Erreur lors de la tentative de reconnexion WebSocket:", e);
+                addMessage("❌ Erreur de connexion. Veuillez réessayer.", 'system');
+                return false;
+            }
+
+            let resolved = false;
+            const onOpen = () => {
+                if (resolved) return;
+                resolved = true;
+                websocket?.removeEventListener?.('open', onOpen);
+                if (timeoutHandle) clearTimeout(timeoutHandle);
+                sendSelection();
+            };
+
+            // ⚠️ Check immédiat après tentative de connexion (évite la course)
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                return sendSelection();
+            }
+
+            websocket?.addEventListener?.('open', onOpen);
+
+            const timeoutHandle = setTimeout(() => {
+                if (resolved) return;
+                if (!websocket || websocket.readyState !== WebSocket.OPEN) {
+                console.error("❌ Connexion WebSocket non établie dans le délai imparti");
+                addMessage("❌ Erreur de connexion persistante. Rechargez la page.", 'system');
+                websocket?.removeEventListener?.('open', onOpen);
+                }
+            }, 1500);
+
+            return true;
+            }
+
 
         function handleUserInteraction(data) {
             console.log("🤝 Interaction utilisateur requise:", data);
@@ -1264,6 +1315,32 @@
                     step.classList.add('active');
                 }
             });
+        }
+        function initializeTaskTracking(taskId) {
+            // Vérification de la validité de l'ID de tâche
+            if (!taskId) {
+                console.error("❌ Erreur : L'ID de la tâche est manquant ou invalide.");
+                return;
+            }
+
+            // Mise à jour de l'ID de tâche actuel
+            currentTaskId = taskId;
+
+            // Affichage de la progression
+            showProgress();
+
+            // Nettoyage du timeout précédent s'il existe
+            if (window.taskInitTimeout) {
+                clearTimeout(window.taskInitTimeout);
+                console.log("⏳ Timeout précédent annulé pour éviter les doublons.");
+            }
+
+            // Configuration d'un nouveau timeout pour initialiser la connexion WebSocket et le suivi de progression
+            window.taskInitTimeout = setTimeout(() => {
+                console.log(`⏳ Initialisation de la tâche avec l'ID : ${taskId}`);
+                connectWebSocket(taskId);
+                trackProgress(taskId);
+            }, 1500);
         }
 
         async function trackProgress(taskId) {
@@ -1417,6 +1494,41 @@
         }
 
         // Gestion messages principaux
+        function validateUserInput(message) {
+            // Vérifie si le message existe et est une chaîne de caractères
+            if (!message || typeof message !== 'string') {
+                return {
+                    valid: false,
+                    error: 'Le message est requis et doit être une chaîne de caractères.'
+                };
+            }
+
+            // Supprime les espaces en début et fin de chaîne
+            const trimmed = message.trim();
+
+            // Vérifie si le message est trop court
+            if (trimmed.length < 3) {
+                return {
+                    valid: false,
+                    error: 'Le message doit contenir au moins 3 caractères (après suppression des espaces).'
+                };
+            }
+
+            // Vérifie si le message est trop long
+            if (trimmed.length > 1000) {
+                return {
+                    valid: false,
+                    error: 'Le message ne peut pas dépasser 1000 caractères.'
+                };
+            }
+
+            // Retourne le message validé
+            return {
+                valid: true,
+                message: trimmed
+            };
+        }
+
         function showTyping() {
             document.getElementById('typingIndicator').classList.add('active');
         }
@@ -1430,14 +1542,28 @@
             const errorDiv = document.getElementById('validationError');
             const message = (input?.value || '').trim();
 
-            // Garde-fous UI et validation
-            if (isProcessing) return;
-            if (!message) return showValidationError('Le message est vide');
-            if (message.length < 3) return showValidationError('Le message doit contenir au moins 3 caractères');
-            if (message.length > 1000) return showValidationError('Le message ne peut pas dépasser 1000 caractères');
+            // Vérification de l'état de traitement et validation du message
+            if (isProcessing) {
+                console.warn("⚠️ Une opération est déjà en cours. Veuillez patienter.");
+                return;
+            }
+
+            // Validation du message utilisateur
+            const validation = validateUserInput(message);
+
+            // Gestion des erreurs de validation
+            if (!validation.valid) {
+                console.error("❌ Erreur de validation :", validation.error);
+                return showValidationError(validation.error);
+            }
+
+            // Si tout est valide, récupération du message nettoyé
+            const msg = validation.message;
+
+
 
             // Détection si c'est un devis avec nom de client
-            const clientMatch = message.match(/devis.*pour\s+([A-Za-z\s]+?)(?:\s+pour|\s*$)/i);
+            const clientMatch = msg.match(/devis.pour\s+([A-Za-z\s]+?)(?:\s+pour|\s$)/i);
             if (clientMatch) {
                 const clientName = clientMatch[1].trim();
                 
@@ -1479,7 +1605,7 @@
                         'Content-Type': 'application/json',
                         'X-Request-ID': generateUUID(),
                     },
-                    body: JSON.stringify({ message, draft_mode: false }),
+                    body: JSON.stringify({ message: msg, draft_mode: false }),
                 });
 
                 // Gestion des erreurs HTTP
@@ -1500,6 +1626,7 @@
                 hideTyping();
 
                 if (result?.task_id) {
+                    initializeTaskTracking(result.task_id);
                     currentTaskId = result.task_id;
                     showProgress();
                     // Attendre que la tâche soit créée côté serveur
@@ -1583,26 +1710,31 @@
             const input = document.getElementById('chatInput');
             const message = input.value.trim();
 
+            // Fonction de validation centralisée
+            function validateUserInput(message) {
+                if (!message) {
+                    return { valid: false, error: 'Veuillez saisir un message' };
+                }
+                if (message.length < 3) {
+                    return { valid: false, error: 'Le message doit contenir au moins 3 caractères' };
+                }
+                if (message.length > 1000) {
+                    return { valid: false, error: 'Le message ne peut pas dépasser 1000 caractères' };
+                }
+                return { valid: true, error: null };
+            }
+
             // Validation côté client
-            if (!message) {
-                showValidationError('Veuillez saisir un message');
+            const validation = validateUserInput(message);
+            if (!validation.valid) {
+                showValidationError(validation.error);
                 return false;
             }
-
-            if (message.length < 3) {
-                showValidationError('Le message doit contenir au moins 3 caractères');
-                return false;
-            }
-
-            if (message.length > 1000) {
-                showValidationError('Le message ne peut pas dépasser 1000 caractères');
-                return false;
-            }
-
             if (isProcessing) {
                 showValidationError('Traitement en cours, veuillez patienter...');
                 return false;
             }
+
 
             // Si validation OK, envoyer le message
             await sendMessage();
@@ -1648,6 +1780,43 @@
             errorDiv.style.display = 'none';
             }
         }
+        function updateUIState() {
+            // Récupération des éléments du DOM
+            const input = document.getElementById('chatInput');
+            const button = document.getElementById('sendButton');
+
+            // Vérification de l'existence des éléments
+            if (!input || !button) {
+                console.error("❌ Éléments du DOM introuvables : 'chatInput' ou 'sendButton'.");
+                return;
+            }
+
+            // Récupération et nettoyage de la valeur de l'input
+            const message = input.value.trim();
+            updateUIState();
+            // Validation du message
+            const validation = validateUserInput(message);
+
+            // Désactivation du bouton si le message est invalide ou si un traitement est en cours
+            button.disabled = !validation.valid || isProcessing;
+
+            // Mise à jour des classes CSS en fonction de l'état
+            if (validation.valid && !isProcessing) {
+                // Si le message est valide et qu'aucun traitement n'est en cours
+                button.classList.remove('disabled');
+                input.classList.remove('error');
+            } else {
+                // Si le message est invalide ou qu'un traitement est en cours
+                button.classList.add('disabled');
+
+                // Ajout de la classe 'error' uniquement si le message est invalide et non vide
+                if (!validation.valid && message.length > 0) {
+                    input.classList.add('error');
+                } else {
+                    input.classList.remove('error');
+                }
+            }
+        }
         
         // Fonction de gestion des touches pour le chat
         function handleKeyPress(event) {
@@ -1660,15 +1829,7 @@
             }
         }
 
-        // Attendre que le DOM soit complètement chargé
-        document.addEventListener('DOMContentLoaded', function() {
-            // Ajouter un écouteur d'événements pour la gestion des touches
-            const chatInput = document.getElementById('chatInput');
-            if (chatInput) {
-                chatInput.addEventListener('keydown', handleKeyPress);
-            }
-        });
-
+    
         function updateSendButton() {
             const input = document.getElementById('chatInput');
             const button = document.getElementById('sendButton');
@@ -1710,6 +1871,25 @@
         }
 
         // Connexion WebSocket
+        function parseWebSocketMessage(event) {
+            // Vérification de la présence des données dans l'événement
+            if (!event || !event.data) {
+                console.error("❌ Aucune donnée reçue dans l'événement WebSocket.");
+                return null;
+            }
+
+            try {
+                // Tentative de parsing des données JSON
+                const parsedData = JSON.parse(event.data);
+                return parsedData;
+            } catch (error) {
+                // Gestion des erreurs de parsing
+                console.error("❌ Erreur lors du parsing du message WebSocket :", error);
+                console.error("❌ Contenu brut reçu :", event.data);
+                return null;
+            }
+        }
+
         function connectWebSocket(taskId) {
             if (websocket && websocket.readyState === WebSocket.OPEN) {
                 console.log("🌐 WebSocket déjà connecté.");
@@ -1730,7 +1910,8 @@
             };
 
             websocket.onmessage = (event) => {
-                const data = JSON.parse(event.data);
+                const data = parseWebSocketMessage(event);
+                if (!data) return;
                 console.log("📥 Message reçu:", data);
 
                 if (data.type === 'progress') {
@@ -1786,17 +1967,27 @@
             };
 
             websocket.onclose = (event) => {
-                // Nettoyer les références
-                if (websocket === window.websocket) {
-                    window.websocket = null;
-                }
-                console.warn(`🔌 WebSocket déconnecté. Code: ${event.code}, Raison: ${event.reason}`);
-                console.log('🔌 WebSocket fermé. Code: ${event.code}, Raison: ${event.reason}');
-                if (event.code !== 1000 && event.code !== 1001) {
+            // Nettoyer les références
+            if (websocket === window.websocket) {
+                window.websocket = null;
+            }
+
+            const code = event?.code ?? 0;
+            const reason = (event?.reason && String(event.reason).trim()) || 'Aucune raison fournie';
+            const wasClean = event?.wasClean === true;
+
+            console.warn(`🔌 WebSocket déconnecté${wasClean ? ' proprement' : ''}. Code: ${code}, Raison: ${reason}`);
+
+            // Reconnexion uniquement si fermeture non intentionnelle
+            if (code !== 1000 && code !== 1001) {
+                if (typeof addMessage === 'function') {
                     addMessage("La connexion a été perdue. Tentative de reconnexion...", 'system');
-                    attemptReconnection(taskId);
                 }
-            };
+                if (typeof attemptReconnection === 'function') {
+                    improvedReconnection(taskId);
+                }
+            }
+        };
 
             websocket.onerror = (error) => {
                 console.error("❌ Erreur WebSocket:", error);
@@ -1858,6 +2049,88 @@
                 connectWebSocket(taskId);
             }, 3000);
         }
+        function improvedReconnection(taskId) {
+            // Nettoyage de l'intervalle de reconnexion précédent s'il existe
+            if (reconnectInterval) {
+                clearInterval(reconnectInterval);
+                reconnectInterval = null;
+                console.log("🔄 Nettoyage de l'intervalle de reconnexion précédent.");
+            }
+
+            let attempts = 0;
+            const maxAttempts = 5;
+            const baseDelay = 2000; // Délai de base en millisecondes
+
+            // Fonction pour tenter une reconnexion
+            function attemptReconnect() {
+                attempts++;
+                console.log(`🔄 Tentative de reconnexion ${attempts}/${maxAttempts}`);
+
+                // Si le nombre maximal de tentatives est atteint
+                if (attempts >= maxAttempts) {
+                    console.error("❌ Échec de la reconnexion après plusieurs tentatives.");
+                    addMessage("❌ Impossible de rétablir la connexion. Veuillez recharger la page.", 'system');
+                    return;
+                }
+
+                // Calcul du délai exponentiel
+                const delay = baseDelay * Math.pow(2, attempts - 1);
+                console.log(`⏳ Prochaine tentative dans ${delay} ms`);
+
+                // Configuration du délai pour la prochaine tentative
+                setTimeout(() => {
+                    // Vérification si la connexion WebSocket est déjà établie
+                    if (websocket && websocket.readyState === WebSocket.OPEN) {
+                        console.log("✅ Connexion WebSocket déjà établie.");
+                        return;
+                    }
+
+                    // Tentative de reconnexion
+                    console.log(`🔄 Tentative de reconnexion pour la tâche ${taskId}`);
+                    connectWebSocket(taskId);
+
+                    // Appel récursif pour une nouvelle tentative
+                    attemptReconnect();
+                }, delay);
+            }
+
+            // Lancement de la première tentative de reconnexion
+            attemptReconnect();
+        }
+        function cleanup() {
+            // Nettoyage du timeout d'initialisation de tâche
+            if (window.taskInitTimeout) {
+                clearTimeout(window.taskInitTimeout);
+                window.taskInitTimeout = null;
+                console.log("⏳ Timeout d'initialisation de tâche nettoyé.");
+            }
+
+            // Nettoyage de l'intervalle de suivi de progression
+            if (progressInterval) {
+                clearInterval(progressInterval);
+                progressInterval = null;
+                console.log("📊 Intervalle de progression nettoyé.");
+            }
+
+            // Nettoyage de l'intervalle de reconnexion
+            if (reconnectInterval) {
+                clearInterval(reconnectInterval);
+                reconnectInterval = null;
+                console.log("🔄 Intervalle de reconnexion nettoyé.");
+            }
+
+            // Fermeture propre de la connexion WebSocket si elle est ouverte
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                websocket.close(1000, "Fermeture de la page");
+                console.log("🔌 Connexion WebSocket fermée proprement.");
+            }
+        }
+
+        // Écouteur d'événement pour nettoyer avant le déchargement de la page
+        window.addEventListener('beforeunload', () => {
+            console.log("🧹 Nettoyage des ressources avant le déchargement de la page.");
+            cleanup();
+        });
 
         // Initialisation au chargement de la page, une seule fois !
         document.addEventListener('DOMContentLoaded', function () {
