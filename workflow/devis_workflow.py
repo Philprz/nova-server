@@ -996,15 +996,13 @@ class DevisWorkflow:
         """
         Traite un prompt avec tracking de progression
         """
-        if task_id:
-            self.task_id = task_id
-            logger.info(f"✅ Utilisation du task_id fourni: {task_id}")
         extracted_info: Optional[Dict[str, Any]] = None
         """Process le prompt utilisateur via LLM et workflow"""
         try:
             # 🔧 MODIFICATION : Utiliser le task_id fourni si disponible
             if task_id:
                 self.task_id = task_id
+                logger.info(f"✅ Utilisation du task_id fourni: {task_id}")
                 # Récupérer la tâche existante créée par start_quote_workflow
                 self.current_task = progress_tracker.get_task(task_id)
                 if not self.current_task:
@@ -1014,7 +1012,6 @@ class DevisWorkflow:
                     draft_mode=self.draft_mode,
                     task_id=task_id
                     )
-
             # Si pas de task existante, en créer une nouvelle
             if not self.current_task:
                 self.task_id = self._initialize_task_tracking(user_prompt)
@@ -1064,22 +1061,39 @@ class DevisWorkflow:
                     logger.info(f"⏸️ Tâche {self.task_id} en attente d'interaction utilisateur")
                     # ARRÊT COMPLET - Pas d'appel à complete_task ni de broadcast
                     return result
-                else:
-                    # Workflow terminé normalement
-                    progress_tracker.complete_task(self.task_id, result)
         
             # Assurer que le résultat final est envoyé via WebSocket SEULEMENT si terminé
             if result.get("status") != "user_interaction_required":
                 try:
-                    await websocket_manager.broadcast_to_task(self.task_id, {
-                        "type": "completion",
-                        "task_id": self.task_id,
-                        "data": result,
-                        "status": "completed"
-                    })
-                
+                    # Envoyer le résultat via WebSocket
+                    await websocket_manager.broadcast_to_task(
+                        self.task_id,
+                        {
+                            "type": "quote_generation_completed",
+                            "task_id": self.task_id,
+                            "result": result,
+                            "status": "completed",
+                            "timestamp": datetime.now().isoformat(),
+                        }
+                    )
+                    logger.info(f"🔔 Résultat final envoyé via WebSocket pour la tâche {self.task_id}")
+
+                    # Attendre brièvement pour s'assurer que le client a reçu le message
+                    await asyncio.sleep(1.0)
+
                 except Exception as ws_error:
-                    logger.error(f"Erreur envoi résultat WebSocket: {ws_error}")
+                    logger.error(f"❌ Erreur lors de l'envoi du résultat via WebSocket pour {self.task_id}: {ws_error}")
+                    raise  # Relever l'erreur pour éviter de marquer la tâche comme terminée si l'envoi échoue
+
+                # Marquer la tâche comme terminée uniquement si l'envoi WebSocket a réussi
+                if self.current_task:
+                    try:
+                        progress_tracker.complete_task(self.task_id, result)
+                        logger.info(f"✅ Tâche {self.task_id} marquée comme terminée avec succès.")
+                    except Exception as complete_error:
+                        logger.error(f"❌ Erreur lors de la finalisation de la tâche {self.task_id}: {complete_error}")
+                        raise  # Relever l'erreur pour éviter de laisser la tâche dans un état incohérent
+
             return result
             
         except Exception as e:
