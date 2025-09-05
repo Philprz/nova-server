@@ -2753,7 +2753,7 @@ class DevisWorkflow:
                             "quote_data": {
                                 "sap_doc_num": sap_quote.get("doc_num"),
                                 "sf_opportunity_id": salesforce_quote.get("id") if salesforce_quote else None,
-                                "total": validated_data.get("products", [{}])[0].get("total_price", 0) * validated_data.get("products", [{}])[0].get("quantity", 1)
+                                "total": total_amount if total_amount > 0 else 0
                             }
                         })
                 except Exception as e:
