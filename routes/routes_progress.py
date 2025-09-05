@@ -739,18 +739,34 @@ async def get_quote_status(task_id: str, detailed: bool = False):
                 logger.warning(f"Tâche {task_id} introuvable même dans l'historique")
                 raise HTTPException(status_code=404, detail=f"Tâche {task_id} introuvable")
         
-        # Tâche active trouvée
+        # Tâche active trouvée - vérifier si elle est réellement terminée
+        task_progress = task.get_detailed_progress() if detailed else task.get_overall_progress()
+        task_status = task_progress.get("status", "")
+        
+        # Si la tâche est terminée, la retirer des tâches actives et la placer en historique
+        if task_status in ["completed", "failed", "cancelled"]:
+            logger.info(f"✅ Tâche {task_id} terminée ({task_status}) - transfert vers historique")
+            progress_tracker.complete_task(task_id, task_progress)
+            return {
+                "found": True,
+                "completed": True,
+                "status": task_status,
+                **task_progress
+            }
+        # Tâche encore active
         if detailed:
             return {
                 "found": True,
                 "completed": False,
-                **task.get_detailed_progress()
+                "status": task_status,
+                **task_progress
             }
         else:
             return {
                 "found": True,
                 "completed": False,
-                **task.get_overall_progress()
+                "status": task_status,
+                **task_progress
             }
     except HTTPException:
         raise
