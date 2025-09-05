@@ -1,5 +1,5 @@
 # workflow/devis_workflow.py - VERSION COMPLÈTE AVEC VALIDATEUR CLIENT
-from calendar import c
+
 import re
 import sys
 import io
@@ -16,7 +16,6 @@ from services.llm_extractor import LLMExtractor
 from services.mcp_connector import MCPConnector, call_mcp_with_progress, test_mcp_connections_with_progress
 from services.progress_tracker import progress_tracker, QuoteTask, TaskStatus
 from services.suggestion_engine import SuggestionEngine
-from services.client_validator import ClientValidator
 from services.websocket_manager import websocket_manager
 from services.company_search_service import company_search_service
 from utils.client_lister import find_client_everywhere
@@ -132,26 +131,6 @@ class DevisWorkflow:
         except Exception as e:
             logger.warning(f"⚠️ Erreur pré-chargement cache: {str(e)}")
         
-    def _initialize_task_tracking(self, prompt: str) -> str:
-        """Initialise le tracking de progression pour cette génération"""
-        if self.task_id:
-            # Utiliser le task_id prédéfini
-            self.current_task = progress_tracker.create_task(
-                user_prompt=prompt,
-                draft_mode=self.draft_mode,
-                task_id=self.task_id
-            )
-        else:
-            # Créer un nouveau task_id si non fourni
-            self.current_task = progress_tracker.create_task(
-                user_prompt=prompt,
-                draft_mode=self.draft_mode
-            )
-            self.task_id = self.current_task.task_id
-        # Conserver une référence globale pour les WebSockets
-        progress_tracker._current_task = self.current_task
-        logger.info(f"Tracking initialisé pour la tâche: {self.task_id}")
-        return self.task_id
     
     def _track_step_start(self, step_id: str, message: str = ""):
         """Démarre le tracking d'une étape"""
@@ -1263,7 +1242,7 @@ class DevisWorkflow:
             # Étape 2.1: Recherche client
             self._track_step_start("search_client", "Recherche du client...")
             
-            client_info = await unified_validator.validate_client_complete(extracted_info.get("client"))
+            client_info = await self.client_validator.validate_client_complete(extracted_info.get("client"))
             # CORRECTION : Gérer les suggestions client MÊME si trouvé (choix multiple)
             if client_info.get("suggestions") and len(client_info["suggestions"]) > 1:
                 self._track_step_progress("verify_client_info", 50, "Plusieurs clients trouvés - sélection requise")
@@ -1542,7 +1521,7 @@ class DevisWorkflow:
             self._track_step_complete("prepare_quote", "Devis préparé")
             self._track_step_start("save_to_sap", "Enregistrement dans SAP...")
             
-            quote_result = await self._create_quote_in_salesforce()
+            quote_result = await self._create_quote_in_salesforce(client_info.get("data", {}), products_info)
             self.context["quote_result"] = quote_result
             
             if not quote_result.get("success"):
@@ -8953,7 +8932,6 @@ class EnhancedDevisWorkflow(DevisWorkflow):
                 "found": False,
                 "error": f"Erreur système: {str(e)}"
             }
-        return await self.product_manager._search_sap_product(product_code, product_name)
     
     async def _search_products_with_notifications(self, products: list):
         """Recherche produits avec notifications"""
