@@ -714,8 +714,16 @@ class DevisWorkflow:
         logger.info(f"📦 _handle_product_selection - selected_product_data: {selected_product_data}")
 
         if selected_product_data:
-            # Récupérer le client depuis le contexte
+            # CORRECTION: Récupérer le client depuis le contexte avec validation robuste
             client_info = self.context.get("client_info", {})
+
+            # Valider que client_info contient bien les données
+            if not client_info or not client_info.get("data"):
+                logger.error("❌ Données client manquantes dans le contexte lors de la sélection produit")
+                return {
+                    "success": False,
+                    "error": "Données client perdues - impossible de générer le devis"
+                }
 
             # Formater le produit sélectionné pour la génération du devis
             # Utiliser les noms de champs attendus par _create_quote_in_salesforce
@@ -740,11 +748,29 @@ class DevisWorkflow:
             # Log pour debug
             logger.info(f"✅ Produit formaté: {formatted_product['name']} - Code: {formatted_product['code']} - Prix: {formatted_product['unit_price']}€ - Quantité: {formatted_product['quantity']}")
 
-            # Préparer les données validées pour la génération
+            # CORRECTION: S'assurer que les données client sont bien présentes
             validated_data = {
                 "client": client_info.get("data"),
                 "products": [formatted_product]
             }
+
+            # NOUVELLE VALIDATION: Vérifier que client_data n'est pas None
+            if not validated_data.get("client"):
+                logger.error("❌ validated_data.client est None - tentative de récupération alternative")
+                # Essayer de récupérer depuis d'autres sources du contexte
+                alternative_client = (
+                    self.context.get("selected_client") or
+                    self.context.get("validated_client") or
+                    self.context.get("client_data")
+                )
+                if alternative_client:
+                    validated_data["client"] = alternative_client
+                    logger.info("✅ Client récupéré depuis source alternative")
+                else:
+                    return {
+                        "success": False,
+                        "error": "Impossible de récupérer les données client pour la génération du devis"
+                    }
 
             logger.info(f"📦 validated_data pour génération: {validated_data}")
 
@@ -790,7 +816,29 @@ class DevisWorkflow:
                 # Si c'est une liste, la transformer en dict avec clé "products"
                 validated_data = {"products": [p.get("data", p) for p in validated_data]}
 
-            client_data = validated_data.get("client", self.context.get("client_info", {}).get("data"))
+            # CORRECTION: Récupération robuste des données client
+            client_data = validated_data.get("client")
+            if not client_data:
+                # Fallback vers le contexte
+                client_info = self.context.get("client_info", {})
+                client_data = client_info.get("data")
+                
+                # Si toujours pas de données, essayer d'autres sources
+                if not client_data:
+                    client_data = (
+                        self.context.get("selected_client") or
+                        self.context.get("validated_client") or
+                        self.context.get("client_data")
+                    )
+                    
+                    if client_data:
+                        logger.info("✅ Données client récupérées depuis source alternative dans _continue_quote_generation")
+                    else:
+                        logger.error("❌ Aucune donnée client disponible pour la génération")
+                        return self._build_error_response(
+                            "Données client manquantes", 
+                            "Impossible de générer le devis sans informations client"
+                        )
             products_data = validated_data.get("products", self.context.get("products_info", []))
 
             # Calculs finaux
@@ -2416,7 +2464,7 @@ class DevisWorkflow:
                             logger.error("❌ Impossible de récupérer les données client depuis aucune source")
                             return {
                                 "success": False,
-                                "error": "Données client introuvables dans le contexte"
+                                "error": "Données client introuvables dans le contexte - veuillez relancer le processus"
                             }
 
                 client_name = sf_client_data.get("Name", "Client Unknown") if sf_client_data else "Client Unknown"
