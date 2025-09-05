@@ -399,12 +399,12 @@ class ProgressTracker:
             import threading
 
             payload = {
-                "type": "completion",
+                "type": "quote_generation_completed",
                 "task_id": task_id,
                 "data": result,
                 "status": "completed",
                 "timestamp": datetime.now().isoformat()
-            }
+                }
 
             async def _notify_and_close():
                 try:
