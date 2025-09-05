@@ -69,7 +69,7 @@ class DevisWorkflow:
         self.validation_enabled = validation_enabled
         self.draft_mode = draft_mode
         self.force_production = force_production
-        self.task_id = task_id  # Accepter un task_id prédéfini
+        self.task_id = task_id
         self.current_task = None
         self.context = {}
         self.workflow_steps = []
@@ -79,35 +79,30 @@ class DevisWorkflow:
         if force_production:
             logger.info("🔥 MODE PRODUCTION FORCÉ - Pas de fallback démo")
 
+        # Gestion de la tâche
         if task_id:
-            self.task_id = task_id
-            self.current_task = progress_tracker.get_task(task_id)
-            if self.current_task:
-                logger.info(f"✅ Tâche récupérée: {task_id}")
-            else:
-                # Ici, tu dois forcer la création explicite AVEC ce même ID
-                logger.warning(f"⚠️ Tâche {task_id} introuvable - création explicite avec l'ID existant")
-                self.current_task = progress_tracker.create_task(
-                    user_prompt="Génération de devis (créée via fallback)",
-                    draft_mode=self.draft_mode,
-                    task_id=self.task_id  # <-- garder explicitement le même ID
-                )
-
-        else:
-            self.current_task = None
-            self.task_id = None
             try:
-                if task_id:
-                    self.current_task = progress_tracker.get_task(task_id)
-                    if self.current_task:
-                        logger.info(f"✅ Tâche récupérée: {task_id}")
-                        # Synchroniser le contexte existant si disponible
-                        if hasattr(self.current_task, 'context'):
-                            self.context.update(self.current_task.context)
+                self.current_task = progress_tracker.get_task(task_id)
+                if self.current_task:
+                    logger.info(f"✅ Tâche récupérée: {task_id}")
+                    # Synchroniser le contexte existant si disponible
+                    if hasattr(self.current_task, 'context') and self.current_task.context:
+                        self.context.update(self.current_task.context)
+                        logger.info(f"✅ Contexte restauré depuis la tâche: {list(self.context.keys())}")
                     else:
-                        logger.warning(f"⚠️ Tâche {task_id} introuvable")
+                        logger.info("📝 Tâche existante - contexte vide")
+                else:
+                    # Création explicite avec l'ID fourni
+                    logger.warning(f"⚠️ Tâche {task_id} introuvable - création explicite avec l'ID existant")
+                    self.current_task = progress_tracker.create_task(
+                        user_prompt="Génération de devis (créée via fallback)",
+                        draft_mode=self.draft_mode,
+                        task_id=task_id
+                    )
             except Exception as e:
-                logger.error(f"Erreur lors de la récupération de la tâche {task_id}: {str(e)}")
+                logger.error(f"Erreur lors de la gestion de la tâche {task_id}: {str(e)}")
+                self.current_task = None
+                self.task_id = None
 
         # Initialisation des moteurs
         self.suggestion_engine = SuggestionEngine()
@@ -230,9 +225,13 @@ class DevisWorkflow:
 
     def _save_context_to_task(self):
         """Sauvegarde le contexte actuel dans la tâche"""
-        if self.current_task and hasattr(self.current_task, 'context'):
-            self.current_task.context = self.context.copy()
-            logger.debug(f"✅ Contexte sauvegardé dans la tâche {self.task_id}")
+        if self.current_task:
+            if not hasattr(self.current_task, 'context'):
+                self.current_task.context = {}
+            self.current_task.context.update(self.context)
+            logger.info(f"💾 Contexte sauvegardé: {list(self.context.keys())}")
+        else:
+            logger.warning("⚠️ Impossible de sauvegarder le contexte - pas de tâche courante")
 
     def _normalize_client_info(self, client_info: Any) -> Dict[str, Any]:
         """Normalise la structure client_info pour éviter les erreurs de type None"""
@@ -415,6 +414,7 @@ class DevisWorkflow:
                 # Mise à jour du contexte
                 self.context["client_info"] = {"data": selected_client_data, "found": True}
                 self.context["client_validated"] = True
+                
                 # NOUVEAU: Sauvegarder le contexte dans la tâche
                 self._save_context_to_task()
                 self.context["client_validated"] = True
@@ -715,6 +715,11 @@ class DevisWorkflow:
 
         if selected_product_data:
             # CORRECTION: Récupérer le client depuis le contexte avec validation robuste
+            # DIAGNOSTIC: Vérifier l'état du contexte
+            logger.info(f"🔍 État du contexte lors sélection produit:")
+            logger.info(f"   - client_info présent: {bool(self.context.get('client_info'))}")
+            logger.info(f"   - client_info.data présent: {bool(self.context.get('client_info', {}).get('data'))}")
+            logger.info(f"   - clés contexte: {list(self.context.keys())}")
             client_info = self.context.get("client_info", {})
 
             # Valider que client_info contient bien les données

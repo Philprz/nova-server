@@ -340,7 +340,10 @@ async def handle_client_selection_task(task_id: str, response_data: dict):
 
         # 5) Créer le workflow
         workflow = DevisWorkflow(task_id=task_id, force_production=True)
-
+        # CORRECTION: Restaurer le contexte si disponible
+        if hasattr(task, 'context') and task.context:
+            workflow.context = task.context.copy()
+            logger.info(f"✅ Contexte restauré pour sélection client: {list(workflow.context.keys())}")
         if action == "create_new":
             # Création d'un nouveau client
             req_name = (client_name or response_data.get("client_name") or "").strip()
