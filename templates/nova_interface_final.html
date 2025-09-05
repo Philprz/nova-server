@@ -1367,12 +1367,15 @@
                     }
                     const data = await response.json();
 
-                    if (data.status === 'completed') {
+                    // Vérifier plusieurs conditions d'arrêt du polling
+                    if (data.status === 'completed' || data.completed === true) {
                         clearInterval(progressInterval);
                         progressInterval = null;
                         hideProgress();
                         handleTaskComplete(data);
-                    } else if (data.status === 'failed') {
+                        console.log("🛑 Polling arrêté - tâche terminée:", data.status);
+                        return;
+                    } else if (data.status === 'failed' || data.status === 'cancelled') {
                         clearInterval(progressInterval);
                         progressInterval = null;
                         hideProgress();
