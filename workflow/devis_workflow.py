@@ -782,8 +782,22 @@ class DevisWorkflow:
 
             # Continuer directement vers la génération du devis
             logger.info(f"✅ Produit sélectionné avec prix {formatted_product['UnitPrice']}€, génération du devis...")
-            return await self._continue_quote_generation(validated_data)
-            
+            # Préparer quote_data pour la création SAP
+            quote_data = {
+                "client": validated_data["client"],
+                "products": validated_data["products"],
+                "total_amount": formatted_product["total_price"],
+                "DocumentLines": [{
+                    "ItemCode": formatted_product["code"],
+                    "ItemName": formatted_product["name"],
+                    "ItemDescription": formatted_product["name"],
+                    "Quantity": formatted_product["quantity"],
+                    "Price": formatted_product["unit_price"],
+                    "LineNum": 0
+                }]
+            }
+            # Générer le devis en utilisant les données validées
+            return await self._continue_quote_generation(validated_data, quote_data)
 
     async def _handle_quantity_adjustment(self, user_input: Dict, context: Dict) -> Dict[str, Any]:
         """Gère l'ajustement des quantités"""
@@ -812,7 +826,7 @@ class DevisWorkflow:
             }
 
     # 🆕 MÉTHODE DE GÉNÉRATION FINALE OPTIMISÉE
-    async def _continue_quote_generation(self, validated_data: Dict) -> Dict[str, Any]:
+    async def _continue_quote_generation(self, validated_data: Dict, quote_data: Dict = None) -> Dict[str, Any]:
         """Continue la génération du devis avec les données validées"""
 
         try:
@@ -919,8 +933,8 @@ class DevisWorkflow:
             products_data = validated_products_data
             total_amount = sum(p.get("LineTotal", 0) for p in products_data)
 
-            # Génération SAP
-            sap_quote = await self._create_sap_quote(client_data, products_data)
+            # Génération SAP (passer quote_data si disponible)
+            sap_quote = await self._create_sap_quote(client_data, products_data, quote_data)
 
             # Génération Salesforce (si SAP réussi)
             if sap_quote.get("success"):
@@ -948,14 +962,14 @@ class DevisWorkflow:
             return self._build_error_response("Erreur génération", str(e))
 
     # Méthodes auxiliaires pour la génération
-    async def _create_sap_quote(self, client_data: Dict, products_data: List[Dict]) -> Dict[str, Any]:
+    async def _create_sap_quote(self, client_data: Dict, products_data: List[Dict], quote_data: Dict = None) -> Dict[str, Any]:
         """Crée le devis dans SAP"""
         try:
             # Utiliser la méthode existante _create_quote_in_salesforce qui gère SAP et Salesforce
             self.context["client_info"] = {"data": client_data, "found": True}
             self.context["products_info"] = products_data
 
-            result = await self._create_quote_in_salesforce(client_data, products_data)
+            result = await self._create_quote_in_salesforce(client_data, products_data, quote_data)
             return {
                 "success": result.get("success", False),
                 "quote_number": result.get("sap_quote_number"),
