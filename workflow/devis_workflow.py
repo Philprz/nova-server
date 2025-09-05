@@ -2745,8 +2745,6 @@ class DevisWorkflow:
                         logger.error(f"❌ SAP a signalé un échec: {sap_quote.get('error', 'Erreur non spécifiée')}")
                     else:
                         logger.info(f"✅ Devis SAP créé avec succès: DocNum {sap_quote.get('doc_num')}")
-                        logger.info(f"✅ Devis SAP créé avec succès: DocNum {sap_result.get('doc_num')}")
-
                         # Notification WebSocket du succès
                         await websocket_manager.send_task_update(self.task_id, {
                             "type": "quote_created",
