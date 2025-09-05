@@ -459,6 +459,13 @@ async def handle_product_selection_task(task_id: str, response_data: Dict[str, A
         from workflow.devis_workflow import DevisWorkflow
         workflow = DevisWorkflow(task_id=task_id, force_production=True)
 
+        # CORRECTION: Restaurer le contexte de la tâche dans le workflow
+        if hasattr(task, 'context') and task.context:
+            workflow.context = task.context.copy()
+            logger.info(f"✅ Contexte restauré pour le workflow: {list(workflow.context.keys())}")
+        else:
+            logger.warning("⚠️ Aucun contexte trouvé dans la tâche")
+
         # Construire l'entrée utilisateur pour le workflow
         selected_product = response_data.get("selected_product", {}) or {}
         product_code = response_data.get("product_code")

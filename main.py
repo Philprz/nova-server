@@ -271,4 +271,4 @@ if __name__ == "__main__":
         os.environ["PYTHONIOENCODING"] = "utf-8"
     
     # Démarrage du serveur
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8000, log_config=None, loop="asyncio")
