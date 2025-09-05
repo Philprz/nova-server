@@ -2430,6 +2430,7 @@ class DevisWorkflow:
         """Crée un devis dans Salesforce"""
         # CORRECTION: Définir valid_products au début
         valid_products = []
+        salesforce_quote = None
         try:
             """Crée un devis dans Salesforce"""
             # CORRECTION: Utiliser les paramètres fournis si disponibles, sinon récupérer du contexte
