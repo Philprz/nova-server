@@ -45,6 +45,7 @@ logger = logging.getLogger('workflow_devis')
 
 # Import conditionnel du validateur client
 try:
+    from services.client_validator import ClientValidator
     VALIDATOR_AVAILABLE = True
     logger.info("✅ Validateur client disponible")
 except ImportError as e:
@@ -2920,62 +2921,106 @@ class DevisWorkflow:
             else:
                 return 120.0
             
-    async def _create_sap_client_if_needed(self, client_info: Dict) -> Dict:
-        """Crée un client SAP si nécessaire - STRUCTURE DE RETOUR CORRIGÉE"""
+    async def _create_sap_client_if_needed(self, client_info):
+        """Crée un client SAP si nécessaire (robuste, schéma de retour stable)"""
         import logging
+        from datetime import datetime
         logger = logging.getLogger(__name__)
-        
+
+        # Helpers
+        def _has_method(obj, name: str) -> bool:
+            return hasattr(obj, name) and callable(getattr(obj, name))
+
+        async def _sap_call_search(query: str):
+            payload = {"query": query, "entity_type": "BusinessPartners", "limit": 5}
+            if _has_method(self.mcp_connector, "call_sap_mcp"):
+                return await self.mcp_connector.call_sap_mcp("sap_search", payload)
+            # fallback ancien schéma
+            if _has_method(self.mcp_connector, "call_mcp"):
+                return await self.mcp_connector.call_mcp("sap_mcp", "sap_search", payload)
+            raise RuntimeError("Aucune méthode SAP MCP disponible")
+
+        async def _sap_call_create(customer_data: dict):
+            if _has_method(self.mcp_connector, "call_sap_mcp"):
+                # tenter l’endpoint complet puis fallback
+                try:
+                    return await self.mcp_connector.call_sap_mcp(
+                        "sap_create_customer_complete", {"customer_data": customer_data}
+                    )
+                except Exception:
+                    return await self.mcp_connector.call_sap_mcp(
+                        "sap_create_customer", {"customer_data": customer_data}
+                    )
+            if _has_method(self.mcp_connector, "call_mcp"):
+                # fallback ancien schéma
+                try:
+                    return await self.mcp_connector.call_mcp(
+                        "sap_mcp", "sap_create_customer_complete", {"customer_data": customer_data}
+                    )
+                except Exception:
+                    return await self.mcp_connector.call_mcp(
+                        "sap_mcp", "sap_create_customer", {"customer_data": customer_data}
+                    )
+            raise RuntimeError("Aucune méthode SAP MCP disponible")
+
         try:
-            client_name = client_info.get("data", {}).get("Name", "Client NOVA")
-            
-            # 1. Chercher si le client existe avec sap_search
-            search_result = await self.mcp_connector.call_sap_mcp(
-                "sap_search", {
-                    "query": client_name,
-                    "entity_type": "BusinessPartners",
-                    "limit": 5
-                }
-            )
-            
-            # CORRECTION: Vérifier la vraie structure de retour SAP
-            if "error" not in search_result:
-                # Si des résultats existent dans la réponse
-                if search_result.get("value") and len(search_result["value"]) > 0:
-                    found_client = search_result["value"][0]
-                    logger.info(f"✅ Client SAP trouvé: {found_client.get('CardCode')} - {found_client.get('CardName')}")
-                    return {"success": True, "client": found_client}
-                elif search_result.get("results") and len(search_result["results"]) > 0:
-                    found_client = search_result["results"][0]
-                    logger.info(f"✅ Client SAP trouvé: {found_client.get('CardCode')} - {found_client.get('CardName')}")
-                    return {"success": True, "client": found_client}
-            
-            # 2. Si pas trouvé, créer le client
-            card_code = f"C{datetime.now().strftime('%Y%m%d%H%M%S')}"
-            
+            client_data = (client_info or {}).get("data", {})
+            client_name = (client_data.get("Name") or "").strip()
+
+            if not client_name:
+                return {"success": False, "error": "Nom client manquant"}
+
+            # 1) Recherche existant
+            search_result = await _sap_call_search(client_name)
+            if isinstance(search_result, dict) and "error" not in search_result:
+                candidates = []
+                if isinstance(search_result.get("value"), list):
+                    candidates = search_result["value"]
+                elif isinstance(search_result.get("results"), list):
+                    candidates = search_result["results"]
+                elif search_result.get("count", 0) > 0 and isinstance(search_result.get("results"), list):
+                    candidates = search_result["results"]
+
+                if candidates:
+                    found = candidates[0]
+                    logger.info("✅ Client SAP trouvé: %s - %s",
+                                found.get("CardCode"), found.get("CardName"))
+                    return {"success": True, "client": found, "created": False}
+
+            # 2) Création
+            # CardCode <= 15, unique à la seconde: "C" + YYMMDDHHMMSS + 2 digits µs
+            card_code = f"C{datetime.now():%y%m%d%H%M%S}{datetime.now():%f}"[:15]
+
             customer_data = {
                 "CardCode": card_code,
                 "CardName": client_name,
                 "CardType": "cCustomer",
                 "Currency": "EUR",
-                "Valid": "tYES",
-                "Frozen": "tNO"
             }
-            
-            create_result = await self.mcp_connector.call_sap_mcp(
-                "sap_create_customer_complete", 
-                {"customer_data": customer_data}
-            )
-            
-            if create_result.get("success"):
-                logger.info(f"✅ Client SAP créé: {card_code}")
-                return {"success": True, "client": {"CardCode": card_code, "CardName": client_name}}
+            # Conserver GroupCode si présent côté v1
+            if "GroupCode" in client_data:
+                customer_data["GroupCode"] = client_data["GroupCode"]
             else:
-                logger.error(f"❌ Échec création client SAP: {create_result.get('error')}")
-                return {"success": False, "error": create_result.get("error", "Erreur inconnue")}
-                
+                # valeur raisonnable si besoin de groupe
+                customer_data["GroupCode"] = 100
+
+            create_result = await _sap_call_create(customer_data)
+            if isinstance(create_result, dict) and create_result.get("success"):
+                logger.info("✅ Client SAP créé: %s", card_code)
+                return {
+                    "success": True,
+                    "client": {"CardCode": card_code, "CardName": client_name},
+                    "created": True,
+                }
+
+            err = (create_result or {}).get("error", "Erreur inconnue")
+            logger.error("❌ Échec création client SAP: %s", err)
+            return {"success": False, "error": err}
+
         except Exception as e:
-            logger.error(f"❌ Exception création client SAP: {str(e)}")
+            logger.error("❌ Exception création client SAP: %s", e)
             return {"success": False, "error": str(e)}
+
     
     async def _create_salesforce_quote(self, quote_data: Dict[str, Any], sap_quote: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         """Crée RÉELLEMENT le devis dans Salesforce avec tous les détails"""
