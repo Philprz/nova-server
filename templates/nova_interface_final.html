@@ -2391,20 +2391,6 @@
                 </div>
             `;
 
-            // Ajouter le message au chat
-            if (typeof addMessage === 'function') {
-                addMessage(resultHtml, 'system');
-            } else {
-                const resultMessage = document.createElement('div');
-                resultMessage.className = 'message system-message';
-                resultMessage.innerHTML = resultHtml;
-                const chatMessages = document.getElementById('chat-messages');
-                if (chatMessages) {
-                    chatMessages.appendChild(resultMessage);
-                    chatMessages.scrollTop = chatMessages.scrollHeight;
-                }
-            }
-
             console.log("✅ Résultat du devis affiché avec succès");
         }
 
