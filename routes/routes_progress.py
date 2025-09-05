@@ -505,6 +505,14 @@ async def handle_product_selection_task(task_id: str, response_data: Dict[str, A
         # Continuer le workflow
         continuation_result = await workflow.continue_after_user_input(user_input, context)
 
+        # S'assurer que le résultat final est bien transmis à l'interface
+        if continuation_result and continuation_result.get("success"):
+            await websocket_manager.send_task_update(task_id, {
+                "type": "workflow_complete",
+                "status": "success",
+                "result": continuation_result
+            })
+
         # Notifier via WebSocket
         try:
             await websocket_manager.send_task_update(task_id, {

@@ -758,8 +758,8 @@ class DevisWorkflow:
                 "code": selected_product_data.get("ItemCode"),
                 "name": selected_product_data.get("ItemName"),
                 "quantity": quantity,
-                # Le prix peut venir de différents champs selon la source
-                "unit_price": selected_product_data.get("AvgPrice") or selected_product_data.get("Price") or selected_product_data.get("unit_price") or 0,
+                # Utiliser Price d'abord, puis AvgPrice, puis estimation
+                "unit_price": selected_product_data.get("Price") or selected_product_data.get("AvgPrice") or selected_product_data.get("unit_price") or self._estimate_product_price(selected_product_data.get("ItemName", "")),
                 "total_price": 0,  # Sera calculé plus tard
                 "found": True,  # Marquer comme produit trouvé
                 "OnHand": selected_product_data.get("OnHand", 0),
@@ -2675,6 +2675,14 @@ class DevisWorkflow:
                         })
                     else:
                         logger.info("Appel SAP en mode NORMAL...")
+                        # Validation finale des prix avant envoi à SAP
+                        for line in quote_data["DocumentLines"]:
+                            if line.get("Price", 0) == 0:
+                                estimated = self._estimate_product_price(line.get("ItemDescription", ""))
+                                line["Price"] = estimated
+                                logger.warning(f"⚠️ Prix 0 détecté pour {line.get('ItemCode')} - Application prix estimé: {estimated}€")
+
+                        logger.info("Appel SAP en mode NORMAL...")
                         sap_quote = await MCPConnector.call_sap_mcp("sap_create_quotation_complete", {
                             "quotation_data": quotation_data
                         })
@@ -2694,7 +2702,18 @@ class DevisWorkflow:
                         logger.error(f"❌ SAP a signalé un échec: {sap_quote.get('error', 'Erreur non spécifiée')}")
                     else:
                         logger.info(f"✅ Devis SAP créé avec succès: DocNum {sap_quote.get('doc_num')}")
-                        
+                        logger.info(f"✅ Devis SAP créé avec succès: DocNum {sap_result.get('doc_num')}")
+
+                        # Notification WebSocket du succès
+                        await websocket_manager.send_task_update(self.task_id, {
+                            "type": "quote_created",
+                            "status": "success",
+                            "quote_data": {
+                                "sap_doc_num": sap_result.get("doc_num"),
+                                "sf_opportunity_id": sf_result.get("id") if sf_result else None,
+                                "total": validated_data.get("products", [{}])[0].get("total_price", 0) * validated_data.get("products", [{}])[0].get("quantity", 1)
+                            }
+                        })
                 except Exception as e:
                     logger.exception(f"❌ EXCEPTION lors de l'appel SAP: {str(e)}")
                     sap_quote = {"success": False, "error": f"Exception lors de l'appel SAP: {str(e)}"}
@@ -6121,7 +6140,11 @@ class DevisWorkflow:
                 interaction_data["options"].append({
                     "name": product_info.get("original_name"),
                     "quantity": product_info.get("quantity"),
-                    "choices": product_info.get("options", [])  # Utiliser les options du produit
+                    "choices": [{
+                        **option,
+                        "Price": option.get("Price") or option.get("AvgPrice") or self._estimate_product_price(option.get("ItemName", "")),
+                        "display_price": f"{option.get('Price') or option.get('AvgPrice') or self._estimate_product_price(option.get('ItemName', ''))}€"
+                    } for option in product_info.get("options", [])]
                 })
             
             await websocket_manager.send_user_interaction_required(self.task_id, interaction_data)
@@ -7883,7 +7906,8 @@ class DevisWorkflow:
                 "currency": "EUR",
                 "stock": int(sap_product.get("OnHand", 0)),
                 "description": sap_product.get("U_Description", ""),
-                "sap_data": sap_product
+                "sap_data": sap_product,
+                "Price": float(sap_product.get("Price", 0)) or float(sap_product.get("AvgPrice", 0)) or self._estimate_product_price(product_name)
             }
     async def _create_quote_document(self, client_result: Dict, products_result: Dict) -> Dict[str, Any]:
         """
