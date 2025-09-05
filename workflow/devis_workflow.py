@@ -227,11 +227,36 @@ class DevisWorkflow:
             response["context"] = context
 
         return response
+
+    def _save_context_to_task(self):
+        """Sauvegarde le contexte actuel dans la tâche"""
+        if self.current_task and hasattr(self.current_task, 'context'):
+            self.current_task.context = self.context.copy()
+            logger.debug(f"✅ Contexte sauvegardé dans la tâche {self.task_id}")
+
+    def _normalize_client_info(self, client_info: Any) -> Dict[str, Any]:
+        """Normalise la structure client_info pour éviter les erreurs de type None"""
+        if not client_info:
+            return {"data": {}, "found": False}
+
+        if not isinstance(client_info, dict):
+            return {"data": {}, "found": False}
+
+        # S'assurer que data est toujours un dictionnaire
+        if "data" not in client_info:
+            client_info["data"] = {}
+        elif client_info["data"] is None:
+            client_info["data"] = {}
+        elif not isinstance(client_info["data"], dict):
+            client_info["data"] = {}
+
+        return client_info
+
     async def _send_final_quote_result(self, result_data: dict):
         """Envoie le résultat final du devis via WebSocket"""
         try:
             if hasattr(self, 'task_id') and self.task_id:
-                
+
                 message = {
                     "type": "quote_generation_completed",
                     "task_id": self.task_id,
@@ -269,6 +294,11 @@ class DevisWorkflow:
             # IMPORTANT: Sauvegarder extracted_info dans le contexte
             self.context["extracted_info"] = extracted_info
             logger.info(f"✅ Contexte initialisé dans process_quote_request - client: {extracted_info.get('client', '')}, produits: {len(extracted_info.get('products', []))}")
+
+            # Enregistrer les informations extraites dans le contexte
+            self.context["extracted_info"] = extracted_info
+            # NOUVEAU: Sauvegarder le contexte dans la tâche
+            self._save_context_to_task()
 
             # PHASE 2: Exécution du workflow de devis
             self._track_step_start("quote_workflow", "🚀 Démarrage du workflow de devis")
@@ -384,6 +414,9 @@ class DevisWorkflow:
 
                 # Mise à jour du contexte
                 self.context["client_info"] = {"data": selected_client_data, "found": True}
+                self.context["client_validated"] = True
+                # NOUVEAU: Sauvegarder le contexte dans la tâche
+                self._save_context_to_task()
                 self.context["client_validated"] = True
                 
                 # CORRECTION: Préserver le nom client réel pour affichage
@@ -663,6 +696,11 @@ class DevisWorkflow:
 
     async def _handle_product_selection(self, user_input: Dict, context: Dict) -> Dict[str, Any]:
         """Gère la sélection de produit par l'utilisateur"""
+
+        # NOUVEAU: Log de debug pour comprendre l'input utilisateur
+        logger.info(f"📦 Input utilisateur dans _handle_product_selection:")
+        logger.info(f"   - user_input: {user_input}")
+        logger.info(f"   - context keys: {list(context.keys())}")
 
         # Récupérer les données du produit sélectionné
         # L'interface envoie 'selected_product', pas 'selected_data'
@@ -2319,7 +2357,7 @@ class DevisWorkflow:
             logger.exception(f"Erreur création client SAP: {str(e)}")
             return {"created": False, "error": str(e)}
     
-    async def _create_quote_in_salesforce(self, client_info: Dict, products_info: List[Dict], 
+    async def _create_quote_in_salesforce(self, client_info: Dict = None, products_info: List[Dict] = None,
                                      quote_data: Optional[Dict] = None) -> Dict[str, Any]:
         """Crée un devis dans Salesforce"""
         # CORRECTION: Définir valid_products au début
@@ -2331,32 +2369,65 @@ class DevisWorkflow:
                 client_info = self.context.get("client_info", {})
             if not products_info:
                 products_info = self.context.get("products_info", [])
+
+            # NOUVELLE VÉRIFICATION : S'assurer que client_info n'est pas None
+            if client_info is None:
+                logger.error("❌ client_info est None, impossible de créer le devis")
+                return {
+                    "success": False,
+                    "error": "Informations client manquantes pour créer le devis"
+                }
+
             logger.info("=== DÉBUT CRÉATION DEVIS SAP ET SALESFORCE ===")
-            
+
             # Récupération des données du contexte
-            client_info = self.context.get("client_info", {})
-            products_info = self.context.get("products_info", [])
+            # Utiliser client_info déjà défini au lieu de le redéfinir
             sap_client = self.context.get("sap_client", {})
-            
+
             # Log du contexte disponible
             logger.info(f"Client info disponible: {bool(client_info.get('found'))}")
             logger.info(f"Produits disponibles: {len(products_info)}")
             logger.info(f"Client SAP disponible: {bool(sap_client.get('data'))}")
-            
+
             try:
                 # ========== ÉTAPE 1: PRÉPARATION DES DONNÉES DE BASE ==========
-                
-                # Récupérer les données client Salesforce
-                sf_client_data = client_info.get("data", {})
-                client_name = sf_client_data.get("Name", "Client Unknown")
-                client_id = sf_client_data.get("Id", "")
-                
+
+                # Récupérer les données client Salesforce - maintenant garanti d'être un dictionnaire
+                sf_client_data = client_info.get("data") if client_info else None
+
+                # NOUVELLE VÉRIFICATION : Si sf_client_data est toujours None, essayer de le récupérer autrement
+                if sf_client_data is None:
+                    logger.warning("⚠️ sf_client_data est None, tentative de récupération depuis le contexte")
+                    # Essayer différentes sources possibles
+                    if self.context.get("validated_client"):
+                        sf_client_data = self.context["validated_client"]
+                        logger.info("✅ Client récupéré depuis validated_client")
+                    elif self.context.get("selected_client"):
+                        sf_client_data = self.context["selected_client"]
+                        logger.info("✅ Client récupéré depuis selected_client")
+                    else:
+                        # En dernier recours, chercher dans les tâches
+                        from services.progress_tracker import progress_tracker
+                        task = progress_tracker.get_task(self.task_id) if self.task_id else None
+                        if task and hasattr(task, 'context') and task.context.get("client_data"):
+                            sf_client_data = task.context["client_data"]
+                            logger.info("✅ Client récupéré depuis la tâche")
+                        else:
+                            logger.error("❌ Impossible de récupérer les données client depuis aucune source")
+                            return {
+                                "success": False,
+                                "error": "Données client introuvables dans le contexte"
+                            }
+
+                client_name = sf_client_data.get("Name", "Client Unknown") if sf_client_data else "Client Unknown"
+                client_id = sf_client_data.get("Id", "") if sf_client_data else ""
+
                 logger.info(f"Client Salesforce: {client_name} (ID: {client_id})")
                 # Vérifier si le client a un code SAP dans ses données
                 # CORRECTION: Vérifier dans plusieurs emplacements possibles
-                
+
                 client_sap_code = (
-                    client_info.get("data", {}).get("sap_code") 
+                    client_info.get("data", {}).get("sap_code")
                     or client_info.get("sap_code")
                     or self.context.get("client_sap_code")
                     or (client_info.get("data", {}).get("details", {}) or {}).get("sap_code")
@@ -2948,12 +3019,12 @@ class DevisWorkflow:
 
         # 1. Priorité au contexte client_info (données Salesforce)
         if self.context.get("client_info", {}).get("data", {}).get("Name"):
-            client_name = self.context["client_info"]["data"]["Name"]
+            client_name = self.context.get("client_info", {}).get("data", {}).get("Name", "")
             logger.info(f"✅ Nom client depuis context Salesforce: {client_name}")
 
         # 2. Sinon, essayer les données SAP dans le contexte
         elif self.context.get("client_info", {}).get("data", {}).get("CardName"):
-            sap_name = self.context["client_info"]["data"]["CardName"]
+            sap_name = self.context.get("client_info", {}).get("data", {}).get("CardName", "")
             # Nettoyer le format "CSAFRAN8267 - SAFRAN" -> "SAFRAN"
             if " - " in sap_name:
                 client_name = sap_name.split(" - ", 1)[1].strip()
@@ -6585,6 +6656,8 @@ class DevisWorkflow:
                         "client_validated": True,
                         "selected_client_display": client_display_name
                     })
+                    # NOUVEAU: Sauvegarder le contexte dans la tâche
+                    self._save_context_to_task()
 
                 # Produits pour continuation
                 products_list: List[Dict[str, Any]] = []
