@@ -1970,7 +1970,7 @@
                     const clients = data.client_options || data.clients || [];
                     const originalName = data.original_client_name || '';
                     addClientSelection(clients, originalName);
-                } else if (data.type === 'completion') {
+                } else if (data.type === 'completion' || data.type === 'quote_generation_completed') {
                     setTimeout(() => {
                         try { 
                             if (websocket && websocket.readyState === WebSocket.OPEN) {
