@@ -418,7 +418,16 @@ class DevisWorkflow:
                 # NOUVEAU: Sauvegarder le contexte dans la tâche
                 self._save_context_to_task()
                 self.context["client_validated"] = True
+                # CORRECTION: Sauvegarder également dans validated_client pour assurer la persistance
+                self.context["validated_client"] = selected_client_data
+                self.context["selected_client"] = selected_client_data
                 
+                # Sauvegarder dans la tâche si disponible
+                if hasattr(self, 'current_task') and self.current_task:
+                    if not hasattr(self.current_task, 'context'):
+                        self.current_task.context = {}
+                    self.current_task.context["client_info"] = {"data": selected_client_data, "found": True}
+                    logger.info("✅ Client info sauvegardé dans la tâche")
                 # CORRECTION: Préserver le nom client réel pour affichage
                 client_display_name = (selected_client_data.get('Name') or 
                                      selected_client_data.get('CardName') or 
@@ -720,6 +729,17 @@ class DevisWorkflow:
             logger.info(f"   - client_info présent: {bool(self.context.get('client_info'))}")
             logger.info(f"   - client_info.data présent: {bool(self.context.get('client_info', {}).get('data'))}")
             logger.info(f"   - clés contexte: {list(self.context.keys())}")
+            # CORRECTION CRITIQUE: S'assurer que les données client sont bien présentes avant la création du devis
+            if not client_info or not client_info.get("data"):
+                # Tenter de récupérer depuis validated_client ou selected_client
+                if self.context.get("validated_client"):
+                    client_info = {"data": self.context["validated_client"], "found": True}
+                    self.context["client_info"] = client_info
+                    logger.info("✅ Client restauré depuis validated_client")
+                elif self.context.get("selected_client"):
+                    client_info = {"data": self.context["selected_client"], "found": True}
+                    self.context["client_info"] = client_info
+                    logger.info("✅ Client restauré depuis selected_client")
             client_info = self.context.get("client_info", {})
 
             # Valider que client_info contient bien les données
@@ -2422,7 +2442,6 @@ class DevisWorkflow:
                 client_info = self.context.get("client_info", {})
             if not products_info:
                 products_info = self.context.get("products_info", [])
-
             # NOUVELLE VÉRIFICATION : S'assurer que client_info n'est pas None
             if client_info is None:
                 logger.error("❌ client_info est None, impossible de créer le devis")
@@ -2447,7 +2466,17 @@ class DevisWorkflow:
 
                 # Récupérer les données client Salesforce - maintenant garanti d'être un dictionnaire
                 sf_client_data = client_info.get("data") if client_info else None
-
+                # CORRECTION: Vérifier aussi dans validated_client et selected_client
+                if sf_client_data is None and not self.context.get("validated_client") and not self.context.get("selected_client"):
+                    # Tenter de reconstituer depuis le contexte du workflow
+                    if hasattr(self, 'current_task') and self.current_task:
+                        if hasattr(self.current_task, 'context'):
+                            task_context = self.current_task.context
+                            if task_context.get("client_info", {}).get("data"):
+                                sf_client_data = task_context["client_info"]["data"]
+                                client_info = task_context["client_info"]
+                                self.context["client_info"] = client_info
+                                logger.info("✅ Client récupéré depuis le contexte de la tâche")
                 # NOUVELLE VÉRIFICATION : Si sf_client_data est toujours None, essayer de le récupérer autrement
                 if sf_client_data is None:
                     logger.warning("⚠️ sf_client_data est None, tentative de récupération depuis le contexte")

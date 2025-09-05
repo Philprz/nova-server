@@ -465,6 +465,10 @@ async def handle_product_selection_task(task_id: str, response_data: Dict[str, A
         # CORRECTION: Restaurer le contexte de la tâche dans le workflow
         if hasattr(task, 'context') and task.context:
             workflow.context = task.context.copy()
+            # CORRECTION: S'assurer que client_info est bien dans le contexte
+            if hasattr(task, 'context') and task.context.get("client_info"):
+                workflow.context["client_info"] = task.context["client_info"]
+                logger.info(f"✅ Client info restauré dans le workflow: {workflow.context['client_info'].get('data', {}).get('Name', 'Unknown')}")
             logger.info(f"✅ Contexte restauré pour le workflow: {list(workflow.context.keys())}")
         else:
             logger.warning("⚠️ Aucun contexte trouvé dans la tâche")
