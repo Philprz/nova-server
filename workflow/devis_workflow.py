@@ -240,11 +240,15 @@ class DevisWorkflow:
                     "type": "quote_generation_completed",
                     "task_id": self.task_id,
                     "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "result": result_data
+                    "result": result_data,
+                    "status": "completed"
                 }
                 
-                await websocket_manager.send_task_update(self.task_id, message)
+                await websocket_manager.broadcast_to_task(self.task_id, message)
                 logger.info(f"✅ Résultat final envoyé pour {self.task_id}")
+                
+                # Attendre pour s'assurer que le message est reçu
+                await asyncio.sleep(0.5)
             else:
                 logger.warning("⚠️ Impossible d'envoyer le résultat - task_id manquant")
         except Exception as e:
