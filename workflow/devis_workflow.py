@@ -2524,21 +2524,28 @@ class DevisWorkflow:
                 logger.info("=== CRÉATION/VÉRIFICATION CLIENT SAP ===")
                 sap_card_code = client_sap_code  # Initialisation explicite
 
-                if not sap_client.get("data"):
+                if not sap_client or not sap_client.get("data"):
                     if sap_card_code:
-                        logger.info(f"✅ Client SAP existant utilisé: {sap_card_code}")
+                        logger.info(f"✅ [SAP] Client existant utilisé: {sap_card_code}")
+                        self.context["sap_client"] = {
+                            "data": {"CardCode": sap_card_code},
+                            "created": False
+                        }
+                        sap_client = self.context["sap_client"]
+                        logger.info(f"✅ [SAP] Client configuré: {sap_card_code}")
                     else:
-                        logger.info("Client SAP non trouvé, création nécessaire...")
-                sap_client_result = await self._create_sap_client_if_needed(client_info)
-                # CORRECTION : Traiter le résultat correctement
-                if sap_client_result.get("success") and sap_client_result.get("client"):
-                    # Mettre à jour le contexte avec le client SAP trouvé/créé
-                    self.context["sap_client"] = {
-                        "data": sap_client_result["client"],
-                        "created": True  # ou False si trouvé
-                    }
-                    sap_client = self.context["sap_client"]
-                    logger.info(f"✅ Client SAP disponible: {sap_client_result['client'].get('CardCode')}")
+                        logger.info("⚠️ [SAP] Client non trouvé, création nécessaire...")
+                        sap_client_result = await self._create_sap_client_if_needed(client_info)
+                        if sap_client_result.get("success") and sap_client_result.get("client"):
+                            self.context["sap_client"] = {
+                                "data": sap_client_result["client"],
+                                "created": True
+                            }
+                            sap_client = self.context["sap_client"]
+                            logger.info(f"✅ [SAP] Client disponible: {sap_client_result['client'].get('CardCode')}")
+                else:
+                    logger.info(f"✅ [SAP] Client déjà disponible dans le contexte")
+
                 
                 # Vérifier que nous avons un client SAP
                 sap_card_code = None
@@ -2676,7 +2683,23 @@ class DevisWorkflow:
                     else:
                         logger.info("Appel SAP en mode NORMAL...")
                         # Validation finale des prix avant envoi à SAP
-                        for line in quote_data["DocumentLines"]:
+                        # Vérifier que quote_data contient DocumentLines avant d'itérer
+                        if not quote_data or not isinstance(quote_data, dict):
+                            logger.error("❌ quote_data invalide pour Salesforce")
+                            return {
+                                "success": False,
+                                "error": "Données de devis invalides pour Salesforce"
+                            }
+
+                        document_lines = quote_data.get("DocumentLines", [])
+                        if not document_lines:
+                            logger.warning("⚠️ Aucune ligne de document dans quote_data")
+                            return {
+                                "success": False,
+                                "error": "Aucune ligne de produit à synchroniser avec Salesforce"
+                            }
+                            # Traitement des lignes existant
+                        for line in document_lines:
                             if line.get("Price", 0) == 0:
                                 estimated = self._estimate_product_price(line.get("ItemDescription", ""))
                                 line["Price"] = estimated
@@ -2688,6 +2711,33 @@ class DevisWorkflow:
                         })
                     
                     logger.info("=== RÉSULTAT APPEL SAP ===")
+                    # Vérification et traitement du résultat SAP
+                    if sap_quote is None:
+                        logger.error("❌ SAP a retourné None!")
+                        return {
+                            "success": False,
+                            "error": "L'appel SAP a retourné None",
+                            "sap_attempted": True,
+                            "salesforce_attempted": False
+                        }
+
+                    if isinstance(sap_quote, dict) and "error" in sap_quote:
+                        logger.error(f"❌ Erreur SAP: {sap_quote.get('error')}")
+                        return {
+                            "success": False,
+                            "error": f"Erreur SAP: {sap_quote.get('error')}",
+                            "sap_attempted": True,
+                            "salesforce_attempted": False
+                        }
+
+                    if not isinstance(sap_quote, dict):
+                        logger.error(f"❌ SAP a retourné un type invalide: {type(sap_quote)}")
+                        return {
+                            "success": False,
+                            "error": f"Type de réponse SAP invalide: {type(sap_quote)}",
+                            "sap_attempted": True,
+                            "salesforce_attempted": False
+                        }
                     logger.info(f"Type retourné: {type(sap_quote)}")
                     logger.info(f"Contenu: {sap_quote}")
                     
