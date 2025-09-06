@@ -803,7 +803,8 @@
         let clientSelectionMode = false;
         let availableClients = [];
         let originalClientName = '';
-        
+        let wsActive = false;
+        let taskCompletedHandled = false;
         function sendWebSocketMessage(message) {
             // Vérifie si le WebSocket est disponible et ouvert
             if (!websocket || websocket.readyState !== WebSocket.OPEN) {
@@ -893,6 +894,12 @@
         }
 
         function addClientSelection(clients, originalClientName) {
+            // Éviter les doublons : si déjà en mode sélection, ne pas réafficher
+            if (clientSelectionMode) {
+                console.log("⚠️ Sélection client déjà en cours, ignoré pour éviter les doublons");
+                return;
+            }
+
             clientSelectionMode = true;
             availableClients = clients;
 
@@ -1339,13 +1346,13 @@
             window.taskInitTimeout = setTimeout(() => {
                 console.log(`⏳ Initialisation de la tâche avec l'ID : ${taskId}`);
                 connectWebSocket(taskId);
-                trackProgress(taskId);
-            }, 1500);
+                setTimeout(() => { if (!wsActive)  }, 1500);
+            }    
         }
 
         async function trackProgress(taskId) {
             if (!taskId) return;
-
+            if (wsActive) return;
             // Si un polling est déjà en cours, on le stoppe
             if (progressInterval) {
                 clearInterval(progressInterval);
@@ -1581,7 +1588,7 @@
                     const searchResult = await searchResp.json();
                     
                     if (searchResult.requires_selection) {
-                        // Afficher directement la sélection
+                        // Afficher le message utilisateur avant la sélection
                         addMessage(message, 'user');
                         addClientSelection(searchResult.clients, clientName);
                         if (input) input.value = '';
@@ -1632,11 +1639,6 @@
                     initializeTaskTracking(result.task_id);
                     currentTaskId = result.task_id;
                     showProgress();
-                    // Attendre que la tâche soit créée côté serveur
-                    setTimeout(() => {
-                    connectWebSocket(result.task_id);
-                    trackProgress(result.task_id);
-                    }, 1500);
                 } else {
                     handleDirectResponse(result);
                 }
@@ -1685,6 +1687,8 @@
         }
 
         function handleTaskComplete(result) {
+            if (taskCompletedHandled) return;
+            taskCompletedHandled = true;
             if (result.status === 'success' || result.success === true) {
                 // Déterminer les informations du devis
                 const clientName = result.client?.name ||
@@ -1821,7 +1825,6 @@
 
             // Récupération et nettoyage de la valeur de l'input
             const message = input.value.trim();
-            updateUIState();
             // Validation du message
             const validation = validateUserInput(message);
 
@@ -1919,10 +1922,9 @@
         }
 
         function connectWebSocket(taskId) {
-            if (websocket && websocket.readyState === WebSocket.OPEN) {
-                console.log("🌐 WebSocket déjà connecté.");
+            if (websocket && (websocket.readyState === WebSocket.OPEN || websocket.readyState === WebSocket.CONNECTING)) {
+                console.log("🌐 WebSocket déjà connecté ou en cours de connexion.");
                 return;
-            }
             const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
             const wsUrl = `${wsProtocol}://${window.location.host}/ws/assistant/${taskId}`;
 
@@ -1931,6 +1933,8 @@
 
             websocket.onopen = () => {
                 console.log("✅ WebSocket connecté !");
+                wsActive = true;
+                if (progressInterval) { clearInterval(progressInterval); progressInterval = null; }
                 // NE PAS cacher la progression automatiquement
                 // hideProgress(); // SUPPRIMÉ
                 addMessage("Connexion établie.", 'system');
@@ -1955,7 +1959,7 @@
                     hideProgress?.();
                     try {
                         const result = (data && (data.result ?? data.data)) || null;
-                        if (result) displayQuoteResult?.(result);
+                        if (result) handleTaskComplete?.(result);
                     } catch (e) {
                         console.error("❌ displayQuoteResult a échoué:", e);
                     }
@@ -2041,7 +2045,7 @@
             const wasClean = event?.wasClean === true;
 
             console.warn(`🔌 WebSocket déconnecté${wasClean ? ' proprement' : ''}. Code: ${code}, Raison: ${reason}`);
-
+            wsActive = false;
             // Reconnexion uniquement si fermeture non intentionnelle
             if (code !== 1000 && code !== 1001) {
                 if (typeof addMessage === 'function') {
@@ -2095,6 +2099,10 @@
 
         // Fonction de tentative de reconnexion WebSocket avec limitation
         function attemptReconnection(taskId) {
+            if (websocket && websocket.readyState === WebSocket.CONNECTING) {
+                console.log("⏳ WS en cours de connexion, on attend.");
+                return;
+                }
             if (reconnectInterval) return;
             let attempts = 0;
             const maxAttempts = 5;
@@ -2114,6 +2122,10 @@
             }, 3000);
         }
         function improvedReconnection(taskId) {
+            if (websocket && websocket.readyState === WebSocket.CONNECTING) {
+                console.log("⏳ WS en cours de connexion, on attend.");
+                return;
+                }
             // Nettoyage de l'intervalle de reconnexion précédent s'il existe
             if (reconnectInterval) {
                 clearInterval(reconnectInterval);
