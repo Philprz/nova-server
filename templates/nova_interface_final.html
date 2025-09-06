@@ -1331,7 +1331,7 @@
             }
 
             // Mise à jour de l'ID de tâche actuel
-            currentTaskId = taskId;
+            const currentTaskId = taskId;
 
             // Affichage de la progression
             showProgress();
@@ -1342,13 +1342,22 @@
                 console.log("⏳ Timeout précédent annulé pour éviter les doublons.");
             }
 
-            // Configuration d'un nouveau timeout pour initialiser la connexion WebSocket et le suivi de progression
+            // Configuration d'un nouveau timeout pour initialiser la connexion WebSocket
             window.taskInitTimeout = setTimeout(() => {
-                console.log(`⏳ Initialisation de la tâche avec l'ID : ${taskId}`);
-                connectWebSocket(taskId);
-                setTimeout(() => { if (!wsActive)  }, 1500);
-            }    
+                console.log(`⏳ Initialisation de la tâche avec l'ID : ${currentTaskId}`);
+                connectWebSocket(currentTaskId);
+
+                // Démarrer le polling si le WebSocket n'est pas actif après un court délai
+                setTimeout(() => {
+                    const shouldPoll = typeof wsActive !== 'boolean' || !wsActive;
+                    if (shouldPoll) {
+                        console.log("🔄 Démarrage du polling pour suivre la progression.");
+                        trackProgress(currentTaskId);
+                    }
+                }, 1500);
+            }, 0); // Délai de 0 ms pour exécuter dès que possible
         }
+
 
         async function trackProgress(taskId) {
             if (!taskId) return;
@@ -1924,7 +1933,7 @@
         function connectWebSocket(taskId) {
             if (websocket && (websocket.readyState === WebSocket.OPEN || websocket.readyState === WebSocket.CONNECTING)) {
                 console.log("🌐 WebSocket déjà connecté ou en cours de connexion.");
-                return;
+                return;}
             const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
             const wsUrl = `${wsProtocol}://${window.location.host}/ws/assistant/${taskId}`;
 
