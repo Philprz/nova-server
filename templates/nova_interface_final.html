@@ -1849,6 +1849,9 @@
         }
 
         function handleTaskComplete(result) {
+            // Variables globales pour éviter les erreurs de portée
+            let globalQuoteIdRaw = null;
+            let globalClientName = null;
             if (taskCompletedHandled) return;
             taskCompletedHandled = true;
 
@@ -1962,9 +1965,9 @@
 
                 // Ajouter des suggestions avec boutons fonctionnels
                 const suggestions = [
-                    { text: 'Voir le devis', action: `viewQuote('${quoteIdRaw}')` },
+                    { text: 'Voir le devis', action: `viewQuote('${globalQuoteIdRaw || quoteNumber}')` },
                     { text: 'Créer un nouveau devis', action: 'newQuote()' },
-                    { text: 'Modifier le devis', action: `modifyQuote('${quoteIdRaw}')` }
+                    { text: 'Modifier le devis', action: `modifyQuote('${globalQuoteIdRaw || quoteNumber}')` }
                 ];
                 addFunctionalSuggestions(suggestions);
 
@@ -2289,6 +2292,24 @@
                     addMessage?.('Réponse utilisateur prise en compte...', 'system');
                 }
                 // Type de message non géré
+                // Gestion des messages quote_created
+                else if (data.type === 'quote_created') {
+                    console.log("✅ Devis créé:", data);
+                    if (data.quote_data) {
+                        addMessage?.('Devis créé avec succès', 'system');
+                        if (data.quote_data.quote_id) {
+                            globalQuoteIdRaw = data.quote_data.quote_id;
+                        }
+                    }
+                }
+                // Gestion des messages product_selection_processed
+                else if (data.type === 'product_selection_processed') {
+                    console.log("📦 Sélection produit traitée:", data);
+                    if (data.result) {
+                        addMessage?.('Sélection de produits traitée', 'system');
+                    }
+                }
+                // Type de message non géré
                 else {
                     console.warn("ℹ️ Type de message non géré:", data.type, data);
                 }
@@ -2579,7 +2600,11 @@
                 (result?.sap_quote?.doc_num ? `SAP-${result.sap_quote.doc_num}` : null) ||
                 (result?.validated_data?.sap_quote?.doc_num ? `SAP-${result.validated_data.sap_quote.doc_num}` : null) ||
                 ('NOVA-' + Date.now().toString().slice(-6));
-
+                // Stocker dans les variables globales
+                globalQuoteIdRaw = quoteNumber;
+                globalClientName = clientName;
+                // Stocker dans la variable globale pour éviter les erreurs de portée
+                globalQuoteIdRaw = quoteIdRaw;
             // Montant + devise
             const totalAmountNum = Number(
                 result?.total_amount ??
@@ -2743,7 +2768,7 @@
                         flex-wrap: wrap;
                         margin-top: 20px;
                     ">
-                        <button type="button" onclick="(typeof viewQuote==='function' ? viewQuote('${quoteIdRaw}') : window.open('/pdf/quote/${quoteIdRaw}','_blank'))" style="
+                        <button type="button" onclick="(typeof viewQuote==='function' ? viewQuote('${globalQuoteIdRaw || quoteIdRaw}') : window.open('/pdf/quote/${globalQuoteIdRaw || quoteIdRaw}','_blank'))" style="
                             background: linear-gradient(135deg, var(--primary-blue), var(--primary-violet));
                             color: white;
                             border: none;
@@ -2758,7 +2783,7 @@
                         " onmouseover="this.style.transform='translateY(-1px)'" onmouseout="this.style.transform='translateY(0)'">
                             📄 Voir le devis
                         </button>
-                        <button type="button" onclick="(typeof modifyQuote==='function' ? modifyQuote('${quoteIdRaw}') : window.open('/edit/quote/${quoteIdRaw}','_blank'))" style="
+                        <button type="button" onclick="(typeof modifyQuote==='function' ? modifyQuote('${globalQuoteIdRaw || quoteIdRaw}') : alert('Fonction de modification non disponible'))" style="
                             background: linear-gradient(135deg, var(--primary-violet), var(--accent-color));
                             color: white;
                             border: none;
