@@ -2297,11 +2297,41 @@
                 .replace(/&/g,'&amp;').replace(/</g,'&lt;')
                 .replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 
-            // Extraire les données du devis
-            const quoteIdRaw = result?.quote_id || result?.sap_quote?.doc_num || ('NOVA-' + Date.now().toString().slice(-6));
-            const clientNameRaw = result?.client?.name || result?.client_name || 'Client non défini';
-            const totalAmountNum = Number(result?.total_amount ?? result?.sap_quote?.total_amount ?? 0);
-            const currency = result?.currency || 'EUR';
+            // Extraire les données du devis (robuste, sans changer la structure de sortie)
+
+            // 1) quoteIdRaw : rétabli + fallback validés
+            const quoteIdRaw =
+                result?.quote_id
+                ?? result?.sap_quote?.doc_num
+                ?? result?.validated_data?.sap_quote?.doc_num
+                ?? ('NOVA-' + Date.now().toString().slice(-6));
+
+            // 2) clientNameRaw : couverture élargie, prise du 1er libellé non vide
+            const clientNameRaw = (
+                [
+                    result?.client?.Name,
+                    result?.client?.name,
+                    result?.client_name,
+                    result?.validated_data?.client?.name,
+                    result?.validated_data?.client?.Name,
+                    (typeof result?.client === 'string' ? result.client : null),
+                ].find(v => typeof v === 'string' && v.trim()) || 'Client non défini'
+            );
+
+            // 3) totalAmountNum : mêmes sources + validated_data, conversion Number
+            const totalAmountNum = Number(
+                result?.total_amount
+                ?? result?.sap_quote?.total_amount
+                ?? result?.validated_data?.sap_quote?.total_amount
+                ?? 0
+            );
+
+            // 4) currency : normalisation simple en majuscules avec fallback
+            const currency = String(
+                result?.currency
+                ?? result?.sap_quote?.currency
+                ?? 'EUR'
+            ).toUpperCase();
 
             // Formatteur monnaie
             const fmt = new Intl.NumberFormat('fr-FR', { style: 'currency', currency });
@@ -2309,8 +2339,18 @@
 
             // Produits (normalisation)
             const rawProducts = result?.products ?? result?.quote_data?.products ?? [];
-            const products = Array.isArray(rawProducts) ? rawProducts : [];
-            let productsHtml = '';
+            const products = Array.isArray(rawProducts) ?
+                rawProducts.map(p => ({
+                    code: p?.code || p?.ItemCode || 'N/A',
+                    name: p?.name || p?.ItemName || p?.description || 'Produit sans nom',
+                    quantity: Number(p?.quantity || p?.Quantity || 0),
+                    unit_price: Number(p?.unit_price || p?.UnitPrice || p?.Price || 0),
+                    total_price: Number(p?.total_price || p?.LineTotal || (p?.quantity * p?.unit_price) || 0)
+                })) : [];
+
+            // Échapper le nom du client pour l'affichage HTML
+            const clientName = escapeHtml(clientNameRaw);
+            const quoteId = escapeHtml(quoteIdRaw);
 
             if (products.length > 0) {
                 productsHtml = `
@@ -2410,7 +2450,22 @@
                         ${[sapBadge, sfBadge].filter(Boolean).join(' ')}
                     </div>
                 </div>
+
+                <!-- Section debug pour diagnostiquer les problèmes d'affichage -->
+                <details style="margin-top: 20px; padding: 10px; background: #f8f9fa; border-radius: 8px; border: 1px solid #e9ecef;">
+                    <summary style="cursor: pointer; font-weight: bold; color: #495057;">🔍 Données de debug (développeurs)</summary>
+                    <div style="font-family: monospace; font-size: 0.8em; white-space: pre-wrap; margin-top: 10px; max-height: 200px; overflow-y: auto; background: white; padding: 10px; border-radius: 4px;">
+Client dans result: ${JSON.stringify(result?.client, null, 2)}
+Client name extrait: "${clientNameRaw}"
+Validated data: ${JSON.stringify(result?.validated_data?.client, null, 2)}
+Total amount: ${totalAmountNum}
+Produits: ${JSON.stringify(products, null, 2)}
+                    </div>
+                </details>
             `;
+
+            // Ajouter le message au chat
+            addMessage(resultHtml, 'system');
 
             console.log("✅ Résultat du devis affiché avec succès");
         }
