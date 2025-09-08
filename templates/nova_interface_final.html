@@ -451,7 +451,160 @@
         .enrichment-item span:last-child {
             color: var(--text-secondary);
         }
-
+        /* Styles pour les résultats de devis */
+        .quote-result-container {
+            margin: 15px 0;
+            width: 100%;
+        }
+        
+        .quote-success-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 15px;
+            padding: 25px;
+            color: white;
+            box-shadow: 0 8px 32px rgba(102, 126, 234, 0.3);
+            margin: 15px 0;
+        }
+        
+        .quote-header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        
+        .success-icon {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+        
+        .quote-header h3 {
+            margin: 10px 0;
+            font-size: 1.4em;
+            font-weight: 600;
+        }
+        
+        .quote-ref {
+            opacity: 0.9;
+            font-size: 0.95em;
+        }
+        
+        .quote-summary {
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+            backdrop-filter: blur(10px);
+        }
+        
+        .summary-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin: 10px 0;
+            font-size: 1.05em;
+        }
+        
+        .summary-row .label {
+            font-weight: 500;
+        }
+        
+        .summary-row .value {
+            font-weight: 600;
+        }
+        
+        .quote-details {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .quote-details h4 {
+            margin-bottom: 15px;
+            font-size: 1.1em;
+            font-weight: 600;
+        }
+        
+        .products-list {
+            space-y: 10px;
+        }
+        
+        .product-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            margin-bottom: 8px;
+        }
+        
+        .product-info {
+            flex: 1;
+        }
+        
+        .product-code {
+            display: block;
+            font-size: 0.85em;
+            opacity: 0.8;
+            margin-bottom: 4px;
+        }
+        
+        .product-name {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+        
+        .product-details {
+            display: block;
+            font-size: 0.9em;
+            opacity: 0.9;
+        }
+        
+        .product-total {
+            font-weight: 700;
+            font-size: 1.1em;
+        }
+        
+        .quote-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        
+        .quote-actions .btn {
+            padding: 12px 20px;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .btn-primary {
+            background: #e74c3c;
+            color: white;
+        }
+        
+        .btn-secondary {
+            background: #9b59b6;
+            color: white;
+        }
+        
+        .btn-success {
+            background: #27ae60;
+            color: white;
+        }
+        
+        .quote-actions .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        }
         .typing-indicator {
             display: none;
             align-items: center;
@@ -1698,28 +1851,48 @@
         function handleTaskComplete(result) {
             if (taskCompletedHandled) return;
             taskCompletedHandled = true;
+
+            // Garde minimale sur l'objet résultat
+            if (!result || typeof result !== 'object') {
+                addMessage('Erreur: résultat invalide', 'system');
+                return;
+            }
+
             if (result.status === 'success' || result.success === true) {
                 // Déterminer les informations du devis
-                const clientName = result.client?.name ||
-                                result.client_name ||
-                                result.validated_data?.client?.name ||
-                                'Client non identifié';
+                const clientName =
+                    result.client?.name ||
+                    result.client_name ||
+                    result.validated_data?.client?.name ||
+                    result.validated_data?.client?.Name ||
+                    'Client non identifié';
 
-                const quoteId = result.quote_id ||
-                            result.sap_quote?.doc_num ||
-                            result.validated_data?.quote_id ||
-                            `NOVA-${Date.now().toString().slice(-6)}`;
+                // Construction robuste du numéro de devis, sans "SAP-undefined"
+                const sapDocNum = result.sap_quote?.doc_num ?? null;
+                const quoteNumber =
+                    result.quote_id ??
+                    result.sap_doc_num ??
+                    (sapDocNum ? `SAP-${sapDocNum}` : null) ??
+                    result.validated_data?.quote_id ??
+                    `NOVA-${Date.now().toString().slice(-6)}`;
 
-                const totalAmount = result.total_amount ||
-                                result.sap_quote?.total_amount ||
-                                result.validated_data?.total_amount ||
-                                0;
+                // Produits si présents (optionnel, non bloquant)
+                const products = result.products || result.validated_data?.products || [];
+
+                // Montant formaté en EUR (FR)
+                const rawAmount =
+                    result.total_amount ??
+                    result.sap_quote?.total_amount ??
+                    result.validated_data?.total_amount ??
+                    0;
+                const totalAmount = Number.isFinite(Number(rawAmount)) ? Number(rawAmount) : 0;
+                const formattedAmount = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(totalAmount);
 
                 // Afficher les messages système
                 addMessage(`Devis créé avec succès !`, 'system');
                 addMessage(`Client: ${clientName}`, 'system');
-                addMessage(`ID: ${quoteId}`, 'system');
-                addMessage(`Montant: ${totalAmount}€`, 'system');
+                addMessage(`Numéro de devis: ${quoteNumber}`, 'system');
+                addMessage(`Montant: ${formattedAmount}`, 'system');
 
                 // Créer et afficher le devis complet si les données sont disponibles
                 if (result.quote_data || result.sap_quote || result.quote_id) {
@@ -1729,6 +1902,10 @@
                 // Ajouter des suggestions
                 const suggestions = ['Voir le devis', 'Créer un nouveau devis', 'Modifier le devis'];
                 addSuggestions(suggestions);
+
+                // (facultatif) trace produits si besoin
+                // if (products.length) console.debug('Produits du devis:', products);
+
             } else {
                 // Gérer les erreurs
                 addMessage(`Erreur: ${result.error || 'Erreur inconnue'}`, 'system');
@@ -1736,10 +1913,26 @@
         }
 
 
+
         function handleTaskError(error) {
             addMessage(`Erreur lors du traitement: ${error}`, 'system');
         }
-
+        function downloadQuotePDF(quoteId) {
+            const link = document.createElement('a');
+            link.href = `/api/quotes/pdf/${quoteId}`;
+            link.download = `devis_${quoteId}.pdf`;
+            link.click();
+        }
+        
+        function modifyQuote(quoteId) {
+            window.open(`/api/quotes/edit/${quoteId}`, '_blank');
+        }
+        
+        function createNewQuote() {
+            const input = document.getElementById('messageInput');
+            input.value = 'Créer un nouveau devis pour ';
+            input.focus();
+        }
         function continuePreviousWorkflow() {
             addMessage('Reprise de la génération du devis...', 'system');
         }
@@ -2287,9 +2480,7 @@
             });
         });
         function displayQuoteResult(result) {
-            console.log("🎯 Affichage résultat devis:", result);
-
-            // Masquer la progression (ajout)
+            // Masquer la progression (si nécessaire)
             if (typeof hideProgress === 'function') { try { hideProgress(); } catch (e) { console.warn(e); } }
 
             // Utils: échappement HTML minimal
@@ -2297,16 +2488,7 @@
                 .replace(/&/g,'&amp;').replace(/</g,'&lt;')
                 .replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 
-            // Extraire les données du devis (robuste, sans changer la structure de sortie)
-
-            // 1) quoteIdRaw : rétabli + fallback validés
-            const quoteIdRaw =
-                result?.quote_id
-                ?? result?.sap_quote?.doc_num
-                ?? result?.validated_data?.sap_quote?.doc_num
-                ?? ('NOVA-' + Date.now().toString().slice(-6));
-
-            // 2) clientNameRaw : couverture élargie, prise du 1er libellé non vide
+            // Extraction des données du devis (robuste)
             const clientNameRaw = (
                 [
                     result?.client?.Name,
@@ -2318,90 +2500,95 @@
                 ].find(v => typeof v === 'string' && v.trim()) || 'Client non défini'
             );
 
-            // 3) totalAmountNum : mêmes sources + validated_data, conversion Number
-            const totalAmountNum = Number(
-                result?.total_amount
-                ?? result?.sap_quote?.total_amount
-                ?? result?.validated_data?.sap_quote?.total_amount
-                ?? 0
-            );
+            // ID devis solide, sans "SAP-undefined"
+            const quoteIdRaw =
+                (result?.quote_id && String(result.quote_id)) ||
+                (result?.sap_doc_num && String(result.sap_doc_num)) ||
+                (result?.sap_quote?.doc_num ? `SAP-${result.sap_quote.doc_num}` : null) ||
+                (result?.validated_data?.sap_quote?.doc_num ? `SAP-${result.validated_data.sap_quote.doc_num}` : null) ||
+                ('NOVA-' + Date.now().toString().slice(-6));
 
-            // 4) currency : normalisation simple en majuscules avec fallback
+            // Montant + devise
+            const totalAmountNum = Number(
+                result?.total_amount ??
+                result?.sap_quote?.total_amount ??
+                result?.validated_data?.sap_quote?.total_amount ??
+                result?.validated_data?.total_amount ??
+                0
+            );
             const currency = String(
-                result?.currency
-                ?? result?.sap_quote?.currency
-                ?? 'EUR'
+                result?.currency ??
+                result?.sap_quote?.currency ??
+                'EUR'
             ).toUpperCase();
 
-            // Formatteur monnaie
             const fmt = new Intl.NumberFormat('fr-FR', { style: 'currency', currency });
-            const formattedAmount = fmt.format(isFinite(totalAmountNum) ? totalAmountNum : 0);
+            const formattedAmount = fmt.format(Number.isFinite(totalAmountNum) ? totalAmountNum : 0);
 
             // Produits (normalisation)
-            const rawProducts = result?.products ?? result?.quote_data?.products ?? [];
-            const products = Array.isArray(rawProducts) ?
-                rawProducts.map(p => ({
-                    code: p?.code || p?.ItemCode || 'N/A',
-                    name: p?.name || p?.ItemName || p?.description || 'Produit sans nom',
-                    quantity: Number(p?.quantity || p?.Quantity || 0),
-                    unit_price: Number(p?.unit_price || p?.UnitPrice || p?.Price || 0),
-                    total_price: Number(p?.total_price || p?.LineTotal || (p?.quantity * p?.unit_price) || 0)
-                })) : [];
+            const rawProducts = result?.products ?? result?.quote_data?.products ?? result?.validated_data?.products ?? [];
+            const products = Array.isArray(rawProducts) ? rawProducts.map(p => {
+                const qty = Number(p?.quantity ?? p?.Quantity ?? 0);
+                const unit = Number(p?.unit_price ?? p?.UnitPrice ?? p?.Price ?? 0);
+                const line = (Number.isFinite(unit) ? unit : 0) * (Number.isFinite(qty) ? qty : 0);
+                return {
+                    code: p?.code ?? p?.ItemCode ?? 'N/A',
+                    name: p?.name ?? p?.ItemName ?? p?.description ?? 'Produit sans nom',
+                    quantity: Number.isFinite(qty) ? qty : 0,
+                    unit_price: Number.isFinite(unit) ? unit : 0,
+                    total_price: Number.isFinite(line) ? line : 0,
+                };
+            }) : [];
 
-            // Échapper le nom du client pour l'affichage HTML
+            // Échapper pour affichage
             const clientName = escapeHtml(clientNameRaw);
             const quoteId = escapeHtml(quoteIdRaw);
 
+            // Génération du HTML produits
+            let productsHtml = '';
             if (products.length > 0) {
                 productsHtml = `
-                    <table style="width:100%; border-collapse:collapse; margin:15px 0; font-size:0.9em;">
-                        <thead>
-                            <tr style="background:#f8fafc; border-bottom:2px solid #e2e8f0;">
-                                <th style="padding:8px; text-align:left; border:1px solid #e2e8f0;">Produit</th>
-                                <th style="padding:8px; text-align:center; border:1px solid #e2e8f0;">Qté</th>
-                                <th style="padding:8px; text-align:right; border:1px solid #e2e8f0;">Prix Unit.</th>
-                                <th style="padding:8px; text-align:right; border:1px solid #e2e8f0;">Total</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                `;
-
-                products.forEach(product => {
-                    const nameRaw = product?.name ?? product?.ItemName ?? 'Produit';
-                    const codeRaw = product?.code ?? product?.ItemCode ?? '';
-                    const unitPrice = Number(product?.unit_price ?? product?.price ?? product?.UnitPrice ?? 0);
-                    const qty = Number(product?.quantity ?? 1);
-                    const lineTotal = (isFinite(unitPrice) ? unitPrice : 0) * (isFinite(qty) ? qty : 0);
-
-                    const name = escapeHtml(nameRaw);
-                    const code = escapeHtml(codeRaw);
-
-                    productsHtml += `
-                        <tr style="border-bottom:1px solid #e2e8f0;">
-                            <td style="padding:8px; border:1px solid #e2e8f0;">
-                                <strong>${name}</strong><br>
-                                ${code ? `<small style="color:#6b7280;">Code: ${code}</small>` : ``}
-                            </td>
-                            <td style="padding:8px; text-align:center; border:1px solid #e2e8f0;">${isFinite(qty) ? qty : 0}</td>
-                            <td style="padding:8px; text-align:right; border:1px solid #e2e8f0;">${fmt.format(isFinite(unitPrice) ? unitPrice : 0)}</td>
-                            <td style="padding:8px; text-align:right; border:1px solid #e2e8f0; font-weight:bold;">${fmt.format(isFinite(lineTotal) ? lineTotal : 0)}</td>
-                        </tr>
-                    `;
-                });
-
-                productsHtml += `
-                        </tbody>
-                    </table>
+                    <div style="background:white; padding:15px; border-radius:8px; margin-bottom:15px;">
+                        <h4 style="color:#374151; margin:0 0 10px 0;">📦 Détail des produits</h4>
+                        <table style="width:100%; border-collapse:collapse; margin:15px 0; font-size:0.9em;">
+                            <thead>
+                                <tr style="background:#f8fafc; border-bottom:2px solid #e2e8f0;">
+                                    <th style="padding:8px; text-align:left; border:1px solid #e2e8f0;">Produit</th>
+                                    <th style="padding:8px; text-align:center; border:1px solid #e2e8f0;">Qté</th>
+                                    <th style="padding:8px; text-align:right; border:1px solid #e2e8f0;">Prix Unit.</th>
+                                    <th style="padding:8px; text-align:right; border:1px solid #e2e8f0;">Total</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${products.map(product => {
+                                    const name = escapeHtml(product.name);
+                                    const code = escapeHtml(product.code);
+                                    const qty = Number.isFinite(product.quantity) ? product.quantity : 0;
+                                    const unit = Number.isFinite(product.unit_price) ? product.unit_price : 0;
+                                    const line = Number.isFinite(product.total_price) ? product.total_price : (unit * qty);
+                                    return `
+                                        <tr style="border-bottom:1px solid #e2e8f0;">
+                                            <td style="padding:8px; border:1px solid #e2e8f0;">
+                                                <strong>${name}</strong><br>
+                                                ${code ? `<small style="color:#6b7280;">Code: ${code}</small>` : ``}
+                                            </td>
+                                            <td style="padding:8px; text-align:center; border:1px solid #e2e8f0;">${qty}</td>
+                                            <td style="padding:8px; text-align:right; border:1px solid #e2e8f0;">${fmt.format(unit)}</td>
+                                            <td style="padding:8px; text-align:right; border:1px solid #e2e8f0; font-weight:bold;">${fmt.format(line)}</td>
+                                        </tr>
+                                    `;
+                                }).join('')}
+                            </tbody>
+                        </table>
+                    </div>
                 `;
             }
 
-            // Construire le message de résultat
+            // Badges
             const sapBadge = result?.sap_quote ? '✅ Devis SAP créé' : '';
-            const sfBadge = result?.salesforce_opportunity ? '✅ Opportunité Salesforce créée' : '';
+            const sfBadge  = result?.salesforce_opportunity ? '✅ Opportunité Salesforce créée' : '';
 
-            const quoteId = escapeHtml(quoteIdRaw);
-            const clientName = escapeHtml(clientNameRaw);
-
+            // Construction du message
             const resultHtml = `
                 <div style="background:linear-gradient(135deg,#f0f9ff 0%,#e0f2fe 100%); padding:20px; border-radius:12px; margin:10px 0;">
                     <div style="display:flex; align-items:center; gap:10px; margin-bottom:15px;">
@@ -2427,12 +2614,7 @@
                         </div>
                     </div>
 
-                    ${products.length > 0 ? `
-                        <div style="background:white; padding:15px; border-radius:8px; margin-bottom:15px;">
-                            <h4 style="color:#374151; margin:0 0 10px 0;">📦 Détail des produits</h4>
-                            ${productsHtml}
-                        </div>
-                    ` : ``}
+                    ${productsHtml}
 
                     <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px;">
                         <button type="button" onclick="window.open('/pdf/quote/${quoteId}', '_blank')" style="background:#dc2626; color:white; border:none; padding:10px 15px; border-radius:6px; cursor:pointer; display:flex; align-items:center; gap:5px;">
@@ -2450,23 +2632,10 @@
                         ${[sapBadge, sfBadge].filter(Boolean).join(' ')}
                     </div>
                 </div>
-
-                <!-- Section debug pour diagnostiquer les problèmes d'affichage -->
-                <details style="margin-top: 20px; padding: 10px; background: #f8f9fa; border-radius: 8px; border: 1px solid #e9ecef;">
-                    <summary style="cursor: pointer; font-weight: bold; color: #495057;">🔍 Données de debug (développeurs)</summary>
-                    <div style="font-family: monospace; font-size: 0.8em; white-space: pre-wrap; margin-top: 10px; max-height: 200px; overflow-y: auto; background: white; padding: 10px; border-radius: 4px;">
-Client dans result: ${JSON.stringify(result?.client, null, 2)}
-Client name extrait: "${clientNameRaw}"
-Validated data: ${JSON.stringify(result?.validated_data?.client, null, 2)}
-Total amount: ${totalAmountNum}
-Produits: ${JSON.stringify(products, null, 2)}
-                    </div>
-                </details>
             `;
 
             // Ajouter le message au chat
             addMessage(resultHtml, 'system');
-
             console.log("✅ Résultat du devis affiché avec succès");
         }
 
