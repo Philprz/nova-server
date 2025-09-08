@@ -219,6 +219,7 @@ async def get_sap_quote_details(
         connector = MCPConnector()
         
         # Utiliser la méthode call_sap_mcp qui existe avec la bonne signature
+        sap_response = None
         logger.info(f"Appel SAP MCP pour devis {doc_entry}")
         # CORRECTION: Traitement spécial si le résultat MCP est encapsulé dans 'result'
         if isinstance(sap_response, dict) and 'result' in sap_response:
