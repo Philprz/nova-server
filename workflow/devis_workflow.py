@@ -295,6 +295,13 @@ class DevisWorkflow:
                     self._track_step_progress(
                         "quote_workflow", 50, f"❗ En attente: {step}"
                     )
+                # Sauvegarder extracted_info dans le contexte de la tâche pour récupération ultérieure
+                if hasattr(self, 'current_task') and self.current_task:
+                    if not hasattr(self.current_task, 'context'):
+                        self.current_task.context = {}
+                    self.current_task.context['extracted_info'] = extracted_info
+                    logger.info(f"📦 extracted_info sauvegardé dans la tâche: {len(extracted_info.get('products', []))} produits")
+
                 # Ajout du contexte pour reprise
                 workflow_result.setdefault("workflow_context", {}).update({
                     "task_id": self.task_id,
@@ -769,7 +776,27 @@ class DevisWorkflow:
 
             # Récupérer la quantité de la demande originale ou utiliser celle fournie
             original_quantity = self.context.get("extracted_info", {}).get("products", [{}])[0].get("quantity", user_input.get("quantity", 2))
-            quantity = user_input.get("quantity", original_quantity)
+            # Récupérer la quantité depuis plusieurs sources possibles
+            quantity = user_input.get("quantity")
+            if not quantity:
+                # Essayer de récupérer depuis extracted_info dans le contexte
+                extracted_info = self.context.get("extracted_info", {})
+                original_products = extracted_info.get("products", [])
+                
+                # Chercher le produit correspondant dans la demande originale
+                for orig_product in original_products:
+                    orig_name = orig_product.get("name", "").lower()
+                    selected_name = selected_product_data.get("ItemName", "").lower()
+                    if (orig_name in selected_name or 
+                        orig_product.get("code") == selected_product_data.get("ItemCode")):
+                        quantity = orig_product.get("quantity", 1)
+                        logger.info(f"📦 Quantité trouvée dans extracted_info: {quantity}")
+                        break
+                
+                if not quantity:
+                    quantity = 1  # Valeur par défaut si rien trouvé
+
+            logger.info(f"📦 Quantité finale utilisée: {quantity}")
             
             logger.info(f"✅ Produit formaté: {formatted_product['name']} - Code: {formatted_product['code']} - Prix: {formatted_product['unit_price']}€ - Quantité: {quantity}")
             # CORRECTION: S'assurer que les données client sont bien présentes
