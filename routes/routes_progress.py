@@ -491,6 +491,18 @@ async def handle_product_selection_task(task_id: str, response_data: Dict[str, A
                 logger.exception(f"⚠️ Échec notification WebSocket: {ws_err}")
             return
 
+        # Récupérer la quantité depuis les métadonnées ou depuis la tâche
+        task = progress_tracker.get_task(task_id)
+        original_quantity = 1  # valeur par défaut
+
+        if task and hasattr(task, 'context') and task.context.get('extracted_info'):
+            original_products = task.context['extracted_info'].get('products', [])
+            for prod in original_products:
+                if (prod.get('name', '').lower() in product_name.lower() or
+                    prod.get('code') == product_code):
+                    original_quantity = prod.get('quantity', 1)
+                    break
+
         user_input = {
             "action": "select_product",
             "selected_data": selected_product,
@@ -498,8 +510,9 @@ async def handle_product_selection_task(task_id: str, response_data: Dict[str, A
             "selected_product": selected_product,
             "product_code": product_code,
             "product_name": product_name,
-            "quantity": response_data.get("meta", {}).get("quantity", 10)  # Récupérer la quantité
+            "quantity": response_data.get("meta", {}).get("quantity", original_quantity)
         }
+
         context = {"interaction_type": "product_selection"}
 
         # Continuer le workflow

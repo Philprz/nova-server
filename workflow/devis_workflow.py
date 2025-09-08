@@ -699,7 +699,19 @@ class DevisWorkflow:
         # L'interface envoie 'selected_product', pas 'selected_data'
         selected_product_data = user_input.get("selected_product") or user_input.get("selected_data")
         product_code = user_input.get("product_code")
-        quantity = user_input.get("quantity") or self.context.get("extracted_info", {}).get("products", [{}])[0].get("quantity", 1)
+        # Récupérer la quantité depuis extracted_info plutôt que d'utiliser une valeur par défaut
+        extracted_info = self.context.get("extracted_info", {})
+        original_products = extracted_info.get("products", [])
+
+        # Trouver le produit original correspondant
+        quantity = 1  # Valeur par défaut
+        for orig_product in original_products:
+            if (orig_product.get("name", "").lower() in selected_product_data.get("ItemName", "").lower() or
+                orig_product.get("code") == selected_product_data.get("ItemCode")):
+                quantity = orig_product.get("quantity", 1)
+                break
+
+        logger.info(f"📦 Quantité récupérée depuis la demande originale: {quantity}")
         current_context = context.get("validation_context", {})
 
         # Logs détaillés pour debug
@@ -970,7 +982,7 @@ class DevisWorkflow:
                 return {
                     "success": True,
                     "status": "success",
-                    "quote_id": f"SAP-{sap_result.get('doc_num', sap_result.get('doc_entry', 'UNKNOWN'))}",
+                    "quote_id": f"SAP-{sap_quote_result.get('doc_num', sap_quote_result.get('doc_entry', 'UNKNOWN'))}",
                     "client": validated_data.get("client", {}),
                     "products": validated_data.get("products", []),
                     "quote_data": {
