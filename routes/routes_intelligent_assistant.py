@@ -193,7 +193,6 @@ async def workflow_create_client(request: Dict[str, Any]):
         logger.error(f"Erreur création client via alias: {e}")
         return {'success': False, 'error': str(e), 'message': f"Erreur lors de la création du client"}
 
-@router.websocket("/ws/assistant/{task_id}")
 async def websocket_endpoint(websocket: WebSocket, task_id: str):
     logger.info(f"🔌 WebSocket - Tentative de connexion pour {task_id}")
     try:

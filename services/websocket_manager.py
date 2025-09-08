@@ -97,16 +97,21 @@ class WebSocketManager:
                 logger.info(f"🚫 Tous les messages étaient déjà envoyés - aucune duplication")
         logger.info("WebSocket connecté", extra={"task_id": task_id})
 
-    async def disconnect(self, websocket: "WebSocket", task_id: str):
-        """Déconnecte proprement un WebSocket"""
+    async def disconnect(self, websocket: "WebSocket", task_id: str = None) -> None:
+        """
+        Déconnecte un WebSocket et nettoie les références.
+        """
         try:
-            conns = self.task_connections.get(task_id)
-            if conns and websocket in conns:
-                conns.discard(websocket)
-                logger.info(f"✅ WebSocket RETIRÉ de {task_id}")
-                self.active_connections.get("all", set()).discard(websocket)
+            if task_id:
+                self.task_connections.get(task_id, set()).discard(websocket)
+            self.active_connections.get("all", set()).discard(websocket)
+            
+            # Fermer proprement la connexion si encore ouverte
+            if websocket.client_state == websocket.client_state.CONNECTED:
+                await websocket.close()
+                
         except Exception as e:
-            logger.error(f"❌ Erreur lors de la déconnexion WebSocket: {e}")
+            logger.error(f"Erreur lors de la déconnexion WebSocket: {e}")
     
     async def broadcast_to_task(
         self,

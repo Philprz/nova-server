@@ -11,7 +11,58 @@ from routes.routes_progress import handle_user_response_task
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
+@router.websocket("/ws/assistant/{task_id}")
+async def websocket_assistant_progress(websocket: WebSocket, task_id: str):
+    """WebSocket pour l'assistant intelligent avec gestion des messages"""
+    await websocket_manager.connect(websocket, task_id)
+    logger.info(f"🔌 Assistant WebSocket connecté pour {task_id}")
+    
+    try:
+        while True:
+            try:
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=300.0)
+                message = json.loads(data)
+                message_type = message.get("type")
+                
+                if message_type == "user_response":
+                    logger.info(f"🎯 Traitement user_response pour {task_id}: {message}")
+                    response_data = message.get("data", {})
+                    await handle_user_response_task(task_id, response_data)
+                    
+                    await websocket.send_text(json.dumps({
+                        "type": "user_response_processed",
+                        "task_id": task_id,
+                        "timestamp": datetime.utcnow().isoformat()
+                    }))
+                elif message_type == "ping":
+                    await websocket.send_text(json.dumps({
+                        "type": "pong",
+                        "task_id": task_id,
+                        "timestamp": datetime.utcnow().isoformat()
+                    }))
+                else:
+                    await websocket.send_text(json.dumps({
+                        "type": "echo",
+                        "task_id": task_id,
+                        "received_type": message_type,
+                        "timestamp": datetime.utcnow().isoformat()
+                    }))
+                    
+            except asyncio.TimeoutError:
+                await websocket.send_text(json.dumps({
+                    "type": "ping",
+                    "task_id": task_id,
+                    "timestamp": datetime.utcnow().isoformat()
+                }))
+                continue
+                
+    except WebSocketDisconnect:
+        logger.info(f"🔌 Assistant WebSocket déconnecté pour {task_id}")
+    except Exception as e:
+        logger.error(f"❌ Erreur WebSocket assistant {task_id}: {str(e)}")
+    finally:
+        await websocket_manager.disconnect(websocket, task_id)
+        
 @router.websocket("/ws/task/{task_id}")
 async def websocket_task_progress(websocket: WebSocket, task_id: str):
     """WebSocket pour suivi en temps réel d'une tâche"""
@@ -38,7 +89,7 @@ async def websocket_task_progress(websocket: WebSocket, task_id: str):
                 await handle_user_response_task(task_id, response_data)
 
     except WebSocketDisconnect:
-        logger.info(f"Client déconnecté du WebSocket pour tâche {task_id}")
+        # Correction: Appel correct de la méthode disconnect avec les bons paramètres
         await websocket_manager.disconnect(websocket, task_id)
 
 
