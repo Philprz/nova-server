@@ -2849,16 +2849,16 @@
                 input.value = '';
                 input.focus();
             }
-            
+
             // Masquer la progression
             hideProgress();
-            
+
             // Déconnecter WebSocket si actif
-            if (currentWebSocket) {
-                currentWebSocket.close();
-                currentWebSocket = null;
+            if (websocket) {
+                websocket.close();
+                websocket = null;
             }
-            
+
             currentTaskId = null;
         }
                 function addFunctionalSuggestions(suggestions) {
