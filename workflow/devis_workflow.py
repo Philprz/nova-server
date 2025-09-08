@@ -702,14 +702,15 @@ class DevisWorkflow:
         # Récupérer la quantité depuis extracted_info plutôt que d'utiliser une valeur par défaut
         extracted_info = self.context.get("extracted_info", {})
         original_products = extracted_info.get("products", [])
-
+        
         # Trouver le produit original correspondant
-        quantity = 1  # Valeur par défaut
-        for orig_product in original_products:
-            if (orig_product.get("name", "").lower() in selected_product_data.get("ItemName", "").lower() or
-                orig_product.get("code") == selected_product_data.get("ItemCode")):
-                quantity = orig_product.get("quantity", 1)
-                break
+        quantity = user_input.get("quantity", 1)  # Utiliser la quantité de user_input en priorité
+        if not quantity or quantity == 1:  # Si pas de quantité ou quantité par défaut
+            for orig_product in original_products:
+                if (orig_product.get("name", "").lower() in selected_product_data.get("ItemName", "").lower() or
+                    orig_product.get("code") == selected_product_data.get("ItemCode")):
+                    quantity = orig_product.get("quantity", 1)
+                    break
 
         logger.info(f"📦 Quantité récupérée depuis la demande originale: {quantity}")
         current_context = context.get("validation_context", {})
@@ -752,7 +753,7 @@ class DevisWorkflow:
             formatted_product = {
                 "code": selected_product_data.get("ItemCode"),
                 "name": selected_product_data.get("ItemName"),
-                "quantity": user_input.get("quantity", 2),
+                "quantity": quantity,
                 # Utiliser Price d'abord, puis AvgPrice, puis estimation
                 "unit_price": selected_product_data.get("Price") or selected_product_data.get("AvgPrice") or selected_product_data.get("unit_price") or self._estimate_product_price(selected_product_data.get("ItemName", "")),
                 "total_price": 0,  # Sera calculé plus tard
@@ -765,12 +766,7 @@ class DevisWorkflow:
             }
 
             # Calculer le prix total
-            formatted_product["total_price"] = formatted_product["unit_price"] * quantity
-
-            # Récupérer la quantité de la demande originale ou utiliser celle fournie
-            original_quantity = self.context.get("extracted_info", {}).get("products", [{}])[0].get("quantity", user_input.get("quantity", 2))
-            quantity = user_input.get("quantity", original_quantity)
-            
+            formatted_product["total_price"] = formatted_product["unit_price"] * quantity            
             logger.info(f"✅ Produit formaté: {formatted_product['name']} - Code: {formatted_product['code']} - Prix: {formatted_product['unit_price']}€ - Quantité: {quantity}")
             # CORRECTION: S'assurer que les données client sont bien présentes
             validated_data = {
