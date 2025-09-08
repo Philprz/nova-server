@@ -699,7 +699,7 @@ class DevisWorkflow:
         # L'interface envoie 'selected_product', pas 'selected_data'
         selected_product_data = user_input.get("selected_product") or user_input.get("selected_data")
         product_code = user_input.get("product_code")
-        quantity = user_input.get("quantity", 10)  # Récupérer la quantité depuis la demande initiale
+        quantity = user_input.get("quantity") or self.context.get("extracted_info", {}).get("products", [{}])[0].get("quantity", 1)
         current_context = context.get("validation_context", {})
 
         # Logs détaillés pour debug
@@ -2971,13 +2971,6 @@ class DevisWorkflow:
                     })
                 
                 logger.info(f"Succès global: {overall_success}")
-                # Générer quote_id à partir du résultat SAP ou Salesforce
-                if sap_result and sap_result.get("success"):
-                    quote_id = f"SAP-{sap_result.get('doc_num', 'UNKNOWN')}"
-                elif sf_result and sf_result.get("success"):
-                    quote_id = f"SF-{sf_result.get('id', 'UNKNOWN')}"
-                else:
-                    quote_id = f"QUOTE-{datetime.now().strftime('%Y%m%d_%H%M%S')}"
                 logger.info(f"SAP: {'✅' if sap_success else '❌'}")
                 logger.info(f"Salesforce: {'✅' if sf_success else '❌'}")
                 logger.info(f"Quote ID: {result['quote_id']}")
