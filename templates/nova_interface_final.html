@@ -1849,9 +1849,6 @@
         }
 
         function handleTaskComplete(result) {
-            // Variables globales pour éviter les erreurs de portée
-            let globalQuoteIdRaw = null;
-            let globalClientName = null;
             if (taskCompletedHandled) return;
             taskCompletedHandled = true;
 
@@ -1868,7 +1865,7 @@
                     result.client_name ||
                     result.validated_data?.client?.name ||
                     result.validated_data?.client?.Name ||
-                    'Client non identifié';
+                    'Client';
 
                 // Construction robuste du numéro de devis, sans "SAP-undefined"
                 const sapDocNum = result.sap_quote?.doc_num ?? null;
@@ -1877,15 +1874,20 @@
                     result.sap_doc_num ??
                     (sapDocNum ? `SAP-${sapDocNum}` : null) ??
                     result.validated_data?.quote_id ??
-                    `NOVA-${Date.now().toString().slice(-6)}`;
+                    ('NOVA-' + Date.now().toString().slice(-6));
+
+                // Assigner aux variables globales (déclarées au niveau script)
+                globalQuoteIdRaw = quoteNumber;
+                globalClientName = clientName;
 
                 // Produits avec extraction complète et formatage détaillé
-                const products = result.products || 
-                                result.validated_data?.products || 
-                                result.sap_quote?.DocumentLines || 
-                                result.raw_result?.DocumentLines || 
-                                [];
-                
+                const products =
+                    result.products ||
+                    result.validated_data?.products ||
+                    result.sap_quote?.DocumentLines ||
+                    result.raw_result?.DocumentLines ||
+                    [];
+
                 let productsHtml = '';
                 if (Array.isArray(products) && products.length > 0) {
                     productsHtml = `
@@ -1899,14 +1901,20 @@
                             <strong style="color: var(--text-primary); margin-bottom: 10px; display: block;">📦 Détail des produits</strong>
                             <div style="margin-top: 10px;">
                     `;
-                    
+
                     products.forEach((product) => {
-                        const productCode = typeof escapeHtml === 'function' ? escapeHtml(product.code || product.ItemCode || 'N/A') : (product.code || product.ItemCode || 'N/A');
-                        const productName = typeof escapeHtml === 'function' ? escapeHtml(product.name || product.ItemName || product.ItemDescription || 'Produit') : (product.name || product.ItemName || product.ItemDescription || 'Produit');
-                        const quantity = Number(product.quantity || product.Quantity || 0);
-                        const unitPrice = Number(product.unit_price || product.UnitPrice || product.Price || 0) || 0;
+                        const productCode = typeof escapeHtml === 'function'
+                            ? escapeHtml(product?.code ?? product?.ItemCode ?? 'N/A')
+                            : (product?.code ?? product?.ItemCode ?? 'N/A');
+
+                        const productName = typeof escapeHtml === 'function'
+                            ? escapeHtml(product?.name ?? product?.ItemName ?? product?.ItemDescription ?? 'Produit')
+                            : (product?.name ?? product?.ItemName ?? product?.ItemDescription ?? 'Produit');
+
+                        const quantity = Number(product?.quantity ?? product?.Quantity ?? 0);
+                        const unitPrice = Number(product?.unit_price ?? product?.UnitPrice ?? product?.Price ?? 0) || 0;
                         const total = quantity * unitPrice;
-                        
+
                         productsHtml += `
                             <div style="
                                 display: flex;
@@ -1938,10 +1946,9 @@
                             </div>
                         `;
                     });
-                    
+
                     productsHtml += '</div></div>';
                 }
-
 
                 // Montant formaté en EUR (FR)
                 const rawAmount =
@@ -1949,6 +1956,7 @@
                     result.sap_quote?.total_amount ??
                     result.validated_data?.total_amount ??
                     0;
+
                 const totalAmount = Number.isFinite(Number(rawAmount)) ? Number(rawAmount) : 0;
                 const formattedAmount = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(totalAmount);
 
@@ -1965,9 +1973,9 @@
 
                 // Ajouter des suggestions avec boutons fonctionnels
                 const suggestions = [
-                    { text: 'Voir le devis', action: `viewQuote('${globalQuoteIdRaw || quoteNumber}')` },
+                    { text: 'Voir le devis', action: `viewQuote('${globalQuoteIdRaw || quoteNumber || ''}')` },
                     { text: 'Créer un nouveau devis', action: 'newQuote()' },
-                    { text: 'Modifier le devis', action: `modifyQuote('${globalQuoteIdRaw || quoteNumber}')` }
+                    { text: 'Modifier le devis', action: `modifyQuote('${globalQuoteIdRaw || quoteNumber || ''}')` }
                 ];
                 addFunctionalSuggestions(suggestions);
 
@@ -1979,6 +1987,7 @@
                 addMessage(`Erreur: ${result.error || 'Erreur inconnue'}`, 'system');
             }
         }
+
 
 
 
