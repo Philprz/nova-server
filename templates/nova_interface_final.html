@@ -1876,8 +1876,69 @@
                     result.validated_data?.quote_id ??
                     `NOVA-${Date.now().toString().slice(-6)}`;
 
-                // Produits si présents (optionnel, non bloquant)
-                const products = result.products || result.validated_data?.products || [];
+                // Produits avec extraction complète et formatage détaillé
+                const products = result.products || 
+                                result.validated_data?.products || 
+                                result.sap_quote?.DocumentLines || 
+                                result.raw_result?.DocumentLines || 
+                                [];
+                
+                let productsHtml = '';
+                if (Array.isArray(products) && products.length > 0) {
+                    productsHtml = `
+                        <div style="
+                            background: var(--bg-primary);
+                            padding: 15px;
+                            border-radius: 8px;
+                            margin: 15px 0;
+                            border: 1px solid var(--border-color);
+                        ">
+                            <strong style="color: var(--text-primary); margin-bottom: 10px; display: block;">📦 Détail des produits</strong>
+                            <div style="margin-top: 10px;">
+                    `;
+                    
+                    products.forEach((product) => {
+                        const productCode = escapeHtml(product.code || product.ItemCode || 'N/A');
+                        const productName = escapeHtml(product.name || product.ItemName || product.ItemDescription || 'Produit');
+                        const quantity = Number(product.quantity || product.Quantity || 0);
+                        const unitPrice = Number(product.unit_price || product.UnitPrice || product.Price || 0) || 0;
+                        const total = quantity * unitPrice;
+                        
+                        productsHtml += `
+                            <div style="
+                                display: flex;
+                                justify-content: space-between;
+                                align-items: center;
+                                padding: 12px;
+                                margin: 8px 0;
+                                background: var(--bg-secondary);
+                                border-radius: 6px;
+                                border-left: 3px solid var(--primary-blue);
+                            ">
+                                <div>
+                                    <div style="
+                                        font-weight: bold;
+                                        color: var(--text-primary);
+                                        margin-bottom: 4px;
+                                    ">${productCode} - ${productName}</div>
+                                    <small style="color: var(--text-secondary);">
+                                        Quantité: ${quantity} × ${unitPrice.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })}
+                                    </small>
+                                </div>
+                                <div style="
+                                    font-weight: bold;
+                                    color: var(--success-color);
+                                    font-size: 1.1em;
+                                ">
+                                    ${total.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })}
+                                </div>
+                            </div>
+                        `;
+                    });
+                    
+                    productsHtml += '</div></div>';
+                }
+
 
                 // Montant formaté en EUR (FR)
                 const rawAmount =
@@ -1899,9 +1960,13 @@
                     displayQuoteResult(result);
                 }
 
-                // Ajouter des suggestions
-                const suggestions = ['Voir le devis', 'Créer un nouveau devis', 'Modifier le devis'];
-                addSuggestions(suggestions);
+                // Ajouter des suggestions avec boutons fonctionnels
+                const suggestions = [
+                    { text: 'Voir le devis', action: `viewQuote('${quoteIdRaw}')` },
+                    { text: 'Créer un nouveau devis', action: 'newQuote()' },
+                    { text: 'Modifier le devis', action: `modifyQuote('${quoteIdRaw}')` }
+                ];
+                addFunctionalSuggestions(suggestions);
 
                 // (facultatif) trace produits si besoin
                 // if (products.length) console.debug('Produits du devis:', products);
@@ -2488,16 +2553,17 @@
                 .replace(/&/g,'&amp;').replace(/</g,'&lt;')
                 .replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 
-            // Extraction des données du devis (robuste)
+            // Extraction robuste du nom client depuis plusieurs sources possibles
             const clientNameRaw = (
-                [
-                    result?.client?.Name,
-                    result?.client?.name,
-                    result?.client_name,
-                    result?.validated_data?.client?.name,
-                    result?.validated_data?.client?.Name,
-                    (typeof result?.client === 'string' ? result.client : null),
-                ].find(v => typeof v === 'string' && v.trim()) || 'Client non défini'
+                result?.validated_data?.client?.Name ||
+                result?.validated_data?.client?.name ||
+                result?.client?.Name ||
+                result?.client?.name ||
+                result?.client_name ||
+                result?.sap_quote?.CardName ||
+                result?.raw_result?.CardName ||
+                (typeof result?.client === 'string' ? result.client : null) ||
+                'Client non identifié'
             );
 
             // ID devis solide, sans "SAP-undefined"
@@ -2590,49 +2656,147 @@
 
             // Construction du message
             const resultHtml = `
-                <div style="background:linear-gradient(135deg,#f0f9ff 0%,#e0f2fe 100%); padding:20px; border-radius:12px; margin:10px 0;">
-                    <div style="display:flex; align-items:center; gap:10px; margin-bottom:15px;">
-                        <div style="background:#059669; color:white; border-radius:50%; width:40px; height:40px; display:flex; align-items:center; justify-content:center; font-size:1.2em;">✅</div>
-                        <div>
-                            <h3 style="color:#0369a1; margin:0; font-size:1.3em;">Devis créé avec succès</h3>
-                            <p style="margin:4px 0 0 0; color:#0f172a;">Référence : <strong>${quoteId}</strong></p>
+                <div class="quote-result-container" style="
+                    background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-tertiary) 100%);
+                    border: 1px solid var(--primary-violet);
+                    border-radius: 12px;
+                    padding: 20px;
+                    margin: 15px 0;
+                    color: var(--text-primary);
+                    box-shadow: 0 8px 32px rgba(130, 45, 254, 0.2);
+                ">
+                    <div style="
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        margin-bottom: 20px;
+                        padding-bottom: 15px;
+                        border-bottom: 1px solid var(--border-color);
+                    ">
+                        <div style="font-size: 2em; margin-right: 10px;">✅</div>
+                        <h3 style="
+                            color: var(--success-color);
+                            margin: 0;
+                            font-size: 1.4em;
+                            font-weight: 600;
+                        ">Devis créé avec succès</h3>
+                    </div>
+                    
+                    <div style="
+                        display: grid;
+                        grid-template-columns: 1fr 1fr;
+                        gap: 15px;
+                        margin-bottom: 20px;
+                    ">
+                        <div style="
+                            background: var(--bg-primary);
+                            padding: 15px;
+                            border-radius: 8px;
+                            border-left: 4px solid var(--primary-violet);
+                            border: 1px solid var(--border-color);
+                        ">
+                            <strong style="color: var(--primary-violet);">🏢 Client</strong><br>
+                            <span style="
+                                font-size: 1.1em;
+                                font-weight: bold;
+                                color: var(--text-primary);
+                            ">${typeof escapeHtml==='function' ? escapeHtml(clientNameRaw) : (clientNameRaw ?? '')}</span>
+                        </div>
+                        <div style="
+                            background: var(--bg-primary);
+                            padding: 15px;
+                            border-radius: 8px;
+                            border-left: 4px solid var(--success-color);
+                            border: 1px solid var(--border-color);
+                        ">
+                            <strong style="color: var(--success-color);">💰 Montant Total</strong><br>
+                            <span style="
+                                font-size: 1.2em;
+                                font-weight: bold;
+                                color: var(--success-color);
+                            ">${formattedAmount}</span>
                         </div>
                     </div>
-
-                    <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:15px; margin-bottom:20px;">
-                        <div style="background:white; padding:15px; border-radius:8px; border-left:4px solid #02B9FD;">
-                            <strong style="color:#0369a1;">📋 Devis N°</strong><br>
-                            <span style="font-size:1.1em; font-weight:bold;">${quoteId}</span>
-                        </div>
-                        <div style="background:white; padding:15px; border-radius:8px; border-left:4px solid #832DFE;">
-                            <strong style="color:#7c3aed;">🏢 Client</strong><br>
-                            <span style="font-size:1.1em; font-weight:bold;">${clientName}</span>
-                        </div>
-                        <div style="background:white; padding:15px; border-radius:8px; border-left:4px solid #059669;">
-                            <strong style="color:#059669;">💰 Montant Total</strong><br>
-                            <span style="font-size:1.2em; font-weight:bold; color:#059669;">${formattedAmount}</span>
-                        </div>
+                    
+                    <div style="
+                        background: var(--bg-primary);
+                        padding: 15px;
+                        border-radius: 8px;
+                        margin-bottom: 15px;
+                        border: 1px solid var(--border-color);
+                    ">
+                        <strong style="color: var(--text-primary);">📋 Référence</strong><br>
+                        <span style="color: var(--text-secondary); font-family: monospace;">${typeof escapeHtml==='function' ? escapeHtml(quoteIdRaw) : (quoteIdRaw ?? '')}</span>
                     </div>
 
                     ${productsHtml}
 
-                    <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px;">
-                        <button type="button" onclick="window.open('/pdf/quote/${quoteId}', '_blank')" style="background:#dc2626; color:white; border:none; padding:10px 15px; border-radius:6px; cursor:pointer; display:flex; align-items:center; gap:5px;">
-                            📄 Télécharger PDF
+                    <div style="
+                        display: flex;
+                        gap: 10px;
+                        flex-wrap: wrap;
+                        margin-top: 20px;
+                    ">
+                        <button type="button" onclick="(typeof viewQuote==='function' ? viewQuote('${quoteIdRaw}') : window.open('/pdf/quote/${quoteIdRaw}','_blank'))" style="
+                            background: linear-gradient(135deg, var(--primary-blue), var(--primary-violet));
+                            color: white;
+                            border: none;
+                            padding: 10px 15px;
+                            border-radius: 6px;
+                            cursor: pointer;
+                            display: flex;
+                            align-items: center;
+                            gap: 5px;
+                            font-weight: 500;
+                            transition: all 0.2s ease;
+                        " onmouseover="this.style.transform='translateY(-1px)'" onmouseout="this.style.transform='translateY(0)'">
+                            📄 Voir le devis
                         </button>
-                        <button type="button" onclick="window.open('/edit/quote/${quoteId}', '_blank')" style="background:#7c3aed; color:white; border:none; padding:10px 15px; border-radius:6px; cursor:pointer; display:flex; align-items:center; gap:5px;">
+                        <button type="button" onclick="(typeof modifyQuote==='function' ? modifyQuote('${quoteIdRaw}') : window.open('/edit/quote/${quoteIdRaw}','_blank'))" style="
+                            background: linear-gradient(135deg, var(--primary-violet), var(--accent-color));
+                            color: white;
+                            border: none;
+                            padding: 10px 15px;
+                            border-radius: 6px;
+                            cursor: pointer;
+                            display: flex;
+                            align-items: center;
+                            gap: 5px;
+                            font-weight: 500;
+                            transition: all 0.2s ease;
+                        " onmouseover="this.style.transform='translateY(-1px)'" onmouseout="this.style.transform='translateY(0)'">
                             ✏️ Modifier
                         </button>
-                        <button type="button" onclick="typeof newQuote==='function' && newQuote()" style="background:#059669; color:white; border:none; padding:10px 15px; border-radius:6px; cursor:pointer; display:flex; align-items:center; gap:5px;">
+                        <button type="button" onclick="(typeof newQuote==='function' ? newQuote() : null)" style="
+                            background: linear-gradient(135deg, var(--success-color), #22C767);
+                            color: white;
+                            border: none;
+                            padding: 10px 15px;
+                            border-radius: 6px;
+                            cursor: pointer;
+                            display: flex;
+                            align-items: center;
+                            gap: 5px;
+                            font-weight: 500;
+                            transition: all 0.2s ease;
+                        " onmouseover="this.style.transform='translateY(-1px)'" onmouseout="this.style.transform='translateY(0)'">
                             ➕ Nouveau devis
                         </button>
                     </div>
 
-                    <div style="margin-top:6px; font-size:0.9em; color:#0f172a;">
+                    <div style="
+                        margin-top: 15px;
+                        padding-top: 15px;
+                        border-top: 1px solid var(--border-color);
+                        font-size: 0.9em;
+                        color: var(--text-secondary);
+                        text-align: center;
+                    ">
                         ${[sapBadge, sfBadge].filter(Boolean).join(' ')}
                     </div>
                 </div>
             `;
+
 
             // Ajouter le message au chat
             addMessage(resultHtml, 'system');
@@ -2658,6 +2822,43 @@
             }
             
             currentTaskId = null;
+        }
+                function addFunctionalSuggestions(suggestions) {
+            const messagesContainer = document.getElementById('chatMessages');
+            const suggestionsDiv = document.createElement('div');
+            suggestionsDiv.className = 'suggestions-container';
+            
+            suggestions.forEach(suggestion => {
+                const button = document.createElement('button');
+                button.className = 'suggestion-button';
+                button.textContent = suggestion.text;
+                button.onclick = () => eval(suggestion.action);
+                button.style.cssText = `
+                    background: linear-gradient(135deg, #832DFE, #E220FB);
+                    color: white;
+                    border: none;
+                    padding: 8px 16px;
+                    margin: 4px;
+                    border-radius: 6px;
+                    cursor: pointer;
+                    font-size: 14px;
+                `;
+                suggestionsDiv.appendChild(button);
+            });
+            
+            messagesContainer.appendChild(suggestionsDiv);
+        }
+        
+        function viewQuote(quoteId) {
+            console.log('Affichage du devis:', quoteId);
+            // Logique pour afficher le détail du devis
+            addMessage(`Affichage du détail du devis ${quoteId}...`, 'system');
+        }
+        
+        function modifyQuote(quoteId) {
+            console.log('Modification du devis:', quoteId);
+            // Logique pour modifier le devis
+            addMessage(`Interface de modification du devis ${quoteId} en cours de développement...`, 'system');
         }
     </script>
 </body>
