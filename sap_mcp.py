@@ -1185,6 +1185,174 @@ async def sap_search_quotes(client_name: str, date_from: str = None, limit: int 
     except Exception as e:
         log(f"❌ Erreur recherche devis: {str(e)}", "ERROR")
         return {"success": False, "error": str(e)}
+@mcp.tool(name="sap_modify_quote")
+async def sap_modify_quote(doc_entry: int, modifications: dict) -> dict:
+    """
+    Modifie un devis SAP existant
+    
+    Args:
+        doc_entry: DocEntry du devis à modifier
+        modifications: Dict contenant les modifications à apporter
+            - header: modifications de l'en-tête (date, commentaires, etc.)
+            - lines: modifications des lignes (quantités, prix, etc.)
+            - add_lines: nouvelles lignes à ajouter
+            - remove_lines: numéros de lignes à supprimer
+    
+    Returns:
+        Dict avec le statut de la modification
+    """
+    try:
+        log(f"Modification du devis SAP DocEntry: {doc_entry}")
+        log(f"Modifications demandées: {modifications}")
+        
+        # Récupérer le devis existant
+        current_quote = await call_sap(f"/Quotations({doc_entry})")
+        
+        if "error" in current_quote:
+            return {"success": False, "error": f"Devis non trouvé: {current_quote['error']}"}
+        
+        # Préparer les données de modification
+        update_data = {}
+        
+        # Modifications de l'en-tête
+        if "header" in modifications:
+            header_mods = modifications["header"]
+            if "comments" in header_mods:
+                update_data["Comments"] = header_mods["comments"]
+            if "doc_date" in header_mods:
+                update_data["DocDate"] = header_mods["doc_date"]
+            if "doc_due_date" in header_mods:
+                update_data["DocDueDate"] = header_mods["doc_due_date"]
+            if "reference" in header_mods:
+                update_data["NumAtCard"] = header_mods["reference"]
+        
+        # Modifications des lignes existantes
+        if "lines" in modifications:
+            document_lines = []
+            existing_lines = current_quote.get("DocumentLines", [])
+            
+            for line_mod in modifications["lines"]:
+                line_num = line_mod.get("line_num")
+                
+                # Trouver la ligne existante
+                existing_line = next((line for line in existing_lines if line.get("LineNum") == line_num), None)
+                
+                if existing_line:
+                    # Modifier la ligne existante
+                    modified_line = existing_line.copy()
+                    
+                    if "quantity" in line_mod:
+                        modified_line["Quantity"] = float(line_mod["quantity"])
+                    if "unit_price" in line_mod:
+                        modified_line["Price"] = float(line_mod["unit_price"])
+                    if "discount_percent" in line_mod:
+                        modified_line["DiscountPercent"] = float(line_mod["discount_percent"])
+                    if "item_description" in line_mod:
+                        modified_line["ItemDescription"] = line_mod["item_description"]
+                    
+                    document_lines.append(modified_line)
+                else:
+                    # Ligne non trouvée, garder les lignes existantes
+                    document_lines.extend(existing_lines)
+            
+            # Ajouter les lignes non modifiées
+            for existing_line in existing_lines:
+                if not any(line.get("LineNum") == existing_line.get("LineNum") for line in document_lines):
+                    document_lines.append(existing_line)
+            
+            update_data["DocumentLines"] = document_lines
+        
+        # Ajouter nouvelles lignes
+        if "add_lines" in modifications:
+            if "DocumentLines" not in update_data:
+                update_data["DocumentLines"] = current_quote.get("DocumentLines", [])
+            
+            for new_line in modifications["add_lines"]:
+                line_num = len(update_data["DocumentLines"])
+                new_line_data = {
+                    "LineNum": line_num,
+                    "ItemCode": new_line.get("item_code"),
+                    "ItemDescription": new_line.get("item_description", ""),
+                    "Quantity": float(new_line.get("quantity", 1)),
+                    "Price": float(new_line.get("unit_price", 0)),
+                    "DiscountPercent": float(new_line.get("discount_percent", 0)),
+                    "TaxCode": new_line.get("tax_code", "S1"),
+                    "WarehouseCode": new_line.get("warehouse_code", "01")
+                }
+                update_data["DocumentLines"].append(new_line_data)
+        
+        # Supprimer lignes
+        if "remove_lines" in modifications and "DocumentLines" in update_data:
+            lines_to_remove = modifications["remove_lines"]
+            update_data["DocumentLines"] = [
+                line for line in update_data["DocumentLines"] 
+                if line.get("LineNum") not in lines_to_remove
+            ]
+            
+            # Réindexer les lignes
+            for i, line in enumerate(update_data["DocumentLines"]):
+                line["LineNum"] = i
+        
+        # Appeler l'API SAP pour mettre à jour
+        response = await call_sap(f"/Quotations({doc_entry})", "PATCH", update_data)
+        
+        if "error" in response:
+            return {"success": False, "error": response["error"]}
+        
+        # Récupérer le devis mis à jour
+        updated_quote = await call_sap(f"/Quotations({doc_entry})")
+        
+        log(f"✅ Devis {doc_entry} modifié avec succès")
+        
+        return {
+            "success": True,
+            "doc_entry": doc_entry,
+            "doc_num": updated_quote.get("DocNum"),
+            "message": f"Devis {updated_quote.get('DocNum')} modifié avec succès",
+            "updated_quote": updated_quote
+        }
+        
+    except Exception as e:
+        log(f"❌ Erreur modification devis: {str(e)}", "ERROR")
+        return {"success": False, "error": str(e)}
+
+@mcp.tool(name="sap_update_quotation")
+async def sap_update_quotation(doc_entry: int, quotation_data: dict) -> dict:
+    """
+    Met à jour complètement un devis SAP (remplacement total)
+    
+    Args:
+        doc_entry: DocEntry du devis à remplacer
+        quotation_data: Nouvelles données complètes du devis
+    
+    Returns:
+        Dict avec le statut de la mise à jour
+    """
+    try:
+        log(f"Mise à jour complète du devis SAP DocEntry: {doc_entry}")
+        
+        # Mettre à jour le devis
+        response = await call_sap(f"/Quotations({doc_entry})", "PATCH", quotation_data)
+        
+        if "error" in response:
+            return {"success": False, "error": response["error"]}
+        
+        # Récupérer le devis mis à jour
+        updated_quote = await call_sap(f"/Quotations({doc_entry})")
+        
+        log(f"✅ Devis {doc_entry} mis à jour complètement")
+        
+        return {
+            "success": True,
+            "doc_entry": doc_entry,
+            "doc_num": updated_quote.get("DocNum"),
+            "message": f"Devis {updated_quote.get('DocNum')} mis à jour avec succès",
+            "updated_quote": updated_quote
+        }
+        
+    except Exception as e:
+        log(f"❌ Erreur mise à jour devis: {str(e)}", "ERROR")
+        return {"success": False, "error": str(e)}
 # Table de mappage des fonctions MCP
 mcp_functions = {
     "ping": ping,
@@ -1197,7 +1365,9 @@ mcp_functions = {
     "sap_validate_draft_quote": sap_validate_draft_quote,
     "get_quotation_details": get_quotation_details,
     "_get_customer_details": _get_customer_details,
-    "sap_search_quotes": sap_search_quotes
+    "sap_search_quotes": sap_search_quotes,
+    "sap_modify_quote": sap_modify_quote,
+    "sap_update_quotation": sap_update_quotation
 }   
 
 # Initialisation au démarrage

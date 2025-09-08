@@ -57,7 +57,152 @@ async def get_quote_details(
     except Exception as e:
         logger.error(f"Erreur lors de la récupération du devis {quote_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Erreur interne: {str(e)}")
+@router.put("/modify/{quote_id}")
+async def modify_quote(
+    quote_id: str,
+    modifications: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Modifie un devis existant
+    
+    Args:
+        quote_id: ID du devis (format: SAP-{DocEntry})
+        modifications: Dict contenant les modifications à apporter
+    
+    Returns:
+        Dict contenant le statut de la modification
+    """
+    
+    try:
+        logger.info(f"Modification du devis: {quote_id}")
+        logger.info(f"Modifications: {modifications}")
+        
+        # Parsing de l'ID pour déterminer le système source
+        if quote_id.startswith("SAP-"):
+            doc_entry = quote_id.replace("SAP-", "")
+            return await modify_sap_quote(doc_entry, modifications)
+        
+        elif quote_id.startswith("SF-"):
+            opportunity_id = quote_id.replace("SF-", "")
+            return await modify_salesforce_quote(opportunity_id, modifications)
+        
+        else:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Format d'ID invalide: {quote_id}. Attendu: SAP-{{DocEntry}} ou SF-{{OpportunityId}}"
+            )
+    
+    except Exception as e:
+        logger.error(f"Erreur lors de la modification du devis {quote_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Erreur interne: {str(e)}")
 
+async def modify_sap_quote(
+    doc_entry: str, 
+    modifications: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Modifie un devis SAP Business One
+    """
+    
+    try:
+        from services.mcp_connector import MCPConnector
+        
+        connector = MCPConnector()
+        
+        # Utiliser la nouvelle fonction de modification
+        logger.info(f"Modification du devis SAP {doc_entry}")
+        sap_response = await connector.call_sap_mcp(
+            "sap_modify_quote",
+            {
+                "doc_entry": int(doc_entry),
+                "modifications": modifications
+            }
+        )
+        
+        if not sap_response or not isinstance(sap_response, dict):
+            raise HTTPException(
+                status_code=500,
+                detail="Réponse SAP invalide ou vide"
+            )
+        
+        if not sap_response.get("success", False):
+            error_msg = sap_response.get('error', 'Erreur inconnue')
+            raise HTTPException(
+                status_code=400,
+                detail=f"Erreur SAP lors de la modification: {error_msg}"
+            )
+        
+        logger.info(f"Devis SAP {doc_entry} modifié avec succès")
+        
+        return {
+            "success": True,
+            "message": sap_response.get("message", "Devis modifié avec succès"),
+            "quote_id": f"SAP-{doc_entry}",
+            "updated_data": sap_response.get("updated_quote", {})
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur modification devis SAP {doc_entry}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Erreur SAP: {str(e)}")
+
+async def modify_salesforce_quote(
+    opportunity_id: str,
+    modifications: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Modifie une opportunité Salesforce
+    """
+    
+    try:
+        from services.mcp_connector import MCPConnector
+        
+        connector = MCPConnector()
+        
+        # Préparer les données Salesforce
+        sf_update_data = {}
+        
+        if "header" in modifications:
+            header_mods = modifications["header"]
+            if "comments" in header_mods:
+                sf_update_data["Description"] = header_mods["comments"]
+            if "doc_due_date" in header_mods:
+                sf_update_data["CloseDate"] = header_mods["doc_due_date"]
+            if "amount" in header_mods:
+                sf_update_data["Amount"] = float(header_mods["amount"])
+        
+        # Mettre à jour l'opportunité
+        sf_response = await connector.call_salesforce_mcp(
+            "salesforce_update_record",
+            {
+                "sobject_type": "Opportunity",
+                "record_id": opportunity_id,
+                "record_data": sf_update_data
+            }
+        )
+        
+        if not sf_response or not sf_response.get("success", False):
+            error_msg = sf_response.get('error', 'Erreur inconnue') if sf_response else 'Pas de réponse'
+            raise HTTPException(
+                status_code=400,
+                detail=f"Erreur Salesforce lors de la modification: {error_msg}"
+            )
+        
+        logger.info(f"Opportunité Salesforce {opportunity_id} modifiée avec succès")
+        
+        return {
+            "success": True,
+            "message": "Opportunité Salesforce modifiée avec succès",
+            "quote_id": f"SF-{opportunity_id}",
+            "updated_data": sf_response
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur modification opportunité SF {opportunity_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Erreur Salesforce: {str(e)}")
 async def get_sap_quote_details(
     doc_entry: str, 
     include_lines: bool = True, 
@@ -75,14 +220,18 @@ async def get_sap_quote_details(
         
         # Utiliser la méthode call_sap_mcp qui existe avec la bonne signature
         logger.info(f"Appel SAP MCP pour devis {doc_entry}")
-        sap_response = await connector.call_sap_mcp(
-            "get_quotation_details",
-            {
-                "doc_entry": int(doc_entry),
-                "include_lines": include_lines,
-                "include_customer": include_customer
-            }
-        )
+        # CORRECTION: Traitement spécial si le résultat MCP est encapsulé dans 'result'
+        if isinstance(sap_response, dict) and 'result' in sap_response:
+            actual_response = sap_response['result']
+            if isinstance(actual_response, str):
+                # Tenter de parser le JSON si c'est une string
+                try:
+                    import json
+                    sap_response = json.loads(actual_response)
+                except:
+                    raise HTTPException(status_code=500, detail=f"Erreur SAP: {actual_response}")
+            else:
+                sap_response = actual_response
         
         # CORRECTION: Vérifier le type de réponse d'abord
         if isinstance(sap_response, str):
