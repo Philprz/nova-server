@@ -21,27 +21,9 @@ from routes.routes_client_listing import router as client_listing_router
 from routes.routes_websocket import router as websocket_router
 from routes.routes_intelligent_assistant import router as intelligent_assistant_router
 from routes import routes_intelligent_assistant, routes_quote_details
-# Ajout du router quote_details manquant
-app.include_router(routes_quote_details.router)
-
-# Route pour edit-quote manquante
-@app.get("/edit-quote/{quote_id}")
-async def edit_quote_page(quote_id: str):
-    """Page d'édition de devis"""
-    try:
-        with open("interface/nova_interface_final.html", "r", encoding="utf-8") as f:
-            html_content = f.read()
-        # Injection du quote_id dans le HTML
-        html_content = html_content.replace(
-            "<!-- QUOTE_ID_PLACEHOLDER -->", 
-            f"<script>window.EDIT_QUOTE_ID = '{quote_id}';</script>"
-        )
-        return HTMLResponse(content=html_content)
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="Interface non trouvée")
 if sys.platform == "win32":
-    os.environ["PYTHONIOENCODING"] = "utf-8"    
-    
+    os.environ["PYTHONIOENCODING"] = "utf-8"
+
 # Configuration du logger pour éviter les erreurs d'emojis
 logging.basicConfig(
     level=logging.INFO,
@@ -61,17 +43,17 @@ HEALTH_CHECK_RESULTS = None
 async def lifespan(app: FastAPI):
     """Gestionnaire de cycle de vie de l'application"""
     global HEALTH_CHECK_RESULTS
-    
+
     try:
         # 1. VÉRIFICATION DE SANTÉ AU DÉMARRAGE
         logger.info("=" * 50)
         logger.info("DEMARRAGE DE NOVA - Assistant IA pour Devis")
         logger.info("=" * 50)
-        
+
         # CORRECTION: Import et utilisation de la bonne classe
         from services.health_checker import HealthChecker
         health_checker = HealthChecker()
-        
+
         logger.info("Execution des tests de sante...")
         await asyncio.sleep(2)  # Délai pour l'initialisation
         HEALTH_CHECK_RESULTS = await health_checker.run_full_health_check()
@@ -89,34 +71,34 @@ async def lifespan(app: FastAPI):
         if HEALTH_CHECK_RESULTS["summary"]["success_rate"] < 50:
             logger.error("SYSTEME CRITIQUE NON OPERATIONNEL")
             logger.error("Impossible de demarrer NOVA avec des erreurs critiques")
-        
+
         # Affichage des recommandations sans emojis
         logger.info("RECOMMANDATIONS:")
         for rec in HEALTH_CHECK_RESULTS["recommendations"]:
             # Suppression des emojis pour éviter les erreurs d'encodage
             clean_rec = rec.replace("🔧", "[FIX]").replace("🛠️", "[TOOL]")
             logger.info(f"   {clean_rec}")
-        
+
         logger.info("=" * 50)
-        
+
         # CORRECTION: Démarrage normal si success_rate >= 50%
         if HEALTH_CHECK_RESULTS["summary"]["success_rate"] >= 50:
             logger.info("DEMARRAGE NOMINAL NOVA")
         else:
             logger.warning("DEMARRAGE EN MODE DEGRADE")
-        
+
         # 2. CHARGEMENT DES MODULES
         logger.info("Chargement des modules...")
-        
+
         # CORRECTION: Configuration des modules directement dans FastAPI
         # Au lieu d'utiliser ModuleLoader qui peut causer des problèmes
-        
+
         # Modules chargés directement
         loaded_modules = 6
-        
+
         logger.info(f"Modules charges: {loaded_modules}/6")
         logger.info("Routes principales configurées")
-        
+
         # 3. SUCCÈS DU DÉMARRAGE
         logger.info("=" * 60)
         logger.info("NOVA DEMARRE AVEC SUCCES")
@@ -124,9 +106,9 @@ async def lifespan(app: FastAPI):
         logger.info("   Sante: http://localhost:8000/health")
         logger.info("   Documentation: http://localhost:8000/docs")
         logger.info("=" * 60)
-        
+
         yield
-        
+
     except Exception as e:
         logger.error(f"Erreur critique au démarrage: {e}")
         raise
@@ -156,6 +138,23 @@ app.include_router(websocket_router, tags=["WebSocket"])
 app.include_router(intelligent_assistant_router)
 app.include_router(routes_quote_details.router)
 app.include_router(routes_intelligent_assistant.router)
+
+# Route pour edit-quote manquante
+@app.get("/edit-quote/{quote_id}")
+async def edit_quote_page(quote_id: str):
+    """Page d'édition de devis"""
+    try:
+        with open("interface/nova_interface_final.html", "r", encoding="utf-8") as f:
+            html_content = f.read()
+        # Injection du quote_id dans le HTML
+        html_content = html_content.replace(
+            "<!-- QUOTE_ID_PLACEHOLDER -->",
+            f"<script>window.EDIT_QUOTE_ID = '{quote_id}';</script>"
+        )
+        return HTMLResponse(content=html_content)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Interface non trouvée")
+
 # Route temporaire de débogage
 @app.get('/api/assistant/interface')
 async def get_assistant_interface():
