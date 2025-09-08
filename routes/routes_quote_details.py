@@ -217,10 +217,14 @@ async def get_sap_quote_details(
         from services.mcp_connector import MCPConnector
         
         connector = MCPConnector()
-        
+
         # Utiliser la méthode call_sap_mcp qui existe avec la bonne signature
-        sap_response = None
-        logger.info(f"Appel SAP MCP pour devis {doc_entry}")
+        sap_response = await connector.call_sap_mcp(
+            "sap_get_quote",
+            {
+                "doc_entry": int(doc_entry)
+            }
+        )
         # CORRECTION: Traitement spécial si le résultat MCP est encapsulé dans 'result'
         if isinstance(sap_response, dict) and 'result' in sap_response:
             actual_response = sap_response['result']
@@ -233,83 +237,79 @@ async def get_sap_quote_details(
                     raise HTTPException(status_code=500, detail=f"Erreur SAP: {actual_response}")
             else:
                 sap_response = actual_response
-        
+
         # CORRECTION: Vérifier le type de réponse d'abord
         if isinstance(sap_response, str):
-            # Réponse est un message d'erreur string
-            raise HTTPException(
-                status_code=500,
-                detail=f"Erreur SAP: {sap_response}"
-            )
-        
-        if not sap_response or not isinstance(sap_response, dict):
-            raise HTTPException(
-                status_code=500,
-                detail="Réponse SAP invalide ou vide"
-            )
-        
-        if not sap_response.get("success", False):
-            error_msg = sap_response.get('error', 'Erreur inconnue')
-            raise HTTPException(
-                status_code=404,
-                detail=f"Devis SAP {doc_entry} non trouvé ou erreur: {error_msg}"
-            )
-        
-        # Structure la réponse pour l'édition
-        quote_data = sap_response.get("quote", {})
-        
+            # Si c'est une string d'erreur directe
+            logger.error(f"Erreur SAP retournée comme string: {sap_response}")
+            raise HTTPException(status_code=500, detail=sap_response)
+
+        # Vérifier si la réponse contient une erreur
+        if isinstance(sap_response, dict):
+            if sap_response.get("error"):
+                error_msg = sap_response.get("error", "Erreur inconnue")
+                logger.error(f"Erreur SAP: {error_msg}")
+                raise HTTPException(status_code=500, detail=error_msg)
+
+            # Si la réponse contient un champ success = False
+            if "success" in sap_response and not sap_response["success"]:
+                error_msg = sap_response.get("message", sap_response.get("error", "Échec de récupération du devis"))
+                logger.error(f"Échec SAP: {error_msg}")
+                raise HTTPException(status_code=400, detail=error_msg)
+
+        # Extraire les données du devis
+        quote_data = None
+        if isinstance(sap_response, dict):
+            # Si les données sont dans "value" (format oData)
+            if "value" in sap_response:
+                values = sap_response["value"]
+                if isinstance(values, list) and len(values) > 0:
+                    quote_data = values[0]
+                else:
+                    logger.error(f"Devis {doc_entry} non trouvé dans SAP")
+                    raise HTTPException(status_code=404, detail=f"Devis {doc_entry} non trouvé")
+            # Si les données sont directement dans la réponse
+            elif "DocEntry" in sap_response:
+                quote_data = sap_response
+            # Si les données sont dans "quote"
+            elif "quote" in sap_response:
+                quote_data = sap_response["quote"]
+
         if not quote_data:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Données de devis vides pour DocEntry {doc_entry}"
-            )
-        
-        # Enrichissement avec métadonnées d'édition
-        editable_structure = structure_quote_for_editing(quote_data, int(doc_entry))
-        
-        lines_count = len(editable_structure.get('quote', {}).get('lines', []))
-        logger.info(f"Devis SAP {doc_entry} récupéré avec succès - {lines_count} lignes")
-        
-        # Formatage pour l'affichage dans l'interface
+            logger.error(f"Structure de réponse SAP inattendue: {sap_response}")
+            raise HTTPException(status_code=500, detail="Format de réponse SAP invalide")
+
+        # Formater la réponse pour l'interface
         formatted_response = {
             "success": True,
-            "quote_id": f"SAP-{doc_entry}",
             "quote": {
                 "doc_entry": quote_data.get("DocEntry"),
                 "doc_num": quote_data.get("DocNum"),
                 "doc_date": quote_data.get("DocDate"),
                 "doc_due_date": quote_data.get("DocDueDate"),
+                "doc_total": quote_data.get("DocTotal", 0),
                 "card_code": quote_data.get("CardCode"),
                 "card_name": quote_data.get("CardName"),
-                "doc_total": quote_data.get("DocTotal", 0),
-                "currency": quote_data.get("DocCurrency", "EUR"),
                 "comments": quote_data.get("Comments", ""),
-                "status": quote_data.get("DocumentStatus", ""),
                 "lines": []
-            },
-            "editable_structure": editable_structure
-        }
-        
-        # Ajouter les lignes de produits
-        for line_data in quote_data.get("DocumentLines", []):
-            line = {
-                "line_num": line_data.get("LineNum"),
-                "item_code": line_data.get("ItemCode"),
-                "item_description": line_data.get("ItemDescription", line_data.get("ItemName", "")),
-                "quantity": line_data.get("Quantity", 0),
-                "unit_price": line_data.get("UnitPrice", line_data.get("Price", 0)),
-                "line_total": line_data.get("LineTotal", 0),
-                "tax_code": line_data.get("TaxCode", ""),
-                "discount_percent": line_data.get("DiscountPercent", 0)
             }
-            formatted_response["quote"]["lines"].append(line)
-        
-        logger.info(f"Devis SAP {doc_entry} formaté avec succès - {len(formatted_response['quote']['lines'])} lignes")
+        }
+
+        # Ajouter les lignes si demandées
+        if include_lines and "DocumentLines" in quote_data:
+            for line in quote_data["DocumentLines"]:
+                formatted_response["quote"]["lines"].append({
+                    "line_num": line.get("LineNum"),
+                    "item_code": line.get("ItemCode"),
+                    "item_description": line.get("ItemDescription"),
+                    "quantity": line.get("Quantity", 0),
+                    "unit_price": line.get("UnitPrice", 0),
+                    "discount_percent": line.get("DiscountPercent", 0),
+                    "line_total": line.get("LineTotal", 0)
+                })
+
+        logger.info(f"Devis SAP {doc_entry} récupéré avec succès")
         return formatted_response
-    
-    except HTTPException:
-        # Re-raise HTTPException without modification
-        raise
     except Exception as e:
         logger.error(f"Erreur SAP pour devis {doc_entry}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Erreur SAP: {str(e)}")

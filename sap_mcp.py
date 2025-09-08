@@ -1147,6 +1147,31 @@ async def _get_customer_details(card_code: str) -> dict:
             "success": False,
             "error": f"Erreur récupération client {card_code}: {str(e)}"
         }
+@mcp.tool(name="sap_get_quote")
+async def sap_get_quote(doc_entry: int) -> dict:
+    """
+    Récupère les détails complets d'un devis SAP par son DocEntry
+    
+    Args:
+        doc_entry: DocEntry du devis SAP
+    """
+    try:
+        log(f"Récupération du devis SAP DocEntry: {doc_entry}")
+        
+        # Requête SAP avec expansion des lignes
+        response = await call_sap(f"/Quotations({doc_entry})?$expand=DocumentLines")
+        
+        if "error" in response:
+            return {"success": False, "error": response["error"]}
+        
+        return {
+            "success": True,
+            **response
+        }
+        
+    except Exception as e:
+        log(f"❌ Erreur récupération devis {doc_entry}: {str(e)}", "ERROR")
+        return {"success": False, "error": str(e)}
 @mcp.tool(name="sap_search_quotes")
 async def sap_search_quotes(client_name: str, date_from: str = None, limit: int = 10) -> dict:
     """
