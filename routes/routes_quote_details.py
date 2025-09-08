@@ -120,7 +120,42 @@ async def get_sap_quote_details(
         lines_count = len(editable_structure.get('quote', {}).get('lines', []))
         logger.info(f"Devis SAP {doc_entry} récupéré avec succès - {lines_count} lignes")
         
-        return editable_structure
+        # Formatage pour l'affichage dans l'interface
+        formatted_response = {
+            "success": True,
+            "quote_id": f"SAP-{doc_entry}",
+            "quote": {
+                "doc_entry": quote_data.get("DocEntry"),
+                "doc_num": quote_data.get("DocNum"),
+                "doc_date": quote_data.get("DocDate"),
+                "doc_due_date": quote_data.get("DocDueDate"),
+                "card_code": quote_data.get("CardCode"),
+                "card_name": quote_data.get("CardName"),
+                "doc_total": quote_data.get("DocTotal", 0),
+                "currency": quote_data.get("DocCurrency", "EUR"),
+                "comments": quote_data.get("Comments", ""),
+                "status": quote_data.get("DocumentStatus", ""),
+                "lines": []
+            },
+            "editable_structure": editable_structure
+        }
+        
+        # Ajouter les lignes de produits
+        for line_data in quote_data.get("DocumentLines", []):
+            line = {
+                "line_num": line_data.get("LineNum"),
+                "item_code": line_data.get("ItemCode"),
+                "item_description": line_data.get("ItemDescription", line_data.get("ItemName", "")),
+                "quantity": line_data.get("Quantity", 0),
+                "unit_price": line_data.get("UnitPrice", line_data.get("Price", 0)),
+                "line_total": line_data.get("LineTotal", 0),
+                "tax_code": line_data.get("TaxCode", ""),
+                "discount_percent": line_data.get("DiscountPercent", 0)
+            }
+            formatted_response["quote"]["lines"].append(line)
+        
+        logger.info(f"Devis SAP {doc_entry} formaté avec succès - {len(formatted_response['quote']['lines'])} lignes")
+        return formatted_response
     
     except HTTPException:
         # Re-raise HTTPException without modification

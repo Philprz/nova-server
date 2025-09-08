@@ -2851,7 +2851,184 @@
             console.log("✅ Résultat du devis affiché avec succès");
         }
 
-
+        function displayQuoteDetails(quoteData) {
+            console.log('Données du devis reçues:', quoteData);
+            
+            if (!quoteData.success) {
+                addMessage(`❌ Erreur: ${quoteData.error || 'Impossible de récupérer les détails'}`, 'system');
+                return;
+            }
+            
+            const quote = quoteData.quote;
+            const lines = quote.lines || [];
+            
+            // Construire l'affichage détaillé
+            let detailsHtml = `
+                <div class="quote-details-container" style="
+                    background: linear-gradient(135deg, #f8faff, #e8f4fd);
+                    border: 2px solid #3b82f6;
+                    border-radius: 12px;
+                    padding: 20px;
+                    margin: 10px 0;
+                    max-width: 100%;
+                ">
+                    <div class="quote-header" style="
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                        margin-bottom: 20px;
+                        border-bottom: 2px solid #e2e8f0;
+                        padding-bottom: 15px;
+                    ">
+                        <div>
+                            <h3 style="margin: 0; color: #1e40af; font-size: 1.4em;">
+                                📋 Devis N° ${quote.doc_num || 'N/A'}
+                            </h3>
+                            <p style="margin: 5px 0 0 0; color: #64748b; font-size: 0.9em;">
+                                DocEntry: ${quote.doc_entry || 'N/A'} | Date: ${quote.doc_date || 'N/A'}
+                            </p>
+                        </div>
+                        <div style="text-align: right;">
+                            <div style="
+                                background: linear-gradient(135deg, #10b981, #059669);
+                                color: white;
+                                padding: 8px 16px;
+                                border-radius: 6px;
+                                font-weight: bold;
+                                font-size: 1.1em;
+                            ">
+                                ${quote.doc_total ? `${quote.doc_total}€` : 'Total N/A'}
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="quote-client-info" style="
+                        background: white;
+                        border-radius: 8px;
+                        padding: 15px;
+                        margin-bottom: 20px;
+                        border-left: 4px solid #06b6d4;
+                    ">
+                        <h4 style="margin: 0 0 10px 0; color: #0f172a; display: flex; align-items: center;">
+                            🏢 Client
+                        </h4>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 0.9em;">
+                            <div><strong>Nom:</strong> ${quote.card_name || 'N/A'}</div>
+                            <div><strong>Code:</strong> ${quote.card_code || 'N/A'}</div>
+                        </div>
+                    </div>
+                    
+                    <div class="quote-lines" style="
+                        background: white;
+                        border-radius: 8px;
+                        padding: 15px;
+                        border-left: 4px solid #8b5cf6;
+                    ">
+                        <h4 style="margin: 0 0 15px 0; color: #0f172a; display: flex; align-items: center;">
+                            📦 Produits (${lines.length} article${lines.length > 1 ? 's' : ''})
+                        </h4>
+                        ${lines.length > 0 ? `
+                            <div style="overflow-x: auto;">
+                                <table style="
+                                    width: 100%;
+                                    border-collapse: collapse;
+                                    font-size: 0.85em;
+                                ">
+                                    <thead>
+                                        <tr style="background: #f8fafc; border-bottom: 2px solid #e2e8f0;">
+                                            <th style="padding: 8px; text-align: left; border-right: 1px solid #e2e8f0;">Code</th>
+                                            <th style="padding: 8px; text-align: left; border-right: 1px solid #e2e8f0;">Description</th>
+                                            <th style="padding: 8px; text-align: center; border-right: 1px solid #e2e8f0;">Qté</th>
+                                            <th style="padding: 8px; text-align: right; border-right: 1px solid #e2e8f0;">Prix Unit.</th>
+                                            <th style="padding: 8px; text-align: right;">Total</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${lines.map(line => `
+                                            <tr style="border-bottom: 1px solid #f1f5f9;">
+                                                <td style="padding: 8px; border-right: 1px solid #f1f5f9; font-weight: 600;">${line.item_code || 'N/A'}</td>
+                                                <td style="padding: 8px; border-right: 1px solid #f1f5f9;">${line.item_description || 'N/A'}</td>
+                                                <td style="padding: 8px; text-align: center; border-right: 1px solid #f1f5f9;">${line.quantity || 0}</td>
+                                                <td style="padding: 8px; text-align: right; border-right: 1px solid #f1f5f9;">${line.unit_price ? `${line.unit_price}€` : 'N/A'}</td>
+                                                <td style="padding: 8px; text-align: right; font-weight: 600;">${line.line_total ? `${line.line_total}€` : 'N/A'}</td>
+                                            </tr>
+                                        `).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+                        ` : '<p style="color: #64748b; font-style: italic;">Aucun produit trouvé</p>'}
+                    </div>
+                    
+                    ${quote.comments ? `
+                        <div class="quote-comments" style="
+                            background: #fffbeb;
+                            border-radius: 8px;
+                            padding: 15px;
+                            margin-top: 20px;
+                            border-left: 4px solid #f59e0b;
+                        ">
+                            <h4 style="margin: 0 0 10px 0; color: #0f172a; display: flex; align-items: center;">
+                                💬 Commentaires
+                            </h4>
+                            <p style="margin: 0; color: #374151; font-size: 0.9em;">${quote.comments}</p>
+                        </div>
+                    ` : ''}
+                    
+                    <div class="quote-actions" style="
+                        margin-top: 20px;
+                        display: flex;
+                        gap: 10px;
+                        justify-content: center;
+                        flex-wrap: wrap;
+                    ">
+                        <button onclick="modifyQuote('${quoteData.quote_id || quote.doc_entry}')" style="
+                            background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+                            color: white;
+                            border: none;
+                            padding: 10px 20px;
+                            border-radius: 6px;
+                            cursor: pointer;
+                            font-weight: 600;
+                            transition: transform 0.2s;
+                        " onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
+                            ✏️ Modifier
+                        </button>
+                        <button onclick="printQuote('${quoteData.quote_id || quote.doc_entry}')" style="
+                            background: linear-gradient(135deg, #10b981, #059669);
+                            color: white;
+                            border: none;
+                            padding: 10px 20px;
+                            border-radius: 6px;
+                            cursor: pointer;
+                            font-weight: 600;
+                            transition: transform 0.2s;
+                        " onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
+                            🖨️ Imprimer
+                        </button>
+                        <button onclick="newQuote()" style="
+                            background: linear-gradient(135deg, #6b7280, #4b5563);
+                            color: white;
+                            border: none;
+                            padding: 10px 20px;
+                            border-radius: 6px;
+                            cursor: pointer;
+                            font-weight: 600;
+                            transition: transform 0.2s;
+                        " onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
+                            📝 Nouveau Devis
+                        </button>
+                    </div>
+                </div>
+            `;
+            
+            // Ajouter le HTML au chat
+            addMessage(detailsHtml, 'system');
+        }
+        
+        function printQuote(quoteId) {
+            console.log('Impression du devis:', quoteId);
+            addMessage(`🖨️ Fonction d'impression en cours de développement pour le devis ${quoteId}`, 'system');
+        }
         function newQuote() {
             // Réinitialiser l'interface
             const input = document.getElementById('message-input');
@@ -2897,10 +3074,34 @@
             messagesContainer.appendChild(suggestionsDiv);
         }
         
-        function viewQuote(quoteId) {
+        async function viewQuote(quoteId) {
             console.log('Affichage du devis:', quoteId);
-            // Logique pour afficher le détail du devis
-            addMessage(`Affichage du détail du devis ${quoteId}...`, 'system');
+            
+            try {
+                // Afficher un indicateur de chargement
+                addMessage(`🔍 Récupération du devis ${quoteId}...`, 'system');
+                
+                // Appel API pour récupérer les détails du devis
+                const response = await fetch(`/api/quotes/details/${quoteId}`, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`Erreur ${response.status}: ${response.statusText}`);
+                }
+                
+                const quoteData = await response.json();
+                
+                // Afficher les détails du devis
+                displayQuoteDetails(quoteData);
+                
+            } catch (error) {
+                console.error('Erreur lors de la récupération du devis:', error);
+                addMessage(`❌ Erreur lors de la récupération du devis: ${error.message}`, 'system');
+            }
         }
         
         function modifyQuote(quoteId) {
