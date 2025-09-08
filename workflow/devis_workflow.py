@@ -3192,17 +3192,17 @@ class DevisWorkflow:
         return 0.0
         
     def _build_response(self) -> Dict[str, Any]:
-        """🔧 CORRECTION : Construit la réponse finale avec nom client correct"""
+        """🔧 Construit la réponse finale avec nom client correct (compat + optimisations légères)"""
         logger.info("Construction de la réponse finale enrichie")
-        
-        client_info = self.context.get("client_info", {})
-        quote_result = self.context.get("quote_result", {})
-        sap_client = self.context.get("sap_client", {})
-        client_validation = self.context.get("client_validation", {})
-        products_info = self.context.get("products_info", [])
-        extracted_info = self.context.get("extracted_info", {})
-        
-        # CORRECTION CRITIQUE: Vérifier les conditions d'erreur AVANT de construire la réponse
+        client_info = self.context.get("client_info", {}) or {}
+        quote_result = self.context.get("quote_result", {}) or {}
+        sap_client = self.context.get("sap_client", {}) or {}
+        client_validation = self.context.get("client_validation", {}) or {}
+        products_info = self.context.get("products_info", []) or []
+        extracted_info = self.context.get("extracted_info", {}) or {}
+        validated_data = self.context.get("validated_data", {}) or {}
+
+        # Erreurs bloquantes en amont
         if not client_info.get("found", False):
             return {
                 "success": False,
@@ -3211,7 +3211,6 @@ class DevisWorkflow:
                 "error": client_info.get('error', 'Client non trouvé'),
                 "next_steps": "Veuillez vérifier le nom du client et réessayer."
             }
-        
         if not quote_result.get("success", False):
             return {
                 "success": False,
@@ -3220,117 +3219,119 @@ class DevisWorkflow:
                 "error": quote_result.get('error', 'Erreur création devis'),
                 "next_steps": "Veuillez contacter le support technique."
             }
-        
-        # 🎯 CORRECTION CRITIQUE : Extraction intelligente du nom client  
-        client_name = "Client extrait"
 
-        # 1. Priorité au contexte client_info (données Salesforce)
+        # Extraction robuste du nom client
+        client_name = "Client extrait"
         if self.context.get("client_info", {}).get("data", {}).get("Name"):
             client_name = self.context.get("client_info", {}).get("data", {}).get("Name", "")
             logger.info(f"✅ Nom client depuis context Salesforce: {client_name}")
-
-        # 2. Sinon, essayer les données SAP dans le contexte
         elif self.context.get("client_info", {}).get("data", {}).get("CardName"):
             sap_name = self.context.get("client_info", {}).get("data", {}).get("CardName", "")
-            # Nettoyer le format "CSAFRAN8267 - SAFRAN" -> "SAFRAN"
-            if " - " in sap_name:
-                client_name = sap_name.split(" - ", 1)[1].strip()
-            else:
-                client_name = sap_name
+            client_name = sap_name.split(" - ", 1)[1].strip() if " - " in sap_name else sap_name
             logger.info(f"✅ Nom client depuis context SAP (nettoyé): {client_name}")
-
-        # 3. En dernier recours, utiliser l'extraction LLM originale
         elif self.context.get("extracted_info", {}).get("client"):
             client_name = self.context["extracted_info"]["client"]
             logger.info(f"✅ Nom client depuis extraction LLM: {client_name}")
-        
-        # 4. En dernier recours, utiliser l'extraction LLM originale
         elif extracted_info.get("client"):
             client_name = extracted_info["client"]
             logger.info(f"✅ Nom client depuis extraction LLM: {client_name}")
-        
-        # 5. NOUVEAU: Utiliser les données SAP brutes depuis le résultat du devis
         elif quote_result.get("sap_results", {}).get("raw_result", {}).get("CardName"):
-            sap_card_name = quote_result["sap_results"]["raw_result"]["CardName"]
-            client_name = sap_card_name
+            client_name = quote_result["sap_results"]["raw_result"]["CardName"]
             logger.info(f"✅ Nom client depuis SAP raw result: {client_name}")
-        
-        # Journalisation du nom client final après toutes les conditions
         logger.info(f"🎯 Nom client final pour interface: '{client_name}'")
 
-        # Construction des données client pour l'interface
-        client_data = client_info.get("data", {})
+        # Données client (compat + address structurée + fallback SAP)
+        vcli = validated_data.get("client", {}) or {}
+        cdata = client_info.get("data", {}) or {}
+        account_number = (
+            vcli.get("AccountNumber")
+            or cdata.get("AccountNumber")
+            or (sap_client.get("data", {}) or {}).get("CardCode")
+            or ""
+        )
+        salesforce_id = vcli.get("Id") or cdata.get("Id") or ""
         client_response = {
-            "name": client_name,  # ← UTILISER LE NOM CORRECTEMENT EXTRAIT
-            "account_number": client_data.get("AccountNumber") or sap_client.get("data", {}).get("CardCode") or "",
-            "salesforce_id": client_data.get("Id", ""),
-            "phone": client_data.get("Phone", ""),
-            "email": client_data.get("Email", ""),
-            "city": client_data.get("BillingCity", ""),
-            "country": client_data.get("BillingCountry", "")
+            "name": client_name,
+            "id": vcli.get("Id", salesforce_id),
+            "salesforce_id": salesforce_id,
+            "account_number": account_number,
+            "address": {
+                "street": vcli.get("BillingStreet") or cdata.get("BillingStreet"),
+                "city": vcli.get("BillingCity") or cdata.get("BillingCity"),
+                "postal_code": vcli.get("BillingPostalCode") or cdata.get("BillingPostalCode"),
+                "country": vcli.get("BillingCountry") or cdata.get("BillingCountry"),
+            },
+            "email": vcli.get("Email") or cdata.get("Email"),
+            "city": vcli.get("BillingCity") or cdata.get("BillingCity"),
+            "country": vcli.get("BillingCountry") or cdata.get("BillingCountry"),
+            "phone": vcli.get("Phone") or cdata.get("Phone"),
+            "industry": (vcli.get("details", {}) or {}).get("industry"),
         }
-        
-        # Construction des données produits (garder la logique existante)
+
+        # Produits (fallback: validated_data.products puis products_info, en filtrant les erreurs)
+        source_products = (validated_data.get("products") or []) or products_info
         products_response = []
-        for product in products_info:
-            if isinstance(product, dict) and "error" not in product:
-                # 🔧 EXTRACTION CORRIGÉE DES DONNÉES PRODUIT
-                product_code = (product.get("code") or 
-                            product.get("item_code") or 
-                            product.get("ItemCode", ""))
-                
-                product_name = (product.get("name") or 
-                            product.get("item_name") or 
-                            product.get("ItemName", "Sans nom"))
-                
-                quantity = float(product.get("quantity", 1))
-                unit_price = float(product.get("unit_price", 0))
-                line_total = quantity * unit_price
-                
-                product_data = {
-                    "code": product_code,                    # ✅ CORRIGÉ
-                    "name": product_name,                    # ✅ CORRIGÉ  
-                    "quantity": quantity,                    # ✅ CORRIGÉ
-                    "unit_price": unit_price,               # ✅ CORRIGÉ
-                    "line_total": line_total,               # ✅ CORRIGÉ
-                    "stock_available": self._get_stock_value(product),
-                    "available": self._get_stock_safely(product) >= quantity
-                }
-                products_response.append(product_data)
-                
-                logger.info(f"✅ Produit formaté dans réponse: {product_code} x{quantity} = {line_total}€")
-        
-        # 🔧 CONSTRUCTION RÉPONSE FINALE CORRIGÉE
+        for product in source_products:
+            if not isinstance(product, dict) or ("error" in product):
+                continue
+            product_code = product.get("code") or product.get("item_code") or product.get("ItemCode")
+            product_name = product.get("name") or product.get("item_name") or product.get("ItemName")
+            # coercition sûre
+            try:
+                quantity = float(product.get("quantity", 1) or 1)
+            except (TypeError, ValueError):
+                quantity = 1.0
+            try:
+                unit_price = float(product.get("unit_price", product.get("UnitPrice", 0)) or 0)
+            except (TypeError, ValueError):
+                unit_price = 0.0
+            line_total = quantity * unit_price
+
+            product_data = {
+                "code": product_code or "",
+                "name": product_name or "Sans nom",
+                "quantity": quantity,
+                "unit_price": unit_price,
+                "line_total": line_total,
+                "stock_available": self._get_stock_value(product),
+                "available": self._get_stock_safely(product) >= quantity,
+                "description": product.get("U_Description", ""),
+                "manufacturer": product.get("Manufacturer", ""),
+                "sales_unit": product.get("SalesUnit", "UN")
+            }
+            products_response.append(product_data)
+            logger.info(f"✅ Produit formaté dans réponse: {product_data['code']} x{quantity} = {line_total}€")
+
+        total_amount = round(sum(float(p.get("line_total", 0) or 0) for p in products_response), 2)
+        all_available = all(bool(p.get("available", False)) for p in products_response)
+
+        # Quote ID hybride: priorité SAP, puis SF, puis NOVA-TS
+        quote_id = (
+            (f"SAP-{quote_result.get('sap_doc_num')}" if quote_result.get('sap_doc_num') else None)
+            or (f"SAP-{quote_result.get('doc_num')}" if quote_result.get('doc_num') else None)
+            or quote_result.get("opportunity_id")
+            or f"NOVA-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        )
+
+        # Réponse
         response = {
             "success": True,
             "status": "success",
-            "quote_id": quote_result.get("opportunity_id", f"NOVA-{datetime.now().strftime('%Y%m%d-%H%M%S')}"),
-            
-            # 🎯 DONNÉES CLIENT CORRIGÉES AVEC BON NOM
+            "quote_id": quote_id,
             "client": client_response,
-            
-            # 🎯 DONNÉES PRODUITS
             "products": products_response,
-            
-            # Calculs financiers
-            "total_amount": sum(float(p.get("line_total", 0)) for p in products_response),
+            "total_amount": total_amount,
             "currency": "EUR",
             "date": datetime.now().strftime("%Y-%m-%d"),
             "quote_status": "Created",
-            
-            # Disponibilité
-            "all_products_available": all(p.get("available", False) for p in products_response),
-            
-            # Informations système
+            "all_products_available": all_available,
             "sap_doc_num": quote_result.get("sap_doc_num"),
             "salesforce_quote_id": quote_result.get("opportunity_id"),
-            "message": f"Devis généré avec succès pour {client_name}",  # ← INCLURE LE NOM
-            
-            # Mode draft
+            "message": f"Devis généré avec succès pour {client_name}",
             "draft_mode": self.draft_mode
         }
-        
-        # Ajouter les informations de validation client si disponibles
+
+        # Validation client
         if client_validation:
             response["client_validation"] = {
                 "validation_used": True,
@@ -3346,8 +3347,9 @@ class DevisWorkflow:
                 "validation_used": False,
                 "reason": "Client existant trouvé dans Salesforce"
             }
-        # Informations de vérification doublons DEVIS (nouveau)
-        duplicate_check = self.context.get("duplicate_check", {})
+
+        # Doublons devis
+        duplicate_check = self.context.get("duplicate_check", {}) or {}
         if duplicate_check:
             response["duplicate_check"] = {
                 "duplicates_found": duplicate_check.get("duplicates_found", False),
@@ -3358,32 +3360,36 @@ class DevisWorkflow:
                 "similar_quotes": len(duplicate_check.get("similar_quotes", [])),
                 "details": duplicate_check
             }
-        # Ajouter les références système pour traçabilité
+
+        # Références système
         response["system_references"] = {
             "sap_client_created": sap_client.get("created", False) if sap_client else False,
-            "sap_client_card_code": sap_client.get("data", {}).get("CardCode") if sap_client and sap_client.get("data") else None,
+            "sap_client_card_code": (sap_client.get("data", {}) or {}).get("CardCode") if sap_client else None,
             "quote_creation_timestamp": datetime.now().isoformat(),
             "validation_enabled": self.validation_enabled
         }
-        
+
         logger.info(f"✅ Réponse finale enrichie construite avec nom client: {client_name}")
         response["workflow_steps"] = self.workflow_steps
-        # AJOUT: Données de visualisation du devis
+
+        # Visualisation
         if quote_result.get("success") and response.get("success"):
             response["quote_visualization"] = {
                 "display_mode": "detailed",
                 "document_data": {
-                    "quote_number": response.get("quote_id", "NOVA-" + datetime.now().strftime('%Y%m%d-%H%M%S')),
+                    "quote_number": response.get("quote_id", (
+                        "SAP-" + (quote_result.get('sap_doc_num') or quote_result.get('doc_num') or 'DRAFT')
+                    )),
                     "issue_date": datetime.now().strftime("%d/%m/%Y"),
                     "due_date": (datetime.now() + timedelta(days=30)).strftime("%d/%m/%Y"),
                     "validity": "30 jours",
                     "client_info": client_response,
                     "products_list": products_response,
                     "totals": {
-                        "subtotal_ht": response.get("total_amount", 0),
+                        "subtotal_ht": total_amount,
                         "tva_rate": 20.0,
-                        "tva_amount": response.get("total_amount", 0) * 0.2,
-                        "total_ttc": response.get("total_amount", 0) * 1.2
+                        "tva_amount": round(total_amount * 0.2, 2),
+                        "total_ttc": round(total_amount * 1.2, 2)
                     },
                     "terms": "Devis valable 30 jours - Paiement à 30 jours",
                     "created_by": "NOVA Assistant",
@@ -3401,7 +3407,9 @@ class DevisWorkflow:
                     {"id": "create_new", "label": "Nouveau devis", "icon": "plus"}
                 ]
             }
+
         return response
+
     
     # ✅ MÉTHODE D'AIDE - Ajouter aussi cette méthode pour enrichir les données client
     def _enrich_client_data(self, client_name: str, salesforce_data: Dict[str, Any]) -> None:
