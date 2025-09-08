@@ -1083,17 +1083,13 @@
                 if (details.address && details.address !== 'N/A' && details.address !== 'None') {
                     clientInfo.push(`📍 ${details.address}`);
                 }
-                
-                if (details.city && details.city !== 'null' && details.city !== null) {
-                    clientInfo.push(`🏢 ${details.city}`);
-                }
-                
+                                
                 if (details.siret && details.siret !== 'null' && details.siret !== null) {
                     clientInfo.push(`🏷️ SIRET: ${details.siret}`);
                 }
                 
                 if (details.sf_id && details.sf_id !== '') {
-                    clientInfo.push(`🆔 SF: ${details.sf_id.substring(0, 8)}...`);
+                    clientInfo.push(`🆔 SF: ${details.sf_id.substring(0, 30)}...`);
                 }
                 
                 if (details.sap_code && details.sap_code !== '') {
