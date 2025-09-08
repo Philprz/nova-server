@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="fr" role="document">
 <head>
+    <!-- QUOTE_ID_PLACEHOLDER -->
     <meta charset="UTF-8">
     <meta name="description" content="NOVA – Assistant Commercial Intelligent, génération automatique de devis.">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -2007,11 +2008,7 @@
             link.download = `devis_${quoteId}.pdf`;
             link.click();
         }
-        
-        function modifyQuote(quoteId) {
-            window.open(`/api/quotes/edit/${quoteId}`, '_blank');
-        }
-        
+                
         function createNewQuote() {
             const input = document.getElementById('messageInput');
             input.value = 'Créer un nouveau devis pour ';
@@ -3107,7 +3104,7 @@
             }
         }
         
-                function modifyQuote(quoteId) {
+        function modifyQuote(quoteId) {
             console.log('Modification du devis:', quoteId);
             
             // Rediriger vers l'interface d'édition
