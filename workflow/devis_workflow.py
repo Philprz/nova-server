@@ -702,30 +702,25 @@ class DevisWorkflow:
         # Récupérer la quantité ORIGINALE depuis extracted_info (en respectant la priorité à user_input)
         extracted_info = self.context.get("extracted_info", {}) or {}
         original_products = extracted_info.get("products") or []
-        
+
         # Rechercher la quantité originale en faisant correspondre le nom du produit
         original_quantity = 1  # valeur par défaut
-        for orig_product in original_products:
-            orig_name = (orig_product.get("name") or "").strip().lower()
-            # Le produit sélectionné vient avec ItemName, on cherche une correspondance
-            if selected_product_data and orig_name and orig_name in (selected_product_data.get("ItemName", "").lower()):
-                original_quantity = orig_product.get("quantity", 1)
-                logger.info(f"📦 Quantité trouvée pour {orig_name}: {original_quantity}")
-                break
-        
+        if selected_product_data and original_products:
+            selected_name = (selected_product_data.get("ItemName") or "").lower()
+            for orig_product in original_products:
+                orig_name = (orig_product.get("name") or "").strip().lower()
+                if orig_name and orig_name in selected_name:
+                    original_quantity = int(orig_product.get("quantity", 1))
+                    logger.info(f"📦 Quantité trouvée pour {orig_name}: {original_quantity}")
+                    break
+
         # Quantité: priorité à user_input s'il est fourni et valide
         quantity = user_input.get("quantity")
         try:
             quantity = int(quantity) if quantity is not None else None
         except (TypeError, ValueError):
             quantity = None
-            
-        def _norm(s):
-            return (s or "").strip().lower()
-            
-        selected_name = _norm(selected_product_data.get("ItemName"))
-        selected_code = selected_product_data.get("ItemCode")
-        
+
         # Utiliser la quantité originale si user_input ne fournit pas de quantité valide
         if quantity is None or quantity <= 0:
             quantity = original_quantity
@@ -737,6 +732,13 @@ class DevisWorkflow:
             logger.info(f"⚠️ Quantité finale par défaut: {quantity}")
 
         logger.info(f"📦 Quantité finale utilisée: {quantity}")
+
+        def _norm(s):
+            return (s or "").strip().lower()
+
+        selected_name = _norm(selected_product_data.get("ItemName"))
+        selected_code = selected_product_data.get("ItemCode")
+
         current_context = context.get("validation_context", {})
 
         # Logs détaillés pour debug
@@ -4446,6 +4448,17 @@ class DevisWorkflow:
                     quantity_match = re.search(rf"(\d+)\s+.*?{keyword}", prompt_lower)
                     quantity = int(quantity_match.group(1)) if quantity_match else 1
 
+                    # AJOUT: Aussi vérifier les chiffres en début de phrase
+                    if quantity == 1:
+                        number_matches = re.findall(r'\b(\d+)\b', prompt_lower)
+                        if number_matches:
+                            try:
+                                first_number = int(number_matches[0])
+                                if 1 <= first_number <= 999:  # Quantité raisonnable
+                                    quantity = first_number
+                            except ValueError:
+                                pass
+
                     products.append({
                         "code": f"{keyword.upper()}_001",
                         "quantity": quantity,
@@ -4478,8 +4491,19 @@ class DevisWorkflow:
         words = prompt.lower().split()
 
         # Chercher des nombres (potentiellement des quantités)
-        quantities = [int(word) for word in words if word.isdigit()]
+        quantities = []
+        for word in words:
+            if word.isdigit():
+                try:
+                    num = int(word)
+                    if 1 <= num <= 999:  # Filtre quantités raisonnables
+                        quantities.append(num)
+                except ValueError:
+                    pass
+
+        # Prendre le premier nombre valide ou 1 par défaut
         default_quantity = quantities[0] if quantities else 1
+        logger.info(f"📦 Quantité extraite en mode minimal: {default_quantity}")
 
         # Chercher des mots-clés produits
         product_keywords = ['imprimante', 'ordinateur', 'écran', 'laptop', 'serveur', 'switch', 'routeur']
@@ -7841,9 +7865,9 @@ class DevisWorkflow:
                         logger.debug("Aucun produit exploitable dans smart_search malgré found=True")
                     else:
                         best_match = best_list[0]
-                        logger.info(f"✅ Produit {'spécifique' if len(products_found)==1 else ''} trouvé: {best_match.get('ItemName')}")
+                        logger.info(f"✅ Produit auto-sélectionné: {best_match.get('ItemName')} - Code: {best_match.get('ItemCode')} - Quantité: {quantity}")
                         found_products.append({
-                            **self._format_product_data(best_match, quantity),
+                            **self._format_product_data(best_match, quantity),  # Passer la vraie quantité
                             "search_method": smart_search_method,
                             "found": True
                         })
@@ -8056,19 +8080,23 @@ class DevisWorkflow:
             }
 
     def _format_product_data(self, sap_product: Dict[str, Any], quantity: int) -> Dict[str, Any]:
-            """Formate les données produit SAP en format standard"""
-            return {
-                "code": sap_product.get("ItemCode", ""),
-                "name": sap_product.get("ItemName", ""),
-                "quantity": quantity,
-                "unit_price": float(sap_product.get("Price") or sap_product.get("AvgPrice", 0)),
-                "total_price": float(sap_product.get("Price") or sap_product.get("AvgPrice", 0)) * quantity,
-                "currency": "EUR",
-                "stock": int(sap_product.get("OnHand", 0)),
-                "description": sap_product.get("U_Description", ""),
-                "sap_data": sap_product,
-                "Price": float(sap_product.get("Price", 0)) or float(sap_product.get("AvgPrice", 0)) or self._estimate_product_price(product_name)
-            }
+        """Formate les données produit SAP en format standard - CORRECTION: Préserver quantité exacte"""
+        unit_price = float(sap_product.get("Price") or sap_product.get("AvgPrice", 0))
+        if unit_price == 0:
+            unit_price = self._estimate_product_price(sap_product.get("ItemName", ""))
+
+        return {
+            "code": sap_product.get("ItemCode", ""),
+            "name": sap_product.get("ItemName", ""),
+            "quantity": quantity,  # CRITIQUE: Utiliser la quantité passée en paramètre
+            "unit_price": unit_price,
+            "total_price": unit_price * quantity,  # Calculer avec la vraie quantité
+            "currency": "EUR",
+            "stock": int(sap_product.get("OnHand", 0)),
+            "description": sap_product.get("U_Description", ""),
+            "sap_data": sap_product,
+            "Price": unit_price
+        }
     async def _create_quote_document(self, client_result: Dict, products_result: Dict) -> Dict[str, Any]:
         """
         Création document devis avec données réelles
