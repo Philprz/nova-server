@@ -1898,8 +1898,8 @@
                     `;
                     
                     products.forEach((product) => {
-                        const productCode = escapeHtml(product.code || product.ItemCode || 'N/A');
-                        const productName = escapeHtml(product.name || product.ItemName || product.ItemDescription || 'Produit');
+                        const productCode = typeof escapeHtml === 'function' ? escapeHtml(product.code || product.ItemCode || 'N/A') : (product.code || product.ItemCode || 'N/A');
+                        const productName = typeof escapeHtml === 'function' ? escapeHtml(product.name || product.ItemName || product.ItemDescription || 'Produit') : (product.name || product.ItemName || product.ItemDescription || 'Produit');
                         const quantity = Number(product.quantity || product.Quantity || 0);
                         const unitPrice = Number(product.unit_price || product.UnitPrice || product.Price || 0) || 0;
                         const total = quantity * unitPrice;
@@ -2214,13 +2214,15 @@
 
                 console.log("📥 Message reçu:", data);
 
-                if (data.type === 'progress') {
+                // Gestion des messages de progression
+                if (data.type === 'progress' || data.type === 'progress_update') {
                     const pc = document.getElementById('progressContainer');
                     if (pc && !pc.classList.contains('active')) {
                         showProgress();
                     }
-                    updateProgress?.(data.progress, data.message, data.step);
+                    updateProgress?.(data.progress, data.message, data.step || data.step_id);
                 }
+                // Gestion des messages de complétion ou de génération de devis
                 else if (data.type === 'completion' || data.type === 'quote_generation_completed' || data.type === 'workflow_complete') {
                     console.log("🎯 Devis terminé reçu:", data);
                     hideProgress?.();
@@ -2230,88 +2232,79 @@
                     } catch (e) {
                         console.error("❌ displayQuoteResult a échoué:", e);
                     }
-                    setTimeout(() => {
-                        try {
-                            if (websocket && websocket.readyState === WebSocket.OPEN) {
-                                websocket.close(1000, "Task completed");
-                            }
-                        } catch (_) {}
-                    }, 500);
+                    closeWebSocketWithDelay(websocket, 1000, "Task completed");
                 }
+                // Gestion des tâches terminées
                 else if (data.type === 'task_completed') {
                     console.log("🏁 Tâche terminée:", data);
                     hideProgress?.();
-                    setTimeout(() => {
-                        try {
-                            if (websocket && websocket.readyState === WebSocket.OPEN) {
-                                websocket.close(1000, "Task completed");
-                            }
-                        } catch (_) {}
-                    }, 500);
+                    closeWebSocketWithDelay(websocket, 1000, "Task completed");
                 }
-                else if (data.type === 'interaction_required') {
-                    handleUserInteraction?.(data.data);
-                }
-                else if (data.type === 'user_interaction_required') {
-                    else if (data.type === 'progress_update') {
-                    console.log("📊 Mise à jour progression:", data);
-                    const pc = document.getElementById('progressContainer');
-                    if (pc && !pc.classList.contains('active')) {
-                        showProgress();
-                    }
-                    updateProgress?.(data.progress, data.message, data.step_id);
-                }
-                else if (data.type === 'user_response_processed') {
-                    console.log("✅ Réponse utilisateur traitée:", data);
-                    // Message informatif pour l'utilisateur
-                    addMessage('Réponse utilisateur prise en compte...', 'system');
-                }
-                else if (data.type === 'user_interaction_required') {
-                    console.log("🤝 Interaction utilisateur détectée:", data.interaction_data);
-                    if (data.interaction_data && data.interaction_data.interaction_type === 'client_selection') {
-                        hideProgress?.();
-                        const opts = data.interaction_data.client_options || data.interaction_data.options || data.interaction_data.clients || [];
-                        const name = data.interaction_data.original_client_name || data.interaction_data.client_name || '';
-                        addClientSelection?.(opts, name);
-                    } else if (data.interaction_data && data.interaction_data.interaction_type === 'product_selection') {
-                        console.log("📦 Product selection via user_interaction_required détecté");
-                        hideProgress?.();
-                        handleProductSelection?.(data.interaction_data);
+                // Gestion des interactions utilisateur
+                else if (data.type === 'interaction_required' || data.type === 'user_interaction_required') {
+                    if (data.interaction_data) {
+                        if (data.interaction_data.interaction_type === 'client_selection') {
+                            hideProgress?.();
+                            const opts = data.interaction_data.client_options || data.interaction_data.options || data.interaction_data.clients || [];
+                            const name = data.interaction_data.original_client_name || data.interaction_data.client_name || '';
+                            addClientSelection?.(opts, name);
+                        } else if (data.interaction_data.interaction_type === 'product_selection') {
+                            console.log("📦 Product selection détecté");
+                            hideProgress?.();
+                            handleProductSelection?.(data.interaction_data);
+                        }
                     }
                 }
-                else if (data.interaction_data && data.interaction_data.interaction_type === 'product_selection') {
+                // Sélection de produit détectée directement dans les données
+                else if (data.interaction_data?.interaction_type === 'product_selection') {
                     console.log("📦 Product selection détecté");
                     hideProgress?.();
                     handleProductSelection?.(data.interaction_data);
                 }
+                // Sélection de client requise
                 else if (data.type === 'client_selection_required') {
                     hideProgress?.();
                     const clients = data.client_options || data.clients || [];
                     const originalName = data.original_client_name || '';
                     addClientSelection?.(clients, originalName);
                 }
+                // Gestion des erreurs
                 else if (data.type === 'error') {
                     handleTaskError?.(data.error);
-                    setTimeout(() => {
-                        try {
-                            if (websocket && websocket.readyState === WebSocket.OPEN) {
-                                websocket.close(1011, "Task error");
-                            }
-                        } catch (_) {}
-                    }, 500);
+                    closeWebSocketWithDelay(websocket, 1011, "Task error");
                 }
+                // Gestion des logs
                 else if (data.type === 'log') {
                     if (data.message) addMessage?.(`[LOG] ${data.message}`, 'system');
                 }
+                // Gestion des messages
                 else if (data.type === 'message') {
                     hideProgress?.();
                     if (data.data) handleTaskComplete?.(data.data);
                     if (data.message) addMessage?.(data.message, 'system');
                 }
+                // Gestion des réponses utilisateur traitées
+                else if (data.type === 'user_response_processed') {
+                    console.log("✅ Réponse utilisateur traitée:", data);
+                    addMessage?.('Réponse utilisateur prise en compte...', 'system');
+                }
+                // Type de message non géré
                 else {
                     console.warn("ℹ️ Type de message non géré:", data.type, data);
                 }
             };
+
+            // Fonction utilitaire pour fermer le WebSocket après un délai
+            function closeWebSocketWithDelay(ws, code, reason) {
+                setTimeout(() => {
+                    try {
+                        if (ws && ws.readyState === WebSocket.OPEN) {
+                            ws.close(code, reason);
+                        }
+                    } catch (_) {}
+                }, 500);
+            }
+
 
 
 
@@ -2619,9 +2612,9 @@
                 };
             }) : [];
 
-            // Échapper pour affichage
-            const clientName = escapeHtml(clientNameRaw);
-            const quoteId = escapeHtml(quoteIdRaw);
+            /// Échapper pour affichage
+            const clientName = typeof escapeHtml === 'function' ? escapeHtml(clientNameRaw) : clientNameRaw;
+            const quoteId = typeof escapeHtml === 'function' ? escapeHtml(quoteIdRaw) : quoteIdRaw;
 
             // Génération du HTML produits
             let productsHtml = '';
@@ -2640,8 +2633,8 @@
                             </thead>
                             <tbody>
                                 ${products.map(product => {
-                                    const name = escapeHtml(product.name);
-                                    const code = escapeHtml(product.code);
+                                    const name = typeof escapeHtml === 'function' ? escapeHtml(product.name) : product.name;
+                                    const code = typeof escapeHtml === 'function' ? escapeHtml(product.code) : product.code;
                                     const qty = Number.isFinite(product.quantity) ? product.quantity : 0;
                                     const unit = Number.isFinite(product.unit_price) ? product.unit_price : 0;
                                     const line = Number.isFinite(product.total_price) ? product.total_price : (unit * qty);
