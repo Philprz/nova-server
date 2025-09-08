@@ -21,6 +21,24 @@ from routes.routes_client_listing import router as client_listing_router
 from routes.routes_websocket import router as websocket_router
 from routes.routes_intelligent_assistant import router as intelligent_assistant_router
 from routes import routes_intelligent_assistant, routes_quote_details
+# Ajout du router quote_details manquant
+app.include_router(routes_quote_details.router)
+
+# Route pour edit-quote manquante
+@app.get("/edit-quote/{quote_id}")
+async def edit_quote_page(quote_id: str):
+    """Page d'édition de devis"""
+    try:
+        with open("interface/nova_interface_final.html", "r", encoding="utf-8") as f:
+            html_content = f.read()
+        # Injection du quote_id dans le HTML
+        html_content = html_content.replace(
+            "<!-- QUOTE_ID_PLACEHOLDER -->", 
+            f"<script>window.EDIT_QUOTE_ID = '{quote_id}';</script>"
+        )
+        return HTMLResponse(content=html_content)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Interface non trouvée")
 if sys.platform == "win32":
     os.environ["PYTHONIOENCODING"] = "utf-8"    
     

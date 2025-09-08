@@ -740,7 +740,7 @@ class DevisWorkflow:
             formatted_product = {
                 "code": selected_product_data.get("ItemCode"),
                 "name": selected_product_data.get("ItemName"),
-                "quantity": quantity,
+                "quantity": user_input.get("quantity", 2),
                 # Utiliser Price d'abord, puis AvgPrice, puis estimation
                 "unit_price": selected_product_data.get("Price") or selected_product_data.get("AvgPrice") or selected_product_data.get("unit_price") or self._estimate_product_price(selected_product_data.get("ItemName", "")),
                 "total_price": 0,  # Sera calculé plus tard
@@ -755,9 +755,11 @@ class DevisWorkflow:
             # Calculer le prix total
             formatted_product["total_price"] = formatted_product["unit_price"] * quantity
 
-            # Log pour debug
-            logger.info(f"✅ Produit formaté: {formatted_product['name']} - Code: {formatted_product['code']} - Prix: {formatted_product['unit_price']}€ - Quantité: {formatted_product['quantity']}")
-
+            # Récupérer la quantité de la demande originale ou utiliser celle fournie
+            original_quantity = self.context.get("extracted_info", {}).get("products", [{}])[0].get("quantity", user_input.get("quantity", 2))
+            quantity = user_input.get("quantity", original_quantity)
+            
+            logger.info(f"✅ Produit formaté: {formatted_product['name']} - Code: {formatted_product['code']} - Prix: {formatted_product['unit_price']}€ - Quantité: {quantity}")
             # CORRECTION: S'assurer que les données client sont bien présentes
             validated_data = {
                 "client": client_info.get("data"),
@@ -968,7 +970,7 @@ class DevisWorkflow:
                 return {
                     "success": True,
                     "status": "success",
-                    "quote_id": quote_id,
+                    "quote_id": f"SAP-{sap_result.get('doc_num', sap_result.get('doc_entry', 'UNKNOWN'))}",
                     "client": validated_data.get("client", {}),
                     "products": validated_data.get("products", []),
                     "quote_data": {
