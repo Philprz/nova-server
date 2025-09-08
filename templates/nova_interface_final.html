@@ -2663,15 +2663,15 @@
             let productsHtml = '';
             if (products.length > 0) {
                 productsHtml = `
-                    <div style="background:#f8fafc; padding:15px; border-radius:8px; margin-bottom:15px;">
-                        <h4 style="color:#374151; margin:0 0 10px 0;">📦 Détail des produits</h4>
-                        <table style="width:100%; border-collapse:collapse; margin:15px 0; font-size:0.9em;">
+                    <div style="background: linear-gradient(135deg, rgba(255,255,255,0.15) 0%, rgba(255,255,255,0.05) 100%); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.2); padding:20px; border-radius:12px; margin-bottom:20px;">
+                        <h4 style="color:#ffffff; margin:0 0 15px 0; font-weight:600;">📦 Détail des produits</h4>
+                        <table style="width:100%; border-collapse:collapse; margin:15px 0; font-size:0.9em; background: rgba(0,0,0,0.2); border-radius:8px; overflow:hidden;">
                             <thead>
-                                <tr style="background:#f8fafc; border-bottom:2px solidrgb(123, 88, 219);">
-                                    <th style="padding:8px; text-align:left; border:1px solid #e2e8f0;">Produit</th>
-                                    <th style="padding:8px; text-align:center; border:1px solid #e2e8f0;">Qté</th>
-                                    <th style="padding:8px; text-align:right; border:1px solid #e2e8f0;">Prix Unit.</th>
-                                    <th style="padding:8px; text-align:right; border:1px solid #e2e8f0;">Total</th>
+                                <tr style="background: rgba(2,185,253,0.2); border-bottom:2px solid rgba(255,255,255,0.1);">
+                                    <th style="padding:12px; text-align:left; border:1px solid rgba(255,255,255,0.1); color:#ffffff; font-weight:600;">Produit</th>
+                                    <th style="padding:12px; text-align:center; border:1px solid rgba(255,255,255,0.1); color:#ffffff; font-weight:600;">Qté</th>
+                                    <th style="padding:12px; text-align:right; border:1px solid rgba(255,255,255,0.1); color:#ffffff; font-weight:600;">Prix Unit.</th>
+                                    <th style="padding:12px; text-align:right; border:1px solid rgba(255,255,255,0.1); color:#ffffff; font-weight:600;">Total</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -2682,8 +2682,8 @@
                                     const unit = Number.isFinite(product.unit_price) ? product.unit_price : 0;
                                     const line = Number.isFinite(product.total_price) ? product.total_price : (unit * qty);
                                     return `
-                                        <tr style="border-bottom:1px solid #e2e8f0;">
-                                            <td style="padding:8px; border:1px solid #e2e8f0;">
+                                        <tr style="border-bottom:1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05);">
+                                            <td style="padding:12px; border:1px solid rgba(255,255,255,0.1); color:#ffffff;">
                                                 <strong>${name}</strong><br>
                                                 ${code ? `<small style="color:#6b7280;">Code: ${code}</small>` : ``}
                                             </td>

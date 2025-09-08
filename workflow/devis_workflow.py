@@ -834,6 +834,25 @@ class DevisWorkflow:
         """Continue la génération du devis avec les données validées"""
 
         try:
+            # S'assurer que les données produits sont complètes avant génération
+            if not validated_data.get("products"):
+                logger.error("❌ Aucun produit validé pour la génération")
+                return self._build_error_response("Données manquantes", "Aucun produit validé")
+            
+            # Compléter les informations produits si quote_data est fourni
+            if quote_data and quote_data.get("DocumentLines"):
+                for product in validated_data["products"]:
+                    if not product.get("name") and quote_data["DocumentLines"]:
+                        doc_line = quote_data["DocumentLines"][0]
+                        product.update({
+                            "name": doc_line.get("ItemName", product.get("code", "Produit")),
+                            "description": doc_line.get("ItemDescription", ""),
+                            "ItemName": doc_line.get("ItemName", product.get("code", "Produit")),
+                            "ItemCode": product.get("code", doc_line.get("ItemCode", "")),
+                            "unit_price": product.get("unit_price", doc_line.get("Price", 0)),
+                            "UnitPrice": product.get("unit_price", doc_line.get("Price", 0)),
+                            "Price": product.get("unit_price", doc_line.get("Price", 0))
+                        })
             # PHASE 3: Génération du devis avec données validées
             # Gérer le cas où validated_data peut être une liste ou un dict
             if isinstance(validated_data, list):
@@ -947,15 +966,28 @@ class DevisWorkflow:
                 self._track_step_complete("generate_quote", f"✅ Devis généré - Total: {total_amount:.2f}€")
 
                 return {
-                    "status": "quote_generated",
+                    "success": True,
+                    "status": "success",
+                    "quote_id": quote_id,
+                    "client": validated_data.get("client", {}),
+                    "products": validated_data.get("products", []),
                     "quote_data": {
-                        "client": client_data,
-                        "products": products_data,
-                        "total_amount": total_amount,
-                        "sap_quote_number": sap_quote.get("quote_number"),
-                        "salesforce_opportunity_id": sf_opportunity.get("opportunity_id"),
-                        "cache_performance": self.cache_manager.get_cache_stats()
-                    }
+                        "products": validated_data.get("products", []),
+                        "client": validated_data.get("client", {}),
+                        "total_amount": validated_data.get("total_amount", total_amount)
+                    },
+                    "validated_data": {
+                        "products": validated_data.get("products", []),
+                        "client": validated_data.get("client", {}),
+                        "total_amount": validated_data.get("total_amount", total_amount)
+                    },
+                    "total_amount": validated_data.get("total_amount", total_amount),
+                    "currency": "EUR",
+                    "sap_doc_num": sap_result.get("DocNum") if sap_result else None,
+                    "salesforce_opportunity_id": sf_result.get("Id") if sf_result else None,
+                    "date": datetime.now().strftime('%Y-%m-%d'),
+                    "quote_status": "Créé",
+                    "message": f"Devis créé avec succès pour {validated_data.get('client', {}).get('name', 'le client')}"
                 }
             else:
                 self._track_step_fail("generate_quote", "Erreur SAP", sap_quote.get("error"))
