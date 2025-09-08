@@ -1009,7 +1009,7 @@ class DevisWorkflow:
                 return {
                     "success": True,
                     "status": "success",
-                    "quote_id": f"SAP-{sap_quote_result.get('doc_num', sap_quote_result.get('doc_entry', 'UNKNOWN'))}",
+                    "quote_id": f"SAP-{sap_quote.get('doc_num', sap_quote.get('doc_entry', 'UNKNOWN'))}",
                     "client": validated_data.get("client", {}),
                     "products": validated_data.get("products", []),
                     "quote_data": {
