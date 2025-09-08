@@ -3106,15 +3106,25 @@
         
         function modifyQuote(quoteId) {
             console.log('Modification du devis:', quoteId);
-            
-            // Rediriger vers l'interface d'édition
-            window.location.href = `/edit-quote/${quoteId}`;
+
+            // Stocker l'ID globalement pour l'utiliser dans saveQuoteChanges
+            window.currentEditingQuoteId = quoteId;
+
+            // Ouvrir l'éditeur de devis directement
+            openQuoteEditor(quoteId);
         }
-        
         async function openQuoteEditor(quoteId) {
             try {
+                // Afficher un indicateur de chargement
+                addMessage(`⏳ Chargement du devis ${quoteId} pour modification...`, 'system');
+                
+                // Formater l'ID si nécessaire
+                let formattedQuoteId = quoteId;
+                if (!quoteId.startsWith('SAP-') && !quoteId.startsWith('SF-')) {
+                    formattedQuoteId = `SAP-${quoteId}`;
+                }
                 // Récupérer les détails du devis
-                const response = await fetch(`/api/quotes/details/${quoteId}`);
+                const response = await fetch(`/api/quotes/details/${formattedQuoteId}`);
                 const quoteData = await response.json();
                 
                 if (!response.ok) {
@@ -3160,13 +3170,29 @@
             `;
             
             modalContent.innerHTML = generateQuoteEditForm(quoteData);
+
+            // Ajouter un écouteur pour fermer en cliquant en dehors
+            modal.addEventListener('click', function(e) {
+                if (e.target === modal) {
+                    closeQuoteEditor();
+                }
+            });
+
+            // Ajouter la gestion de la touche Escape
+            document.addEventListener('keydown', function escapeHandler(e) {
+                if (e.key === 'Escape') {
+                    closeQuoteEditor();
+                    document.removeEventListener('keydown', escapeHandler);
+                }
+            });
+
             modal.appendChild(modalContent);
             document.body.appendChild(modal);
         }
         
         function generateQuoteEditForm(quoteData) {
             const quote = quoteData.quote;
-            
+
             return `
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
                     <h2>Modification du devis ${quote.doc_num}</h2>
@@ -3174,50 +3200,64 @@
                         ✕ Fermer
                     </button>
                 </div>
-                
-                <form id="quoteEditForm">
-                    <!-- En-tête du devis -->
-                    <div style="margin-bottom: 24px; padding: 16px; border: 1px solid #e5e7eb; border-radius: 8px;">
-                        <h3>Informations générales</h3>
+
+                <form id="quoteEditForm" onsubmit="return false;">
+                    <input type="hidden" name="quote_id" value="${quote.doc_entry || quote.opportunity_id}">
+
+                    <!-- Section Informations générales -->
+                    <div style="background: #f9fafb; padding: 16px; border-radius: 8px; margin-bottom: 20px;">
+                        <h3 style="margin-bottom: 16px; color: #1f2937;">📝 Informations générales</h3>
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
                             <div>
-                                <label>Date du devis:</label>
+                                <label style="display: block; margin-bottom: 4px; font-weight: 500;">Date du devis</label>
                                 <input type="date" name="doc_date" value="${quote.doc_date}" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
                             </div>
                             <div>
-                                <label>Date d'échéance:</label>
+                                <label style="display: block; margin-bottom: 4px; font-weight: 500;">Date d'échéance</label>
                                 <input type="date" name="doc_due_date" value="${quote.doc_due_date}" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
                             </div>
-                            <div style="grid-column: 1 / -1;">
-                                <label>Commentaires:</label>
-                                <textarea name="comments" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 4px; min-height: 60px;">${quote.comments || ''}</textarea>
-                            </div>
+                        </div>
+                        <div style="margin-top: 16px;">
+                            <label style="display: block; margin-bottom: 4px; font-weight: 500;">Commentaires</label>
+                            <textarea name="comments" rows="3" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">${quote.comments || ''}</textarea>
                         </div>
                     </div>
-                    
-                    <!-- Lignes de produits -->
-                    <div style="margin-bottom: 24px;">
-                        <h3>Produits</h3>
+
+                    <!-- Section Lignes de produits -->
+                    <div style="background: #f9fafb; padding: 16px; border-radius: 8px; margin-bottom: 20px;">
+                        <h3 style="margin-bottom: 16px; color: #1f2937;">📦 Lignes de produits</h3>
                         <div id="productLines">
-                            ${quote.lines.map((line, index) => generateProductLineEditor(line, index)).join('')}
+                            ${quote.lines.map((line, index) => `
+                                <div class="product-line" style="background: white; padding: 12px; border-radius: 6px; margin-bottom: 12px;">
+                                    <input type="hidden" name="lines[${index}][line_num]" value="${line.line_num}">
+                                    <div style="display: grid; grid-template-columns: 2fr 3fr 1fr 1fr 1fr; gap: 12px; align-items: center;">
+                                        <input type="text" name="lines[${index}][item_code]" value="${line.item_code}" placeholder="Code produit" style="padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
+                                        <input type="text" name="lines[${index}][item_description]" value="${line.item_description}" placeholder="Description" style="padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
+                                        <input type="number" name="lines[${index}][quantity]" value="${line.quantity}" min="1" step="1" placeholder="Qté" style="padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
+                                        <input type="number" name="lines[${index}][unit_price]" value="${line.unit_price}" min="0" step="0.01" placeholder="Prix" style="padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
+                                        <input type="number" name="lines[${index}][discount_percent]" value="${line.discount_percent || 0}" min="0" max="100" step="0.1" placeholder="Remise %" style="padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
+                                    </div>
+                                </div>
+                            `).join('')}
                         </div>
                         <button type="button" onclick="addProductLine()" style="background: #059669; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-top: 12px;">
                             ➕ Ajouter un produit
                         </button>
                     </div>
-                    
+
                     <!-- Boutons d'action -->
-                    <div style="display: flex; gap: 12px; justify-content: flex-end;">
-                        <button type="button" onclick="closeQuoteEditor()" style="background: #6b7280; color: white; border: none; padding: 12px 24px; border-radius: 6px; cursor: pointer;">
+                    <div style="display: flex; justify-content: flex-end; gap: 12px;">
+                        <button type="button" onclick="closeQuoteEditor()" style="background: #6b7280; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer;">
                             Annuler
                         </button>
-                        <button type="submit" style="background: #059669; color: white; border: none; padding: 12px 24px; border-radius: 6px; cursor: pointer;">
-                            💾 Enregistrer
+                        <button type="button" onclick="saveQuoteChanges(this.form)" style="background: #10b981; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer;">
+                            💾 Enregistrer les modifications
                         </button>
                     </div>
                 </form>
             `;
         }
+
         
         function generateProductLineEditor(line, index) {
             return `
@@ -3239,6 +3279,28 @@
                 modal.remove();
             }
         }
+
+        function addProductLine() {
+            const productLinesDiv = document.getElementById('productLines');
+            const lineCount = productLinesDiv.querySelectorAll('.product-line').length;
+
+            const newLine = document.createElement('div');
+            newLine.className = 'product-line';
+            newLine.style.cssText = 'background: white; padding: 12px; border-radius: 6px; margin-bottom: 12px;';
+
+            newLine.innerHTML = `
+                <input type="hidden" name="lines[${lineCount}][line_num]" value="${lineCount}">
+                <div style="display: grid; grid-template-columns: 2fr 3fr 1fr 1fr 1fr; gap: 12px; align-items: center;">
+                    <input type="text" name="lines[${lineCount}][item_code]" placeholder="Code produit" style="padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
+                    <input type="text" name="lines[${lineCount}][item_description]" placeholder="Description" style="padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
+                    <input type="number" name="lines[${lineCount}][quantity]" value="1" min="1" step="1" placeholder="Qté" style="padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
+                    <input type="number" name="lines[${lineCount}][unit_price]" value="0" min="0" step="0.01" placeholder="Prix" style="padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
+                    <input type="number" name="lines[${lineCount}][discount_percent]" value="0" min="0" max="100" step="0.1" placeholder="Remise %" style="padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
+                </div>
+            `;
+
+            productLinesDiv.appendChild(newLine);
+        }
         
         // Gestion du formulaire d'édition
         document.addEventListener('submit', async function(e) {
@@ -3251,6 +3313,14 @@
         async function saveQuoteChanges(form) {
             try {
                 const formData = new FormData(form);
+                const quoteId = formData.get('quote_id');
+
+                // Formater l'ID correctement
+                const formattedQuoteId = quoteId.startsWith('SAP-') || quoteId.startsWith('SF-')
+                    ? quoteId
+                    : `SAP-${quoteId}`;
+
+                // Préparer les données de modification
                 const modifications = {
                     header: {
                         doc_date: formData.get('doc_date'),
@@ -3259,7 +3329,7 @@
                     },
                     lines: []
                 };
-                
+
                 // Traiter les lignes de produits
                 const lineElements = form.querySelectorAll('.product-line');
                 lineElements.forEach((lineElement, index) => {
@@ -3271,34 +3341,41 @@
                         unit_price: parseFloat(formData.get(`lines[${index}][unit_price]`)),
                         discount_percent: parseFloat(formData.get(`lines[${index}][discount_percent]`) || 0)
                     };
-                    modifications.lines.push(lineData);
+
+                    // Ajouter seulement si les champs obligatoires sont remplis
+                    if (lineData.item_code && lineData.quantity > 0) {
+                        modifications.lines.push(lineData);
+                    }
                 });
-                
-                // Envoyer les modifications
-                const quoteId = globalQuoteIdRaw; // Variable globale avec l'ID du devis
-                const response = await fetch(`/api/quotes/modify/${quoteId}`, {
+
+                // Afficher un message de traitement
+                addMessage('⏳ Enregistrement des modifications en cours...', 'system');
+
+                // Envoyer les modifications à l'API
+                const response = await fetch(`/api/quotes/modify/${formattedQuoteId}`, {
                     method: 'PUT',
                     headers: {
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify(modifications)
                 });
-                
+
                 const result = await response.json();
-                
+
                 if (response.ok && result.success) {
                     addMessage('✅ Devis modifié avec succès !', 'system');
                     closeQuoteEditor();
-                    // Rafraîchir l'affichage du devis
+
+                    // Rafraîchir l'affichage du devis si la fonction existe
                     if (typeof viewQuote === 'function') {
-                        viewQuote(quoteId);
+                        await viewQuote(quoteId);
                     }
                 } else {
                     throw new Error(result.detail || result.message || 'Erreur lors de la modification');
                 }
-                
+
             } catch (error) {
-                console.error('Erreur:', error);
+                console.error('Erreur lors de la sauvegarde:', error);
                 addMessage(`❌ Erreur lors de la modification: ${error.message}`, 'system');
             }
         }
