@@ -748,25 +748,32 @@ class DevisWorkflow:
                     "error": "Données client perdues - impossible de générer le devis"
                 }
 
-            # Formater le produit sélectionné pour la génération du devis
-            # Utiliser les noms de champs attendus par _create_quote_in_salesforce
+            # Calcul du prix unitaire avec fallback (Price -> AvgPrice -> unit_price -> estimation)
+            unit_price = float(
+            (selected_product_data.get("Price")
+                or selected_product_data.get("AvgPrice")
+                or selected_product_data.get("unit_price")
+                or 0)
+            )
+            if not unit_price:
+                unit_price = float(self._estimate_product_price(selected_product_data.get("ItemName", "")) or 0)
             formatted_product = {
                 "code": selected_product_data.get("ItemCode"),
                 "name": selected_product_data.get("ItemName"),
-                "quantity": quantity,
+                "quantity": quantity,  # Utiliser la quantité récupérée
                 # Utiliser Price d'abord, puis AvgPrice, puis estimation
-                "unit_price": selected_product_data.get("Price") or selected_product_data.get("AvgPrice") or selected_product_data.get("unit_price") or self._estimate_product_price(selected_product_data.get("ItemName", "")),
-                "total_price": 0,  # Sera calculé plus tard
+                "unit_price": unit_price,
+                "total_price": 0, # Sera calculé après
                 "found": True,  # Marquer comme produit trouvé
                 "OnHand": selected_product_data.get("OnHand", 0),
                 # Garder aussi les champs SAP originaux pour compatibilité
                 "ItemCode": selected_product_data.get("ItemCode"),
                 "ItemName": selected_product_data.get("ItemName"),
-                "UnitPrice": selected_product_data.get("AvgPrice") or selected_product_data.get("Price") or selected_product_data.get("unit_price") or 0,
+                "UnitPrice": unit_price,
             }
 
             # Calculer le prix total
-            formatted_product["total_price"] = formatted_product["unit_price"] * quantity            
+            formatted_product["total_price"] = unit_price * quantity            
             logger.info(f"✅ Produit formaté: {formatted_product['name']} - Code: {formatted_product['code']} - Prix: {formatted_product['unit_price']}€ - Quantité: {quantity}")
             # CORRECTION: S'assurer que les données client sont bien présentes
             validated_data = {
@@ -795,7 +802,7 @@ class DevisWorkflow:
             logger.info(f"📦 validated_data pour génération: {validated_data}")
 
             # Continuer directement vers la génération du devis
-            logger.info(f"✅ Produit sélectionné avec prix {formatted_product['UnitPrice']}€, génération du devis...")
+            logger.info(f"✅ Produit sélectionné avec prix {formatted_product['unit_price']}€, génération du devis.")
             # Préparer quote_data pour la création SAP
             quote_data = {
                 "client": validated_data["client"],
@@ -842,7 +849,8 @@ class DevisWorkflow:
     # 🆕 MÉTHODE DE GÉNÉRATION FINALE OPTIMISÉE
     async def _continue_quote_generation(self, validated_data: Dict, quote_data: Dict = None) -> Dict[str, Any]:
         """Continue la génération du devis avec les données validées"""
-
+        # Robustesse: garantir un dict pour quote_data
+        quote_data = quote_data or {}
         try:
             # S'assurer que les données produits sont complètes avant génération
             if not validated_data.get("products"):
@@ -974,11 +982,26 @@ class DevisWorkflow:
                 sf_opportunity = await self._create_salesforce_opportunity(client_data, products_data, sap_quote)
 
                 self._track_step_complete("generate_quote", f"✅ Devis généré - Total: {total_amount:.2f}€")
+                # Normaliser les identifiants avant retour
+                sap_doc_num = (
+                sap_quote.get("quote_number")
+                    or quote_data.get("DocNum")
+                    or validated_data.get("quote_number")
+                    or "UNKNOWN"
+                )
+                sf_id = None
+                if isinstance(sf_opportunity, dict):
+                    sf_id = sf_opportunity.get("opportunity_id") or sf_opportunity.get("Id")
+                # Récupérer les résultats des systèmes
+
+                # Si pas de doc_num dans sap, essayer d'autres sources
+                if not sap_doc_num:
+                    sap_doc_num = quote_data.get("sap_doc_num") or quote_data.get("quote_number") or "UNKNOWN"
 
                 return {
                     "success": True,
                     "status": "success",
-                    "quote_id": f"SAP-{sap_quote_result.get('doc_num', sap_quote_result.get('doc_entry', 'UNKNOWN'))}",
+                    "quote_id": f"SAP-{sap_doc_num}",
                     "client": validated_data.get("client", {}),
                     "products": validated_data.get("products", []),
                     "quote_data": {
@@ -993,8 +1016,10 @@ class DevisWorkflow:
                     },
                     "total_amount": validated_data.get("total_amount", total_amount),
                     "currency": "EUR",
-                    "sap_doc_num": sap_result.get("DocNum") if sap_result else None,
-                    "salesforce_opportunity_id": sf_result.get("Id") if sf_result else None,
+                    "sap_doc_num": sap_doc_num,
+                    "salesforce_opportunity_id": sf_id,
+                    "opportunity_id": sf_id,
+                    "salesforce_quote_id": sf_id,
                     "date": datetime.now().strftime('%Y-%m-%d'),
                     "quote_status": "Créé",
                     "message": f"Devis créé avec succès pour {validated_data.get('client', {}).get('name', 'le client')}"

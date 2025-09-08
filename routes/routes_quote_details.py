@@ -111,13 +111,14 @@ async def modify_sap_quote(
         
         # Utiliser la nouvelle fonction de modification
         logger.info(f"Modification du devis SAP {doc_entry}")
-        sap_response = await connector.call_sap_mcp(
-            "sap_modify_quote",
-            {
-                "doc_entry": int(doc_entry),
-                "modifications": modifications
-            }
-        )
+        sap_response = await connector.call_sap_mcp({
+            "tool": "sap_modify_quote",
+            "doc_entry": int(doc_entry),
+            "modifications": modifications
+        })
+        # Unwrap éventuel des réponses encapsulées
+        if isinstance(sap_response, dict) and "result" in sap_response:
+            sap_response = sap_response["result"]
         
         if not sap_response or not isinstance(sap_response, dict):
             raise HTTPException(
@@ -173,14 +174,12 @@ async def modify_salesforce_quote(
                 sf_update_data["Amount"] = float(header_mods["amount"])
         
         # Mettre à jour l'opportunité
-        sf_response = await connector.call_salesforce_mcp(
-            "salesforce_update_record",
-            {
-                "sobject_type": "Opportunity",
-                "record_id": opportunity_id,
-                "record_data": sf_update_data
-            }
-        )
+        sf_response = await connector.call_salesforce_mcp({
+            "tool": "salesforce_update_record",
+            "sobject_type": "Opportunity",
+            "record_id": opportunity_id,
+            "record_data": sf_update_data
+        })
         
         if not sf_response or not sf_response.get("success", False):
             error_msg = sf_response.get('error', 'Erreur inconnue') if sf_response else 'Pas de réponse'
@@ -218,13 +217,22 @@ async def get_sap_quote_details(
         
         connector = MCPConnector()
 
-        # Utiliser la méthode call_sap_mcp qui existe avec la bonne signature
-        sap_response = await connector.call_sap_mcp(
-            "sap_get_quote",
-            {
+        # Essayer d'abord avec get_quotation_details (si disponible)
+        try:
+            sap_response = await connector.call_sap_mcp({
+                "tool": "get_quotation_details",
+                "doc_entry": int(doc_entry),
+                "include_lines": include_lines,
+                "include_customer": include_customer
+            })
+        except Exception as e:
+            # Fallback sur sap_get_quote si get_quotation_details n'existe pas
+            logger.warning(f"get_quotation_details non disponible, utilisation de sap_get_quote: {str(e)}")
+            sap_response = await connector.call_sap_mcp({
+                "tool": "sap_get_quote",
                 "doc_entry": int(doc_entry)
-            }
-        )
+            })
+        logger.info(f"Réponse SAP reçue pour devis {doc_entry}")
         # CORRECTION: Traitement spécial si le résultat MCP est encapsulé dans 'result'
         if isinstance(sap_response, dict) and 'result' in sap_response:
             actual_response = sap_response['result']
