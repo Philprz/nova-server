@@ -131,6 +131,12 @@ app.include_router(devis_router, prefix="/api/devis", tags=["Devis"])
 app.include_router(progress_router, prefix="/progress", tags=["Suivi tâches"])
 app.include_router(client_listing_router, prefix="/api/clients", tags=["Client Listing"])
 app.include_router(websocket_router, tags=["WebSocket"])
+# Route WebSocket pour l'assistant intelligent manquante
+@app.websocket("/ws/assistant/{task_id}")
+async def websocket_assistant_endpoint(websocket: WebSocket, task_id: str):
+    """WebSocket pour l'assistant intelligent"""
+    from routes.routes_intelligent_assistant import websocket_endpoint
+    await websocket_endpoint(websocket, task_id)
 app.include_router(routes_quote_details.router)
 
 # Route pour edit-quote manquante
