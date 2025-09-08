@@ -228,9 +228,10 @@ async def get_sap_quote_details(
         except Exception as e:
             # Fallback sur sap_get_quote si get_quotation_details n'existe pas
             logger.warning(f"get_quotation_details non disponible, utilisation de sap_get_quote: {str(e)}")
-            sap_response = await connector.call_sap_mcp({
-                "tool": "sap_get_quote",
-                "doc_entry": int(doc_entry)
+            # Appel corrigé avec les bons paramètres
+            sap_response = await connector.call_mcp_func("sap_mcp", "sap_read", {
+                "endpoint": f"/Quotations({doc_entry})",
+                "method": "GET"
             })
         logger.info(f"Réponse SAP reçue pour devis {doc_entry}")
         # CORRECTION: Traitement spécial si le résultat MCP est encapsulé dans 'result'
@@ -320,7 +321,28 @@ async def get_sap_quote_details(
         return formatted_response
     except Exception as e:
         logger.error(f"Erreur SAP pour devis {doc_entry}: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Erreur SAP: {str(e)}")
+        
+        # Tentative avec l'instance globale du connecteur
+        try:
+            from services.mcp_connector import get_mcp_connector
+            connector = get_mcp_connector()
+            
+            sap_response = await connector.call_sap_mcp("sap_read", {
+                "endpoint": f"/Quotations({doc_entry})",
+                "method": "GET"
+            })
+            
+            if sap_response and "error" not in sap_response:
+                return format_sap_quote_details(sap_response, include_lines, include_customer)
+                
+        except Exception as e2:
+            logger.error(f"Fallback échoué: {str(e2)}")
+        
+        # Si tout échoue, retourner une erreur détaillée
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Erreur SAP: {str(e)}"
+        )
 
 async def get_salesforce_quote_details(
     opportunity_id: str,

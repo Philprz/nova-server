@@ -699,18 +699,54 @@ class DevisWorkflow:
         # L'interface envoie 'selected_product', pas 'selected_data'
         selected_product_data = user_input.get("selected_product") or user_input.get("selected_data")
         product_code = user_input.get("product_code")
-        # Récupérer la quantité depuis extracted_info plutôt que d'utiliser une valeur par défaut
-        extracted_info = self.context.get("extracted_info", {})
-        original_products = extracted_info.get("products", [])
+        # Récupérer la quantité ORIGINALE depuis extracted_info (en respectant la priorité à user_input)
+        extracted_info = self.context.get("extracted_info", {}) or {}
+        original_products = extracted_info.get("products") or []
         
-        # Trouver le produit original correspondant
-        quantity = user_input.get("quantity", 1)  # Utiliser la quantité de user_input en priorité
-        if not quantity or quantity == 1:  # Si pas de quantité ou quantité par défaut
+        # Quantité: priorité à user_input s'il est fourni et valide
+        quantity = user_input.get("quantity")
+        try:
+            quantity = int(quantity) if quantity is not None else None
+        except (TypeError, ValueError):
+            quantity = None
+            
+        def _norm(s):
+            return (s or "").strip().lower()
+            
+        selected_name = _norm(selected_product_data.get("ItemName"))
+        selected_code = selected_product_data.get("ItemCode")
+        
+        # Si quantité absente ou égale à 1, tenter de reprendre celle de la demande originale
+        if (quantity is None) or (quantity == 1):
+            matched = None
             for orig_product in original_products:
-                if (orig_product.get("name", "").lower() in selected_product_data.get("ItemName", "").lower() or
-                    orig_product.get("code") == selected_product_data.get("ItemCode")):
-                    quantity = orig_product.get("quantity", 1)
+                orig_name = _norm(orig_product.get("name"))
+                orig_code = orig_product.get("code")
+                # Correspondance robuste: code exact OU nom inclusif (nom complet ou tokens)
+                name_match = orig_name and (orig_name in selected_name or any(tok and tok in selected_name for tok in orig_name.split()))
+                code_match = orig_code and (orig_code == selected_code)
+                if code_match or name_match:
+                    matched = orig_product
                     break
+                    
+            if matched:
+                try:
+                    quantity = int(matched.get("quantity", 1))
+                except (TypeError, ValueError):
+                    quantity = matched.get("quantity", 1) or 1
+                logger.info(f"📦 Quantité récupérée depuis demande originale: {quantity} pour {matched.get('name')}")
+            elif original_products:
+                # Fallback prudent uniquement si rien d'explicite et toujours à 1
+                try:
+                    quantity = int(original_products[0].get("quantity", 1))
+                except (TypeError, ValueError):
+                    quantity = original_products[0].get("quantity", 1) or 1
+                logger.info(f"📦 Fallback quantité: {quantity}")
+                
+        # Garde-fou final
+        if quantity is None or quantity <= 0:
+            quantity = 1
+
 
         logger.info(f"📦 Quantité récupérée depuis la demande originale: {quantity}")
         current_context = context.get("validation_context", {})
