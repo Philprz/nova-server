@@ -2253,6 +2253,20 @@
                     handleUserInteraction?.(data.data);
                 }
                 else if (data.type === 'user_interaction_required') {
+                    else if (data.type === 'progress_update') {
+                    console.log("📊 Mise à jour progression:", data);
+                    const pc = document.getElementById('progressContainer');
+                    if (pc && !pc.classList.contains('active')) {
+                        showProgress();
+                    }
+                    updateProgress?.(data.progress, data.message, data.step_id);
+                }
+                else if (data.type === 'user_response_processed') {
+                    console.log("✅ Réponse utilisateur traitée:", data);
+                    // Message informatif pour l'utilisateur
+                    addMessage('Réponse utilisateur prise en compte...', 'system');
+                }
+                else if (data.type === 'user_interaction_required') {
                     console.log("🤝 Interaction utilisateur détectée:", data.interaction_data);
                     if (data.interaction_data && data.interaction_data.interaction_type === 'client_selection') {
                         hideProgress?.();
@@ -2545,15 +2559,14 @@
             });
         });
         function displayQuoteResult(result) {
-            // Masquer la progression (si nécessaire)
-            if (typeof hideProgress === 'function') { try { hideProgress(); } catch (e) { console.warn(e); } }
-
-            // Utils: échappement HTML minimal
-            const escapeHtml = (s) => String(s ?? '')
-                .replace(/&/g,'&amp;').replace(/</g,'&lt;')
-                .replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 
             // Extraction robuste du nom client depuis plusieurs sources possibles
+            // Utils: échappement HTML minimal (si pas déjà définie)
+            if (typeof escapeHtml !== 'function') {
+                window.escapeHtml = (s) => String(s ?? '')
+                    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+                    .replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+            }
             const clientNameRaw = (
                 result?.validated_data?.client?.Name ||
                 result?.validated_data?.client?.name ||
