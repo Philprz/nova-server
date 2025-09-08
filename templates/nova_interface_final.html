@@ -2610,10 +2610,8 @@
                 (result?.validated_data?.sap_quote?.doc_num ? `SAP-${result.validated_data.sap_quote.doc_num}` : null) ||
                 ('NOVA-' + Date.now().toString().slice(-6));
                 // Stocker dans les variables globales
-                globalQuoteIdRaw = quoteNumber;
-                globalClientName = clientName;
-                // Stocker dans la variable globale pour éviter les erreurs de portée
                 globalQuoteIdRaw = quoteIdRaw;
+                globalClientName = clientName;
             // Montant + devise
             const totalAmountNum = Number(
                 result?.total_amount ??
