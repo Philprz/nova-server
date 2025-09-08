@@ -3074,11 +3074,18 @@
             console.log('Affichage du devis:', quoteId);
             
             try {
+                // Déterminer le préfixe selon le format de l'ID
+                let formattedQuoteId = quoteId;
+                if (!quoteId.startsWith('SAP-') && !quoteId.startsWith('SF-')) {
+                    // Si c'est un numéro pur, assumer que c'est SAP par défaut
+                    formattedQuoteId = `SAP-${quoteId}`;
+                }
+                
                 // Afficher un indicateur de chargement
                 addMessage(`🔍 Récupération du devis ${quoteId}...`, 'system');
                 
                 // Appel API pour récupérer les détails du devis
-                const response = await fetch(`/api/quotes/details/${quoteId}`, {
+                const response = await fetch(`/api/quotes/details/${formattedQuoteId}`, {
                     method: 'GET',
                     headers: {
                         'Content-Type': 'application/json'
