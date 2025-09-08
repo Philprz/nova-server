@@ -2,6 +2,7 @@
 
 import uvicorn
 import logging
+from pathlib import Path
 import os
 import sys
 import asyncio
@@ -15,12 +16,9 @@ from routes.routes_intelligent_assistant import router as assistant_router
 from routes.routes_clients import router as clients_router  
 from routes.routes_devis import router as devis_router
 from routes.routes_progress import router as progress_router
-from routes.routes_devis import router as quote_router
-from routes.routes_clients import router as client_router
 from routes.routes_client_listing import router as client_listing_router
 from routes.routes_websocket import router as websocket_router
-from routes.routes_intelligent_assistant import router as intelligent_assistant_router
-from routes import routes_intelligent_assistant, routes_quote_details
+from routes import routes_quote_details
 if sys.platform == "win32":
     os.environ["PYTHONIOENCODING"] = "utf-8"
 
@@ -131,13 +129,9 @@ app.include_router(assistant_router, prefix="/api/assistant", tags=["IA Assistan
 app.include_router(clients_router, prefix="/api/clients", tags=["Clients"])
 app.include_router(devis_router, prefix="/api/devis", tags=["Devis"])
 app.include_router(progress_router, prefix="/progress", tags=["Suivi tâches"])
-app.include_router(quote_router, prefix="/api/assistant", tags=["Quote"])
-app.include_router(client_router, prefix="/api/assistant", tags=["Client"])
 app.include_router(client_listing_router, prefix="/api/clients", tags=["Client Listing"])
 app.include_router(websocket_router, tags=["WebSocket"])
-app.include_router(intelligent_assistant_router)
 app.include_router(routes_quote_details.router)
-app.include_router(routes_intelligent_assistant.router)
 
 # Route pour edit-quote manquante
 @app.get("/edit-quote/{quote_id}")
@@ -148,10 +142,21 @@ async def edit_quote_page(quote_id: str):
         with file_path.open("r", encoding="utf-8") as f:
             html_content = f.read()
         # Injection du quote_id dans le HTML
-        html_content = html_content.replace(
+        replaced = html_content.replace(
             "<!-- QUOTE_ID_PLACEHOLDER -->",
             f"<script>window.EDIT_QUOTE_ID = '{quote_id}';</script>"
         )
+        if replaced == html_content:
+            # Fallback si le placeholder est absent : insérer avant </body> ou en fin
+            if "</body>" in html_content:
+                html_content = html_content.replace(
+                    "</body>",
+                    f"<script>window.EDIT_QUOTE_ID = '{quote_id}';</script></body>"
+                )
+            else:
+                html_content = html_content + f"<script>window.EDIT_QUOTE_ID = '{quote_id}';</script>"
+        else:
+            html_content = replaced
         return HTMLResponse(content=html_content, media_type="text/html")
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Interface non trouvée")
