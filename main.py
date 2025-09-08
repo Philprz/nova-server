@@ -144,14 +144,15 @@ app.include_router(routes_intelligent_assistant.router)
 async def edit_quote_page(quote_id: str):
     """Page d'édition de devis"""
     try:
-        with open("interface/nova_interface_final.html", "r", encoding="utf-8") as f:
+        file_path = Path("templates") / "nova_interface_final.html"
+        with file_path.open("r", encoding="utf-8") as f:
             html_content = f.read()
         # Injection du quote_id dans le HTML
         html_content = html_content.replace(
             "<!-- QUOTE_ID_PLACEHOLDER -->",
             f"<script>window.EDIT_QUOTE_ID = '{quote_id}';</script>"
         )
-        return HTMLResponse(content=html_content)
+        return HTMLResponse(content=html_content, media_type="text/html")
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Interface non trouvée")
 
