@@ -851,12 +851,43 @@
             .input-container {
                 gap: 8px;
             }
-            
+
             .send-button {
                 width: 40px;
                 height: 40px;
                 font-size: 1rem;
             }
+        }
+        @media screen and (max-width: 1024px) {
+            body {
+                padding: 0px;
+            }
+        }
+    </style>
+    <style>
+        /* Styles pour la recherche de produits */
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .search-results {
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+        }
+
+        .search-result-item.active {
+            background-color: #f3f4f6 !important;
+        }
+
+        .search-result-item:last-child {
+            border-bottom: none;
+        }
+
+        .search-result-item mark {
+            background-color: #fef08a;
+            color: inherit;
+            padding: 0 2px;
+            font-weight: 600;
         }
     </style>
 </head>
@@ -3221,6 +3252,37 @@
                             <label style="display: block; margin-bottom: 4px; font-weight: 500;">Commentaires</label>
                             <textarea name="comments" rows="3" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">${quote.comments || ''}</textarea>
                         </div>
+                    <!-- Champ de recherche produit avec auto-complétion -->
+                    <div class="product-search-container" style="margin-top: 20px;">
+                        <label for="productSearch" style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">
+                            🔍 Recherche de produits
+                        </label>
+                        <div style="position: relative;">
+                            <input
+                                type="text"
+                                id="productSearch"
+                                placeholder="Tapez une référence ou description de produit..."
+                                style="width: 100%; padding: 12px 16px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 16px;"
+                                autocomplete="off"
+                            >
+                            <div id="productSearchResults" class="search-results" style="
+                                display: none;
+                                position: absolute;
+                                top: 100%;
+                                left: 0;
+                                right: 0;
+                                background: white;
+                                border: 1px solid #d1d5db;
+                                border-top: none;
+                                border-radius: 0 0 8px 8px;
+                                max-height: 300px;
+                                overflow-y: auto;
+                                z-index: 1000;
+                                box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+                            "></div>
+                        </div>
+                    </div>
+                    </div>
                     </div>
 
                     <!-- Section Lignes de produits -->
@@ -3301,7 +3363,308 @@
 
             productLinesDiv.appendChild(newLine);
         }
-        
+
+        // Recherche produit en temps réel type Google
+        let productSearchTimeout = null;
+
+        function initializeProductSearch() {
+            const searchInput = document.getElementById('productSearch');
+            const resultsDiv = document.getElementById('productSearchResults');
+
+            if (!searchInput || !resultsDiv) return;
+
+            searchInput.addEventListener('input', function(e) {
+                const query = e.target.value.trim();
+
+                // Annuler la recherche précédente
+                if (productSearchTimeout) {
+                    clearTimeout(productSearchTimeout);
+                }
+
+                if (query.length < 2) {
+                    hideProductSearchResults();
+                    return;
+                }
+
+                // Délai de 300ms pour éviter trop de requêtes
+                productSearchTimeout = setTimeout(() => {
+                    searchProductsRealTime(query);
+                }, 300);
+            });
+
+            // Masquer les résultats quand on clique ailleurs
+            document.addEventListener('click', function(e) {
+                if (!searchInput.contains(e.target) && !resultsDiv.contains(e.target)) {
+                    hideProductSearchResults();
+                }
+            });
+
+            // Navigation au clavier
+            searchInput.addEventListener('keydown', function(e) {
+                const items = resultsDiv.querySelectorAll('.search-result-item');
+                const activeItem = resultsDiv.querySelector('.search-result-item.active');
+
+                if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    navigateSearchResults(items, activeItem, e.key === 'ArrowDown');
+                } else if (e.key === 'Enter' && activeItem) {
+                    e.preventDefault();
+                    activeItem.click();
+                } else if (e.key === 'Escape') {
+                    hideProductSearchResults();
+                }
+            });
+        }
+
+        async function searchProductsRealTime(query) {
+            const resultsDiv = document.getElementById('productSearchResults');
+
+            // Afficher loading
+            showProductSearchLoading();
+
+            try {
+                const response = await fetch(`/products/search_products_advanced?q=${encodeURIComponent(query)}&limit=8`);
+                const data = await response.json();
+
+                if (data.success && data.products && data.products.length > 0) {
+                    displayProductSearchResults(data.products, query);
+                } else {
+                    displayNoProductResults(query);
+                }
+            } catch (error) {
+                console.error('Erreur recherche produits:', error);
+                displayProductSearchError();
+            }
+        }
+
+        function showProductSearchLoading() {
+            const resultsDiv = document.getElementById('productSearchResults');
+            resultsDiv.style.display = 'block';
+            resultsDiv.innerHTML = `
+                <div class="search-result-item" style="padding: 16px; text-align: center; color: #6b7280;">
+                    <div class="spinner" style="display: inline-block; width: 16px; height: 16px; border: 2px solid #f3f4f6; border-top: 2px solid #3b82f6; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+                    <span style="margin-left: 8px;">Recherche en cours...</span>
+                </div>
+            `;
+        }
+
+        function displayProductSearchResults(products, query) {
+            const resultsDiv = document.getElementById('productSearchResults');
+            resultsDiv.style.display = 'block';
+
+            resultsDiv.innerHTML = products.map((product, index) => {
+                const code = product.item_code || product.ItemCode || 'N/A';
+                const name = product.item_name || product.ItemName || 'Produit sans nom';
+                const price = product.price || product.UnitPrice || 0;
+                const availability = product.availability_text || 'Stock non défini';
+                const availabilityColor = product.availability_color || '#6b7280';
+
+                return `
+                    <div class="search-result-item ${index === 0 ? 'active' : ''}"
+                         onclick="selectProductFromSearch('${code}', '${name.replace(/'/g, "\\'")}', ${price})"
+                         style="
+                            padding: 12px 16px;
+                            cursor: pointer;
+                            border-bottom: 1px solid #f3f4f6;
+                            transition: background-color 0.2s;
+                         "
+                         onmouseover="this.style.backgroundColor='#f9fafb'; this.classList.add('active')"
+                         onmouseout="this.style.backgroundColor='white'; this.classList.remove('active')"
+                    >
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                            <div style="flex: 1;">
+                                <div style="font-weight: 600; color: #111827; margin-bottom: 4px;">
+                                    ${highlightSearchTerm(code, query)} - ${highlightSearchTerm(name, query)}
+                                </div>
+                                <div style="font-size: 14px; color: ${availabilityColor};">
+                                    📦 ${availability}
+                                </div>
+                            </div>
+                            <div style="text-align: right; margin-left: 16px;">
+                                <div style="font-weight: 600; color: #059669;">
+                                    ${price > 0 ? price.toFixed(2) + ' €' : 'Prix sur demande'}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            // Ajouter option "Créer nouveau produit" si pas de résultats exacts
+            const exactMatch = products.some(p =>
+                (p.item_code || p.ItemCode || '').toLowerCase() === query.toLowerCase()
+            );
+
+            if (!exactMatch && query.length > 2) {
+                resultsDiv.innerHTML += `
+                    <div class="search-result-item create-product"
+                         onclick="createNewProductFromSearch('${query.replace(/'/g, "\\'")}')"
+                         style="
+                            padding: 12px 16px;
+                            cursor: pointer;
+                            border-top: 1px solid #e5e7eb;
+                            background-color: #f9fafb;
+                            color: #374151;
+                         "
+                         onmouseover="this.style.backgroundColor='#f3f4f6'"
+                         onmouseout="this.style.backgroundColor='#f9fafb'"
+                    >
+                        <div style="display: flex; align-items: center;">
+                            <span style="color: #10b981; margin-right: 8px;">➕</span>
+                            <span>Créer le produit "${query}"</span>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        function displayNoProductResults(query) {
+            const resultsDiv = document.getElementById('productSearchResults');
+            resultsDiv.style.display = 'block';
+            resultsDiv.innerHTML = `
+                <div class="search-result-item" style="padding: 16px; text-align: center; color: #6b7280;">
+                    <div style="margin-bottom: 8px;">❌ Aucun produit trouvé pour "${query}"</div>
+                    <div class="search-result-item create-product"
+                         onclick="createNewProductFromSearch('${query.replace(/'/g, "\\'")}')"
+                         style="
+                            display: inline-block;
+                            padding: 8px 16px;
+                            cursor: pointer;
+                            background-color: #10b981;
+                            color: white;
+                            border-radius: 6px;
+                            margin-top: 8px;
+                         "
+                    >
+                        ➕ Créer "${query}"
+                    </div>
+                </div>
+            `;
+        }
+
+        function displayProductSearchError() {
+            const resultsDiv = document.getElementById('productSearchResults');
+            resultsDiv.style.display = 'block';
+            resultsDiv.innerHTML = `
+                <div class="search-result-item" style="padding: 16px; text-align: center; color: #ef4444;">
+                    ⚠️ Erreur de recherche - Vérifiez la connexion SAP
+                </div>
+            `;
+        }
+
+        function hideProductSearchResults() {
+            const resultsDiv = document.getElementById('productSearchResults');
+            resultsDiv.style.display = 'none';
+        }
+
+        function highlightSearchTerm(text, term) {
+            if (!term || !text) return text;
+            const regex = new RegExp(`(${term})`, 'gi');
+            return text.replace(regex, '<mark style="background-color: #fef08a; padding: 0;">$1</mark>');
+        }
+
+        function navigateSearchResults(items, activeItem, isDown) {
+            if (items.length === 0) return;
+
+            // Supprimer l'état actif
+            items.forEach(item => item.classList.remove('active'));
+
+            let newIndex = 0;
+            if (activeItem) {
+                const currentIndex = Array.from(items).indexOf(activeItem);
+                newIndex = isDown
+                    ? (currentIndex + 1) % items.length
+                    : (currentIndex - 1 + items.length) % items.length;
+            }
+
+            items[newIndex].classList.add('active');
+        }
+
+        function selectProductFromSearch(code, name, price) {
+            const searchInput = document.getElementById('productSearch');
+            searchInput.value = `${code} - ${name}`;
+            hideProductSearchResults();
+
+            // Ajouter le produit aux lignes si l'interface le permet
+            addProductToLines(code, name, price);
+
+            showNotification(`Produit sélectionné: ${code}`, 'success');
+        }
+
+        function createNewProductFromSearch(productRef) {
+            hideProductSearchResults();
+            showNotification(`Création du produit "${productRef}" en cours...`, 'info');
+
+            // Ici vous pouvez appeler votre logique de création de produit
+            // ou rediriger vers un formulaire de création
+        }
+
+        function addProductToLines(code, name, price) {
+            // Si vous avez un système de lignes de produits dans votre formulaire
+            const productLinesDiv = document.getElementById('productLines');
+            if (productLinesDiv) {
+                addProductLine(); // Utilise la fonction existante
+
+                // Remplir la nouvelle ligne avec les données du produit
+                const lines = productLinesDiv.querySelectorAll('.product-line');
+                const lastLine = lines[lines.length - 1];
+
+                if (lastLine) {
+                    const codeInput = lastLine.querySelector('input[name*="[item_code]"]');
+                    const descInput = lastLine.querySelector('input[name*="[item_description]"]');
+                    const priceInput = lastLine.querySelector('input[name*="[unit_price]"]');
+
+                    if (codeInput) codeInput.value = code;
+                    if (descInput) descInput.value = name;
+                    if (priceInput && price > 0) priceInput.value = price;
+                }
+            }
+        }
+
+        // Initialiser la recherche au chargement
+        document.addEventListener('DOMContentLoaded', function() {
+            initializeProductSearch();
+        });
+
+        // Fonction utilitaire pour afficher des notifications
+        function showNotification(message, type = 'info') {
+            const colors = {
+                'success': '#10b981',
+                'error': '#ef4444',
+                'warning': '#f59e0b',
+                'info': '#3b82f6'
+            };
+
+            const notification = document.createElement('div');
+            notification.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                background: ${colors[type]};
+                color: white;
+                padding: 12px 24px;
+                border-radius: 8px;
+                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                z-index: 9999;
+                opacity: 0;
+                transition: opacity 0.3s ease-in-out;
+                font-size: 14px;
+                max-width: 400px;
+            `;
+            notification.textContent = message;
+
+            document.body.appendChild(notification);
+
+            // Animation d'apparition
+            setTimeout(() => notification.style.opacity = '1', 10);
+
+            // Disparition automatique après 3 secondes
+            setTimeout(() => {
+                notification.style.opacity = '0';
+                setTimeout(() => notification.remove(), 300);
+            }, 3000);
+        }
+
         // Gestion du formulaire d'édition
         document.addEventListener('submit', async function(e) {
             if (e.target.id === 'quoteEditForm') {
