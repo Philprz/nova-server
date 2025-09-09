@@ -251,21 +251,23 @@ async def get_sap_quote_details(
             if "error" in sap_response.lower() or "not found" in sap_response.lower():
                 raise HTTPException(status_code=404, detail=f"Devis {doc_entry} non trouvé")
             else:
-                raise HTTPException(status_code=500, detail="Format de réponse SAP invalide")
+                raise HTTPException(status_code=500, detail=f"Format de réponse SAP invalide: {sap_response}")
 
-            # Vérifier les erreurs
-            if isinstance(sap_response, dict):
-                # Si la réponse contient un champ error
-                if "error" in sap_response:
-                    error_msg = sap_response.get("error", {}).get("message", sap_response.get("message", "Erreur inconnue"))
-                    logger.error(f"Erreur SAP: {error_msg}")
-                    raise HTTPException(status_code=500, detail=error_msg)
+        # Vérifier les erreurs dans la réponse dict
+        if isinstance(sap_response, dict):
+            # Si la réponse contient un champ error
+            if "error" in sap_response:
+                error_msg = sap_response.get("error", {})
+                if isinstance(error_msg, dict):
+                    error_msg = error_msg.get("message", sap_response.get("message", "Erreur inconnue"))
+                logger.error(f"Erreur SAP: {error_msg}")
+                raise HTTPException(status_code=500, detail=str(error_msg))
 
-                # Si la réponse contient un champ success = False
-                if "success" in sap_response and not sap_response["success"]:
-                    error_msg = sap_response.get("message", sap_response.get("error", "Échec de récupération du devis"))
-                    logger.error(f"Échec SAP: {error_msg}")
-                    raise HTTPException(status_code=400, detail=error_msg)
+            # Si la réponse contient un champ success = False
+            if "success" in sap_response and not sap_response["success"]:
+                error_msg = sap_response.get("message", sap_response.get("error", "Échec de récupération du devis"))
+                logger.error(f"Échec SAP: {error_msg}")
+                raise HTTPException(status_code=400, detail=str(error_msg))
 
         # Extraire les données du devis
         quote_data = None
