@@ -105,14 +105,14 @@ async def modify_sap_quote(
     """
     
     try:
-        from services.mcp_connector import MCPConnector
-        
-        connector = MCPConnector()
+        from services.mcp_connector import get_mcp_connector
+
+        connector = get_mcp_connector()
         
         # Utiliser la nouvelle fonction de modification
         logger.info(f"Modification du devis SAP {doc_entry}")
-        sap_response = await connector.call_sap_mcp({
-            "tool": "sap_modify_quote",
+        # Correction de la syntaxe d'appel
+        sap_response = await connector.call_sap_mcp("sap_modify_quote", {
             "doc_entry": int(doc_entry),
             "modifications": modifications
         })
@@ -157,13 +157,13 @@ async def modify_salesforce_quote(
     """
     
     try:
-        from services.mcp_connector import MCPConnector
-        
-        connector = MCPConnector()
-        
+        from services.mcp_connector import get_mcp_connector
+
+        connector = get_mcp_connector()
+
         # Préparer les données Salesforce
         sf_update_data = {}
-        
+
         if "header" in modifications:
             header_mods = modifications["header"]
             if "comments" in header_mods:
@@ -172,10 +172,9 @@ async def modify_salesforce_quote(
                 sf_update_data["CloseDate"] = header_mods["doc_due_date"]
             if "amount" in header_mods:
                 sf_update_data["Amount"] = float(header_mods["amount"])
-        
-        # Mettre à jour l'opportunité
-        sf_response = await connector.call_salesforce_mcp({
-            "tool": "salesforce_update_record",
+
+        # Mettre à jour l'opportunité - correction de la syntaxe
+        sf_response = await connector.call_salesforce_mcp("salesforce_update_record", {
             "sobject_type": "Opportunity",
             "record_id": opportunity_id,
             "record_data": sf_update_data
@@ -203,37 +202,37 @@ async def modify_salesforce_quote(
         logger.error(f"Erreur modification opportunité SF {opportunity_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Erreur Salesforce: {str(e)}")
 async def get_sap_quote_details(
-    doc_entry: str, 
-    include_lines: bool = True, 
+    doc_entry: str,
+    include_lines: bool = True,
     include_customer: bool = True
 ) -> Dict[str, Any]:
     """
-    Récupère les détails complets d'un devis SAP Business One
+    Récupère les détails d'un devis SAP Business One
     """
-    
+    from services.mcp_connector import get_mcp_connector
+
     try:
-        # Utilisation correcte du MCPConnector avec la bonne méthode
-        from services.mcp_connector import MCPConnector
-        
-        connector = MCPConnector()
+        connector = get_mcp_connector()
+        logger.info(f"Récupération du devis SAP {doc_entry}")
 
         # Essayer d'abord avec get_quotation_details (si disponible)
         try:
-            sap_response = await connector.call_sap_mcp({
-                "tool": "get_quotation_details",
+            sap_response = await connector.call_sap_mcp("get_quotation_details", {
                 "doc_entry": int(doc_entry),
                 "include_lines": include_lines,
                 "include_customer": include_customer
             })
         except Exception as e:
-            # Fallback sur sap_get_quote si get_quotation_details n'existe pas
-            logger.warning(f"get_quotation_details non disponible, utilisation de sap_get_quote: {str(e)}")
+            # Fallback sur sap_read si get_quotation_details n'existe pas
+            logger.warning(f"get_quotation_details non disponible, utilisation de sap_read: {str(e)}")
             # Appel corrigé avec les bons paramètres
-            sap_response = await connector.call_mcp_func("sap_mcp", "sap_read", {
+            sap_response = await connector.call_sap_mcp("sap_read", {
                 "endpoint": f"/Quotations({doc_entry})",
                 "method": "GET"
             })
+
         logger.info(f"Réponse SAP reçue pour devis {doc_entry}")
+
         # CORRECTION: Traitement spécial si le résultat MCP est encapsulé dans 'result'
         if isinstance(sap_response, dict) and 'result' in sap_response:
             actual_response = sap_response['result']
@@ -249,22 +248,24 @@ async def get_sap_quote_details(
 
         # CORRECTION: Vérifier le type de réponse d'abord
         if isinstance(sap_response, str):
-            # Si c'est une string d'erreur directe
-            logger.error(f"Erreur SAP retournée comme string: {sap_response}")
-            raise HTTPException(status_code=500, detail=sap_response)
+            if "error" in sap_response.lower() or "not found" in sap_response.lower():
+                raise HTTPException(status_code=404, detail=f"Devis {doc_entry} non trouvé")
+            else:
+                raise HTTPException(status_code=500, detail="Format de réponse SAP invalide")
 
-        # Vérifier si la réponse contient une erreur
-        if isinstance(sap_response, dict):
-            if sap_response.get("error"):
-                error_msg = sap_response.get("error", "Erreur inconnue")
-                logger.error(f"Erreur SAP: {error_msg}")
-                raise HTTPException(status_code=500, detail=error_msg)
+            # Vérifier les erreurs
+            if isinstance(sap_response, dict):
+                # Si la réponse contient un champ error
+                if "error" in sap_response:
+                    error_msg = sap_response.get("error", {}).get("message", sap_response.get("message", "Erreur inconnue"))
+                    logger.error(f"Erreur SAP: {error_msg}")
+                    raise HTTPException(status_code=500, detail=error_msg)
 
-            # Si la réponse contient un champ success = False
-            if "success" in sap_response and not sap_response["success"]:
-                error_msg = sap_response.get("message", sap_response.get("error", "Échec de récupération du devis"))
-                logger.error(f"Échec SAP: {error_msg}")
-                raise HTTPException(status_code=400, detail=error_msg)
+                # Si la réponse contient un champ success = False
+                if "success" in sap_response and not sap_response["success"]:
+                    error_msg = sap_response.get("message", sap_response.get("error", "Échec de récupération du devis"))
+                    logger.error(f"Échec SAP: {error_msg}")
+                    raise HTTPException(status_code=400, detail=error_msg)
 
         # Extraire les données du devis
         quote_data = None
@@ -319,28 +320,67 @@ async def get_sap_quote_details(
 
         logger.info(f"Devis SAP {doc_entry} récupéré avec succès")
         return formatted_response
+    except HTTPException:
+        # Re-raise HTTPException as-is
+        raise
     except Exception as e:
         logger.error(f"Erreur SAP pour devis {doc_entry}: {str(e)}")
-        
+
         # Tentative avec l'instance globale du connecteur
         try:
             from services.mcp_connector import get_mcp_connector
             connector = get_mcp_connector()
-            
+
             sap_response = await connector.call_sap_mcp("sap_read", {
                 "endpoint": f"/Quotations({doc_entry})",
                 "method": "GET"
             })
-            
+
             if sap_response and "error" not in sap_response:
-                return format_sap_quote_details(sap_response, include_lines, include_customer)
-                
+                # Formatter directement la réponse ici au lieu d'appeler une fonction non définie
+                quote_data = sap_response
+                if isinstance(sap_response, dict):
+                    if "value" in sap_response and isinstance(sap_response["value"], list):
+                        quote_data = sap_response["value"][0] if sap_response["value"] else None
+                    elif "quote" in sap_response:
+                        quote_data = sap_response["quote"]
+
+                if quote_data:
+                    formatted_response = {
+                        "success": True,
+                        "quote": {
+                            "doc_entry": quote_data.get("DocEntry"),
+                            "doc_num": quote_data.get("DocNum"),
+                            "doc_date": quote_data.get("DocDate"),
+                            "doc_due_date": quote_data.get("DocDueDate"),
+                            "doc_total": quote_data.get("DocTotal", 0),
+                            "card_code": quote_data.get("CardCode"),
+                            "card_name": quote_data.get("CardName"),
+                            "comments": quote_data.get("Comments", ""),
+                            "lines": []
+                        }
+                    }
+
+                    if include_lines and "DocumentLines" in quote_data:
+                        for line in quote_data["DocumentLines"]:
+                            formatted_response["quote"]["lines"].append({
+                                "line_num": line.get("LineNum"),
+                                "item_code": line.get("ItemCode"),
+                                "item_description": line.get("ItemDescription"),
+                                "quantity": line.get("Quantity", 0),
+                                "unit_price": line.get("UnitPrice", 0),
+                                "discount_percent": line.get("DiscountPercent", 0),
+                                "line_total": line.get("LineTotal", 0)
+                            })
+
+                    return formatted_response
+
         except Exception as e2:
             logger.error(f"Fallback échoué: {str(e2)}")
-        
+
         # Si tout échoue, retourner une erreur détaillée
         raise HTTPException(
-            status_code=500, 
+            status_code=500,
             detail=f"Erreur SAP: {str(e)}"
         )
 
@@ -354,20 +394,19 @@ async def get_salesforce_quote_details(
     """
     
     try:
-        from services.mcp_connector import MCPConnector
-        
-        connector = MCPConnector()
-        
+        from services.mcp_connector import get_mcp_connector
+
+        connector = get_mcp_connector()
+
         # Récupération de l'opportunité Salesforce complète
-        sf_request = {
-            "tool": "get_opportunity_details",
+        logger.info(f"Appel Salesforce MCP pour opportunité {opportunity_id}")
+
+        # Correction de la syntaxe - call_salesforce_mcp prend 2 paramètres
+        sf_response = await connector.call_salesforce_mcp("get_opportunity_details", {
             "opportunity_id": opportunity_id,
             "include_products": include_lines,
             "include_account": include_customer
-        }
-        
-        logger.info(f"Appel Salesforce MCP pour opportunité {opportunity_id}")
-        sf_response = await connector.call_salesforce_mcp(sf_request)
+        })
         
         if not sf_response or not sf_response.get("success", False):
             raise HTTPException(

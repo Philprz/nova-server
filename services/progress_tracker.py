@@ -142,6 +142,7 @@ class QuoteTask:
         self.user_interactions = []  # Historique des interactions
         self.validation_data = {}    # Données de validation
         self.alternatives = {}       # Alternatives disponibles
+        self.interaction_data = {}  # Stocker les données d'interaction
         self.context = {}           # Contexte du workflow pour persistence
         # Initialiser toutes les étapes
         self._initialize_steps()
