@@ -6331,6 +6331,12 @@ class DevisWorkflow:
                     } for option in product_info.get("options", [])]
                 })
             
+            # Stocker les données d'interaction dans la tâche pour récupération ultérieure
+            task = progress_tracker.get_task(self.task_id)
+            if task:
+                task.interaction_data = interaction_data
+                logger.info(f"📦 Données d'interaction stockées avec quantités")
+
             await websocket_manager.send_user_interaction_required(self.task_id, interaction_data)
             logger.info(f"✅ Interaction produit envoyée pour {len(products_needing_selection)} produits")
             

@@ -1,0 +1,44 @@
+[
+  {
+    "test": "API Key Format",
+    "status": "✅ PASS",
+    "timestamp": "19:38:49",
+    "message": "Clé API valide: sk-ant-api...g-7kx0BAAA",
+    "data": null
+  },
+  {
+    "test": "Claude API Connectivity",
+    "status": "✅ PASS",
+    "timestamp": "19:38:55",
+    "message": "Connexion réussie - Réponse: TEST OK...",
+    "data": null
+  },
+  {
+    "test": "Dependencies",
+    "status": "✅ PASS",
+    "timestamp": "19:38:56",
+    "message": "Tous les services sont disponibles",
+    "data": null
+  },
+  {
+    "test": "LLMExtractor Function",
+    "status": "❌ FAIL",
+    "timestamp": "19:38:56",
+    "message": "Exception: LLMExtractor.extract_quote_info() missing 1 required positional argument: 'prompt'",
+    "data": null
+  },
+  {
+    "test": "Workflow Basic",
+    "status": "✅ PASS",
+    "timestamp": "19:38:56",
+    "message": "Fallback fonctionne: {\n  \"action_type\": \"DEVIS\",\n  \"client\": \"3\",\n  \"products\": [\n    {\n      \"code\": \"imprimantes\",\n      \"quantity\": 3,\n      \"name\": \"Imprimantes\"\n    },\n    {\n      \"code\": \"imprimantes\",\n      \"quantity\": 3,\n      \"name\": \"Imprimantes\"\n    },\n    {\n      \"code\": \"imprimante\",\n      \"quantity\": 3,\n      \"name\": \"Imprimante\"\n    }\n  ],\n  \"extracted_method\": \"manual_robust\",\n  \"confidence\": 0.7\n}",
+    "data": null
+  },
+  {
+    "test": "Full Workflow",
+    "status": "❌ FAIL",
+    "timestamp": "19:39:47",
+    "message": "Workflow échoue: Erreur inconnue",
+    "data": null
+  }
+]
