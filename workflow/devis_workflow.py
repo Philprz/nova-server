@@ -6416,6 +6416,8 @@ class DevisWorkflow:
                         return await self._continue_workflow_after_client_selection(
                             selected_client_data, {"extracted_info": original_extracted_info}
                         )
+                    elif isinstance(extracted_info, dict) and extracted_info:
+                        return await self._process_quote_workflow(extracted_info)
 
                     else:
                         # Fallback minimal si aucun extracted_info complet
