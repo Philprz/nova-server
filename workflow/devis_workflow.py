@@ -120,7 +120,8 @@ class DevisWorkflow:
             asyncio.create_task(self._initialize_cache())
         except RuntimeError:
             logger.info("⏳ Initialisation du cache différée (pas d'event loop actif)")
-
+        # Initialiser WebSocket manager
+        self.websocket_manager = websocket_manager
         logger.info("✅ Workflow initialisé avec cache et validation séquentielle")
 
     async def _initialize_cache(self):
