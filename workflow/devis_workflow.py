@@ -6410,10 +6410,13 @@ class DevisWorkflow:
                     if isinstance(self.context.get("extracted_info"), dict) and self.context["extracted_info"]:
                         # CORRECTION: Continuer le workflow avec vérification doublons puis produits
                         return await self._continue_workflow_after_client_selection(
+                            selected_client_data, {"extracted_info": self.context["extracted_info"]}
+                        )
+                    elif isinstance(original_extracted_info, dict) and original_extracted_info:
+                        return await self._continue_workflow_after_client_selection(
                             selected_client_data, {"extracted_info": original_extracted_info}
                         )
-                    elif isinstance(extracted_info, dict) and extracted_info:
-                        return await self._process_quote_workflow(extracted_info)
+
                     else:
                         # Fallback minimal si aucun extracted_info complet
                         return await self._continue_workflow_after_client_selection(
