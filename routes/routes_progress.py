@@ -404,19 +404,20 @@ async def handle_client_selection_task(task_id: str, response_data: dict):
             # Rcupérer le code SAP si nécessaire
             if selected_client.get("sap_code"):
                 workflow.context["client_sap_code"] = selected_client.get("sap_code")
-            # CORRECTION: Récupérer le code SAP si le client sélectionné est un client Salesforce 
-            if selected_client.get("source_raw") == "salesforce" and not selected_client.get("sap_code"):
-                workflow.context["client_sap_code"] = selected_client.get("sap_code", "")
-                # Le client sélectionné est Salesforce, chercher le client SAP existant
-                logger.info(f"🔍 Recherche du client SAP correspondant à {selected_client_name}")
-                from utils.client_lister import find_client_everywhere
-                sap_search = await find_client_everywhere(selected_client_name)
-                sap_clients = sap_search.get("sap", {}).get("clients", [])
-                if sap_clients:
-                    # Prendre le premier client SAP trouvé
-                    sap_client = sap_clients[0]
-                    selected_client["sap_code"] = sap_client.get("CardCode", "")
-                    logger.info(f"✅ Code SAP trouvé: {selected_client['sap_code']}")
+                # CORRECTION CRITIQUE: Restaurer le contexte complet ET continuer le workflow avec l'étape check_duplicates
+                # Récupérer le contexte original de la tâche
+                if hasattr(task, 'context') and task.context:
+                    workflow.context.update(task.context)
+                    logger.info(f"✅ Contexte original restauré: {list(workflow.context.keys())}")
+                
+                # IMPORTANT: Marquer le client comme validé dans le contexte
+                workflow.context.update({
+                    "client_info": {"data": selected_client, "found": True, "status": "found"},
+                    "client_validated": True,
+                    "client_sap_code": selected_client.get("sap_code", "")
+                })
+                
+                logger.info(f"✅ Client info sauvegardé: {selected_client.get('name', selected_client.get('Name', 'Inconnu'))}")
             await workflow.continue_after_user_input(user_input, context)
 
         else:
