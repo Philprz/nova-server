@@ -9165,6 +9165,13 @@ class DevisWorkflow:
             logger.info(f"🔄 Tracking initialisé pour la tâche: {self.task_id}")
 
         return self.task_id
+    async def _notify_websocket(self, event_type: str, data: dict):
+        """Notification WebSocket"""
+        if self.task_id:
+            await self.websocket_manager.send_task_update(self.task_id, {
+                "event": event_type,
+                "data": data
+            })
 
 class EnhancedDevisWorkflow(DevisWorkflow):
     """Workflow enrichi avec recherche parallèle"""
