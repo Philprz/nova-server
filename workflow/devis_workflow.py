@@ -6120,7 +6120,17 @@ class DevisWorkflow:
                     )
                 else:
                     client_display_name = client_name or "Client sans nom"
-
+                # Récupérer original_extracted_info depuis le contexte ou interaction_data
+                original_extracted_info = context.get("workflow_context", {}).get("extracted_info", {})
+                if not original_extracted_info:
+                    original_extracted_info = context.get("original_context", {}).get("extracted_info", {})
+                if not original_extracted_info and hasattr(self, 'context'):
+                    original_extracted_info = self.context.get("extracted_info", {})
+                    
+                # Fallback si toujours pas trouvé
+                if not original_extracted_info:
+                    original_extracted_info = {}
+                    logger.warning("⚠️ original_extracted_info vide - utilisation fallback")
                 self.context["selected_client_display"] = client_display_name
                 logger.info(f"✅ Client sélectionné: {client_display_name}")
 
