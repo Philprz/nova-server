@@ -422,7 +422,78 @@ class DevisWorkflow:
                 
                 self.context["selected_client_display"] = client_display_name
                 logger.info(f"✅ Client sélectionné: {client_display_name}")
-
+                # CORRECTION CRITIQUE: Après sélection du client, CONTINUER le workflow avec l'étape check_duplicates
+                # Récupérer le contexte original avec extracted_info
+                workflow_ctx = context.get("workflow_context", {}) or {}
+                original_extracted_info = (workflow_ctx.get("extracted_info") or {}) if isinstance(workflow_ctx, dict) else {}
+                
+                if original_extracted_info:
+                    logger.info(f"📋 Contexte original récupéré - client: {original_extracted_info.get('client')}, produits: {len(original_extracted_info.get('products', []))}")
+                    
+                    # ÉTAPE CRITIQUE: Vérifier les doublons maintenant que le client est sélectionné
+                    logger.info("🔍 === DÉBUT VÉRIFICATION DOUBLONS APRÈS SÉLECTION CLIENT ===")
+                    duplicate_check = await self._check_duplicate_quotes(
+                        {"data": selected_client_data, "found": True, "name": client_display_name},
+                        original_extracted_info.get("products", [])
+                    )
+                    
+                    self.context["duplicate_check"] = duplicate_check
+                    
+                    # Si doublons trouvés ET que cela nécessite une décision utilisateur
+                    if duplicate_check.get("requires_user_decision"):
+                        logger.warning(f"⚠️ DOUBLONS DÉTECTÉS - Interaction utilisateur requise")
+                        
+                        duplicate_interaction_data = {
+                            "type": "duplicate_resolution",
+                            "interaction_type": "duplicate_resolution", 
+                            "client_name": client_display_name,
+                            "alert_message": duplicate_check.get("alert_message"),
+                            "recent_quotes": duplicate_check.get("recent_quotes", []),
+                            "draft_quotes": duplicate_check.get("draft_quotes", []),
+                            "similar_quotes": duplicate_check.get("similar_quotes", []),
+                            "extracted_info": original_extracted_info,
+                            "options": [
+                                {"value": "proceed", "label": "Créer un nouveau devis malgré les doublons"},
+                                {"value": "consolidate", "label": "Consolider avec un devis existant"},
+                                {"value": "review", "label": "Examiner les devis existants d'abord"},
+                                {"value": "cancel", "label": "Annuler la demande"}
+                            ],
+                            "input_type": "choice"
+                        }
+                        
+                        # Marquer la tâche en attente d'interaction
+                        if self.current_task:
+                            from services.progress_tracker import TaskStatus
+                            self.current_task.status = TaskStatus.PENDING
+                            self.current_task.require_user_validation(
+                                "duplicate_resolution",
+                                "duplicate_resolution",
+                                duplicate_interaction_data
+                            )
+                        
+                        # Envoyer via WebSocket
+                        try:
+                            from services.websocket_manager import websocket_manager
+                            await websocket_manager.send_user_interaction_required(
+                                self.task_id,
+                                duplicate_interaction_data
+                            )
+                            logger.info("✅ Alerte de doublon envoyée via WebSocket")
+                        except Exception as ws_error:
+                            logger.warning(f"⚠️ Erreur envoi WebSocket alerte doublon: {ws_error}")
+                        
+                        return {
+                            "success": True,
+                            "status": "user_interaction_required",
+                            "type": "duplicate_resolution",
+                            "message": duplicate_check.get("alert_message"),
+                            "task_id": self.task_id,
+                            "interaction_data": duplicate_interaction_data
+                        }
+                    
+                    # Sinon, si doublons détectés mais sans interaction requise, continuer avec warning
+                    if duplicate_check.get("duplicates_found"):
+                        logger.warning(f"⚠️ {len(duplicate_check.get('warnings', []))} doublons détectés - Continuation du workflow")
                 # Poursuite du workflow
                 # Récupérer les produits depuis le contexte ou depuis la tâche
                 workflow_ctx = context.get("workflow_context", {})
@@ -435,7 +506,7 @@ class DevisWorkflow:
                         original_context = client_validation.get("original_context", {})
                         original_products = original_context.get("extracted_info", {}).get("products", [])
                         logger.info(f"🔍 Produits récupérés depuis validation_data de la tâche: {len(original_products)} produit(s)")
-                if original_products:
+                """if original_products:
                     self._track_step_start(
                         "lookup_products",
                         f"📦 Recherche de {len(original_products)} produit(s)"
@@ -449,7 +520,7 @@ class DevisWorkflow:
                     return self._build_error_response(
                         "Workflow incomplet",
                         "Produits manquants pour continuer"
-                    )
+                    )"""
 
             elif action == "create_new":
                 client_name = user_input.get("client_name", context.get("original_client_name", ""))
@@ -6153,43 +6224,149 @@ class DevisWorkflow:
             ]
         }
     
-    async def handle_client_suggestions(self, choice: Dict, workflow_context: Dict) -> Dict:
-        """
-        🔧 GESTION COMPLÈTE DES SUGGESTIONS CLIENT
-        """
-        choice_type = choice.get("type")
-        
-        if choice_type == "use_suggestion":
-            # Client sélectionné depuis les suggestions
-            suggested_client = choice.get("client_data")
-            client_name = suggested_client.get("name") or suggested_client.get("Name")
-            
-            logger.info(f"✅ Client sélectionné: {client_name}")
-            
-            # 🔧 MISE À JOUR DU CONTEXTE ET CONTINUATION
-            self.context.update({
-                "client_info": {"data": suggested_client, "found": True},
-                "client_validated": True
-            })
-            
-            # Extraire les produits du contexte original
-            original_products = workflow_context.get("extracted_info", {}).get("products", [])
-            
-            # 🔧 CONTINUATION DIRECTE DU WORKFLOW
-            if original_products:
-                # Passer à l'étape suivante : récupération produits
-                return await self._get_products_info(original_products)
+    async def _handle_client_selection(self, user_input: Dict, context: Dict) -> Dict[str, Any]:
+        """🔧 Gère la sélection de client par l'utilisateur avec continuation workflow"""
+        try:
+            action = user_input.get("action")
+
+            if action == "select_existing":
+                # Initialisation des variables nécessaires
+                selected_client_data = user_input.get("selected_data")
+                client_name = context.get("original_client_name", "")
+
+                # Récupérer le code SAP depuis selected_data
+                if selected_client_data and isinstance(selected_client_data, dict) and selected_client_data.get("sap_code"):
+                    self.context["client_sap_code"] = selected_client_data["sap_code"]
+                    logger.info(f"✅ Code SAP récupéré depuis client sélectionné: {selected_client_data['sap_code']}")
+
+                # Récupérer aussi depuis selected_client si selected_data manque
+                if not selected_client_data:
+                    alt = user_input.get("selected_client")
+                    if alt and isinstance(alt, dict):
+                        selected_client_data = alt
+
+                # Préserver/compléter les données Salesforce si présentes
+                if selected_client_data and isinstance(selected_client_data, dict) and selected_client_data.get("sf_id"):
+                    sf_id = selected_client_data.get("sf_id")
+                    if sf_id and not selected_client_data.get("Id"):
+                        try:
+                            sf_query = (
+                                "SELECT Id, Name, AccountNumber, Phone, BillingStreet, "
+                                "BillingCity, BillingPostalCode, BillingCountry "
+                                f"FROM Account WHERE Id = '{sf_id}'"
+                            )
+                            sf_result = await self.mcp_connector.call_mcp(
+                                "salesforce_mcp", "salesforce_query", {"query": sf_query}
+                            )
+                            if sf_result.get("totalSize", 0) > 0:
+                                sf_data = sf_result["records"][0]
+                                if isinstance(sf_data, dict):
+                                    selected_client_data.update(sf_data)
+                                    logger.info(f"✅ Données Salesforce récupérées pour {sf_data.get('Name')}")
+                        except Exception as e:
+                            logger.warning(f"⚠️ Erreur récupération données SF: {str(e)}")
+
+                if selected_client_data and isinstance(selected_client_data, dict):
+                    # Mettre à jour avec le nom réel depuis les données
+                    client_name = (
+                        selected_client_data.get("Name")
+                        or selected_client_data.get("name")
+                        or selected_client_data.get("CardName")
+                        or client_name
+                    )
+                    try:
+                        await self.cache_manager.cache_client(client_name, selected_client_data)
+                    except Exception as e:
+                        logger.warning(f"⚠️ Cache client échoué: {e}")
+                else:
+                    logger.warning("⚠️ selected_data manquant - utilisation nom par défaut")
+
+                # Mise à jour du contexte (unique source de vérité)
+                self.context["client_info"] = {"data": selected_client_data, "found": bool(selected_client_data)}
+                self.context["client_validated"] = True  # (dédupliqué)
+
+                # Sauvegarder le contexte dans la tâche
+                self._save_context_to_task()
+
+                # Persistance complémentaire
+                self.context["validated_client"] = selected_client_data
+                self.context["selected_client"] = selected_client_data
+
+                # Sauvegarder dans la tâche si disponible
+                if getattr(self, "current_task", None):
+                    if not hasattr(self.current_task, "context") or not isinstance(self.current_task.context, dict):
+                        self.current_task.context = {}
+                    self.current_task.context["client_info"] = {"data": selected_client_data, "found": bool(selected_client_data)}
+                    logger.info("✅ Client info sauvegardé dans la tâche")
+
+                # Affichage : protéger si selected_client_data est None
+                if isinstance(selected_client_data, dict):
+                    client_display_name = (
+                        selected_client_data.get("Name")
+                        or selected_client_data.get("CardName")
+                        or client_name
+                        or "Client sans nom"
+                    )
+                else:
+                    client_display_name = client_name or "Client sans nom"
+
+                self.context["selected_client_display"] = client_display_name
+                logger.info(f"✅ Client sélectionné: {client_display_name}")
+
+                # Poursuite du workflow
+                workflow_ctx = context.get("workflow_context", {}) or {}
+                extracted_info = (workflow_ctx.get("extracted_info") or {}) if isinstance(workflow_ctx, dict) else {}
+
+                # Récupérer les produits depuis le contexte ou depuis la tâche
+                original_products = (extracted_info.get("products") or []) if isinstance(extracted_info, dict) else []
+
+                # Si pas de produits dans le contexte, essayer de les récupérer depuis la tâche
+                if not original_products and getattr(self, "current_task", None):
+                    validation_data = getattr(self.current_task, "validation_data", None)
+                    if isinstance(validation_data, dict):
+                        client_validation = validation_data.get("client_selection", {}) or {}
+                        original_context = client_validation.get("original_context", {}) or {}
+                        original_products = (original_context.get("extracted_info", {}) or {}).get("products", []) or []
+                        logger.info(f"🔍 Produits récupérés depuis validation_data de la tâche: {len(original_products)} produit(s)")
+
+                if original_products:
+                    self._track_step_start("lookup_products", f"📦 Recherche de {len(original_products)} produit(s)")
+                    await self._process_products_retrieval(original_products)
+
+                    # Préserver/Restaurer extracted_info complet quand disponible
+                    if isinstance(extracted_info, dict) and extracted_info:
+                        self.context["extracted_info"] = extracted_info
+                        logger.info(
+                            f"✅ extracted_info restauré: client={extracted_info.get('client')}, "
+                            f"produits={len(extracted_info.get('products', []))}"
+                        )
+
+                    # Reprendre le workflow principal avec le contexte complet (préférence V1)
+                    if isinstance(self.context.get("extracted_info"), dict) and self.context["extracted_info"]:
+                        return await self._process_quote_workflow(self.context["extracted_info"])
+                    elif isinstance(extracted_info, dict) and extracted_info:
+                        return await self._process_quote_workflow(extracted_info)
+                    else:
+                        # Fallback minimal si aucun extracted_info complet
+                        return await self._continue_workflow_after_client_selection(
+                            selected_client_data, {"extracted_info": {"products": original_products}}
+                        )
+
+                return self._build_error_response("Workflow incomplet", "Produits manquants pour continuer")
+
+            elif action == "create_new":
+                client_name = user_input.get("client_name", context.get("original_client_name", ""))
+                return await self._initiate_client_creation(client_name)
+
+            elif action == "cancel":
+                return {"status": "cancelled", "message": "Demande de devis annulée par l'utilisateur"}
+
             else:
-                # Demander les produits si manquants
-                return self._build_product_request_response(client_name)
-        
-        elif choice_type == "create_new":
-            # 🔧 DÉCLENCHER CRÉATION CLIENT PUIS CONTINUER
-            new_client_name = choice.get("client_name", "")
-            return await self._handle_new_client_creation(new_client_name, workflow_context)
-        
-        else:
-            return self._build_error_response("Choix non supporté", f"Type '{choice_type}' non reconnu")
+                return self._build_error_response("Action non reconnue", f"Action: {action}")
+
+        except Exception as e:
+            logger.exception(f"Erreur _handle_client_selection: {e}")
+            return self._build_error_response("Erreur sélection client", str(e))
 
     async def _handle_new_client_creation(self, client_name: str, workflow_context: Dict) -> Dict:
         """
@@ -6835,20 +7012,16 @@ class DevisWorkflow:
             # 0) Entrées extraites du prompt
             client_name = extracted_info.get("client", "")
             products = extracted_info.get("products", [])
-
             # IMPORTANT: Sauvegarder extracted_info dans le contexte pour que _process_client_validation puisse y accéder
             self.context["extracted_info"] = extracted_info
             logger.info(f"✅ Contexte initialisé avec extracted_info - client: {client_name}, produits: {len(products)}")
-
             # NOUVEAU : Vérifier si recherche parallèle a déjà eu lieu
             if not hasattr(self, '_parallel_search_done'):
                 parallel_search_result = await self._parallel_client_product_search(client_name, products)
                 self._parallel_search_done = True
-
                 # Si interactions requises, s'arrêter ici
                 if parallel_search_result.get("status") in ["user_interaction_required", "product_selection_required"]:
                     return parallel_search_result
-
                 # Si erreur, fallback vers séquentiel
                 if parallel_search_result.get("status") == "fallback_to_sequential":
                     logger.warning("⚠️ Fallback vers recherche séquentielle")
@@ -6856,13 +7029,10 @@ class DevisWorkflow:
                     # Recherche parallèle réussie, continuer directement à la génération
                     if parallel_search_result.get("status") not in ["error"]:
                         return parallel_search_result
-
             # Fallback séquentiel si parallèle a échoué
-
             # Étape 1 : recherche/validation du client
             self._track_step_start("search_client", f"👤 Recherche du client : {client_name}")
             client_result = await self._process_client_validation(client_name)
-
             # 🔒 Garde-fous
             if client_result is None:
                 logger.error("❌ _process_client_validation a retourné None")
@@ -6872,7 +7042,6 @@ class DevisWorkflow:
                     "message": "Erreur lors de la validation du client",
                     "error": "client_validation_failed"
                 }
-
             # ⏸️ Cas d'interaction utilisateur requise (sélection client)
             if client_result.get("status") in ["user_interaction_required", "client_selection_required"]:
                 # Récupérer des options client de manière robuste
@@ -6883,7 +7052,6 @@ class DevisWorkflow:
                     or interaction_data.get("clients")
                     or []
                 )
-
                 # Construire la validation_data ENRICHIE avec le contexte initial (client + produits)
                 validation_data = {
                     "options": client_options,
@@ -6900,20 +7068,17 @@ class DevisWorkflow:
                         }
                     }
                 }
-
                 # Marquer la tâche et enregistrer l'attente d'interaction
                 if self.current_task:
                     self.current_task.status = TaskStatus.PENDING
                     # 🔑 Un SEUL appel, avec le contexte complet
                     self.current_task.require_user_validation("client_selection", "client_selection", validation_data)
-
                 # Logs de debug utiles
                 if not client_options:
                     logger.error("❌ ERREUR: Pas de client_options dans validation_data")
                     logger.error(f"❌ Structure envoyée: {json.dumps(validation_data, indent=2, default=str)}")
                 else:
                     logger.info(f"✅ {len(client_options)} clients prêts pour sélection")
-
                 # Retour standardisé pour le front
                 return {
                     "success": True,
@@ -6923,18 +7088,99 @@ class DevisWorkflow:
                     "task_id": self.task_id,
                     "interaction_data": validation_data
                 }
-
             # 🔧 Statuts bloquants
             if client_result.get("status") in ["error", "cancelled"]:
                 logger.warning(f"❌ Workflow interrompu - Statut client : {client_result.get('status')}")
                 return client_result
-
             self._track_step_complete("search_client", f"✅ Client : {client_result.get('status')}")
-
+            # CORRECTION CRITIQUE: Vérification doublons IMMÉDIATEMENT après validation du client
+            self._track_step_start("check_duplicates", "🔍 Vérification des doublons...")
+            
+            # Utiliser le client du contexte si disponible (pour après sélection)
+            client_info_for_duplicates = client_result
+            if self.context.get("client_validated") and self.context.get("client_info"):
+                logger.info("🔄 Utilisation du client du contexte (post-sélection)")
+                client_info_for_duplicates = self.context["client_info"]
+            
+            duplicate_check = await self._check_duplicate_quotes(
+                client_info=client_info_for_duplicates,
+                products=products
+            )
+            
+            self.context["duplicate_check"] = duplicate_check
+            
+            # Si doublons trouvés ET nécessite une décision utilisateur
+            if duplicate_check.get("requires_user_decision"):
+                client_name_for_alert = (
+                    client_info_for_duplicates.get("data", {}).get("Name") or 
+                    client_info_for_duplicates.get("name") or 
+                    client_name
+                )
+                
+                self._track_step_progress("check_duplicates", 90, duplicate_check.get("alert_message", "Doublons détectés"))
+                
+                duplicate_interaction_data = {
+                    "type": "duplicate_resolution",
+                    "interaction_type": "duplicate_resolution",
+                    "client_name": client_name_for_alert,
+                    "alert_message": duplicate_check.get("alert_message"),
+                    "recent_quotes": duplicate_check.get("recent_quotes", []),
+                    "draft_quotes": duplicate_check.get("draft_quotes", []),
+                    "similar_quotes": duplicate_check.get("similar_quotes", []),
+                    "extracted_info": extracted_info,
+                    "options": [
+                        {"value": "proceed", "label": "Créer un nouveau devis malgré les doublons"},
+                        {"value": "consolidate", "label": "Consolider avec un devis existant"},
+                        {"value": "review", "label": "Examiner les devis existants d'abord"},
+                        {"value": "cancel", "label": "Annuler la demande"}
+                    ],
+                    "input_type": "choice"
+                }
+                
+                # Marquer la tâche en attente d'interaction
+                if self.current_task:
+                    from services.progress_tracker import TaskStatus
+                    self.current_task.status = TaskStatus.PENDING
+                    self.current_task.require_user_validation(
+                        "duplicate_resolution",
+                        "duplicate_resolution",
+                        duplicate_interaction_data
+                    )
+                
+                # Envoyer via WebSocket
+                try:
+                    from services.websocket_manager import websocket_manager
+                    await websocket_manager.send_user_interaction_required(
+                        self.task_id,
+                        duplicate_interaction_data
+                    )
+                    logger.info("✅ Alerte de doublon envoyée via WebSocket")
+                except Exception as ws_error:
+                    logger.warning(f"⚠️ Erreur envoi WebSocket alerte doublon: {ws_error}")
+                
+                return {
+                    "success": True,
+                    "status": "user_interaction_required",
+                    "type": "duplicate_resolution",
+                    "message": duplicate_check.get("alert_message"),
+                    "task_id": self.task_id,
+                    "interaction_data": duplicate_interaction_data
+                }
+            
+            # Si doublons détectés mais sans interaction requise, continuer avec warning
+            if duplicate_check.get("duplicates_found"):
+                logger.warning(f"⚠️ {len(duplicate_check.get('warnings', []))} doublons détectés - Continuation du workflow")
+            else:
+                logger.info("✅ Aucun doublon détecté")
+            
+            self._track_step_complete("check_duplicates", "✅ Vérification doublons terminée")            
             # Étape 2 : récupération des produits
             self._track_step_start("lookup_products", f"📦 Recherche de {len(products)} produit(s)")
-            products_result = await self._process_products_retrieval(products)
-            # VÉRIFICATION CRITIQUE : Arrêter le workflow si sélection de produits requise  
+            products_result = await self._process_products_retrieval(products) or {}
+            if not isinstance(products_result, dict):
+                logger.error("❌ _process_products_retrieval a retourné un type invalide")
+                products_result = {"status": "error", "products": []}
+            # VÉRIFICATION CRITIQUE : Arrêter le workflow si sélection de produits requise
             if products_result.get("status") == "product_selection_required":
                 # Envoyer l'interaction WebSocket avant de s'arrêter
                 try:
@@ -6946,18 +7192,19 @@ class DevisWorkflow:
                 return {
                     "success": False,
                     "status": "user_interaction_required",
-                    "interaction_type": "product_selection", 
+                    "interaction_type": "product_selection",
                     "message": products_result.get("message", "Sélection de produits requise"),
                     "products_info": products_result.get("products", []),
                     "task_id": self.task_id
                 }
-                
+
             # Vérification des produits valides AVANT création du devis
-            valid_products = [p for p in products_result.get("products", []) if not p.get("error") and not p.get("requires_manual_search")]
+            raw_products = products_result.get("products", []) if isinstance(products_result.get("products", []), list) else []
+            valid_products = [p for p in raw_products if not p.get("error") and not p.get("requires_manual_search")]
             if not valid_products:
                 error_msg = "Aucun produit valide trouvé dans le catalogue SAP"
-                if products_result.get("products"):
-                    errors = [p.get("error", "Produit non trouvé") for p in products_result["products"] if p.get("error")]
+                if raw_products:
+                    errors = [p.get("error", "Produit non trouvé") for p in raw_products if p.get("error")]
                     if errors:
                         error_msg = f"Erreurs produits: {'; '.join(set(errors))}"
                 logger.error(f"❌ {error_msg}")
@@ -6965,36 +7212,30 @@ class DevisWorkflow:
                 return {"success": False, "error": error_msg, "status": "product_error"}
             found = len(valid_products)  # Utiliser les produits réellement valides
             self._track_step_complete("lookup_products", f"✅ {found} produit(s) trouvé(s)")
-
             # Étape 3 : préparation et prévisualisation du devis
             self._track_step_start("prepare_quote", "📋 Préparation du devis")
             quote_preview = await self._prepare_quote_preview(client_result, products_result)
             self._track_step_complete("prepare_quote", "✅ Devis préparé")
-
+            
             # Demander validation utilisateur avant création
             if not quote_preview.get("error"):
                 validation_data = {
                     "type": "quote_validation",
                     "interaction_type": "quote_validation",
                     "quote_preview": quote_preview,
-                    "client_info": client_result.get("data", {}),
-                    "products": products_result.get("products", []),
+                    "client_info": client_info,
+                    "products": valid_products,  # ✅ uniquement valides
                     "message": "Veuillez valider le devis avant création",
                     "total_amount": quote_preview.get("total_amount", 0),
                     "currency": quote_preview.get("currency", "EUR")
                 }
-
-                # Marquer la tâche en attente d'interaction
                 if self.current_task:
                     self.current_task.status = TaskStatus.PENDING
                     self.current_task.require_user_validation("quote_validation", "quote_validation", validation_data)
-
-                # Envoyer via WebSocket
                 try:
                     await websocket_manager.send_user_interaction_required(self.task_id, validation_data)
                 except Exception as ws_error:
                     logger.warning(f"⚠️ Erreur envoi WebSocket (non bloquant): {ws_error}")
-
                 return {
                     "success": True,
                     "status": "user_interaction_required",
@@ -7003,47 +7244,40 @@ class DevisWorkflow:
                     "task_id": self.task_id,
                     "interaction_data": validation_data
                 }
-            
+
             self._track_step_start("create_quote", "🧾 Création du devis")
             quote_result = await self._create_quote_document(client_result, products_result)
             if not isinstance(quote_result, dict):
                 logger.error("❌ _create_quote_document a retourné un résultat invalide")
                 quote_result = {"status": "error", "quote_data": {}}
-
             # Extraction sécurisée de quote_data
             quote_data = quote_result.get("quote_data") or {}
             returned_products = quote_data.get("products") or valid_products  # Utiliser produits valides uniquement
             if not returned_products:
                 logger.warning("❌ Aucun produit valide pour le devis")
                 return {"success": False, "error": "Aucun produit valide trouvé"}
-
             # Étape 4 : synchronisation dans les systèmes externes (SAP / Salesforce)
             self._track_step_start("sync_external_systems", "💾 Synchronisation SAP & Salesforce")
             sync_results = {}
             for system in ("sap", "salesforce"):
                 key = f"sync_to_{system}"
                 self._track_step_start(key, f"{'💾' if system=='sap' else '☁️'} Enregistrement dans {system.upper()}")
-                
                 # Ajouter simulation temporelle même en mode draft
-                if self.draft_mode:
+                if getattr(self, "draft_mode", False):
                     logger.info(f"🎯 MODE DRAFT - Simulation synchronisation {system.upper()}")
                     await asyncio.sleep(0.5)  # Simulation réaliste
                     result = {"status": "success", "simulated": True, "message": f"Simulation {system} réussie"}
                 else:
                     result = await self._sync_quote_to_systems(quote_result, target=system)
-                
                 # Vérifier le résultat avant de marquer comme terminé
                 if result.get("status") == "success":
                     self._track_step_complete(key, f"✅ {system.upper()} mis à jour")
                 else:
                     error_msg = result.get("message", f"Erreur {system}")
                     self._track_step_fail(key, f"❌ Erreur {system.upper()}", error_msg)
-                
                 sync_results[system] = result
-
             # Total
             total_amount = sum(p.get("total_price", 0) for p in returned_products)
-
             # Résultat final
             return {
                 "success": True,
@@ -7051,7 +7285,7 @@ class DevisWorkflow:
                 "type": "quote_generated",
                 "message": "✅ Devis généré avec succès !",
                 "task_id": self.task_id,
-                "workflow_steps": self.workflow_steps,
+                "workflow_steps": getattr(self, "workflow_steps", []),
                 "quote_id": quote_data.get("quote_id", ""),
                 "client": quote_data.get("client", client_result.get("client_data", {})),
                 "products": returned_products,
@@ -7062,7 +7296,6 @@ class DevisWorkflow:
                 "products_result": products_result,
                 "sync_results": sync_results
             }
-
         except HTTPException:
             # Réélever les erreurs HTTP
             raise
