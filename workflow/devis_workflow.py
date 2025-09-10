@@ -7069,7 +7069,6 @@ class DevisWorkflow:
                 }
                 # Marquer la tâche et enregistrer l'attente d'interaction
                 if self.current_task:
-                    self.current_task.status = TaskStatus.PENDING
                     # 🔑 Un SEUL appel, avec le contexte complet
                     self.current_task.require_user_validation("client_selection", "client_selection", validation_data)
                 # Logs de debug utiles
