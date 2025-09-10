@@ -6319,7 +6319,10 @@ class DevisWorkflow:
 
                 # Récupérer les produits depuis le contexte ou depuis la tâche
                 original_products = (extracted_info.get("products") or []) if isinstance(extracted_info, dict) else []
-
+                # CORRECTION: Récupérer les produits depuis extracted_info du contexte
+                if not original_products and hasattr(self, 'context') and self.context.get('extracted_info'):
+                    original_products = self.context.get('extracted_info', {}).get('products', [])
+                    logger.info(f"🔄 Produits récupérés depuis contexte: {len(original_products)} produit(s)")
                 # Si pas de produits dans le contexte, essayer de les récupérer depuis la tâche
                 if not original_products and getattr(self, "current_task", None):
                     validation_data = getattr(self.current_task, "validation_data", None)
@@ -6329,7 +6332,69 @@ class DevisWorkflow:
                         original_products = (original_context.get("extracted_info", {}) or {}).get("products", []) or []
                         logger.info(f"🔍 Produits récupérés depuis validation_data de la tâche: {len(original_products)} produit(s)")
 
+                # CORRECTION: Vérifier doublons APRÈS sélection client mais AVANT produits
+                logger.info("🔍 === DÉBUT VÉRIFICATION DOUBLONS APRÈS SÉLECTION CLIENT ===")
+                duplicate_check = await self._check_duplicate_quotes(
+                    {"data": selected_client_data, "found": True, "name": client_display_name},
+                    original_products
+                )
+                self.context["duplicate_check"] = duplicate_check
+
+                # Si doublons trouvés ET nécessite une décision utilisateur
+                if duplicate_check.get("requires_user_decision"):
+                    logger.warning(f"⚠️ DOUBLONS DÉTECTÉS - Interaction utilisateur requise")
+                    
+                    duplicate_interaction_data = {
+                        "type": "duplicate_resolution",
+                        "interaction_type": "duplicate_resolution",
+                        "client_name": client_display_name,
+                        "alert_message": duplicate_check.get("alert_message"),
+                        "recent_quotes": duplicate_check.get("recent_quotes", []),
+                        "draft_quotes": duplicate_check.get("draft_quotes", []),
+                        "similar_quotes": duplicate_check.get("similar_quotes", []),
+                        "extracted_info": original_extracted_info,
+                        "options": [
+                            {"value": "proceed", "label": "Créer un nouveau devis malgré les doublons"},
+                            {"value": "consolidate", "label": "Consolider avec un devis existant"},
+                            {"value": "review", "label": "Examiner les devis existants d'abord"},
+                            {"value": "cancel", "label": "Annuler la demande"}
+                        ],
+                        "input_type": "choice"
+                    }
+                    
+                    # Marquer la tâche en attente d'interaction
+                    if self.current_task:
+                        from services.progress_tracker import TaskStatus
+                        self.current_task.status = TaskStatus.PENDING
+                        self.current_task.require_user_validation(
+                            "duplicate_resolution",
+                            "duplicate_resolution", 
+                            duplicate_interaction_data
+                        )
+                    
+                    # Envoyer via WebSocket
+                    try:
+                        from services.websocket_manager import websocket_manager
+                        await websocket_manager.send_user_interaction_required(
+                            self.task_id,
+                            duplicate_interaction_data
+                        )
+                        logger.info("✅ Alerte de doublon envoyée via WebSocket")
+                        
+                        return {
+                            "success": True,
+                            "status": "user_interaction_required", 
+                            "type": "duplicate_resolution",
+                            "message": duplicate_check.get("alert_message"),
+                            "task_id": self.task_id,
+                            "interaction_data": duplicate_interaction_data
+                        }
+                    except Exception as ws_error:
+                        logger.warning(f"⚠️ Erreur envoi WebSocket alerte doublon: {ws_error}")
+
+                # Si pas de doublons ou utilisateur veut continuer
                 if original_products:
+                    
                     self._track_step_start("lookup_products", f"📦 Recherche de {len(original_products)} produit(s)")
                     await self._process_products_retrieval(original_products)
 
@@ -6343,7 +6408,10 @@ class DevisWorkflow:
 
                     # Reprendre le workflow principal avec le contexte complet (préférence V1)
                     if isinstance(self.context.get("extracted_info"), dict) and self.context["extracted_info"]:
-                        return await self._process_quote_workflow(self.context["extracted_info"])
+                        # CORRECTION: Continuer le workflow avec vérification doublons puis produits
+                        return await self._continue_workflow_after_client_selection(
+                            selected_client_data, {"extracted_info": original_extracted_info}
+                        )
                     elif isinstance(extracted_info, dict) and extracted_info:
                         return await self._process_quote_workflow(extracted_info)
                     else:
