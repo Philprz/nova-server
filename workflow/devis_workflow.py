@@ -464,7 +464,6 @@ class DevisWorkflow:
                         # Marquer la tâche en attente d'interaction
                         if self.current_task:
                             from services.progress_tracker import TaskStatus
-                            self.current_task.status = TaskStatus.PENDING
                             self.current_task.require_user_validation(
                                 "duplicate_resolution",
                                 "duplicate_resolution",
