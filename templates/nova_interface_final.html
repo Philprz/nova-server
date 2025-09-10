@@ -2353,6 +2353,11 @@
                         addMessage?.('Sélection de produits traitée', 'system');
                     }
                 }
+                // Gestion des messages de recherche parallèle
+                else if (data.type === 'parallel_search_started') {
+                    addMessage(`🚀 Recherche parallèle en cours : client "${data.client_query}" et ${data.product_count} produit(s)...`, 'system');
+                    showProgress();
+                }
                 // Type de message non géré
                 else {
                     console.warn("ℹ️ Type de message non géré:", data.type, data);

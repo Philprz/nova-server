@@ -342,6 +342,9 @@ class DevisWorkflow:
             elif interaction_type == "quantity_adjustment":
                 return await self._handle_quantity_adjustment(user_input, context)
 
+            elif interaction_type == "duplicate_resolution":
+                return await self._handle_duplicate_resolution(user_input, context)
+
             else:
                 return self._build_error_response("Type d'interaction non reconnu", f"Type: {interaction_type}")
 
@@ -1076,6 +1079,56 @@ class DevisWorkflow:
             logger.exception(f"Erreur création devis SAP: {str(e)}")
             return {"success": False, "error": str(e)}
 
+    async def _handle_duplicate_resolution(self, user_input: Dict, context: Dict) -> Dict[str, Any]:
+        """Gère la résolution des doublons de devis"""
+
+        action = user_input.get("action")
+        client_name = context.get("extracted_info", {}).get("client", "")
+
+        logger.info(f"Résolution doublons: action={action}, client={client_name}")
+
+        if action == "proceed":
+            # Forcer la création malgré les doublons
+            logger.info("✅ Utilisateur décide de créer un nouveau devis malgré les doublons")
+            self.context["skip_duplicate_check"] = True
+            extracted_info = context.get("extracted_info", {})
+            return await self._process_quote_workflow(extracted_info)
+
+        elif action == "consolidate":
+            # Permettre de choisir un devis à consolider
+            selected_quote_id = user_input.get("selected_quote_id")
+            if selected_quote_id:
+                # TODO: Implémenter la logique de consolidation
+                return {
+                    "status": "consolidation_in_progress",
+                    "message": f"Consolidation avec devis {selected_quote_id} en cours...",
+                    "selected_quote": selected_quote_id
+                }
+            else:
+                return {
+                    "status": "user_interaction_required",
+                    "interaction_type": "quote_selection",
+                    "message": "Sélectionnez le devis à consolider",
+                    "available_quotes": context.get("recent_quotes", []) + context.get("draft_quotes", [])
+                }
+
+        elif action == "review":
+            # Rediriger vers l'interface de gestion des devis
+            return {
+                "status": "redirect_to_management",
+                "message": "Redirection vers la gestion des devis existants",
+                "redirect_url": "/quote-management",
+                "client_filter": client_name
+            }
+
+        elif action == "cancel":
+            return {
+                "status": "cancelled",
+                "message": "Demande de devis annulée par l'utilisateur"
+            }
+
+        return {"status": "error", "message": "Action non reconnue"}
+
     async def _create_salesforce_opportunity(self, client_data: Dict, products_data: List[Dict], sap_quote: Dict) -> Dict[str, Any]:
         """Crée l'opportunité dans Salesforce"""
         try:
@@ -1447,12 +1500,74 @@ class DevisWorkflow:
             self._track_step_start("check_duplicates", "Vérification des doublons...")
 
             duplicate_check = await self._check_duplicate_quotes(
-                client_info, 
+                client_info,
                 extracted_info.get("products", [])
             )
             self.context["duplicate_check"] = duplicate_check
+            # Extraire le nom du client pour l'utiliser dans les messages
+            client_name = client_info.get("data", {}).get("Name", client_info.get("name", "Client"))
+
+            # Gérer l'affichage des alertes de doublon
+            if duplicate_check.get("requires_user_decision"):
+                self._track_step_progress(
+                    "check_duplicates",
+                    90,
+                    duplicate_check.get("alert_message", "Doublons détectés")
+                )
+
+                # Préparer les données pour l'interaction utilisateur
+                duplicate_interaction_data = {
+                    "type": "duplicate_resolution",
+                    "interaction_type": "duplicate_resolution",
+                    "client_name": client_name,
+                    "alert_message": duplicate_check.get("alert_message"),
+                    "recent_quotes": duplicate_check.get("recent_quotes", []),
+                    "draft_quotes": duplicate_check.get("draft_quotes", []),
+                    "similar_quotes": duplicate_check.get("similar_quotes", []),
+                    "extracted_info": extracted_info,
+                    "options": [
+                        {"value": "proceed", "label": "Créer un nouveau devis malgré les doublons"},
+                        {"value": "consolidate", "label": "Consolider avec un devis existant"},
+                        {"value": "review", "label": "Examiner les devis existants d'abord"},
+                        {"value": "cancel", "label": "Annuler la demande"}
+                    ],
+                    "input_type": "choice"
+                }
+
+                # Marquer la tâche en attente d'interaction
+                if self.current_task:
+                    self.current_task.status = TaskStatus.PENDING
+                    self.current_task.require_user_validation(
+                        "duplicate_resolution",
+                        "duplicate_resolution",
+                        duplicate_interaction_data
+                    )
+
+                # Envoyer via WebSocket
+                try:
+                    await websocket_manager.send_user_interaction_required(
+                        self.task_id,
+                        duplicate_interaction_data
+                    )
+                except Exception as ws_error:
+                    logger.warning(f"⚠️ Erreur envoi WebSocket: {ws_error}")
+
+                return {
+                    "success": True,
+                    "status": "user_interaction_required",
+                    "type": "duplicate_resolution",
+                    "message": duplicate_check.get("alert_message"),
+                    "task_id": self.task_id,
+                    "interaction_data": duplicate_interaction_data
+                }
 
             if duplicate_check.get("duplicates_found"):
+                self._track_step_progress("check_duplicates", 80, f"⚠️ {len(duplicate_check.get('warnings', []))} alerte(s) détectée(s)")
+
+                logger.warning(f"⚠️ {len(duplicate_check.get('warnings', []))} doublons détectés - Récupération des informations produits quand même")
+
+                # 🔧 MODIFICATION : Récupérer les informations produits MÊME avec des doublons
+                self._track_step_start("get_products_info", "Récupération des informations produits...")
                 self._track_step_progress("check_duplicates", 80, f"⚠️ {len(duplicate_check.get('warnings', []))} alerte(s) détectée(s)")
                 
                 logger.warning(f"⚠️ {len(duplicate_check.get('warnings', []))} doublons détectés - Récupération des informations produits quand même")
@@ -3668,18 +3783,36 @@ class DevisWorkflow:
             if total_findings > 0:
                 duplicate_check["duplicates_found"] = True
                 duplicate_check["action_required"] = True
-                
+
                 # Messages d'alerte
                 if recent_quotes:
                     duplicate_check["warnings"].append(f"⚠️ {len(recent_quotes)} devis récent(s) trouvé(s) pour {client_name}")
-                    
+
                 if draft_quotes:
                     duplicate_check["warnings"].append(f"📝 {len(draft_quotes)} devis en brouillon pour {client_name}")
                     duplicate_check["suggestions"].append("💡 Considérez consolider avec les brouillons existants")
-                    
+
                 if similar_quotes:
                     duplicate_check["warnings"].append(f"🔄 {len(similar_quotes)} devis avec produits similaires")
                     duplicate_check["suggestions"].append("💡 Vérifiez s'il s'agit d'une mise à jour ou d'un nouveau besoin")
+
+                # Créer le message d'alerte personnalisé et demander décision utilisateur
+                if duplicate_check.get("duplicates_found"):
+                    alert_message = f"⚠️ ATTENTION: Devis existants détectés pour {client_name}"
+
+                    if recent_quotes:
+                        alert_message += f"\n📋 {len(recent_quotes)} devis récent(s) d'imprimantes"
+                    if draft_quotes:
+                        alert_message += f"\n✏️ {len(draft_quotes)} devis en brouillon"
+                    if similar_quotes:
+                        alert_message += f"\n🔄 {len(similar_quotes)} devis avec produits similaires"
+
+                    duplicate_check["alert_message"] = alert_message
+                    duplicate_check["requires_user_decision"] = True
+
+                    logger.warning(f"⚠️ {len(duplicate_check.get('warnings', []))} doublons détectés")
+
+                    return duplicate_check
             
             else:
                 duplicate_check["suggestions"].append("✅ Aucun doublon détecté - Création sécurisée")
@@ -3745,14 +3878,58 @@ class DevisWorkflow:
             # Pour l'instant, implémentation simplifiée
             # TODO: Logique avancée de comparaison produits
             
-            # Extraire les codes produits demandés
-            requested_codes = set(product.get("code", "").upper() for product in requested_products)
-            
-            logger.info(f"Recherche produits similaires pour {client_name}: {requested_codes}")
-            
-            # Retourner vide pour l'instant - à implémenter selon les besoins
-            return []
-            
+            # Extraire les codes et noms produits demandés pour comparaison
+            requested_codes = set()
+            requested_names = set()
+
+            for product in requested_products:
+                if product.get("code"):
+                    requested_codes.add(product.get("code", "").upper())
+                if product.get("name"):
+                    # Rechercher par mots-clés dans le nom (ex: "imprimante")
+                    name_keywords = product.get("name", "").lower().split()
+                    requested_names.update(name_keywords)
+
+            logger.info(f"Recherche produits similaires pour {client_name}: codes={requested_codes}, mots-clés={requested_names}")
+
+            # Rechercher dans les devis récents du client (ex: 7 jours)
+            recent_quotes = await self._get_recent_sap_quotes(client_name, hours=168)
+            similar_quotes = []
+
+            for quote in recent_quotes:
+                quote_has_similar = False
+                matching_products = []
+                # Analyser les lignes du devis pour détecter les produits similaires
+                for line in quote.get("DocumentLines", []):
+                    item_code = line.get("ItemCode", "").upper()
+                    item_name = line.get("ItemDescription", "").lower()
+
+                    # Vérification par code exact
+                    if item_code and item_code in requested_codes:
+                        quote_has_similar = True
+                        matching_products.append(line.get("ItemDescription"))
+                        # On continue pour collecter d'éventuels autres produits correspondants
+                        continue
+
+                    # Vérification par mots-clés dans le nom
+                    for keyword in requested_names:
+                        if len(keyword) > 3 and keyword in item_name:  # Éviter les mots trop courts
+                            quote_has_similar = True
+                            matching_products.append(line.get("ItemDescription"))
+                            break
+
+                if quote_has_similar:
+                    similar_quotes.append({
+                        "doc_entry": quote.get("DocEntry"),
+                        "doc_num": quote.get("DocNum"),
+                        "doc_date": quote.get("DocDate"),
+                        "total": quote.get("DocTotal"),
+                        "status": quote.get("DocumentStatus"),
+                        "matching_products": matching_products
+                    })
+
+            return similar_quotes
+
         except Exception as e:
             logger.warning(f"Erreur recherche produits similaires: {str(e)}")
             return []
@@ -6373,6 +6550,132 @@ class DevisWorkflow:
             logger.exception(f"Erreur validation produits: {str(e)}")
             return self._build_error_response("Erreur validation produits", str(e))
 
+    async def _parallel_client_product_search(self, client_name: str, products: List[Dict]) -> Dict[str, Any]:
+        """Recherche parallèle client et produits pour optimiser les performances"""
+        try:
+            logger.info(f"🚀 Recherche parallèle - Client: {client_name}, Produits: {len(products)}")
+
+            # Notification début recherche parallèle
+            await self._notify_websocket("parallel_search_started", {
+                "client_query": client_name,
+                "product_count": len(products),
+                "message": "Recherche parallèle client et produits..."
+            })
+
+            # Créer les tâches parallèles
+            client_task = asyncio.create_task(
+                self._search_client_parallel(client_name)
+            )
+            products_task = asyncio.create_task(
+                self._search_products_parallel(products)
+            )
+
+            # Exécution parallèle avec gestion d'exceptions
+            client_result, products_result = await asyncio.gather(
+                client_task, products_task, return_exceptions=True
+            )
+
+            # Gestion des erreurs de tâches
+            if isinstance(client_result, Exception):
+                logger.error(f"❌ Erreur recherche client parallèle: {client_result}")
+                client_result = {"found": False, "error": str(client_result)}
+
+            if isinstance(products_result, Exception):
+                logger.error(f"❌ Erreur recherche produits parallèle: {products_result}")
+                products_result = {"status": "error", "products": [], "error": str(products_result)}
+
+            # Traitement des résultats
+            return await self._process_parallel_results(client_result, products_result)
+
+        except Exception as e:
+            logger.exception(f"❌ Erreur recherche parallèle: {e}")
+            # Fallback vers méthode séquentielle
+            return {"status": "fallback_to_sequential", "error": str(e)}
+
+    async def _search_client_parallel(self, client_name: str) -> Dict[str, Any]:
+        """Recherche client optimisée pour parallélisation"""
+        try:
+            # Utiliser la logique existante sans les track_step qui sont séquentiels
+            return await self._process_client_validation(client_name)
+        except Exception as e:
+            logger.error(f"❌ Erreur recherche client: {e}")
+            return {"found": False, "error": str(e)}
+
+    async def _search_products_parallel(self, products: List[Dict]) -> Dict[str, Any]:
+        """Recherche produits optimisée pour parallélisation"""
+        try:
+            # Utiliser la logique existante sans les track_step
+            return await self._process_products_retrieval(products)
+        except Exception as e:
+            logger.error(f"❌ Erreur recherche produits: {e}")
+            return {"status": "error", "products": [], "error": str(e)}
+
+    async def _process_parallel_results(self, client_result: Dict, products_result: Dict) -> Dict[str, Any]:
+        """Traite les résultats de la recherche parallèle"""
+        try:
+            # Vérifier si interactions utilisateur requises
+            interactions_needed = []
+
+            # Client nécessite interaction
+            if client_result.get("status") == "user_interaction_required":
+                interactions_needed.append({
+                    "type": "client_selection",
+                    "data": client_result
+                })
+
+            # Produits nécessitent interaction
+            if products_result.get("status") == "product_selection_required":
+                interactions_needed.append({
+                    "type": "product_selection",
+                    "data": products_result
+                })
+
+            # Si interactions requises, prioriser client puis produits
+            if interactions_needed:
+                # Retourner la première interaction (client prioritaire)
+                first_interaction = interactions_needed[0]
+
+                # Stocker les autres interactions pour plus tard
+                if len(interactions_needed) > 1:
+                    self.context["pending_interactions"] = interactions_needed[1:]
+
+                return first_interaction["data"]
+
+            # Si tout est validé, continuer vers génération
+            if (client_result.get("found") and
+                products_result.get("status") == "success"):
+
+                # Mettre à jour le contexte
+                self.context["client_info"] = client_result
+                self.context["products_info"] = products_result.get("products", [])
+
+                logger.info("✅ Recherche parallèle réussie - Passage à la génération")
+                return await self._continue_quote_generation({
+                    "client": client_result,
+                    "products": products_result.get("products", [])
+                })
+
+            # Cas d'erreur mixte
+            errors = []
+            if not client_result.get("found"):
+                errors.append(f"Client non trouvé: {client_result.get('error', 'N/A')}")
+            if products_result.get("status") != "success":
+                errors.append(f"Produits non trouvés: {products_result.get('error', 'N/A')}")
+
+            return {
+                "status": "error",
+                "message": "Erreurs lors de la recherche parallèle",
+                "errors": errors
+            }
+
+        except Exception as e:
+            logger.exception(f"❌ Erreur traitement résultats parallèles: {e}")
+            return {
+                "status": "error",
+                "message": "Erreur traitement résultats parallèles",
+                "error": str(e)
+            }
+
     async def _continue_product_resolution(self, validated_products: List[Dict], remaining_products: List[Dict]) -> Dict[str, Any]:
         """Continue la résolution des produits restants"""
         try:
@@ -6536,6 +6839,25 @@ class DevisWorkflow:
             # IMPORTANT: Sauvegarder extracted_info dans le contexte pour que _process_client_validation puisse y accéder
             self.context["extracted_info"] = extracted_info
             logger.info(f"✅ Contexte initialisé avec extracted_info - client: {client_name}, produits: {len(products)}")
+
+            # NOUVEAU : Vérifier si recherche parallèle a déjà eu lieu
+            if not hasattr(self, '_parallel_search_done'):
+                parallel_search_result = await self._parallel_client_product_search(client_name, products)
+                self._parallel_search_done = True
+
+                # Si interactions requises, s'arrêter ici
+                if parallel_search_result.get("status") in ["user_interaction_required", "product_selection_required"]:
+                    return parallel_search_result
+
+                # Si erreur, fallback vers séquentiel
+                if parallel_search_result.get("status") == "fallback_to_sequential":
+                    logger.warning("⚠️ Fallback vers recherche séquentielle")
+                else:
+                    # Recherche parallèle réussie, continuer directement à la génération
+                    if parallel_search_result.get("status") not in ["error"]:
+                        return parallel_search_result
+
+            # Fallback séquentiel si parallèle a échoué
 
             # Étape 1 : recherche/validation du client
             self._track_step_start("search_client", f"👤 Recherche du client : {client_name}")
