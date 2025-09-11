@@ -1591,7 +1591,7 @@
                         clearInterval(progressInterval);
                         progressInterval = null;
                         hideProgress();
-                        handleTaskComplete(data);
+                        displayQuoteResult(data);
                         console.log("🛑 Polling arrêté - tâche terminée:", data.status);
                         return;
                     } else if (data.status === 'failed' || data.status === 'cancelled') {
@@ -2296,7 +2296,7 @@
                     hideProgress?.();
                     try {
                         const result = (data && (data.result ?? data.data)) || null;
-                        if (result) handleTaskComplete?.(result);
+                        if (result) displayQuoteResult(result);
                     } catch (e) {
                         console.error("❌ displayQuoteResult a échoué:", e);
                     }
@@ -2312,7 +2312,8 @@
                 else if (data.type === 'interaction_required' || data.type === 'user_interaction_required') {
                     if (data.interaction_data) {
                         if (data.interaction_data.interaction_type === 'client_selection') {
-                            hideProgress?.();
+                            hideProgress();
+                            handleUserInteraction(data.interaction_data);
                             const opts = data.interaction_data.client_options || data.interaction_data.options || data.interaction_data.clients || [];
                             const name = data.interaction_data.original_client_name || data.interaction_data.client_name || '';
                             if (typeof addClientSelection === 'function') {
@@ -2338,9 +2339,11 @@
                     hideProgress?.();
                     const clients = data.client_options || data.clients || [];
                     const originalName = data.original_client_name || '';
+                    handleUserInteraction(data.interaction_data);
                     if (typeof addClientSelection === 'function') {
                         addClientSelection(clients, originalName);
                     } else {
+                        
                         console.error("❌ Fonction addClientSelection non disponible");
                         addMessage("Erreur: Interface de sélection client non disponible", 'system');
                     }
@@ -2354,12 +2357,12 @@
                 else if (data.type === 'log') {
                     if (data.message) addMessage?.(`[LOG] ${data.message}`, 'system');
                 }
-                // Gestion des messages
-                else if (data.type === 'message') {
-                    hideProgress?.();
-                    if (data.data) handleTaskComplete?.(data.data);
-                    if (data.message) addMessage?.(data.message, 'system');
+                // Gestion des réponses utilisateur traitées
+                else if (data.type === 'user_response_processed') {
+                    console.log("✅ Réponse utilisateur traitée:", data);
+                    addMessage?.('Réponse utilisateur prise en compte...', 'system');
                 }
+                // Gestion des messages quote_created
                 // Gestion des réponses utilisateur traitées
                 else if (data.type === 'user_response_processed') {
                     console.log("✅ Réponse utilisateur traitée:", data);
