@@ -27,9 +27,9 @@
             --success-color: #2DFE83;
             --warning-color: #FD5202;
 
-            --bg-primary: #1a1a1a;
-            --bg-secondary: #2a2a2a;
-            --bg-tertiary: #333333;
+            -bg-primary: #0F172A;
+            --bg-secondary: #1E293B;
+            --bg-tertiary: #334155;
             --text-primary: #ffffff;
             --text-secondary: #cccccc;
             --border-color: #444444;
@@ -314,9 +314,12 @@
 
         body {
             font-family: 'League Spartan', sans-serif;
-            background-color: #000000;
+            background: #0F172A;
             color: var(--text-primary);
-            line-height: 1.6;
+            margin: 0;
+            padding: 0;
+            overflow-x: hidden;
+            min-height: 100vh;
         }
 
         .main-container {
@@ -3966,15 +3969,15 @@
                                 📅 Date: ${date}
                             </div>
                             <div style="margin-top:8px; display: flex; gap: 8px;">
-                                <button onclick="(typeof viewQuote==='function' ? viewQuote('${id}') : null)" class="btn btn-primary btn-sm">Voir</button>
-                                <button onclick="resolveDuplicateDecision('consolidate','${id}')" class="btn btn-accent btn-sm">Consolider</button>
+                                <button onclick="(typeof viewQuote==='function' ? viewQuote('${id}') : null)" style="border:0;border-radius:8px;padding:8px 16px;cursor:pointer;background:linear-gradient(135deg, #02B9FD 0%, #832DFE 100%);color:#fff;font-weight:600;transition:all 0.3s ease;box-shadow:0 2px 8px rgba(2, 185, 253, 0.3);">Voir</button>
+                                <button onclick="resolveDuplicateDecision('consolidate','${id}')" style="border:0;border-radius:8px;padding:8px 16px;cursor:pointer;background:linear-gradient(135deg, #832DFE 0%, #E220FB 100%);color:#fff;font-weight:600;transition:all 0.3s ease;margin-left:8px;box-shadow:0 2px 8px rgba(131, 45, 254, 0.3);">Consolider avec celui-ci</button>
                             </div>
                         </div>`;
                 };
 
             if (recent.length) {
                 const html = `
-                    <div style="background:#f0f8ff;border-radius:12px;padding:16px;margin:10px 0">
+                    <div style="background:rgba(45, 254, 131, 0.1);border:1px solid rgba(45, 254, 131, 0.3);border-radius:12px;padding:16px;margin:10px 0">
                         <h4 style="margin:0 0 8px 0">📋 Devis récents</h4>
                         ${recent.map(q => makeCard(q, '#3b82f6')).join('')}
                     </div>`;
@@ -3982,7 +3985,7 @@
             }
             if (drafts.length) {
                 const html = `
-                    <div style="background:#fffdf0;border-radius:12px;padding:16px;margin:10px 0">
+                    <div style="background:rgba(253, 82, 2, 0.1);border:1px solid rgba(253, 82, 2, 0.3);border-radius:12px;padding:16px;margin:10px 0">
                         <h4 style="margin:0 0 8px 0">📝 Brouillons</h4>
                         ${drafts.map(q => makeCard(q, '#f59e0b')).join('')}
                     </div>`;
@@ -3997,13 +4000,13 @@
         // ----- Options de résolution (boutons d'action) -----
         function addDuplicateResolutionOptions(duplicateData) {
             const html = `
-                <div style="background:linear-gradient(135deg,#e3f2fd,#f3e5f5);border:1px solid #bbdefb;border-radius:12px;padding:16px;margin:12px 0">
+                <div style="background:rgba(255, 255, 255, 0.1);border:1px solid rgba(255, 255, 255, 0.2);border-radius:12px;padding:16px;margin:12px 0;backdrop-filter:blur(10px);">
                     <h4 style="margin:0 0 12px 0;text-align:center">🔧 Comment souhaitez-vous procéder ?</h4>
                     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-                        <button onclick="resolveDuplicateDecision('proceed')" style="border:0;border-radius:8px;padding:12px;cursor:pointer;background:#10b981;color:#fff">✅ Créer un nouveau devis</button>
-                        <button onclick="resolveDuplicateDecision('review')" style="border:0;border-radius:8px;padding:12px;cursor:pointer;background:#f59e0b;color:#fff">📋 Examiner les existants</button>
-                        <button onclick="resolveDuplicateDecision('consolidate')" style="border:0;border-radius:8px;padding:12px;cursor:pointer;background:#3b82f6;color:#fff">🔄 Consolider</button>
-                        <button onclick="resolveDuplicateDecision('cancel')" style="border:0;border-radius:8px;padding:12px;cursor:pointer;background:#9ca3af;color:#fff">❌ Annuler</button>
+                        <button onclick="resolveDuplicateDecision('proceed')" style="border:0;border-radius:12px;padding:14px 20px;cursor:pointer;background:linear-gradient(135deg, #2DFE83 0%, #22C767 100%);color:#000;font-weight:600;transition:all 0.3s ease;box-shadow:0 4px 15px rgba(45, 254, 131, 0.3);">✅ Créer un nouveau devis</button>
+                        <button onclick="resolveDuplicateDecision('review')" style="border:0;border-radius:12px;padding:14px 20px;cursor:pointer;background:linear-gradient(135deg, #FD5202 0%, #E8460C 100%);color:#fff;font-weight:600;transition:all 0.3s ease;box-shadow:0 4px 15px rgba(253, 82, 2, 0.3);">📋 Examiner les existants</button>
+                        <button onclick="resolveDuplicateDecision('consolidate')" style="border:0;border-radius:12px;padding:14px 20px;cursor:pointer;background:linear-gradient(135deg, #02B9FD 0%, #832DFE 100%);color:#fff;font-weight:600;transition:all 0.3s ease;box-shadow:0 4px 15px rgba(2, 185, 253, 0.3);">🔄 Consolider</button>
+                        <button onclick="resolveDuplicateDecision('cancel')" style="border:0;border-radius:12px;padding:14px 20px;cursor:pointer;background:rgba(255, 255, 255, 0.15);color:#fff;font-weight:600;transition:all 0.3s ease;border:1px solid rgba(255, 255, 255, 0.3);backdrop-filter:blur(10px);">❌ Annuler</button>
                     </div>
                 </div>`;
             if (typeof addMessage === 'function') addMessage(html, 'system');
