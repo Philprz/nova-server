@@ -27,7 +27,7 @@
             --success-color: #2DFE83;
             --warning-color: #FD5202;
 
-            -bg-primary: #0F172A;
+            --bg-primary: #0F172A;
             --bg-secondary: #1E293B;
             --bg-tertiary: #334155;
             --text-primary: #ffffff;
@@ -3121,8 +3121,8 @@
             // Construire l'affichage détaillé
             let detailsHtml = `
                 <div class="quote-details-container" style="
-                    background: linear-gradient(135deg, #f8faff, #e8f4fd);
-                    border: 2px solid #3b82f6;
+                    background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-tertiary) 100%);
+                    border: 2px solid var(--primary-violet);
                     border-radius: 12px;
                     padding: 20px;
                     margin: 10px 0;
@@ -3133,21 +3133,21 @@
                         justify-content: space-between;
                         align-items: center;
                         margin-bottom: 20px;
-                        border-bottom: 2px solid #e2e8f0;
+                        border-bottom: 2px solid var(--border-color);
                         padding-bottom: 15px;
                     ">
                         <div>
-                            <h3 style="margin: 0; color: #1e40af; font-size: 1.4em;">
+                            <h3 style="margin: 0; color: var(--text-primary); font-size: 1.4em;">
                                 📋 Devis N° ${quote.doc_num || 'N/A'}
                             </h3>
-                            <p style="margin: 5px 0 0 0; color: #64748b; font-size: 0.9em;">
+                            <p style="margin: 5px 0 0 0; color: var(--text-secondary); font-size: 0.9em;">
                                 DocEntry: ${quote.doc_entry || 'N/A'} | Date: ${quote.doc_date || 'N/A'}
                             </p>
                         </div>
                         <div style="text-align: right;">
                             <div style="
-                                background: linear-gradient(135deg, #10b981, #059669);
-                                color: white;
+                                background: linear-gradient(135deg, var(--accent-green), var(--accent-teal));
+                                color: var(--text-on-accent, #fff);
                                 padding: 8px 16px;
                                 border-radius: 6px;
                                 font-weight: bold;
@@ -3157,15 +3157,16 @@
                             </div>
                         </div>
                     </div>
-                    
+
                     <div class="quote-client-info" style="
-                        background: white;
+                        background: var(--bg-primary);
+                        color: var(--text-primary);
                         border-radius: 8px;
                         padding: 15px;
                         margin-bottom: 20px;
-                        border-left: 4px solid #06b6d4;
+                        border-left: 4px solid var(--accent-teal);
                     ">
-                        <h4 style="margin: 0 0 10px 0; color: #0f172a; display: flex; align-items: center;">
+                        <h4 style="margin: 0 0 10px 0; color: var(--text-primary); display: flex; align-items: center;">
                             🏢 Client
                         </h4>
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 0.9em;">
@@ -3173,14 +3174,14 @@
                             <div><strong>Code:</strong> ${quote.card_code || 'N/A'}</div>
                         </div>
                     </div>
-                    
+
                     <div class="quote-lines" style="
-                        background: white;
+                        background: var(--bg-tertiary);
                         border-radius: 8px;
                         padding: 15px;
-                        border-left: 4px solid #8b5cf6;
+                        border-left: 4px solid var(--accent-violet);
                     ">
-                        <h4 style="margin: 0 0 15px 0; color: #0f172a; display: flex; align-items: center;">
+                        <h4 style="margin: 0 0 15px 0; color: var(--text-primary); display: flex; align-items: center;">
                             📦 Produits (${lines.length} article${lines.length > 1 ? 's' : ''})
                         </h4>
                         ${lines.length > 0 ? `
@@ -3191,11 +3192,11 @@
                                     font-size: 0.85em;
                                 ">
                                     <thead>
-                                        <tr style="background: #f8fafc; border-bottom: 2px solid #e2e8f0;">
-                                            <th style="padding: 8px; text-align: left; border-right: 1px solid #e2e8f0;">Code</th>
-                                            <th style="padding: 8px; text-align: left; border-right: 1px solid #e2e8f0;">Description</th>
-                                            <th style="padding: 8px; text-align: center; border-right: 1px solid #e2e8f0;">Qté</th>
-                                            <th style="padding: 8px; text-align: right; border-right: 1px solid #e2e8f0;">Prix Unit.</th>
+                                        <tr style="background: rgba(255, 255, 255, 0.1); border-bottom: 2px solid rgba(255, 255, 255, 0.1);">
+                                            <th style="padding: 8px; text-align: left; border-right: 1px solid rgba(255, 255, 255, 0.1);">Code</th>
+                                            <th style="padding: 8px; text-align: left; border-right: 1px solid rgba(255, 255, 255, 0.1);">Description</th>
+                                            <th style="padding: 8px; text-align: center; border-right: 1px solid rgba(255, 255, 255, 0.1);">Qté</th>
+                                            <th style="padding: 8px; text-align: right; border-right: 1px solid rgba(255, 255, 255, 0.1);">Prix Unit.</th>
                                             <th style="padding: 8px; text-align: right;">Total</th>
                                         </tr>
                                     </thead>
@@ -3396,7 +3397,7 @@
             
             const modalContent = document.createElement('div');
             modalContent.style.cssText = `
-                background: white;
+                background: var(--bg-tertiary);
                 border-radius: 12px;
                 padding: 24px;
                 max-width: 1200px;
@@ -3441,7 +3442,7 @@
                     <input type="hidden" name="quote_id" value="${quote.doc_entry || quote.opportunity_id}">
 
                     <!-- Section Informations générales -->
-                    <div style="background: #f9fafb; padding: 16px; border-radius: 8px; margin-bottom: 20px;">
+                    <div style="background: var(--bg-secondary); padding: 16px; border-radius: 8px; margin-bottom: 20px;">
                         <h3 style="margin-bottom: 16px; color: #1f2937;">📝 Informations générales</h3>
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
                             <div>
@@ -3476,7 +3477,7 @@
                                 top: 100%;
                                 left: 0;
                                 right: 0;
-                                background: white;
+                                background: var(--bg-tertiary);
                                 border: 1px solid #d1d5db;
                                 border-top: none;
                                 border-radius: 0 0 8px 8px;
@@ -3491,11 +3492,11 @@
                     </div>
 
                     <!-- Section Lignes de produits -->
-                    <div style="background: #f9fafb; padding: 16px; border-radius: 8px; margin-bottom: 20px;">
+                    <div style="background: var(--bg-secondary); padding: 16px; border-radius: 8px; margin-bottom: 20px;">
                         <h3 style="margin-bottom: 16px; color: #1f2937;">📦 Lignes de produits</h3>
                         <div id="productLines">
                             ${quote.lines.map((line, index) => `
-                                <div class="product-line" style="background: white; padding: 12px; border-radius: 6px; margin-bottom: 12px;">
+                                <div class="product-line" style="background: var(--bg-tertiary); padding: 12px; border-radius: 6px; margin-bottom: 12px;">
                                     <input type="hidden" name="lines[${index}][line_num]" value="${line.line_num}">
                                     <div style="display: grid; grid-template-columns: 2fr 3fr 1fr 1fr 1fr; gap: 12px; align-items: center;">
                                         <input type="text" name="lines[${index}][item_code]" value="${line.item_code}" placeholder="Code produit" style="padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
@@ -3553,7 +3554,7 @@
 
             const newLine = document.createElement('div');
             newLine.className = 'product-line';
-            newLine.style.cssText = 'background: white; padding: 12px; border-radius: 6px; margin-bottom: 12px;';
+            newLine.style.cssText = 'background: var(--bg-tertiary); padding: 12px; border-radius: 6px; margin-bottom: 12px;';
 
             newLine.innerHTML = `
                 <input type="hidden" name="lines[${lineCount}][line_num]" value="${lineCount}">
@@ -3673,8 +3674,8 @@
                             border-bottom: 1px solid #f3f4f6;
                             transition: background-color 0.2s;
                          "
-                         onmouseover="this.style.backgroundColor='#f9fafb'; this.classList.add('active')"
-                         onmouseout="this.style.backgroundColor='white'; this.classList.remove('active')"
+                         onmouseover="this.style.backgroundColor='var(--bg-secondary)'; this.classList.add('active')"
+                         onmouseout="this.style.backgroundColor='var(--bg-primary)'; this.classList.remove('active')"
                     >
                         <div style="display: flex; justify-content: space-between; align-items: flex-start;">
                             <div style="flex: 1;">
