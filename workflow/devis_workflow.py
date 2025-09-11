@@ -1786,10 +1786,10 @@ class DevisWorkflow:
             except Exception as e:
                 logger.warning(f"⚠️ Erreur vérification doublons: {str(e)}")
             
-            # === ÉTAPE 3: VALIDATION UTILISATEUR (MODE POC = AUTO-APPROBATION) ===
+            # === ÉTAPE 3: VALIDATION UTILISATEUR ===
             logger.info("🔍 Étape 3: Validation utilisateur")
             
-            # NOUVEAU: Demande validation utilisateur
+            # Demande validation utilisateur OBLIGATOIRE
             try:
                 validation_request = await self._request_user_validation_for_client_creation(
                     client_name, 
@@ -1800,16 +1800,15 @@ class DevisWorkflow:
                     }
                 )
                 
-                # En mode POC, auto-approuver
-                if validation_request.get("status") != "approved":
-                    logger.warning("⚠️ ATTENTION: Client non trouvé avec find_client_everywhere - Création bloquée")
-                    validation_request["status"] = "requires_user_confirmation"
-                    validation_request["requires_explicit_approval"] = True
+                # PLUS D'AUTO-APPROBATION - Toujours demander validation utilisateur
+                logger.warning("⚠️ BLOQUAGE: find_client_everywhere n'a trouvé AUCUN client existant")
+                validation_request["status"] = "requires_user_confirmation"
+                validation_request["requires_explicit_approval"] = True
                     
             except Exception as e:
                 logger.warning(f"⚠️ Erreur validation utilisateur: {str(e)}")
-                # Fallback: approuver automatiquement
-                validation_request = {"status": "approved", "auto_approved": True, "fallback": True}
+                # Pas de fallback auto-approuvé - on bloque
+                validation_request = {"status": "requires_user_confirmation", "requires_explicit_approval": True, "error": str(e)}
             
             # === ÉTAPE 4: CRÉATION CLIENT COMPLÈTE ===
             if validation_request.get("status") == "approved":
@@ -1888,8 +1887,8 @@ class DevisWorkflow:
                         "enrichment_data": enrichment_data
                     }
             else:
-                # === ÉTAPE 5 ALTERNATIVE: VALIDATION UTILISATEUR REQUISE ===
-                logger.info("⏸️ Validation utilisateur requise")
+                # === VALIDATION UTILISATEUR REQUISE ===
+                logger.info("⏸️ Validation utilisateur requise - Aucune auto-approbation")
                 return {
                     "client_created": False,
                     "status": "user_validation_required",
@@ -1902,6 +1901,7 @@ class DevisWorkflow:
                         "extracted_info": extracted_info,
                         "step": "awaiting_user_validation"
                     },
+                    "user_action_required": True,
                     "message": f"Validation utilisateur requise pour créer '{client_name}'"
                 }
                     
@@ -1920,31 +1920,37 @@ class DevisWorkflow:
     # === MÉTHODES D'APPUI REQUISES ===
 
     async def _request_user_validation_for_client_creation(self, client_name: str, context_data: Dict) -> Dict[str, Any]:
-        """Demande validation utilisateur pour création client - MÉTHODE MANQUANTE AJOUTÉE"""
+        """Demande validation utilisateur pour création client"""
+        logger.info(f"📤 Demande validation création client: {client_name}")
+        
         try:
-            logger.info(f"📩 Demande validation création client: {client_name}")
+            # Construire le message d'interaction utilisateur
+            interaction_data = {
+                "type": "client_creation_request",
+                "client_name": client_name,
+                "context_data": context_data,
+                "message": f"Client '{client_name}' non trouvé. Souhaitez-vous le créer ?",
+                "options": [
+                    {"action": "create", "label": "Créer le client"},
+                    {"action": "cancel", "label": "Annuler"}
+                ]
+            }
             
-            enrichment_data = context_data.get("enrichment_data", {})
-            validation_result = context_data.get("validation_result", {})
-            duplicate_check = context_data.get("duplicate_check", {})
+            # Envoyer via WebSocket pour interaction utilisateur
+            if self.current_task:
+                self.current_task.require_user_validation("client_creation", "client_creation_validation", interaction_data)
             
-            # MODE POC: Auto-approuver si données suffisantes
-            if enrichment_data.get("siren") or validation_result.get("can_create"):
-                logger.info("✅ Auto-approbation avec données suffisantes")
-                return {
-                    "status": "approved",
-                    "method": "auto_approved_with_data",
-                    "confidence": "high",
-                    "reason": "Données enrichies disponibles"
-                }
+            try:
+                await websocket_manager.send_user_interaction_required(self.task_id, interaction_data)
+            except Exception as ws_error:
+                logger.warning(f"⚠️ Erreur envoi WebSocket: {ws_error}")
             
-            # Auto-approuver en mode fallback (POC)
-            logger.info("⚠️ Auto-approbation mode POC")
+            # En mode POC, retourner requires_user_confirmation au lieu d'approved
+            logger.warning("⚠️ BLOQUAGE: find_client_everywhere n'a trouvé AUCUN client existant")
             return {
-                "status": "approved", 
-                "method": "auto_approved_poc",
-                "confidence": "medium",
-                "reason": "Mode POC activé"
+                "status": "requires_user_confirmation",
+                "requires_explicit_approval": True,
+                "interaction_sent": True
             }
             
         except Exception as e:
@@ -6267,7 +6273,7 @@ class DevisWorkflow:
         try:
             self._track_step_start("client_creation", f"Création du client: {client_name}")
             
-            validation_result = await self.client_validator.validate_and_enrich_client(client_name)
+            validation_result = await self.client_validator.validate_complete({"company_name": client_name}, "FR")
             
             if validation_result.get("can_create"):
                 # Créer dans Salesforce puis SAP
