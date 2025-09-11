@@ -3447,11 +3447,11 @@
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
                             <div>
                                 <label style="display: block; margin-bottom: 4px; font-weight: 500;">Date du devis</label>
-                                <input type="date" name="doc_date" value="${quote.doc_date}" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
+                                <input type="date" name="doc_date" value="${quote.doc_date ? quote.doc_date.split('T')[0] : ''}" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
                             </div>
                             <div>
                                 <label style="display: block; margin-bottom: 4px; font-weight: 500;">Date d'échéance</label>
-                                <input type="date" name="doc_due_date" value="${quote.doc_due_date}" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
+                                <input type="date" name="doc_due_date" value="${quote.doc_due_date ? quote.doc_due_date.split('T')[0] : ''}" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
                             </div>
                         </div>
                         <div style="margin-top: 16px;">
