@@ -2388,6 +2388,33 @@
                     showProgress();
                 }
                 // Type de message non géré
+                // Gestion des messages task_update
+                else if (data.type === 'task_update') {
+                    console.log("📋 Mise à jour de tâche:", data);
+                    
+                    // Gestion des événements spécifiques dans task_update
+                    if (data.event === 'parallel_search_started') {
+                        const clientQuery = data.data?.client_query || 'client';
+                        const productCount = data.data?.product_count || 0;
+                        addMessage(`🚀 Recherche parallèle en cours : client "${clientQuery}" et ${productCount} produit(s)...`, 'system');
+                        showProgress();
+                    }
+                    else if (data.event === 'client_validation_started') {
+                        addMessage('🔍 Validation du client en cours...', 'system');
+                    }
+                    else if (data.event === 'product_validation_started') {
+                        addMessage('📦 Validation des produits en cours...', 'system');
+                    }
+                    else if (data.event === 'quote_generation_started') {
+                        addMessage('📝 Génération du devis en cours...', 'system');
+                    }
+                    else {
+                        // Autres événements task_update
+                        if (data.data?.message) {
+                            addMessage(data.data.message, 'system');
+                        }
+                    }
+                }
                 else {
                     console.warn("ℹ️ Type de message non géré:", data.type, data);
                 }
@@ -2470,9 +2497,6 @@
                 console.error("❌ Erreur récupération validations:", error);
             }
         }
-        // Variables globales pour la sélection client
-        let clientSelectionMode = false;
-        let availableClients = [];
         // Fonction de tentative de reconnexion WebSocket avec limitation
         function attemptReconnection(taskId) {
             if (websocket && websocket.readyState === WebSocket.CONNECTING) {
