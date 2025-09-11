@@ -1528,13 +1528,12 @@
         }
         function initializeTaskTracking(taskId) {
             // Vérification de la validité de l'ID de tâche
-            if (!taskId) {
-                console.error("❌ Erreur : L'ID de la tâche est manquant ou invalide.");
+            if (!taskId) { console.error("❌ Erreur : L'ID de la tâche est manquant ou invalide."); return; }
+            // Protection contre les appels multiples pour le même task_id
+            if (currentTaskId === taskId && wsActive) {
+                console.log("ℹ️ Task déjà initialisée et WebSocket actif pour :", taskId);
                 return;
             }
-
-            // Mise à jour de l'ID de tâche actuel
-            const currentTaskId = taskId;
 
             // Affichage de la progression
             showProgress();
@@ -2019,13 +2018,16 @@
                     0;
 
                 const totalAmount = Number.isFinite(Number(rawAmount)) ? Number(rawAmount) : 0;
-                const formattedAmount = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(totalAmount);
+                // formattedAmount will be set later
 
                 // Afficher les messages système
                 addMessage(`Devis créé avec succès !`, 'system');
                 addMessage(`Client: ${clientName}`, 'system');
                 addMessage(`Numéro de devis: ${quoteNumber}`, 'system');
-                addMessage(`Montant: ${formattedAmount}`, 'system');
+                const totalAmountNum = Number(result.total_amount ?? result.sap_quote?.total_amount ?? result.validated_data?.total_amount ?? 0) || 0;
+    const currency = (result.currency || result.sap_quote?.DocCurrency || 'EUR').toString();
+    const formattedAmount = safeFormatCurrency(totalAmountNum, currency);
+    addMessage(`Montant: ${formattedAmount}`, 'system');
 
                 // Créer et afficher le devis complet si les données sont disponibles
                 if (result.quote_data || result.sap_quote || result.quote_id) {
@@ -2063,7 +2065,7 @@
         }
                 
         function createNewQuote() {
-            const input = document.getElementById('messageInput');
+            const input = document.getElementById('chatInput');
             input.value = 'Créer un nouveau devis pour ';
             input.focus();
         }
@@ -2078,26 +2080,7 @@
             const input = document.getElementById('chatInput');
             const message = input.value.trim();
 
-            // Fonction de validation centralisée
-            function validateUserInput(message) {
-                if (!message) {
-                    return { valid: false, error: 'Veuillez saisir un message' };
-                }
-                if (message.length < 3) {
-                    return { valid: false, error: 'Le message doit contenir au moins 3 caractères' };
-                }
-                if (message.length > 1000) {
-                    return { valid: false, error: 'Le message ne peut pas dépasser 1000 caractères' };
-                }
-                return { valid: true, error: null };
-            }
-
             // Validation côté client
-            const validation = validateUserInput(message);
-            if (!validation.valid) {
-                showValidationError(validation.error);
-                return false;
-            }
             if (isProcessing) {
                 showValidationError('Traitement en cours, veuillez patienter...');
                 return false;
@@ -2279,8 +2262,39 @@
 
             websocket.onmessage = (event) => {
                 const data = parseWebSocketMessage(event);
-                if (!data) return;
-                console.log("📥 Message reçu:", data);
+                if (!data || typeof data !== 'object') {
+                    console.warn("⚠️ Message WebSocket invalide ou inattendu:", event?.data);
+                    return;
+                }
+                
+                            
+                try {
+                    // Early guard for duplicate_resolution
+                    if (typeof data !== 'undefined' && data && data.type === 'interaction_required' &&
+                        data.interaction_data && data.interaction_data.interaction_type === 'duplicate_resolution') {
+                        console.log("⚠️ Duplicate resolution détecté (early guard)");
+                        if (typeof hideProgress === 'function') { try { hideProgress(); } catch(e){} }
+
+                        if (data.interaction_data?.recent_quotes?.length > 0 || data.interaction_data?.draft_quotes?.length > 0) {
+                            if (typeof displayExistingQuotesInChat === 'function') {
+                                displayExistingQuotesInChat(data.interaction_data);
+                            } else {
+                                if (typeof addMessage === 'function') { addMessage("⚠️ Devis existants détectés", 'system'); }
+                            }
+                        } else {
+                            if (typeof addMessage === 'function') { addMessage("⚠️ Devis existants détectés (liste vide ou non fournie).", 'system'); }
+                        }
+
+                        if (typeof addDuplicateResolutionOptions === 'function') {
+                            addDuplicateResolutionOptions(data.interaction_data);
+                        } else if (typeof addMessage === 'function') {
+                            addMessage("Sélectionnez une option : créer un nouveau devis, examiner, consolider ou annuler.", 'system');
+                        }
+                        return;
+                    }
+                } catch(e) {
+                    console.error("Duplicate resolution early-guard error:", e);
+                }
 
                 // Gestion des messages de progression
                 if (data.type === 'progress' || data.type === 'progress_update') {
@@ -2331,7 +2345,25 @@
                                 console.error("❌ Fonction handleProductSelection non disponible");
                                 addMessage("Erreur: Interface de sélection produit non disponible", 'system');
                             }
-                        }
+                        
+                        } else if (data.interaction_data.interaction_type === 'duplicate_resolution') {
+                            console.log("⚠️ Duplicate resolution détecté");
+                            if (typeof hideProgress === 'function') { try { hideProgress(); } catch(e){} }
+                            if (data.interaction_data?.recent_quotes?.length > 0 || data.interaction_data?.draft_quotes?.length > 0) {
+                                if (typeof displayExistingQuotesInChat === 'function') {
+                                    displayExistingQuotesInChat(data.interaction_data);
+                                } else if (typeof addMessage === 'function') {
+                                    addMessage("⚠️ Devis existants détectés", 'system');
+                                }
+                            } else if (typeof addMessage === 'function') {
+                                addMessage("⚠️ Devis existants détectés (liste vide ou non fournie).", 'system');
+                            }
+                            if (typeof addDuplicateResolutionOptions === 'function') {
+                                addDuplicateResolutionOptions(data.interaction_data);
+                            } else if (typeof addMessage === 'function') {
+                                addMessage("Sélectionnez une option : créer un nouveau devis, examiner, consolider ou annuler.", 'system');
+                            }
+                }
                     }
                 }
                 // Gestion de la sélection de client
@@ -2439,31 +2471,40 @@
 
 
             websocket.onclose = (event) => {
-            // Nettoyer les références
-            if (websocket === window.websocket) {
-                window.websocket = null;
-            }
-
-            const code = event?.code ?? 0;
-            const reason = (event?.reason && String(event.reason).trim()) || 'Aucune raison fournie';
-            const wasClean = event?.wasClean === true;
-
-            console.warn(`🔌 WebSocket déconnecté${wasClean ? ' proprement' : ''}. Code: ${code}, Raison: ${reason}`);
-            wsActive = false;
-            // Reconnexion uniquement si fermeture non intentionnelle
-            if (code !== 1000 && code !== 1001) {
-                if (typeof addMessage === 'function') {
-                    addMessage("La connexion a été perdue. Tentative de reconnexion...", 'system');
+                wsActive = false;
+                if (websocket === window.websocket) {
+                    window.websocket = null;
                 }
-                if (typeof attemptReconnection === 'function') {
-                    improvedReconnection(taskId);
-                }
-            }
-        };
+                const code = event?.code ?? 0;
+                const reason = (event?.reason && String(event.reason).trim()) || 'Aucune raison fournie';
+                const wasClean = event?.wasClean === true;
+                console.warn(`🔌 WebSocket déconnecté${wasClean ? ' proprement' : ''}. Code: ${code}, Raison: ${reason}`);
 
-            websocket.onerror = (error) => {
+                if (currentTaskId) {
+                    const shouldReconnect = (code === 1005 || code === 1006 || code === 1011 || code === 1012 || code === 1013 || code >= 3000);
+                    if (shouldReconnect) {
+                        try { addMessage("La connexion a été perdue. Tentative de reconnexion...", 'system'); } catch (e) {}
+                        if (typeof improvedReconnection === 'function') {
+                            improvedReconnection(currentTaskId);
+                        } else {
+                            if (!window.reconnectInProgress) {
+                                window.reconnectInProgress = true;
+                                window.reconnectTimeout = setTimeout(() => {
+                                    connectWebSocket(currentTaskId);
+                                    window.reconnectInProgress = false;
+                                }, 2000);
+                            }
+                        }
+                    }
+                }
+            };
+
+                        websocket.onerror = (error) => {
                 console.error("❌ Erreur WebSocket:", error);
-                addMessage("Une erreur de connexion est survenue.", 'system');
+                wsActive = false;
+                try { addMessage("Une erreur de connexion est survenue.", 'system'); } catch (e) {}
+
+                if (reconnectInterval) { clearInterval(reconnectInterval); reconnectInterval = null; }
             };
 
             // Vérifier s'il y a des validations en attente après connexion
@@ -2577,112 +2618,130 @@
             attemptReconnect();
         }
         function cleanup() {
-            // Nettoyage du timeout d'initialisation de tâche
-            if (window.taskInitTimeout) {
-                clearTimeout(window.taskInitTimeout);
-                window.taskInitTimeout = null;
-                console.log("⏳ Timeout d'initialisation de tâche nettoyé.");
+            if (reconnectInterval) { clearInterval(reconnectInterval); reconnectInterval = null; console.log("🔄 Intervalle de reconnexion nettoyé."); }
+            if (window.reconnectTimeout) { clearTimeout(window.reconnectTimeout); window.reconnectTimeout = null; console.log("⏰ Timeout de reconnexion nettoyé."); }
+
+                // Nettoyage du timeout d'initialisation de tâche
+                if (window.taskInitTimeout) {
+                    clearTimeout(window.taskInitTimeout);
+                    window.taskInitTimeout = null;
+                    console.log("⏳ Timeout d'initialisation de tâche nettoyé.");
+                }
+
+                // Nettoyage de l'intervalle de suivi de progression
+                if (progressInterval) {
+                    clearInterval(progressInterval);
+                    progressInterval = null;
+                    console.log("📊 Intervalle de progression nettoyé.");
+                }
+
+                // Nettoyage de l'intervalle de reconnexion
+                if (reconnectInterval) {
+                    clearInterval(reconnectInterval);
+                    reconnectInterval = null;
+                    console.log("🔄 Intervalle de reconnexion nettoyé.");
+                }
+
+                // Fermeture propre de la connexion WebSocket si elle est ouverte
+                if (websocket && websocket.readyState === WebSocket.OPEN) {
+                    websocket.close(1000, "Fermeture de la page");
+                    console.log("🔌 Connexion WebSocket fermée proprement.");
+                }
             }
 
-            // Nettoyage de l'intervalle de suivi de progression
-            if (progressInterval) {
-                clearInterval(progressInterval);
-                progressInterval = null;
-                console.log("📊 Intervalle de progression nettoyé.");
-            }
+            // Écouteur d'événement pour nettoyer avant le déchargement de la page
+            window.addEventListener('beforeunload', () => {
+                console.log("🧹 Nettoyage des ressources avant le déchargement de la page.");
+                cleanup();
+            });
 
-            // Nettoyage de l'intervalle de reconnexion
-            if (reconnectInterval) {
-                clearInterval(reconnectInterval);
-                reconnectInterval = null;
-                console.log("🔄 Intervalle de reconnexion nettoyé.");
-            }
+            // Initialisation au chargement de la page, une seule fois !
+            document.addEventListener('DOMContentLoaded', function () {
+                const input = document.getElementById('chatInput');
+                const form = document.getElementById('chatForm');
+                const errorDiv = document.getElementById('validationError');
 
-            // Fermeture propre de la connexion WebSocket si elle est ouverte
-            if (websocket && websocket.readyState === WebSocket.OPEN) {
-                websocket.close(1000, "Fermeture de la page");
-                console.log("🔌 Connexion WebSocket fermée proprement.");
-            }
-        }
-
-        // Écouteur d'événement pour nettoyer avant le déchargement de la page
-        window.addEventListener('beforeunload', () => {
-            console.log("🧹 Nettoyage des ressources avant le déchargement de la page.");
-            cleanup();
-        });
-
-        // Initialisation au chargement de la page, une seule fois !
-        document.addEventListener('DOMContentLoaded', function () {
-            const input = document.getElementById('chatInput');
-            const form = document.getElementById('chatForm');
-            const errorDiv = document.getElementById('validationError');
-
-            // Éviter les listeners multiples
-            if (document._initializationComplete) {
-                return;
-            }
-            document._initializationComplete = true;
-
-            // Écouteur de validation formulaire sur submit
-            if (form) {
-                form.addEventListener('submit', handleFormSubmit);
-
-                // Validation du formulaire en temps réel (input sur le champ de saisie)
-                form.addEventListener('input', function (e) {
-                    if (e.target.id === 'chatInput') {
-                        const message = e.target.value.trim();
-                        if (message.length > 1000) {
-                            showValidationError('Message trop long (maximum 1000 caractères)');
-                        } else if (errorDiv) {
-                            errorDiv.style.display = 'none';
-                        }
-                    }
-                });
-            }
-
-            // Écouteur sur input pour gestion de l'envoi par clavier
-            if (input) {
-                input.addEventListener('keydown', handleKeyPress);
-                input.addEventListener('input', handleInput);
-                input.focus();
-            }
-
-            // Vérification de la connexion WebSocket régulière
-            checkConnection();
-            setInterval(checkConnection, 30000);
-
-            updateSendButton();
-
-            // Écouteur global pour détecter les task_id
-            document.addEventListener('submit', function (e) {
-                if (e.target.id === 'chatForm') {
-                    // handleFormSubmit gère la logique principale
+                // Éviter les listeners multiples
+                if (document._initializationComplete) {
                     return;
                 }
+                document._initializationComplete = true;
 
-                if (e.target.closest('.input-container')) {
-                    setTimeout(() => {
-                        const messagesContainer = document.getElementById('chatMessages');
-                        if (messagesContainer) {
-                            // Cherche un task_id dans le dernier message
-                            const lastMessages = messagesContainer.querySelectorAll('.message');
-                            if (lastMessages.length > 0) {
-                                const lastMessage = lastMessages[lastMessages.length - 1];
-                                const taskIdMatch = lastMessage.textContent.match(/quote_\d{8}_\d{6}_\w+/);
-                                if (taskIdMatch) {
-                                    const taskId = taskIdMatch[0];
-                                    console.log("🎯 Task ID détecté:", taskId);
-                                    connectWebSocket(taskId);
-                                }
+                // Écouteur de validation formulaire sur submit
+                if (form) {
+                    form.addEventListener('submit', handleFormSubmit);
+
+                    // Validation du formulaire en temps réel (input sur le champ de saisie)
+                    form.addEventListener('input', function (e) {
+                        if (e.target.id === 'chatInput') {
+                            const message = e.target.value.trim();
+                            if (message.length > 1000) {
+                                showValidationError('Message trop long (maximum 1000 caractères)');
+                            } else if (errorDiv) {
+                                errorDiv.style.display = 'none';
                             }
                         }
-                    }, 1000);
+                    });
                 }
+
+                // Écouteur sur input pour gestion de l'envoi par clavier
+                if (input) {
+                    input.addEventListener('keydown', handleKeyPress);
+                    input.addEventListener('input', handleInput);
+                    input.focus();
+                }
+
+                // Vérification de la connexion WebSocket régulière
+                checkConnection();
+                setInterval(checkConnection, 30000);
+
+                updateSendButton();
+
+                // Écouteur global pour détecter les task_id
+                document.addEventListener('submit', function (e) {
+                    if (e.target.id === 'chatForm') {
+                        // handleFormSubmit gère la logique principale
+                        return;
+                    }
+
+                    if (e.target.closest('.input-container')) {
+                        setTimeout(() => {
+                            const messagesContainer = document.getElementById('chatMessages');
+                            if (messagesContainer) {
+                                // Cherche un task_id dans le dernier message
+                                const lastMessages = messagesContainer.querySelectorAll('.message');
+                                if (lastMessages.length > 0) {
+                                    const lastMessage = lastMessages[lastMessages.length - 1];
+                                    const taskIdMatch = lastMessage.textContent.match(/quote_\d{8}_\d{6}_\w+/);
+                                    if (taskIdMatch) {
+                                        const taskId = taskIdMatch[0];
+                                        console.log("🎯 Task ID détecté:", taskId);
+                                        connectWebSocket(taskId);
+                                    }
+                                }
+                            }
+                        }, 1000);
+                    }
+                });
             });
-        });
         function displayQuoteResult(result) {
 
-            // Extraction robuste du nom client depuis plusieurs sources possibles
+            if (typeof window.escapeHtml !== 'function') {
+                window.escapeHtml = (s) => {
+                    if (s == null) return '';
+                    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+                };
+            }
+            const safeFormatCurrency = (amount, curr = 'EUR') => {
+                try {
+                    const num = Number.isFinite(Number(amount)) ? Number(amount) : 0;
+                    return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: String(curr).toUpperCase() }).format(num);
+                } catch (e) {
+                    const num = Number.isFinite(Number(amount)) ? Number(amount).toFixed(2) : '0.00';
+                    return `${num} €`;
+                }
+            };
+                  // Extraction robuste du nom client depuis plusieurs sources possibles
             // Utils: échappement HTML minimal (si pas déjà définie)
             if (typeof escapeHtml !== 'function') {
                 window.escapeHtml = (s) => String(s ?? '')
@@ -3807,5 +3866,104 @@
             }
         }
     </script>
+
+<script>
+// ----- Affichage des devis existants (récents & brouillons) dans le chat -----
+function displayExistingQuotesInChat(duplicateData) {
+    try {
+        const recent = Array.isArray(duplicateData?.recent_quotes) ? duplicateData.recent_quotes : [];
+        const drafts = Array.isArray(duplicateData?.draft_quotes) ? duplicateData.draft_quotes : [];
+
+        const makeCard = (q, color) => {
+            const id = q.DocNum ?? q.doc_num ?? q.id ?? "N/A";
+            const client = q.CardName ?? q.card_name ?? "Client N/A";
+            const total = q.DocTotal ?? q.doc_total ?? "N/A";
+            const date = q.DocDate ?? q.doc_date ?? "N/A";
+            return `
+                <div style="background:#fff;border-left:4px solid ${color};border-radius:8px;padding:12px;margin:8px 0;box-shadow:0 1px 3px rgba(0,0,0,.06)">
+                    <div style="font-weight:600">#${id} — ${client}</div>
+                    <div style="color:#059669">Montant: ${total}</div>
+                    <div style="color:#6b7280;font-size:.9em">Date: ${date}</div>
+                    <div style="margin-top:8px">
+                        <button onclick="(typeof viewQuote==='function' ? viewQuote('${id}') : null)" style="border:0;border-radius:6px;padding:6px 10px;cursor:pointer;background:#3b82f6;color:#fff">Voir</button>
+                        <button onclick="resolveDuplicateDecision('consolidate','${id}')" style="border:0;border-radius:6px;padding:6px 10px;cursor:pointer;background:#6366f1;color:#fff;margin-left:8px">Consolider avec celui-ci</button>
+                    </div>
+                </div>`;
+        };
+
+        if (recent.length) {
+            const html = `
+                <div style="background:#f0f8ff;border-radius:12px;padding:16px;margin:10px 0">
+                    <h4 style="margin:0 0 8px 0">📋 Devis récents</h4>
+                    ${recent.map(q => makeCard(q, '#3b82f6')).join('')}
+                </div>`;
+            if (typeof addMessage === 'function') addMessage(html, 'system');
+        }
+        if (drafts.length) {
+            const html = `
+                <div style="background:#fffdf0;border-radius:12px;padding:16px;margin:10px 0">
+                    <h4 style="margin:0 0 8px 0">📝 Brouillons</h4>
+                    ${drafts.map(q => makeCard(q, '#f59e0b')).join('')}
+                </div>`;
+            if (typeof addMessage === 'function') addMessage(html, 'system');
+        }
+    } catch (e) {
+        console.error("Erreur displayExistingQuotesInChat:", e);
+        if (typeof addMessage === 'function') addMessage("❌ Erreur lors de l'affichage des devis existants.", 'system');
+    }
+}
+
+// ----- Options de résolution (boutons d'action) -----
+function addDuplicateResolutionOptions(duplicateData) {
+    const html = `
+        <div style="background:linear-gradient(135deg,#e3f2fd,#f3e5f5);border:1px solid #bbdefb;border-radius:12px;padding:16px;margin:12px 0">
+            <h4 style="margin:0 0 12px 0;text-align:center">🔧 Comment souhaitez-vous procéder ?</h4>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                <button onclick="resolveDuplicateDecision('proceed')" style="border:0;border-radius:8px;padding:12px;cursor:pointer;background:#10b981;color:#fff">✅ Créer un nouveau devis</button>
+                <button onclick="resolveDuplicateDecision('review')" style="border:0;border-radius:8px;padding:12px;cursor:pointer;background:#f59e0b;color:#fff">📋 Examiner les existants</button>
+                <button onclick="resolveDuplicateDecision('consolidate')" style="border:0;border-radius:8px;padding:12px;cursor:pointer;background:#3b82f6;color:#fff">🔄 Consolider</button>
+                <button onclick="resolveDuplicateDecision('cancel')" style="border:0;border-radius:8px;padding:12px;cursor:pointer;background:#9ca3af;color:#fff">❌ Annuler</button>
+            </div>
+        </div>`;
+    if (typeof addMessage === 'function') addMessage(html, 'system');
+}
+
+// ----- Envoi de la décision utilisateur vers le backend -----
+function resolveDuplicateDecision(decision, selectedQuoteId=null) {
+    try {
+        if (typeof currentTaskId === 'undefined' || !currentTaskId) {
+            if (typeof addMessage === 'function') addMessage("❌ Erreur: task_id indisponible.", 'system');
+            return;
+        }
+        const payload = {
+            type: 'user_response',
+            task_id: currentTaskId,
+            data: {
+                response_type: 'duplicate_resolution',
+                decision: decision,
+                selected_quote_id: selectedQuoteId
+            }
+        };
+        console.log("📤 Décision duplicate_resolution:", payload);
+        if (typeof sendWebSocketMessage === 'function') {
+            if (!sendWebSocketMessage(payload)) {
+                if (typeof addMessage === 'function') addMessage("❌ Erreur: Connexion WebSocket fermée. Rechargez la page.", 'system');
+                return;
+            }
+        } else if (window.websocket && window.websocket.readyState === WebSocket.OPEN) {
+            window.websocket.send(JSON.stringify(payload));
+        } else {
+            if (typeof addMessage === 'function') addMessage("❌ Erreur: Connexion WebSocket fermée. Rechargez la page.", 'system');
+            return;
+        }
+        if (typeof addMessage === 'function') addMessage('Votre décision a été envoyée. Traitement en cours…', 'system');
+        if (typeof showProgress === 'function') { try { showProgress(); } catch(e){} }
+    } catch (e) {
+        console.error("Erreur resolveDuplicateDecision:", e);
+        if (typeof addMessage === 'function') addMessage("❌ Erreur lors de l'envoi de la décision.", 'system');
+    }
+}
+</script>
+
 </body>
 </html>
