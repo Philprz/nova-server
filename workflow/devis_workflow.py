@@ -6245,7 +6245,9 @@ class DevisWorkflow:
 
             elif action == "create_new":
                 client_name = user_input.get("client_name", context.get("original_client_name", ""))
-                return await self._initiate_client_creation(client_name)
+                # CORRECTION: Appeler directement _handle_new_client_creation avec le contexte workflow
+                workflow_context = context.get("workflow_context", {})
+                return await self._handle_new_client_creation(client_name, workflow_context)
 
             elif action == "cancel":
                 return {"status": "cancelled", "message": "Demande de devis annulée par l'utilisateur"}
@@ -6261,30 +6263,69 @@ class DevisWorkflow:
         """
         🔧 CRÉATION CLIENT PUIS CONTINUATION WORKFLOW
         """
-        # Validation et création du client
-        validation_result = await self.client_validator.validate_and_enrich_client(client_name)
-        
-        if validation_result.get("can_create"):
-            # Créer dans Salesforce puis SAP
-            sf_client = await self._create_salesforce_client(validation_result)
-            sap_client = await self._create_sap_client_from_validation(validation_result, sf_client)
+        # CORRECTION: Validation et création du client avec workflow continuation
+        try:
+            self._track_step_start("client_creation", f"Création du client: {client_name}")
             
-            # Mettre à jour le contexte
-            self.context.update({
-                "client_info": {"data": sf_client, "found": True},
-                "client_validated": True
-            })
+            validation_result = await self.client_validator.validate_and_enrich_client(client_name)
             
-            # 🔧 CONTINUER AVEC LES PRODUITS
-            original_products = workflow_context.get("extracted_info", {}).get("products", [])
-            if original_products:
-                return await self._get_products_info(original_products)
+            if validation_result.get("can_create"):
+                # Créer dans Salesforce puis SAP
+                self._track_step_progress("client_creation", 30, "Création Salesforce...")
+                sf_client = await self._create_salesforce_client(validation_result)
+                
+                self._track_step_progress("client_creation", 60, "Création SAP...")
+                sap_client = await self._create_sap_client_from_validation(validation_result, sf_client)
+                
+                # Mettre à jour le contexte
+                self.context.update({
+                    "client_info": {"data": sf_client, "found": True},
+                    "client_validated": True,
+                    "client_sap_code": sf_client.get("sap_code", "")
+                })
+                
+                self._track_step_complete("client_creation", f"Client créé: {sf_client.get('Name', client_name)}")
+                
+                # CORRECTION: Continuer le workflow avec les produits
+                original_products = workflow_context.get("extracted_info", {}).get("products", [])
+                if original_products:
+                    self._track_step_start("product_validation", "Validation des produits...")
+                    return await self._get_products_info(original_products)
+                else:
+                    # Pas de produits dans le contexte - demander à l'utilisateur
+                    return self._build_product_request_response(sf_client.get("Name", client_name))
+            
             else:
-                return self._build_product_request_response(sf_client.get("Name", client_name))
+                self._track_step_fail("client_creation", "Impossible de créer le client", validation_result.get("error", ""))
+                return self._build_error_response("Impossible de créer le client", validation_result.get("error", ""))
         
-        else:
-            return self._build_error_response("Impossible de créer le client", validation_result.get("error", ""))
-    
+        except Exception as e:
+            logger.exception(f"Erreur création client {client_name}: {e}")
+            self._track_step_fail("client_creation", "Erreur création client", str(e))
+            return self._build_error_response("Erreur création client", str(e))
+        
+    async def _initiate_client_creation(self, client_name: str) -> Dict[str, Any]:
+        """
+        CORRECTION: Méthode manquante pour initier la création client
+        """
+        try:
+            logger.info(f"Initiation création client: {client_name}")
+            
+            # Récupérer le contexte workflow complet depuis la tâche
+            if self.task_id:
+                task = progress_tracker.get_task(self.task_id)
+                if task and hasattr(task, 'context'):
+                    workflow_context = task.context
+                else:
+                    workflow_context = {"extracted_info": {"products": []}}
+            else:
+                workflow_context = {"extracted_info": {"products": []}}
+            
+            return await self._handle_new_client_creation(client_name, workflow_context)
+            
+        except Exception as e:
+            logger.exception(f"Erreur initiation création client {client_name}: {e}")
+            return self._build_error_response("Erreur initiation création client", str(e))
     async def _continue_workflow_after_client_selection(self, client_data: Dict, original_context: Dict) -> Dict:
         """
         🔧 CONTINUATION AUTOMATIQUE DU WORKFLOW APRÈS SÉLECTION CLIENT
