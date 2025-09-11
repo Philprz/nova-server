@@ -1079,6 +1079,13 @@
         }
 
         function addClientSelection(clients, originalClientName) {
+            // Log + validation d'entrée
+            console.log("🤝 Sélection de client requise:", clients);
+            if (!Array.isArray(clients) || clients.length === 0) {
+                addMessage("Aucun client disponible pour la sélection.", 'system');
+                return;
+            }
+
             // Éviter les doublons : si déjà en mode sélection, ne pas réafficher
             if (clientSelectionMode) {
                 console.log("⚠️ Sélection client déjà en cours, ignoré pour éviter les doublons");
@@ -1088,55 +1095,64 @@
             clientSelectionMode = true;
             availableClients = clients;
 
-            const messagesContainer = document.getElementById('chatMessages');
+            // Échappement HTML minimal (prévention XSS)
+            const esc = (v) => String(v)
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#39;");
 
-            // Message d'explication
-            addMessage(`Plusieurs clients correspondent à "${originalClientName}". Veuillez sélectionner :`, 'system');
+            // Message d’explication
+            addMessage(`Plusieurs clients correspondent à "${esc(originalClientName)}". Veuillez sélectionner :`, 'system');
+
+            const messagesContainer = document.getElementById('chatMessages');
+            if (!messagesContainer) {
+                console.error("❌ Conteneur de messages introuvable (#chatMessages)");
+                return;
+            }
 
             // Créer les boutons de sélection
             const selectionDiv = document.createElement('div');
             selectionDiv.className = 'client-selection-container';
 
+            const isSentinel = (v) => v === undefined || v === null || v === '' || v === 'null' || v === 'None' || v === 'N/A';
+
             clients.forEach((client, index) => {
                 const button = document.createElement('button');
                 button.className = 'client-selection-button';
-                
-                // Construire les informations détaillées du client
-                const details = client.details || {};
-                let detailsHtml = '';
-                
-                // Afficher les détails disponibles de façon structurée
-                const clientInfo = [];
-                
-                if (details.phone && details.phone !== 'null' && details.phone !== null) {
-                    clientInfo.push(`📞 ${details.phone}`);
+
+                const details = client && client.details ? client.details : {};
+                const info = [];
+
+                // Affichage structuré prioritaire (avec emojis)
+                if (!isSentinel(details.phone))  info.push(`📞 ${esc(details.phone)}`);
+                if (!isSentinel(details.address)) info.push(`📍 ${esc(details.address)}`);
+                if (!isSentinel(details.siret))   info.push(`🏷️ SIRET: ${esc(details.siret)}`);
+                if (!isSentinel(details.sf_id))   info.push(`🆔 SF: ${esc(String(details.sf_id).substring(0, 15))}...`);
+                if (!isSentinel(details.sap_code))info.push(`💼 SAP: ${esc(details.sap_code)}`);
+
+                // Complément générique (si d’autres clés utiles existent)
+                if (typeof details === 'object') {
+                    Object.entries(details).forEach(([k, v]) => {
+                        if (['phone','address','siret','sf_id','sap_code'].includes(k)) return;
+                        if (!isSentinel(v)) info.push(`${esc(k)}: ${esc(v)}`);
+                    });
+                } else if (typeof details === 'string' && !isSentinel(details)) {
+                    info.push(esc(details));
                 }
-                
-                if (details.address && details.address !== 'N/A' && details.address !== 'None') {
-                    clientInfo.push(`📍 ${details.address}`);
-                }
-                                
-                if (details.siret && details.siret !== 'null' && details.siret !== null) {
-                    clientInfo.push(`🏷️ SIRET: ${details.siret}`);
-                }
-                
-                if (details.sf_id && details.sf_id !== '') {
-                    clientInfo.push(`🆔 SF: ${details.sf_id.substring(0, 30)}...`);
-                }
-                
-                if (details.sap_code && details.sap_code !== '') {
-                    clientInfo.push(`💼 SAP: ${details.sap_code}`);
-                }
-                
-                // Construire le HTML avec les détails
-                detailsHtml = clientInfo.length > 0 ? 
-                    `<div class="client-details">${clientInfo.join('<br>')}</div>` : 
-                    '<div class="client-details">Aucun détail disponible</div>';
-                
+
+                const detailsHtml = info.length > 0
+                    ? `<div class="client-details">${info.join('<br>')}</div>`
+                    : '<div class="client-details">Aucun détail disponible</div>';
+
+                const name = esc(client && client.name ? client.name : 'Client');
+                const source = esc(client && client.source ? client.source : 'Inconnue');
+
                 button.innerHTML = `
                     <div class="client-header">
-                        <strong>${client.name}</strong>
-                        <span class="client-source">${client.source || 'Inconnue'}</span>
+                        <strong>${name}</strong>
+                        <span class="client-source">${source}</span>
                     </div>
                     ${detailsHtml}
                 `;
@@ -1148,7 +1164,7 @@
             const newClientButton = document.createElement('button');
             newClientButton.className = 'client-selection-button create-new';
             newClientButton.innerHTML = `
-                <i class="bi bi-plus-circle"></i> Créer un nouveau client "${originalClientName}"
+                <i class="bi bi-plus-circle"></i> Créer un nouveau client "${esc(originalClientName)}"
             `;
             newClientButton.onclick = () => createNewClient(originalClientName);
             selectionDiv.appendChild(newClientButton);
@@ -1156,6 +1172,12 @@
             messagesContainer.appendChild(selectionDiv);
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
         }
+
+        // Fonction alternative si addClientSelection n'existe pas
+        function handleClientSelection(clients, originalClientName) {
+            addClientSelection(clients, originalClientName);
+        }
+
 
         function selectClient(client, index) {
             clientSelectionMode = false;
@@ -2258,7 +2280,6 @@
             websocket.onmessage = (event) => {
                 const data = parseWebSocketMessage(event);
                 if (!data) return;
-
                 console.log("📥 Message reçu:", data);
 
                 // Gestion des messages de progression
@@ -2294,26 +2315,35 @@
                             hideProgress?.();
                             const opts = data.interaction_data.client_options || data.interaction_data.options || data.interaction_data.clients || [];
                             const name = data.interaction_data.original_client_name || data.interaction_data.client_name || '';
-                            addClientSelection?.(opts, name);
+                            if (typeof addClientSelection === 'function') {
+                                addClientSelection(opts, name);
+                            } else {
+                                console.error("❌ Fonction addClientSelection non disponible");
+                                addMessage("Erreur: Interface de sélection client non disponible", 'system');
+                            }
                         } else if (data.interaction_data.interaction_type === 'product_selection') {
                             console.log("📦 Product selection détecté");
                             hideProgress?.();
-                            handleProductSelection?.(data.interaction_data);
+                            if (typeof handleProductSelection === 'function') {
+                                handleProductSelection(data.interaction_data);
+                            } else {
+                                console.error("❌ Fonction handleProductSelection non disponible");
+                                addMessage("Erreur: Interface de sélection produit non disponible", 'system');
+                            }
                         }
                     }
                 }
-                // Sélection de produit détectée directement dans les données
-                else if (data.interaction_data?.interaction_type === 'product_selection') {
-                    console.log("📦 Product selection détecté");
-                    hideProgress?.();
-                    handleProductSelection?.(data.interaction_data);
-                }
-                // Sélection de client requise
+                // Gestion de la sélection de client
                 else if (data.type === 'client_selection_required') {
                     hideProgress?.();
                     const clients = data.client_options || data.clients || [];
                     const originalName = data.original_client_name || '';
-                    addClientSelection?.(clients, originalName);
+                    if (typeof addClientSelection === 'function') {
+                        addClientSelection(clients, originalName);
+                    } else {
+                        console.error("❌ Fonction addClientSelection non disponible");
+                        addMessage("Erreur: Interface de sélection client non disponible", 'system');
+                    }
                 }
                 // Gestion des erreurs
                 else if (data.type === 'error') {
@@ -2335,7 +2365,6 @@
                     console.log("✅ Réponse utilisateur traitée:", data);
                     addMessage?.('Réponse utilisateur prise en compte...', 'system');
                 }
-                // Type de message non géré
                 // Gestion des messages quote_created
                 else if (data.type === 'quote_created') {
                     console.log("✅ Devis créé:", data);
@@ -2363,6 +2392,7 @@
                     console.warn("ℹ️ Type de message non géré:", data.type, data);
                 }
             };
+
 
             // Fonction utilitaire pour fermer le WebSocket après un délai
             function closeWebSocketWithDelay(ws, code, reason) {
@@ -2440,7 +2470,9 @@
                 console.error("❌ Erreur récupération validations:", error);
             }
         }
-
+        // Variables globales pour la sélection client
+        let clientSelectionMode = false;
+        let availableClients = [];
         // Fonction de tentative de reconnexion WebSocket avec limitation
         function attemptReconnection(taskId) {
             if (websocket && websocket.readyState === WebSocket.CONNECTING) {
