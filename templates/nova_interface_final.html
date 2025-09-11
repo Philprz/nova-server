@@ -125,17 +125,15 @@
         }
 
         .product-selection-button {
-            background-color: var(--bg-tertiary);
-            border: 1px solid var(--border-color);
+            border: 1px solid #832dfe80;
             border-radius: 6px;
-            padding: 16px;
+            padding: 12px;
             text-align: left;
-            cursor: pointer;
+            cursor: pointer !important;
             transition: all 0.2s ease;
             display: flex;
             flex-direction: column;
-            max-height: none;
-            overflow: visible;
+            background: none !important;
         }
 
         .product-selection-button .product-header {
@@ -154,24 +152,19 @@
             margin-top: 4px;
         }
 
-        .product-selection-button:hover .product-details {
-            opacity: 1;
-        }
-
         .product-selection-button:hover {
-            background-color: var(--bg-primary);
-            border-color: var(--primary-blue);
+            border-color: #832dfe;
             transform: translateY(-2px);
-            box-shadow: 0 4px 8px rgba(0,0,0,0.05);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.05);
         }
 
         .product-selection-button strong {
             font-weight: 600;
-            color: var(--primary-blue);
+            color: white;
         }
 
         .product-selection-button.create-new {
-            color: var(--success-color);
+            color: #02B9FD;
             border-style: dashed;
             align-items: center;
             flex-direction: row;
@@ -180,9 +173,122 @@
 
         .product-selection-button.create-new:hover {
             color: white;
-            background-color: var(--success-color);
-            border-color: var(--success-color);
+            background-color: rgba(2, 185, 253, 0.1);
+            border-color: #02B9FD;
         }
+        /* Styles pour la sélection de devis - Style unifié avec client-selection */
+        .quote-selection-container {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-top: 12px;
+        }
+
+        .quote-selection-button {
+            border: 1px solid #832dfe80;
+            border-radius: 6px;
+            padding: 12px;
+            text-align: left;
+            cursor: pointer !important;
+            transition: all 0.2s ease;
+            display: flex;
+            flex-direction: column;
+            background: none !important;
+        }
+
+        .quote-selection-button .quote-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .quote-selection-button .quote-source {
+            background: linear-gradient(135deg, #02B9FD, #832DFE, #E220FB);
+            padding: 2px 8px 0px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: normal;
+            color: white;
+        }
+
+        .quote-selection-button .quote-details {
+            font-size: 12px;
+            line-height: 1.4;
+            opacity: 0.9;
+            text-align: left;
+            color: white;
+        }
+
+        .quote-selection-button:hover .quote-details {
+            opacity: 1;
+        }
+
+        .quote-selection-button:hover {
+            border-color: #832dfe;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.05);
+        }
+
+        .quote-selection-button strong {
+            font-weight: 600;
+            color: white;
+        }
+
+        .quote-selection-button.create-new {
+            color: #02B9FD;
+            border-style: dashed;
+            align-items: center;
+            flex-direction: row;
+            gap: 8px;
+        }
+        /* Styles pour les boutons uniformisés */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-decoration: none;
+            white-space: nowrap;
+        }
+
+        .btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #02B9FD, #832DFE);
+            color: white;
+        }
+
+        .btn-accent {
+            background: linear-gradient(135deg, #832DFE, #E220FB);
+            color: white;
+        }
+
+        .btn-outline {
+            background: transparent;
+            color: white;
+            border: 1px solid #832dfe80;
+        }
+
+        .btn-outline:hover {
+            background: rgba(131, 45, 254, 0.1);
+            border-color: #832dfe;
+        }
+
+        .btn-sm {
+            padding: 6px 12px;
+            font-size: 12px;
+        }        
         .client-selection-button.create-new:hover {
             color: #02B9FD;
             background-color: var(--success-color);
@@ -1366,26 +1472,26 @@
 
         // --- Helpers --- //
         function normalizeProductData(product) {
-        if (!product) return null;
-        return {
-            code: product.ItemCode || product.value || product.id || product.code || null,
-            name: product.ItemName || product.label || product.name || 'Produit',
-            stock: product.OnHand || product.data?.OnHand || 0,
-            unit: product.SalesUnit || product.data?.SalesUnit || product.data?.UnitMsr || 'unité',
-            price: product.AvgPrice || product.data?.AvgPrice || product.data?.Price || 0
-        };
-        }
+            if (!product) return null;
+            return {
+                code: product.ItemCode || product.value || product.id || product.code || null,
+                name: product.ItemName || product.label || product.name || 'Produit',
+                stock: product.OnHand || product.data?.OnHand || 0,
+                unit: product.SalesUnit || product.data?.SalesUnit || product.data?.UnitMsr || 'unité',
+                price: product.AvgPrice || product.data?.AvgPrice || product.data?.Price || 0
+            };
+            }
 
         function safeSerialize(obj, fallback = {}) {
-        try {
-            if (typeof structuredClone === 'function') return structuredClone(obj);
-        } catch (_) {}
-        try {
-            return JSON.parse(JSON.stringify(obj));
-        } catch (_) {
-            return fallback;
-        }
-        }
+            try {
+                if (typeof structuredClone === 'function') return structuredClone(obj);
+            } catch (_) {}
+            try {
+                return JSON.parse(JSON.stringify(obj));
+            } catch (_) {
+                return fallback;
+            }
+            }
         // Fonction pour sélectionner un produit
         function selectProduct(product, index) {
             // Polyfill minimal si safeSerialize absent
@@ -2025,9 +2131,9 @@
                 addMessage(`Client: ${clientName}`, 'system');
                 addMessage(`Numéro de devis: ${quoteNumber}`, 'system');
                 const totalAmountNum = Number(result.total_amount ?? result.sap_quote?.total_amount ?? result.validated_data?.total_amount ?? 0) || 0;
-    const currency = (result.currency || result.sap_quote?.DocCurrency || 'EUR').toString();
-    const formattedAmount = safeFormatCurrency(totalAmountNum, currency);
-    addMessage(`Montant: ${formattedAmount}`, 'system');
+                const currency = (result.currency || result.sap_quote?.DocCurrency || 'EUR').toString();
+                const formattedAmount = safeFormatCurrency(totalAmountNum, currency);
+                addMessage(`Montant: ${formattedAmount}`, 'system');
 
                 // Créer et afficher le devis complet si les données sont disponibles
                 if (result.quote_data || result.sap_quote || result.quote_id) {
@@ -3128,41 +3234,14 @@
                         justify-content: center;
                         flex-wrap: wrap;
                     ">
-                        <button onclick="modifyQuote('${quoteData.quote_id || quote.doc_entry}')" style="
-                            background: linear-gradient(135deg, #3b82f6, #1d4ed8);
-                            color: white;
-                            border: none;
-                            padding: 10px 20px;
-                            border-radius: 6px;
-                            cursor: pointer;
-                            font-weight: 600;
-                            transition: transform 0.2s;
-                        " onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
+                        <button onclick="modifyQuote('${quoteData.quote_id || quote.doc_entry}')" class="btn btn-primary">
                             ✏️ Modifier
                         </button>
-                        <button onclick="printQuote('${quoteData.quote_id || quote.doc_entry}')" style="
-                            background: linear-gradient(135deg, #10b981, #059669);
-                            color: white;
-                            border: none;
-                            padding: 10px 20px;
-                            border-radius: 6px;
-                            cursor: pointer;
-                            font-weight: 600;
-                            transition: transform 0.2s;
-                        " onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
+                        <button onclick="printQuote('${quoteData.quote_id || quote.doc_entry}')" class="btn btn-accent">
                             🖨️ Imprimer
                         </button>
-                        <button onclick="newQuote()" style="
-                            background: linear-gradient(135deg, #6b7280, #4b5563);
-                            color: white;
-                            border: none;
-                            padding: 10px 20px;
-                            border-radius: 6px;
-                            cursor: pointer;
-                            font-weight: 600;
-                            transition: transform 0.2s;
-                        " onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
-                            📝 Nouveau Devis
+                        <button onclick="newQuote()" class="btn btn-outline">
+                            📄 Nouveau devis
                         </button>
                     </div>
                 </div>
@@ -3195,7 +3274,7 @@
 
             currentTaskId = null;
         }
-                function addFunctionalSuggestions(suggestions) {
+        function addFunctionalSuggestions(suggestions) {
             const messagesContainer = document.getElementById('chatMessages');
             const suggestionsDiv = document.createElement('div');
             suggestionsDiv.className = 'suggestions-container';
@@ -3860,109 +3939,111 @@
                     throw new Error(result.detail || result.message || 'Erreur lors de la modification');
                 }
 
-            } catch (error) {
-                console.error('Erreur lors de la sauvegarde:', error);
-                addMessage(`❌ Erreur lors de la modification: ${error.message}`, 'system');
+                } catch (error) {
+                    console.error('Erreur lors de la sauvegarde:', error);
+                    addMessage(`❌ Erreur lors de la modification: ${error.message}`, 'system');
+                }
+            }
+        // ----- Affichage des devis existants (récents & brouillons) dans le chat -----
+        function displayExistingQuotesInChat(duplicateData) {
+            try {
+                const recent = Array.isArray(duplicateData?.recent_quotes) ? duplicateData.recent_quotes : [];
+                const drafts = Array.isArray(duplicateData?.draft_quotes) ? duplicateData.draft_quotes : [];
+
+                const makeCard = (q, color) => {
+                    const id = q.DocNum ?? q.doc_num ?? q.id ?? "N/A";
+                    const client = q.CardName ?? q.card_name ?? "Client N/A";
+                    const total = q.DocTotal ?? q.doc_total ?? "N/A";
+                    const date = q.DocDate ?? q.doc_date ?? "N/A";
+                    return `
+                        <div class="quote-selection-button">
+                            <div class="quote-header">
+                                <strong>#${id} — ${client}</strong>
+                                <span class="quote-source">${q.source || 'SAP'}</span>
+                            </div>
+                            <div class="quote-details">
+                                💰 Montant: ${total}<br>
+                                📅 Date: ${date}
+                            </div>
+                            <div style="margin-top:8px; display: flex; gap: 8px;">
+                                <button onclick="(typeof viewQuote==='function' ? viewQuote('${id}') : null)" class="btn btn-primary btn-sm">Voir</button>
+                                <button onclick="resolveDuplicateDecision('consolidate','${id}')" class="btn btn-accent btn-sm">Consolider</button>
+                            </div>
+                        </div>`;
+                };
+
+            if (recent.length) {
+                const html = `
+                    <div style="background:#f0f8ff;border-radius:12px;padding:16px;margin:10px 0">
+                        <h4 style="margin:0 0 8px 0">📋 Devis récents</h4>
+                        ${recent.map(q => makeCard(q, '#3b82f6')).join('')}
+                    </div>`;
+                if (typeof addMessage === 'function') addMessage(html, 'system');
+            }
+            if (drafts.length) {
+                const html = `
+                    <div style="background:#fffdf0;border-radius:12px;padding:16px;margin:10px 0">
+                        <h4 style="margin:0 0 8px 0">📝 Brouillons</h4>
+                        ${drafts.map(q => makeCard(q, '#f59e0b')).join('')}
+                    </div>`;
+                if (typeof addMessage === 'function') addMessage(html, 'system');
+            }
+        } catch (e) {
+            console.error("Erreur displayExistingQuotesInChat:", e);
+            if (typeof addMessage === 'function') addMessage("❌ Erreur lors de l'affichage des devis existants.", 'system');
             }
         }
-    </script>
 
-<script>
-// ----- Affichage des devis existants (récents & brouillons) dans le chat -----
-function displayExistingQuotesInChat(duplicateData) {
-    try {
-        const recent = Array.isArray(duplicateData?.recent_quotes) ? duplicateData.recent_quotes : [];
-        const drafts = Array.isArray(duplicateData?.draft_quotes) ? duplicateData.draft_quotes : [];
-
-        const makeCard = (q, color) => {
-            const id = q.DocNum ?? q.doc_num ?? q.id ?? "N/A";
-            const client = q.CardName ?? q.card_name ?? "Client N/A";
-            const total = q.DocTotal ?? q.doc_total ?? "N/A";
-            const date = q.DocDate ?? q.doc_date ?? "N/A";
-            return `
-                <div style="background:#fff;border-left:4px solid ${color};border-radius:8px;padding:12px;margin:8px 0;box-shadow:0 1px 3px rgba(0,0,0,.06)">
-                    <div style="font-weight:600">#${id} — ${client}</div>
-                    <div style="color:#059669">Montant: ${total}</div>
-                    <div style="color:#6b7280;font-size:.9em">Date: ${date}</div>
-                    <div style="margin-top:8px">
-                        <button onclick="(typeof viewQuote==='function' ? viewQuote('${id}') : null)" style="border:0;border-radius:6px;padding:6px 10px;cursor:pointer;background:#3b82f6;color:#fff">Voir</button>
-                        <button onclick="resolveDuplicateDecision('consolidate','${id}')" style="border:0;border-radius:6px;padding:6px 10px;cursor:pointer;background:#6366f1;color:#fff;margin-left:8px">Consolider avec celui-ci</button>
+        // ----- Options de résolution (boutons d'action) -----
+        function addDuplicateResolutionOptions(duplicateData) {
+            const html = `
+                <div style="background:linear-gradient(135deg,#e3f2fd,#f3e5f5);border:1px solid #bbdefb;border-radius:12px;padding:16px;margin:12px 0">
+                    <h4 style="margin:0 0 12px 0;text-align:center">🔧 Comment souhaitez-vous procéder ?</h4>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                        <button onclick="resolveDuplicateDecision('proceed')" style="border:0;border-radius:8px;padding:12px;cursor:pointer;background:#10b981;color:#fff">✅ Créer un nouveau devis</button>
+                        <button onclick="resolveDuplicateDecision('review')" style="border:0;border-radius:8px;padding:12px;cursor:pointer;background:#f59e0b;color:#fff">📋 Examiner les existants</button>
+                        <button onclick="resolveDuplicateDecision('consolidate')" style="border:0;border-radius:8px;padding:12px;cursor:pointer;background:#3b82f6;color:#fff">🔄 Consolider</button>
+                        <button onclick="resolveDuplicateDecision('cancel')" style="border:0;border-radius:8px;padding:12px;cursor:pointer;background:#9ca3af;color:#fff">❌ Annuler</button>
                     </div>
                 </div>`;
-        };
-
-        if (recent.length) {
-            const html = `
-                <div style="background:#f0f8ff;border-radius:12px;padding:16px;margin:10px 0">
-                    <h4 style="margin:0 0 8px 0">📋 Devis récents</h4>
-                    ${recent.map(q => makeCard(q, '#3b82f6')).join('')}
-                </div>`;
             if (typeof addMessage === 'function') addMessage(html, 'system');
         }
-        if (drafts.length) {
-            const html = `
-                <div style="background:#fffdf0;border-radius:12px;padding:16px;margin:10px 0">
-                    <h4 style="margin:0 0 8px 0">📝 Brouillons</h4>
-                    ${drafts.map(q => makeCard(q, '#f59e0b')).join('')}
-                </div>`;
-            if (typeof addMessage === 'function') addMessage(html, 'system');
-        }
-    } catch (e) {
-        console.error("Erreur displayExistingQuotesInChat:", e);
-        if (typeof addMessage === 'function') addMessage("❌ Erreur lors de l'affichage des devis existants.", 'system');
-    }
-}
 
-// ----- Options de résolution (boutons d'action) -----
-function addDuplicateResolutionOptions(duplicateData) {
-    const html = `
-        <div style="background:linear-gradient(135deg,#e3f2fd,#f3e5f5);border:1px solid #bbdefb;border-radius:12px;padding:16px;margin:12px 0">
-            <h4 style="margin:0 0 12px 0;text-align:center">🔧 Comment souhaitez-vous procéder ?</h4>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-                <button onclick="resolveDuplicateDecision('proceed')" style="border:0;border-radius:8px;padding:12px;cursor:pointer;background:#10b981;color:#fff">✅ Créer un nouveau devis</button>
-                <button onclick="resolveDuplicateDecision('review')" style="border:0;border-radius:8px;padding:12px;cursor:pointer;background:#f59e0b;color:#fff">📋 Examiner les existants</button>
-                <button onclick="resolveDuplicateDecision('consolidate')" style="border:0;border-radius:8px;padding:12px;cursor:pointer;background:#3b82f6;color:#fff">🔄 Consolider</button>
-                <button onclick="resolveDuplicateDecision('cancel')" style="border:0;border-radius:8px;padding:12px;cursor:pointer;background:#9ca3af;color:#fff">❌ Annuler</button>
-            </div>
-        </div>`;
-    if (typeof addMessage === 'function') addMessage(html, 'system');
-}
-
-// ----- Envoi de la décision utilisateur vers le backend -----
-function resolveDuplicateDecision(decision, selectedQuoteId=null) {
-    try {
-        if (typeof currentTaskId === 'undefined' || !currentTaskId) {
-            if (typeof addMessage === 'function') addMessage("❌ Erreur: task_id indisponible.", 'system');
-            return;
-        }
-        const payload = {
-            type: 'user_response',
-            task_id: currentTaskId,
-            data: {
-                response_type: 'duplicate_resolution',
-                decision: decision,
-                selected_quote_id: selectedQuoteId
+        // ----- Envoi de la décision utilisateur vers le backend -----
+        function resolveDuplicateDecision(decision, selectedQuoteId=null) {
+            try {
+                if (typeof currentTaskId === 'undefined' || !currentTaskId) {
+                    if (typeof addMessage === 'function') addMessage("❌ Erreur: task_id indisponible.", 'system');
+                    return;
+                }
+                const payload = {
+                    type: 'user_response',
+                    task_id: currentTaskId,
+                    data: {
+                        response_type: 'duplicate_resolution',
+                        decision: decision,
+                        selected_quote_id: selectedQuoteId
+                    }
+                };
+                console.log("📤 Décision duplicate_resolution:", payload);
+                if (typeof sendWebSocketMessage === 'function') {
+                    if (!sendWebSocketMessage(payload)) {
+                        if (typeof addMessage === 'function') addMessage("❌ Erreur: Connexion WebSocket fermée. Rechargez la page.", 'system');
+                        return;
+                    }
+                } else if (window.websocket && window.websocket.readyState === WebSocket.OPEN) {
+                    window.websocket.send(JSON.stringify(payload));
+                } else {
+                    if (typeof addMessage === 'function') addMessage("❌ Erreur: Connexion WebSocket fermée. Rechargez la page.", 'system');
+                    return;
+                }
+                if (typeof addMessage === 'function') addMessage('Votre décision a été envoyée. Traitement en cours…', 'system');
+                if (typeof showProgress === 'function') { try { showProgress(); } catch(e){} }
+            } catch (e) {
+                console.error("Erreur resolveDuplicateDecision:", e);
+                if (typeof addMessage === 'function') addMessage("❌ Erreur lors de l'envoi de la décision.", 'system');
             }
-        };
-        console.log("📤 Décision duplicate_resolution:", payload);
-        if (typeof sendWebSocketMessage === 'function') {
-            if (!sendWebSocketMessage(payload)) {
-                if (typeof addMessage === 'function') addMessage("❌ Erreur: Connexion WebSocket fermée. Rechargez la page.", 'system');
-                return;
-            }
-        } else if (window.websocket && window.websocket.readyState === WebSocket.OPEN) {
-            window.websocket.send(JSON.stringify(payload));
-        } else {
-            if (typeof addMessage === 'function') addMessage("❌ Erreur: Connexion WebSocket fermée. Rechargez la page.", 'system');
-            return;
         }
-        if (typeof addMessage === 'function') addMessage('Votre décision a été envoyée. Traitement en cours…', 'system');
-        if (typeof showProgress === 'function') { try { showProgress(); } catch(e){} }
-    } catch (e) {
-        console.error("Erreur resolveDuplicateDecision:", e);
-        if (typeof addMessage === 'function') addMessage("❌ Erreur lors de l'envoi de la décision.", 'system');
-    }
-}
 </script>
 
 </body>
