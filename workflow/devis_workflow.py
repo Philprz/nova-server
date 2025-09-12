@@ -974,6 +974,18 @@ class DevisWorkflow:
             logger.info("✅ Utilisateur décide de créer un nouveau devis malgré les doublons")
             self.context["skip_duplicate_check"] = True
             extracted_info = context.get("extracted_info", {})
+            # 3. Récupérer les nouveaux produits à ajouter depuis le contexte (avec fallbacks robustes)
+            extracted_info = (
+                context.get("extracted_info")
+                or self.context.get("extracted_info")
+                or (
+                getattr(self, "current_task", None).context.get("extracted_info")
+                if getattr(self, "current_task", None) and getattr(self.current_task, "context", None)
+                else {}
+                )
+                or {}
+            )
+            new_products = (extracted_info.get("products") or [])
             return await self._process_quote_workflow(extracted_info)
 
         elif action == "consolidate":

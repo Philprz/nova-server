@@ -587,17 +587,21 @@ async def handle_duplicate_resolution_task(task_id: str, response_data: dict):
         
         logger.info(f"✅ Résolution doublon - décision: {decision}, quote_id: {selected_quote_id}")
         
-        # Récupérer le contexte original depuis la tâche
+        # Récupérer le contexte original depuis la tâche avec fallbacks
         original_context = {}
         if hasattr(task, 'validation_data') and task.validation_data:
             duplicate_validation = task.validation_data.get("duplicate_resolution", {})
             interaction_data = duplicate_validation.get("data", {}) or duplicate_validation.get("interaction_data", {})
             original_context = {
-                "interaction_type": "duplicate_resolution", 
-                "extracted_info": interaction_data.get("extracted_info", {}),
-                "recent_quotes": interaction_data.get("recent_quotes", []),
-                "draft_quotes": interaction_data.get("draft_quotes", [])
+            "interaction_type": "duplicate_resolution",
+            "extracted_info": (
+                interaction_data.get("extracted_info")
+                or (task.context.get("extracted_info") if hasattr(task, "context") and task.context else {})
+            ),
+            "recent_quotes": interaction_data.get("recent_quotes", []),
+            "draft_quotes": interaction_data.get("draft_quotes", [])
             }
+        
         
         # Créer instance workflow pour continuer le traitement
         from workflow.devis_workflow import DevisWorkflow
