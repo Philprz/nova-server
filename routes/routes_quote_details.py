@@ -210,6 +210,44 @@ async def get_sap_quote_details(
     Récupère les détails d'un devis SAP Business One
     """
     from services.mcp_connector import get_mcp_connector
+    import json
+
+    # Validation d'entrée
+    try:
+        doc_entry_int = int(doc_entry)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail=f"doc_entry invalide: {doc_entry}")
+
+    def _extract_quote_data(resp: Any) -> Dict[str, Any]:
+        """Normalise les variantes de réponse (value/quote/direct)."""
+        if isinstance(resp, dict):
+            if "value" in resp:
+                values = resp["value"]
+                if isinstance(values, list) and values:
+                    return values[0]
+                raise HTTPException(status_code=404, detail=f"Devis {doc_entry} non trouvé")
+            if "quote" in resp:
+                return resp["quote"]
+            if "DocEntry" in resp:
+                return resp
+        logger.error(f"Structure de réponse SAP inattendue: {resp}")
+        raise HTTPException(status_code=500, detail="Format de réponse SAP invalide")
+
+    def _check_errors(resp: Any) -> None:
+        """Détecte les erreurs standardisées dans un dict de réponse."""
+        if isinstance(resp, dict):
+            if "error" in resp:
+                err = resp.get("error", {})
+                if isinstance(err, dict):
+                    msg = err.get("message", resp.get("message", "Erreur inconnue"))
+                else:
+                    msg = str(err)
+                logger.error(f"Erreur SAP: {msg}")
+                raise HTTPException(status_code=500, detail=str(msg))
+            if "success" in resp and not resp["success"]:
+                msg = resp.get("message", resp.get("error", "Échec de récupération du devis"))
+                logger.error(f"Échec SAP: {msg}")
+                raise HTTPException(status_code=400, detail=str(msg))
 
     try:
         connector = get_mcp_connector()
@@ -218,14 +256,13 @@ async def get_sap_quote_details(
         # Essayer d'abord avec get_quotation_details (si disponible)
         try:
             sap_response = await connector.call_sap_mcp("get_quotation_details", {
-                "doc_entry": int(doc_entry),
+                "doc_entry": doc_entry_int,
                 "include_lines": include_lines,
                 "include_customer": include_customer
             })
         except Exception as e:
             # Fallback sur sap_read si get_quotation_details n'existe pas
             logger.warning(f"get_quotation_details non disponible, utilisation de sap_read: {str(e)}")
-            # Appel corrigé avec les bons paramètres
             sap_response = await connector.call_sap_mcp("sap_read", {
                 "endpoint": f"/Quotations({doc_entry})",
                 "method": "GET"
@@ -233,63 +270,31 @@ async def get_sap_quote_details(
 
         logger.info(f"Réponse SAP reçue pour devis {doc_entry}")
 
-        # CORRECTION: Traitement spécial si le résultat MCP est encapsulé dans 'result'
+        # Vérifier le format de la réponse MCP avant traitement
+        if isinstance(sap_response, str):
+            logger.error(f"Réponse SAP au format string: {sap_response}")
+            low = sap_response.lower()
+            if "not found" in low or "erreur" in low:
+                raise HTTPException(status_code=404, detail=f"Devis {doc_entry} non trouvé")
+            raise HTTPException(status_code=500, detail=f"Erreur SAP: {sap_response}")
+
+        # Si la réponse est dans un wrapper 'result'
         if isinstance(sap_response, dict) and 'result' in sap_response:
             actual_response = sap_response['result']
             if isinstance(actual_response, str):
-                # Tenter de parser le JSON si c'est une string
                 try:
-                    import json
                     sap_response = json.loads(actual_response)
-                except:
-                    raise HTTPException(status_code=500, detail=f"Erreur SAP: {actual_response}")
+                except json.JSONDecodeError:
+                    logger.error(f"JSON invalide dans result: {actual_response}")
+                    raise HTTPException(status_code=500, detail=f"Format JSON invalide: {actual_response}")
             else:
                 sap_response = actual_response
 
-        # CORRECTION: Vérifier le type de réponse d'abord
-        if isinstance(sap_response, str):
-            if "error" in sap_response.lower() or "not found" in sap_response.lower():
-                raise HTTPException(status_code=404, detail=f"Devis {doc_entry} non trouvé")
-            else:
-                raise HTTPException(status_code=500, detail=f"Format de réponse SAP invalide: {sap_response}")
-
-        # Vérifier les erreurs dans la réponse dict
-        if isinstance(sap_response, dict):
-            # Si la réponse contient un champ error
-            if "error" in sap_response:
-                error_msg = sap_response.get("error", {})
-                if isinstance(error_msg, dict):
-                    error_msg = error_msg.get("message", sap_response.get("message", "Erreur inconnue"))
-                logger.error(f"Erreur SAP: {error_msg}")
-                raise HTTPException(status_code=500, detail=str(error_msg))
-
-            # Si la réponse contient un champ success = False
-            if "success" in sap_response and not sap_response["success"]:
-                error_msg = sap_response.get("message", sap_response.get("error", "Échec de récupération du devis"))
-                logger.error(f"Échec SAP: {error_msg}")
-                raise HTTPException(status_code=400, detail=str(error_msg))
+        # Vérifier les erreurs
+        _check_errors(sap_response)
 
         # Extraire les données du devis
-        quote_data = None
-        if isinstance(sap_response, dict):
-            # Si les données sont dans "value" (format oData)
-            if "value" in sap_response:
-                values = sap_response["value"]
-                if isinstance(values, list) and len(values) > 0:
-                    quote_data = values[0]
-                else:
-                    logger.error(f"Devis {doc_entry} non trouvé dans SAP")
-                    raise HTTPException(status_code=404, detail=f"Devis {doc_entry} non trouvé")
-            # Si les données sont directement dans la réponse
-            elif "DocEntry" in sap_response:
-                quote_data = sap_response
-            # Si les données sont dans "quote"
-            elif "quote" in sap_response:
-                quote_data = sap_response["quote"]
-
-        if not quote_data:
-            logger.error(f"Structure de réponse SAP inattendue: {sap_response}")
-            raise HTTPException(status_code=500, detail="Format de réponse SAP invalide")
+        quote_data = _extract_quote_data(sap_response)
 
         # Formater la réponse pour l'interface
         formatted_response = {
@@ -308,7 +313,7 @@ async def get_sap_quote_details(
         }
 
         # Ajouter les lignes si demandées
-        if include_lines and "DocumentLines" in quote_data:
+        if include_lines and isinstance(quote_data.get("DocumentLines"), list):
             for line in quote_data["DocumentLines"]:
                 formatted_response["quote"]["lines"].append({
                     "line_num": line.get("LineNum"),
@@ -322,6 +327,7 @@ async def get_sap_quote_details(
 
         logger.info(f"Devis SAP {doc_entry} récupéré avec succès")
         return formatted_response
+
     except HTTPException:
         # Re-raise HTTPException as-is
         raise
@@ -330,61 +336,72 @@ async def get_sap_quote_details(
 
         # Tentative avec l'instance globale du connecteur
         try:
-            from services.mcp_connector import get_mcp_connector
             connector = get_mcp_connector()
-
             sap_response = await connector.call_sap_mcp("sap_read", {
                 "endpoint": f"/Quotations({doc_entry})",
                 "method": "GET"
             })
 
-            if sap_response and "error" not in sap_response:
-                # Formatter directement la réponse ici au lieu d'appeler une fonction non définie
-                quote_data = sap_response
-                if isinstance(sap_response, dict):
-                    if "value" in sap_response and isinstance(sap_response["value"], list):
-                        quote_data = sap_response["value"][0] if sap_response["value"] else None
-                    elif "quote" in sap_response:
-                        quote_data = sap_response["quote"]
+            # Gestion des mêmes cas (str/result) qu'au chemin principal
+            if isinstance(sap_response, str):
+                logger.error(f"Réponse SAP (fallback) au format string: {sap_response}")
+                low = sap_response.lower()
+                if "not found" in low or "erreur" in low:
+                    raise HTTPException(status_code=404, detail=f"Devis {doc_entry} non trouvé")
+                raise HTTPException(status_code=500, detail=f"Erreur SAP: {sap_response}")
 
-                if quote_data:
-                    formatted_response = {
-                        "success": True,
-                        "quote": {
-                            "doc_entry": quote_data.get("DocEntry"),
-                            "doc_num": quote_data.get("DocNum"),
-                            "doc_date": quote_data.get("DocDate"),
-                            "doc_due_date": quote_data.get("DocDueDate"),
-                            "doc_total": quote_data.get("DocTotal", 0),
-                            "card_code": quote_data.get("CardCode"),
-                            "card_name": quote_data.get("CardName"),
-                            "comments": quote_data.get("Comments", ""),
-                            "lines": []
-                        }
-                    }
+            if isinstance(sap_response, dict) and 'result' in sap_response:
+                actual_response = sap_response['result']
+                if isinstance(actual_response, str):
+                    try:
+                        sap_response = json.loads(actual_response)
+                    except json.JSONDecodeError:
+                        logger.error(f"JSON invalide dans result (fallback): {actual_response}")
+                        raise HTTPException(status_code=500, detail=f"Format JSON invalide: {actual_response}")
+                else:
+                    sap_response = actual_response
 
-                    if include_lines and "DocumentLines" in quote_data:
-                        for line in quote_data["DocumentLines"]:
-                            formatted_response["quote"]["lines"].append({
-                                "line_num": line.get("LineNum"),
-                                "item_code": line.get("ItemCode"),
-                                "item_description": line.get("ItemDescription"),
-                                "quantity": line.get("Quantity", 0),
-                                "unit_price": line.get("UnitPrice", 0),
-                                "discount_percent": line.get("DiscountPercent", 0),
-                                "line_total": line.get("LineTotal", 0)
-                            })
+            _check_errors(sap_response)
 
-                    return formatted_response
+            quote_data = _extract_quote_data(sap_response)
 
+            formatted_response = {
+                "success": True,
+                "quote": {
+                    "doc_entry": quote_data.get("DocEntry"),
+                    "doc_num": quote_data.get("DocNum"),
+                    "doc_date": quote_data.get("DocDate"),
+                    "doc_due_date": quote_data.get("DocDueDate"),
+                    "doc_total": quote_data.get("DocTotal", 0),
+                    "card_code": quote_data.get("CardCode"),
+                    "card_name": quote_data.get("CardName"),
+                    "comments": quote_data.get("Comments", ""),
+                    "lines": []
+                }
+            }
+
+            if include_lines and isinstance(quote_data.get("DocumentLines"), list):
+                for line in quote_data["DocumentLines"]:
+                    formatted_response["quote"]["lines"].append({
+                        "line_num": line.get("LineNum"),
+                        "item_code": line.get("ItemCode"),
+                        "item_description": line.get("ItemDescription"),
+                        "quantity": line.get("Quantity", 0),
+                        "unit_price": line.get("UnitPrice", 0),
+                        "discount_percent": line.get("DiscountPercent", 0),
+                        "line_total": line.get("LineTotal", 0)
+                    })
+
+            return formatted_response
+
+        except HTTPException:
+            raise
         except Exception as e2:
             logger.error(f"Fallback échoué: {str(e2)}")
-
-        # Si tout échoue, retourner une erreur détaillée
-        raise HTTPException(
-            status_code=500,
-            detail=f"Erreur SAP: {str(e)}"
-        )
+            raise HTTPException(
+                status_code=500,
+                detail=f"Erreur SAP: {str(e)}"
+            )
 
 async def get_salesforce_quote_details(
     opportunity_id: str,
