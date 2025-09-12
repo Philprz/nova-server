@@ -2042,6 +2042,10 @@
                 const products =
                     result.products ||
                     result.validated_data?.products ||
+                    result.quote_data?.products ||
+                    result.quote_data?.quote?.DocumentLines ||
+                    result.quote_data?.DocumentLines ||
+                    result.validated_data?.sap_quote?.DocumentLines ||
                     result.sap_quote?.DocumentLines ||
                     result.raw_result?.DocumentLines ||
                     [];
@@ -2897,7 +2901,16 @@
             const formattedAmount = fmt.format(Number.isFinite(totalAmountNum) ? totalAmountNum : 0);
 
             // Produits (normalisation)
-            const rawProducts = result?.products ?? result?.quote_data?.products ?? result?.validated_data?.products ?? [];
+            const rawProducts =
+                result?.products ??
+                result?.quote_data?.products ??
+                result?.quote_data?.quote?.DocumentLines ??
+                result?.quote_data?.DocumentLines ??
+                result?.validated_data?.products ??
+                result?.validated_data?.sap_quote?.DocumentLines ??
+                result?.sap_quote?.DocumentLines ??
+                result?.raw_result?.DocumentLines ??
+                [];
             const products = Array.isArray(rawProducts) ? rawProducts.map(p => {
                 const qty = Number(p?.quantity ?? p?.Quantity ?? 0);
                 const unit = Number(p?.unit_price ?? p?.UnitPrice ?? p?.Price ?? 0);
@@ -3135,6 +3148,8 @@
                     quote.DocumentLines ||
                     quote.lines ||
                     quoteData?.quote?.DocumentLines ||
+                    quoteData?.DocumentLines ||
+                    quoteData?.sap_quote?.DocumentLines ||
                     [];
 
                 if (!Array.isArray(rawLines)) rawLines = [];

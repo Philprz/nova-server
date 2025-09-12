@@ -326,8 +326,19 @@ async def get_sap_quote_details(
                 })
 
         logger.info(f"Devis SAP {doc_entry} récupéré avec succès")
-        return formatted_response
-
+        # Structurer les données pour l'interface d'édition
+        structured_data = structure_quote_for_editing(quote_data, int(doc_entry))
+        
+        return {
+            "success": True,
+            "quote": structured_data["quote"],
+            "metadata": {
+                "doc_entry": doc_entry,
+                "lines_count": len(quote_data.get("DocumentLines", [])),
+                "has_customer_details": "CustomerDetails" in quote_data,
+                "retrieved_at": datetime.now().isoformat()
+            }
+        }
     except HTTPException:
         # Re-raise HTTPException as-is
         raise

@@ -1319,7 +1319,7 @@ async def sap_modify_quote(doc_entry: int, modifications: dict) -> dict:
                 line["LineNum"] = i
         
         # Appeler l'API SAP pour mettre à jour
-        response = await call_sap(f"/Quotations({doc_entry})", "PATCH", update_data)
+        response = await call_sap(f"/Quotations({doc_entry})", "PUT", update_data)
         
         if "error" in response:
             return {"success": False, "error": response["error"]}
@@ -1357,7 +1357,7 @@ async def sap_update_quotation(doc_entry: int, quotation_data: dict) -> dict:
         log(f"Mise à jour complète du devis SAP DocEntry: {doc_entry}")
         
         # Mettre à jour le devis
-        response = await call_sap(f"/Quotations({doc_entry})", "PATCH", quotation_data)
+        response = await call_sap(f"/Quotations({doc_entry})", "PUT", quotation_data)
         
         if "error" in response:
             return {"success": False, "error": response["error"]}
