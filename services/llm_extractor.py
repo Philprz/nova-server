@@ -207,7 +207,12 @@ Réponds UNIQUEMENT au format JSON suivant:
                     if client_match:
                         extracted_data["client"] = client_match
                         logger.info(f"🔧 CLIENT RÉCUPÉRÉ du prompt: {client_match}")
-                
+                        # FALLBACK EXTRACTION MANUELLE POUR PATTERNS SIMPLES (si le LLM n'a pas détecté de produits)
+                        if not extracted_data.get("products") and prompt:
+                            manual_products = self._extract_products_manually(prompt)
+                            if manual_products:
+                                extracted_data["products"] = manual_products
+                                logger.info(f"✅ Produits extraits manuellement: {manual_products}")
                 return extracted_data
             else:
                 logger.error("Impossible de trouver du JSON dans la réponse Claude")
@@ -222,6 +227,45 @@ Réponds UNIQUEMENT au format JSON suivant:
             except json.JSONDecodeError:
                 logger.error("❌ OpenAI response not valid JSON")
                 raise
+    def _extract_products_manually(self, prompt: str) -> List[Dict[str, Any]]:
+        """Extraction manuelle robuste avec patterns étendus (imprimantes, variantes x4/4x/4*)"""
+        import re
+
+        prompt_lower = prompt.lower().replace('.', '').strip()
+        products: List[Dict[str, Any]] = []
+
+        # Variantes : "4 imprimantes", "imprimantes x4", "4x impr", "4 * imprimantes", "devis 4 imprimantes"
+        quantity_patterns = [
+            r'(?:\bx\s*)?(\d+)\s*(?:x|\*)?\s*impr[iy]m?ante?s?',  # "4 imprimantes", "x4 impr", "4x imprimantes"
+            r'impr[iy]m?ante?s?\s*(?:x|\*)?\s*(\d+)',             # "imprimantes x4", "imprimantes 4"
+            r'(\d+)\s*(?:x|\*)?\s*impr[iy]?',                     # "4 impr", "4x impr"
+            r'devis\s+(\d+)\s+impr[iy]m?ante?s?'                  # "devis 4 imprimantes"
+        ]
+
+        for pattern in quantity_patterns:
+            match = re.search(pattern, prompt_lower)
+            if match:
+                qty = self._to_int_safe(match.group(1))
+                if 1 <= qty <= 999:
+                    products.append({
+                        "name": "Imprimante",
+                        "label": "imprimante",
+                        "quantity": qty,
+                        # Hints génériques (pas de référence figée)
+                        "item_hint": ["imprimante", "printer", "laser", "bureau"]
+                    })
+                    logger.info(f"Pattern imprimante détecté: {qty} unité(s)")
+                    break
+
+        return products
+
+    def _to_int_safe(self, value: str, default: int = 1) -> int:
+        """Conversion int sécurisée avec bornes"""
+        try:
+            val = int(str(value).strip())
+            return max(1, min(999, val))
+        except (ValueError, AttributeError):
+            return default
     async def extract_product_search_criteria(self, product_name: str) -> Dict[str, Any]:
         """Extrait critères de recherche intelligents pour un produit"""
         

@@ -1018,14 +1018,32 @@ class DevisWorkflow:
                     extracted_info = context.get("extracted_info", {})
                     new_products = extracted_info.get("products", [])
                     
+                    # GARDE-FOU : Consolidation sans nouveaux produits → interaction explicite
                     if not new_products:
                         logger.warning("⚠️ Pas de nouveaux produits à consolider")
-                        return {
-                            "success": True,
-                            "status": "completed", 
-                            "message": f"Aucun nouveau produit à ajouter au devis {selected_quote_id}"
-                        }
-                    
+                        try:
+                            from services.websocket_manager import websocket_manager
+                            await websocket_manager.send_user_interaction_required(
+                                self.task_id,
+                                {
+                                    "type": "duplicate_resolution_no_changes",
+                                    "message": "Aucun produit à consolider. Voulez-vous examiner le devis existant ou créer un nouveau devis ?",
+                                    "selected_quote_id": selected_quote_id,
+                                    "options": [
+                                        {"value": "review", "label": "Examiner le devis existant"},
+                                        {"value": "proceed", "label": "Créer un nouveau devis"}
+                                    ],
+                                    "input_type": "choice"
+                                }
+                            )
+                            return {"success": True, "status": "user_interaction_required"}
+                        except Exception as ws_error:
+                            logger.warning(f"Erreur WebSocket: {ws_error}")
+                            return {
+                                "success": False,
+                                "status": "error",
+                                "message": f"Aucun nouveau produit à ajouter au devis {selected_quote_id}"
+                            }
                     # 4. Préparer les modifications pour SAP
                     new_lines_to_add = []
                     lines_to_modify = []
@@ -4574,7 +4592,14 @@ class DevisWorkflow:
         try:
             fallback_result = await self._extract_info_basic_robust(prompt)
 
-            if fallback_result and "client" in fallback_result:
+            # Ajouter extraction produits même si le client est trouvé mais pas les produits
+            if fallback_result and not fallback_result.get("products"):
+                manual_products = self._extract_products_from_prompt_manual(prompt)
+                if manual_products:
+                    fallback_result["products"] = manual_products
+                    logger.info(f"✅ Produits ajoutés au fallback: {manual_products}")
+
+            if fallback_result and ("client" in fallback_result or "products" in fallback_result):
                 logger.info("✅ Extraction manuelle réussie")
                 return fallback_result
             else:
@@ -4587,6 +4612,42 @@ class DevisWorkflow:
         logger.info("🔄 Extraction minimale par défaut...")
 
         return await self._extract_info_minimal(prompt)
+    
+    def _extract_products_from_prompt_manual(self, prompt: str) -> List[Dict[str, Any]]:
+        """Extraction manuelle des produits (patterns étendus)"""
+        import re
+
+        prompt_lower = prompt.lower().replace('.', '').strip()
+        products: List[Dict[str, Any]] = []
+
+        patterns = [
+            r'(?:\bx\s*)?(\d+)\s*(?:x|\*)?\s*impr[iy]m?ante?s?',
+            r'impr[iy]m?ante?s?\s*(?:x|\*)?\s*(\d+)',
+            r'devis\s+(\d+)\s+impr[iy]m?ante?s?'
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, prompt_lower)
+            if match:
+                qty = self._to_int_safe(match.group(1))
+                if 1 <= qty <= 999:
+                    products.append({
+                        "name": "Imprimante",
+                        "label": "imprimante",
+                        "quantity": qty,
+                        "item_hint": ["imprimante", "printer", "laser", "bureau"]
+                    })
+                    break
+
+        return products
+
+    def _to_int_safe(self, value: str, default: int = 1) -> int:
+        """Conversion int sécurisée avec bornes"""
+        try:
+            val = int(str(value).strip())
+            return max(1, min(999, val))
+        except (ValueError, AttributeError):
+            return default
 
     async def _extract_info_basic_robust(self, prompt: str) -> Dict[str, Any]:
         """
