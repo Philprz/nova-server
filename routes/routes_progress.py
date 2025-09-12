@@ -230,7 +230,9 @@ async def handle_user_response_task(task_id: str, response_data: dict):
         elif response_type == "product_selection":
             # Traiter la sélection produit
             await handle_product_selection_task(task_id, response_data)
-            
+        elif response_type == "duplicate_resolution":
+            # Traiter la résolution des doublons
+            await handle_duplicate_resolution_task(task_id, response_data)    
     except Exception as e:
         logger.error(f"❌ Erreur traitement réponse task {task_id}: {e}")
 
@@ -568,7 +570,82 @@ async def handle_product_selection_task(task_id: str, response_data: Dict[str, A
         except Exception as ws_err:
             logger.exception(f"⚠️ Échec notification WebSocket en erreur: {ws_err}")
 
-
+async def handle_duplicate_resolution_task(task_id: str, response_data: dict):
+    """Traite la résolution des doublons pour une tâche donnée."""
+    try:
+        logger.info(f"🔄 Traitement résolution doublons task {task_id}: {response_data}")
+        
+        # Récupérer la tâche
+        task = progress_tracker.get_task(task_id)
+        if not task:
+            logger.error(f"❌ Tâche {task_id} introuvable")
+            return
+            
+        # Extraire les données de décision
+        decision = response_data.get("decision")
+        selected_quote_id = response_data.get("selected_quote_id")
+        
+        logger.info(f"✅ Résolution doublon - décision: {decision}, quote_id: {selected_quote_id}")
+        
+        # Récupérer le contexte original depuis la tâche
+        original_context = {}
+        if hasattr(task, 'validation_data') and task.validation_data:
+            duplicate_validation = task.validation_data.get("duplicate_resolution", {})
+            interaction_data = duplicate_validation.get("data", {}) or duplicate_validation.get("interaction_data", {})
+            original_context = {
+                "interaction_type": "duplicate_resolution", 
+                "extracted_info": interaction_data.get("extracted_info", {}),
+                "recent_quotes": interaction_data.get("recent_quotes", []),
+                "draft_quotes": interaction_data.get("draft_quotes", [])
+            }
+        
+        # Créer instance workflow pour continuer le traitement
+        from workflow.devis_workflow import DevisWorkflow
+        workflow = DevisWorkflow(task_id=task_id, force_production=True)
+        
+        # Restaurer le contexte du workflow si disponible
+        if hasattr(task, 'context') and task.context:
+            workflow.context = task.context.copy()
+            logger.info(f"✅ Contexte restauré pour duplicate_resolution")
+        
+        # Préparer les données pour le workflow
+        user_input = {
+            "action": decision,
+            "selected_quote_id": selected_quote_id
+        }
+        
+        # Continuer le workflow avec la décision utilisateur
+        continuation_result = await workflow.continue_after_user_input(user_input, original_context)
+        
+        logger.info(f"✅ Résultat continuation workflow: {continuation_result.get('status', 'N/A')}")
+        # Répercuter le contexte du workflow dans la tâche (persistance)
+        try:
+            if hasattr(workflow, "context") and task:
+                task.context = (task.context or {}) | (workflow.context or {})
+                logger.info("💾 Contexte de workflow répercuté dans la tâche")
+        except Exception as sync_err:
+            logger.warning(f"⚠️ Échec sauvegarde contexte vers la tâche: {sync_err}")
+        # Notifier via WebSocket
+        await websocket_manager.send_task_update(task_id, {
+            "type": "duplicate_resolution_processed",
+            "decision": decision,
+            "result": continuation_result
+        })
+        
+        # Si le workflow continue, ne pas marquer comme complet immédiatement
+        if continuation_result.get("status") == "user_interaction_required":
+            logger.info(f"⏸️ Nouvelle interaction utilisateur requise")
+        else:
+            # Marquer l'étape comme complétée seulement si fini
+            task.complete_user_validation("duplicate_resolution", response_data)
+        
+    except Exception as e:
+        logger.exception(f"❌ Erreur résolution doublons {task_id}: {str(e)}")
+        await websocket_manager.send_task_update(task_id, {
+            "type": "validation_error",
+            "step": "duplicate_resolution",
+            "error": str(e)
+        })
 # =============================================
 # ENDPOINTS DE VALIDATION UTILISATEUR
 # =============================================

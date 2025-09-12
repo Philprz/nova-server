@@ -980,19 +980,159 @@ class DevisWorkflow:
             # Permettre de choisir un devis à consolider
             selected_quote_id = user_input.get("selected_quote_id")
             if selected_quote_id:
-                # TODO: Implémenter la logique de consolidation
-                return {
-                    "status": "consolidation_in_progress",
-                    "message": f"Consolidation avec devis {selected_quote_id} en cours...",
-                    "selected_quote": selected_quote_id
-                }
+                logger.info(f"🔄 Début de la consolidation avec le devis ID: {selected_quote_id}")
+                try:
+                    # 1. Récupérer le devis existant via l'instance MCP (architecture correcte)
+                    doc_id = int(selected_quote_id) if str(selected_quote_id).isdigit() else selected_quote_id
+                    existing_quote_response = await self.mcp_connector.call_mcp("sap_mcp", "get_quotation_details", {
+                        "doc_entry": doc_id,
+                        "include_lines": True
+                    })
+                    
+                    if not existing_quote_response.get("success"):
+                        return {
+                            "success": False,
+                            "status": "error",
+                            "message": f"Impossible de récupérer le devis {selected_quote_id}",
+                            "error": existing_quote_response.get("error", "Erreur inconnue")
+                        }
+                    
+                    # 2. Accès robuste aux données SAP (gestion payload emballée)
+                    data = existing_quote_response.get("data") or existing_quote_response
+                    quote_header = data or {}
+                    existing_lines = (quote_header.get("quote") or quote_header).get("DocumentLines", []) or []
+                    
+                    # 3. Récupérer les nouveaux produits à ajouter depuis le contexte
+                    extracted_info = context.get("extracted_info", {})
+                    new_products = extracted_info.get("products", [])
+                    
+                    if not new_products:
+                        logger.warning("⚠️ Pas de nouveaux produits à consolider")
+                        return {
+                            "success": True,
+                            "status": "completed", 
+                            "message": f"Aucun nouveau produit à ajouter au devis {selected_quote_id}"
+                        }
+                    
+                    # 4. Préparer les modifications pour SAP
+                    new_lines_to_add = []
+                    lines_to_modify = []
+                    
+                    for product in new_products:
+                        product_name = (product.get("name") or "").strip()
+                        product_code = (product.get("code") or product.get("ItemCode") or "").strip()
+                        product_qty = float(product.get("quantity", 1))
+                        
+                        if not product_name:
+                            continue
+                            
+                        # 5. Matching robuste : exact sur ItemCode puis fallback nom exact (insensible casse)
+                        match_index = None
+                        match_line_num = None
+                        
+                        for idx, line in enumerate(existing_lines):
+                            item_code = (line.get("ItemCode") or "").strip()
+                            item_desc = (line.get("ItemDescription") or "").strip()
+                            
+                            if product_code and item_code and product_code.lower() == item_code.lower():
+                                match_index = idx
+                                match_line_num = line.get("LineNum", idx)
+                                break
+                            elif product_name and item_desc and product_name.lower() == item_desc.lower():
+                                match_index = idx
+                                match_line_num = line.get("LineNum", idx)
+                                break
+                        
+                        if match_index is not None:
+                            # Modifier ligne existante (corrige index vs LineNum)
+                            current_qty = float(existing_lines[match_index].get("Quantity", 0))
+                            lines_to_modify.append({
+                                "LineNum": match_line_num,   # PascalCase SAP
+                                "Quantity": current_qty + product_qty
+                            })
+                            logger.info(f"✅ Ligne {match_line_num} - quantité augmentée de {product_qty}")
+                        else:
+                            # Rechercher le produit dans SAP pour obtenir les détails
+                            product_search = await self.mcp_connector.call_mcp("sap_mcp", "sap_search", {
+                                "query": product_name,
+                                "entity_type": "Items",
+                                "limit": 1
+                            })
+                            
+                            if product_search.get("success") and product_search.get("results"):
+                                sap_product = product_search["results"][0]
+                                
+                                # Ajouter nouvelle ligne (schéma SAP PascalCase)
+                                new_lines_to_add.append({
+                                    "ItemCode": sap_product.get("ItemCode"),
+                                    "ItemDescription": sap_product.get("ItemName", product_name),
+                                    "Quantity": product_qty
+                                })
+                                logger.info(f"✅ Nouveau produit {product_name} préparé pour ajout")
+                            else:
+                                logger.warning(f"⚠️ Produit {product_name} non trouvé dans SAP, ignoré")
+                    
+                    # 6. Appliquer les modifications via sap_modify_quote (schéma correct)
+                    modifications = {}
+                    
+                    if lines_to_modify:
+                        modifications["modify_lines"] = lines_to_modify
+                    if new_lines_to_add:
+                        modifications["add_lines"] = new_lines_to_add
+                    
+                    # Ajouter un commentaire de traçabilité
+                    from datetime import datetime as _dt
+                    modifications["header"] = {
+                        "comments": f"Consolidé via NOVA le {_dt.now().strftime('%d/%m/%Y %H:%M')} - {len(new_lines_to_add)} ligne(s) ajoutée(s), {len(lines_to_modify)} ligne(s) modifiée(s)"
+                    }
+                    
+                    if not modifications.get("modify_lines") and not modifications.get("add_lines"):
+                        return {
+                            "success": True,
+                            "status": "completed",
+                            "message": "Aucune modification nécessaire pour la consolidation"
+                        }
+                    
+                    # 7. Appel SAP via l'architecture unifiée (signature correcte)
+                    update_result = await self.mcp_connector.call_mcp("sap_mcp", "sap_modify_quote", {
+                        "doc_entry": doc_id,
+                        "modifications": modifications
+                    })
+                    
+                    if update_result.get("success"):
+                        self._track_step_complete("consolidation", f"✅ Devis {selected_quote_id} consolidé avec succès")
+                        
+                        return {
+                            "success": True,
+                            "status": "completed",
+                            "message": f"Devis {selected_quote_id} consolidé avec succès",
+                            "quote_id": selected_quote_id,
+                            "doc_num": update_result.get("doc_num"),
+                            "lines_added": len(new_lines_to_add),
+                            "lines_modified": len(lines_to_modify),
+                            "updated_quote": update_result.get("updated_quote", {})
+                        }
+                    else:
+                        return {
+                            "success": False,
+                            "status": "error",
+                            "message": f"Erreur lors de la consolidation du devis {selected_quote_id}",
+                            "error": update_result.get("error", "Erreur inconnue")
+                        }
+                            
+                except Exception as e:
+                    logger.exception(f"❌ Erreur consolidation devis {selected_quote_id}: {e}")
+                    return {
+                        "success": False,
+                        "status": "error",
+                        "message": f"Erreur lors de la consolidation: {str(e)}"
+                    }
             else:
                 return {
-                    "status": "user_interaction_required",
-                    "interaction_type": "quote_selection",
-                    "message": "Sélectionnez le devis à consolider",
-                    "available_quotes": context.get("recent_quotes", []) + context.get("draft_quotes", [])
-                }
+                    "success": False,
+                    "status": "error",
+                    "message": "Aucun devis sélectionné pour la consolidation"
+                    }
 
         elif action == "review":
             # Rediriger vers l'interface de gestion des devis
