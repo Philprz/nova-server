@@ -172,61 +172,96 @@ Réponds UNIQUEMENT au format JSON suivant:
         logger.info(f"Extraction d'informations de devis à partir de: {prompt}")
 
         try:
+            # 1) Appel Claude
             response_data = await self._call_claude(prompt)
             claude_content = response_data.get("content", [{}])[0].get("text", "")
             logger.info(f"CONTENU CLAUDE EXTRAIT: {claude_content}")
+
+            # 2) Tentative d'extraction JSON depuis le texte
             start_idx = claude_content.find("{")
             end_idx = claude_content.rfind("}") + 1
-            if start_idx >= 0 and end_idx > start_idx:
-                json_str = claude_content[start_idx:end_idx]
-                logger.info(f"JSON EXTRAIT: {json_str}")
-                extracted_data = json.loads(json_str)
-                logger.info(f"EXTRACTION RÉUSSIE: {extracted_data}")
-                
-                # CORRECTION: Préserver le client détecté
-                action_type = extracted_data.get("action_type", "NON_DÉTECTÉ")
-                if action_type == "RECHERCHE_PRODUIT" and not extracted_data.get("client"):
-                    # Rechercher le client dans le prompt original
-                    client_match = self._extract_client_from_prompt(prompt)
-                    if client_match:
-                        extracted_data["client"] = client_match
-                        logger.info(f"CLIENT RÉCUPÉRÉ: {client_match}")
-                logger.info(f"TYPE D'ACTION DÉTECTÉ: {action_type}")
-                if action_type == "RECHERCHE_PRODUIT":
-                    search_criteria = extracted_data.get('search_criteria', {})
-                    logger.info(f"🔍 CRITÈRES DE RECHERCHE: {search_criteria}")
-                elif action_type == "DEVIS":
-                    client = extracted_data.get('client', 'Non spécifié')
-                    products = extracted_data.get('products', [])
-                    logger.info(f"CLIENT DEVIS: {client}")
-                    logger.info(f"PRODUITS DEVIS: {products}")
-                # CORRECTION: Détecter le client dans le prompt si manquant
-                if extracted_data.get("action_type") == "RECHERCHE_PRODUIT" and not extracted_data.get("client"):
-                    # Rechercher le client dans le prompt original
-                    client_match = self._extract_client_from_original_prompt(prompt)
-                    if client_match:
-                        extracted_data["client"] = client_match
-                        logger.info(f"🔧 CLIENT RÉCUPÉRÉ du prompt: {client_match}")
-                        # FALLBACK EXTRACTION MANUELLE POUR PATTERNS SIMPLES (si le LLM n'a pas détecté de produits)
-                        if not extracted_data.get("products") and prompt:
-                            manual_products = self._extract_products_manually(prompt)
-                            if manual_products:
-                                extracted_data["products"] = manual_products
-                                logger.info(f"✅ Produits extraits manuellement: {manual_products}")
-                return extracted_data
-            else:
+            if start_idx < 0 or end_idx <= start_idx:
                 logger.error("Impossible de trouver du JSON dans la réponse Claude")
                 return {"error": "Format de réponse invalide - pas de JSON trouvé"}
+
+            json_str = claude_content[start_idx:end_idx]
+            logger.info(f"JSON EXTRAIT: {json_str}")
+            extracted_data = json.loads(json_str)
+            logger.info(f"EXTRACTION RÉUSSIE: {extracted_data}")
+
+            # 3) Post-traitements communs (quel que soit le type d'action)
+            action_type = extracted_data.get("action_type", "NON_DÉTECTÉ")
+            logger.info(f"TYPE D'ACTION DÉTECTÉ: {action_type}")
+
+            # 3.a) Client manquant → tentative depuis le prompt
+            if not extracted_data.get("client"):
+                client_match = self._extract_client_from_prompt(prompt)
+                if client_match:
+                    extracted_data["client"] = client_match
+                    logger.info(f"🔧 CLIENT RÉCUPÉRÉ du prompt: {client_match}")
+
+            # 3.b) Produits manquants → fallback manuel (regex étendus)
+            if not extracted_data.get("products") and prompt:
+                manual_products = self._extract_products_manually(prompt)
+                if manual_products:
+                    extracted_data["products"] = manual_products
+                    logger.info(f"✅ Produits extraits manuellement (général): {manual_products}")
+
+            # 4) Logs contextuels selon type d'action (informatifs)
+            if action_type == "RECHERCHE_PRODUIT":
+                search_criteria = extracted_data.get("search_criteria", {})
+                logger.info(f"🔍 CRITÈRES DE RECHERCHE: {search_criteria}")
+            elif action_type == "DEVIS":
+                client = extracted_data.get("client", "Non spécifié")
+                products = extracted_data.get("products", [])
+                logger.info(f"CLIENT DEVIS: {client}")
+                logger.info(f"PRODUITS DEVIS: {products}")
+
+            return extracted_data
+
         except Exception as e:
+            # 5) Fallback OpenAI si Claude échoue
             logger.error(f"❌ Claude failed after retries: {str(e)} – Falling back to OpenAI")
             if not OPENAI_API_KEY:
                 raise ValueError("OPENAI_API_KEY not set – Cannot fallback")
+
             openai_response = await self._call_openai(prompt)
+
             try:
-                return json.loads(openai_response)
+                extracted_data = json.loads(openai_response)
+                action_type = extracted_data.get("action_type", "NON_DÉTECTÉ")
+                logger.info(f"[OpenAI] TYPE D'ACTION DÉTECTÉ: {action_type}")
+
+                # Post-traitements communs (identiques à la branche Claude)
+                if not extracted_data.get("client"):
+                    client_match = self._extract_client_from_prompt(prompt)
+                    if client_match:
+                        extracted_data["client"] = client_match
+                        logger.info(f"🔧 CLIENT RÉCUPÉRÉ (OpenAI): {client_match}")
+
+                if not extracted_data.get("products") and prompt:
+                    manual_products = self._extract_products_manually(prompt)
+                    if manual_products:
+                        extracted_data["products"] = manual_products
+                        logger.info(f"✅ Produits extraits manuellement (OpenAI): {manual_products}")
+
+                # Logs contextuels
+                if action_type == "RECHERCHE_PRODUIT":
+                    search_criteria = extracted_data.get("search_criteria", {})
+                    logger.info(f"[OpenAI] 🔍 CRITÈRES DE RECHERCHE: {search_criteria}")
+                elif action_type == "DEVIS":
+                    client = extracted_data.get("client", "Non spécifié")
+                    products = extracted_data.get("products", [])
+                    logger.info(f"[OpenAI] CLIENT DEVIS: {client}")
+                    logger.info(f"[OpenAI] PRODUITS DEVIS: {products}")
+
+                return extracted_data
+
             except json.JSONDecodeError:
                 logger.error("❌ OpenAI response not valid JSON")
                 raise
+
+
     def _extract_products_manually(self, prompt: str) -> List[Dict[str, Any]]:
         """Extraction manuelle robuste avec patterns étendus (imprimantes, variantes x4/4x/4*)"""
         import re
