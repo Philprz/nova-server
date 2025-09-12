@@ -1742,7 +1742,8 @@ class DevisWorkflow:
             if self.client_validator:
                 try:
                     logger.info("🔍 Validation via ClientValidator...")
-                    validation_result = await self.client_validator.validate_and_enrich_client(client_name)
+                    validation_result = await self.client_validator.validate_complete({"company_name": client_name}, "FR")
+                    validation_result["can_create"] = validation_result.get("valid", False)
                     logger.info(f"✅ Validation terminée: {validation_result.get('can_create', False)}")
                 except Exception as e:
                     logger.warning(f"⚠️ Erreur validation client: {str(e)}")
@@ -6274,6 +6275,7 @@ class DevisWorkflow:
             self._track_step_start("client_creation", f"Création du client: {client_name}")
             
             validation_result = await self.client_validator.validate_complete({"company_name": client_name}, "FR")
+            validation_result["can_create"] = validation_result.get("valid", False)
             
             if validation_result.get("can_create"):
                 # Créer dans Salesforce puis SAP
