@@ -3108,152 +3108,181 @@
         }
 
         function displayQuoteDetails(quoteData) {
-            console.log('Données du devis reçues:', quoteData);
-            
-            if (!quoteData.success) {
-                addMessage(`❌ Erreur: ${quoteData.error || 'Impossible de récupérer les détails'}`, 'system');
-                return;
-            }
-            
-            const quote = quoteData.quote;
-            const lines = quote.lines || [];
-            
-            // Construire l'affichage détaillé
-            let detailsHtml = `
-                <div class="quote-details-container" style="
-                    background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-tertiary) 100%);
-                    border: 2px solid var(--primary-violet);
-                    border-radius: 12px;
-                    padding: 20px;
-                    margin: 10px 0;
-                    max-width: 100%;
-                ">
-                    <div class="quote-header" style="
-                        display: flex;
-                        justify-content: space-between;
-                        align-items: center;
-                        margin-bottom: 20px;
-                        border-bottom: 2px solid var(--border-color);
-                        padding-bottom: 15px;
-                    ">
-                        <div>
-                            <h3 style="margin: 0; color: var(--text-primary); font-size: 1.4em;">
-                                📋 Devis N° ${quote.doc_num || 'N/A'}
-                            </h3>
-                            <p style="margin: 5px 0 0 0; color: var(--text-secondary); font-size: 0.9em;">
-                                DocEntry: ${quote.doc_entry || 'N/A'} | Date: ${quote.doc_date || 'N/A'}
-                            </p>
-                        </div>
-                        <div style="text-align: right;">
-                            <div style="
-                                background: linear-gradient(135deg, var(--accent-green), var(--accent-teal));
-                                color: var(--text-on-accent, #fff);
-                                padding: 8px 16px;
-                                border-radius: 6px;
-                                font-weight: bold;
-                                font-size: 1.1em;
-                            ">
-                                ${quote.doc_total ? `${quote.doc_total}€` : 'Total N/A'}
-                            </div>
-                        </div>
-                    </div>
+            try {
+                console.log("Données du devis reçues:", quoteData);
 
-                    <div class="quote-client-info" style="
-                        background: var(--bg-primary);
-                        color: var(--text-primary);
-                        border-radius: 8px;
-                        padding: 15px;
-                        margin-bottom: 20px;
-                        border-left: 4px solid var(--accent-teal);
-                    ">
-                        <h4 style="margin: 0 0 10px 0; color: var(--text-primary); display: flex; align-items: center;">
-                            🏢 Client
-                        </h4>
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 0.9em;">
-                            <div><strong>Nom:</strong> ${quote.card_name || 'N/A'}</div>
-                            <div><strong>Code:</strong> ${quote.card_code || 'N/A'}</div>
-                        </div>
-                    </div>
+                // 1) Garde-fous & messages d'erreur
+                if (!quoteData || quoteData.success === false) {
+                    const err = quoteData?.error || "Impossible de récupérer les détails";
+                    addMessage(`❌ Erreur: ${err}`, "system");
+                    return;
+                }
 
-                    <div class="quote-lines" style="
-                        background: var(--bg-tertiary);
-                        border-radius: 8px;
-                        padding: 15px;
-                        border-left: 4px solid var(--accent-violet);
+                // 2) Extraction/normalisation du devis
+                const quote = quoteData.quote || quoteData || {};
+                const get = (obj, ...keys) => keys.find(k => obj?.[k] !== undefined) ? obj[keys.find(k => obj?.[k] !== undefined)] : undefined;
+
+                const docNum   = get(quote, "doc_num", "DocNum", "document_number") ?? "N/A";
+                const docEntry = get(quote, "doc_entry", "DocEntry", "id") ?? "N/A";
+                const docDate  = get(quote, "doc_date", "DocDate", "date") ?? "N/A";
+                const docTotalRaw = Number(get(quote, "doc_total", "DocTotal", "total", "Total"));
+                const cardName = get(quote, "card_name", "CardName", "customer_name") ?? "N/A";
+                const cardCode = get(quote, "card_code", "CardCode", "customer_code") ?? "N/A";
+                const comments = get(quote, "comments", "Comments", "remark", "Remark");
+
+                // 3) Normalisation des lignes (accepte plusieurs schémas)
+                let rawLines =
+                    quote.DocumentLines ||
+                    quote.lines ||
+                    quoteData?.quote?.DocumentLines ||
+                    [];
+
+                if (!Array.isArray(rawLines)) rawLines = [];
+
+                const toNum = (v) => {
+                    const n = Number(v);
+                    return Number.isFinite(n) ? n : 0;
+                };
+
+                const normalizedLines = rawLines
+                    .filter(l => l && (l.ItemCode || l.item_code || l.ItemDescription || l.item_description))
+                    .map((l) => {
+                        const quantity   = toNum(l.Quantity ?? l.quantity);
+                        const unitPrice  = toNum(l.UnitPrice ?? l.unit_price ?? l.Price ?? l.price);
+                        const lineTotal  = toNum(l.LineTotal ?? l.line_total ?? quantity * unitPrice);
+                        return {
+                            item_code:       l.ItemCode ?? l.item_code ?? l.code ?? "N/A",
+                            item_description:l.ItemDescription ?? l.item_description ?? l.description ?? "Produit",
+                            quantity,
+                            unit_price: unitPrice,
+                            line_total: lineTotal
+                        };
+                    });
+
+                // 4) Formatage (€ fr-FR) + date
+                const fmtMoney = (v) => Number.isFinite(v) ? v.toLocaleString("fr-FR", { style: "currency", currency: "EUR" }) : "N/A";
+                const fmtDate  = (d) => {
+                    // accepte yyyy-mm-dd, ISO ou déjà lisible
+                    try {
+                        const dt = new Date(d);
+                        return isNaN(dt.getTime()) ? (d || "N/A") : dt.toLocaleDateString("fr-FR");
+                    } catch { return d || "N/A"; }
+                };
+
+                const totalFormatted = Number.isFinite(docTotalRaw) ? fmtMoney(docTotalRaw) : "Total N/A";
+
+                // 5) Construction HTML
+                const linesCount = normalizedLines.length;
+                const linesTable = linesCount > 0
+                    ? `
+                    <div style="overflow-x: auto;">
+                        <table style="width: 100%; border-collapse: collapse; font-size: 0.85em;">
+                            <thead>
+                                <tr style="background: rgba(255,255,255,0.1); border-bottom: 2px solid rgba(255,255,255,0.1);">
+                                    <th style="padding: 8px; text-align: left; border-right: 1px solid rgba(255,255,255,0.1);">Code</th>
+                                    <th style="padding: 8px; text-align: left; border-right: 1px solid rgba(255,255,255,0.1);">Description</th>
+                                    <th style="padding: 8px; text-align: center; border-right: 1px solid rgba(255,255,255,0.1);">Qté</th>
+                                    <th style="padding: 8px; text-align: right; border-right: 1px solid rgba(255,255,255,0.1);">Prix Unit.</th>
+                                    <th style="padding: 8px; text-align: right;">Total</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${normalizedLines.map(line => `
+                                    <tr style="border-bottom: 1px solid #f1f5f9;">
+                                        <td style="padding: 8px; border-right: 1px solid #f1f5f9; font-weight: 600;">${line.item_code}</td>
+                                        <td style="padding: 8px; border-right: 1px solid #f1f5f9;">${line.item_description}</td>
+                                        <td style="padding: 8px; text-align: center; border-right: 1px solid #f1f5f9;">${line.quantity}</td>
+                                        <td style="padding: 8px; text-align: right; border-right: 1px solid #f1f5f9;">${fmtMoney(line.unit_price)}</td>
+                                        <td style="padding: 8px; text-align: right; font-weight: 600;">${fmtMoney(line.line_total)}</td>
+                                    </tr>
+                                `).join("")}
+                            </tbody>
+                        </table>
+                    </div>`
+                    : `<p style="color: #64748b; font-style: italic;">Aucun produit trouvé</p>`;
+
+                const detailsHtml = `
+                    <div class="quote-details-container" style="
+                        background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-tertiary) 100%);
+                        border: 2px solid var(--primary-violet);
+                        border-radius: 12px;
+                        padding: 20px;
+                        margin: 10px 0;
+                        max-width: 100%;
                     ">
-                        <h4 style="margin: 0 0 15px 0; color: var(--text-primary); display: flex; align-items: center;">
-                            📦 Produits (${lines.length} article${lines.length > 1 ? 's' : ''})
-                        </h4>
-                        ${lines.length > 0 ? `
-                            <div style="overflow-x: auto;">
-                                <table style="
-                                    width: 100%;
-                                    border-collapse: collapse;
-                                    font-size: 0.85em;
-                                ">
-                                    <thead>
-                                        <tr style="background: rgba(255, 255, 255, 0.1); border-bottom: 2px solid rgba(255, 255, 255, 0.1);">
-                                            <th style="padding: 8px; text-align: left; border-right: 1px solid rgba(255, 255, 255, 0.1);">Code</th>
-                                            <th style="padding: 8px; text-align: left; border-right: 1px solid rgba(255, 255, 255, 0.1);">Description</th>
-                                            <th style="padding: 8px; text-align: center; border-right: 1px solid rgba(255, 255, 255, 0.1);">Qté</th>
-                                            <th style="padding: 8px; text-align: right; border-right: 1px solid rgba(255, 255, 255, 0.1);">Prix Unit.</th>
-                                            <th style="padding: 8px; text-align: right;">Total</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        ${lines.map(line => `
-                                            <tr style="border-bottom: 1px solid #f1f5f9;">
-                                                <td style="padding: 8px; border-right: 1px solid #f1f5f9; font-weight: 600;">${line.item_code || 'N/A'}</td>
-                                                <td style="padding: 8px; border-right: 1px solid #f1f5f9;">${line.item_description || 'N/A'}</td>
-                                                <td style="padding: 8px; text-align: center; border-right: 1px solid #f1f5f9;">${line.quantity || 0}</td>
-                                                <td style="padding: 8px; text-align: right; border-right: 1px solid #f1f5f9;">${line.unit_price ? `${line.unit_price}€` : 'N/A'}</td>
-                                                <td style="padding: 8px; text-align: right; font-weight: 600;">${line.line_total ? `${line.line_total}€` : 'N/A'}</td>
-                                            </tr>
-                                        `).join('')}
-                                    </tbody>
-                                </table>
-                            </div>
-                        ` : '<p style="color: #64748b; font-style: italic;">Aucun produit trouvé</p>'}
-                    </div>
-                    
-                    ${quote.comments ? `
-                        <div class="quote-comments" style="
-                            background: #fffbeb;
-                            border-radius: 8px;
-                            padding: 15px;
-                            margin-top: 20px;
-                            border-left: 4px solid #f59e0b;
+                        <div class="quote-header" style="
+                            display: flex; justify-content: space-between; align-items: center;
+                            margin-bottom: 20px; border-bottom: 2px solid var(--border-color); padding-bottom: 15px;
                         ">
-                            <h4 style="margin: 0 0 10px 0; color: #0f172a; display: flex; align-items: center;">
-                                💬 Commentaires
-                            </h4>
-                            <p style="margin: 0; color: #374151; font-size: 0.9em;">${quote.comments}</p>
+                            <div>
+                                <h3 style="margin: 0; color: var(--text-primary); font-size: 1.4em;">
+                                    📋 Devis N° ${docNum}
+                                </h3>
+                                <p style="margin: 5px 0 0 0; color: var(--text-secondary); font-size: 0.9em;">
+                                    DocEntry: ${docEntry} | Date: ${fmtDate(docDate)}
+                                </p>
+                            </div>
+                            <div style="text-align: right;">
+                                <div style="
+                                    background: linear-gradient(135deg, var(--accent-green), var(--accent-teal));
+                                    color: var(--text-on-accent, #fff);
+                                    padding: 8px 16px; border-radius: 6px; font-weight: bold; font-size: 1.1em;
+                                ">
+                                    ${totalFormatted}
+                                </div>
+                            </div>
                         </div>
-                    ` : ''}
-                    
-                    <div class="quote-actions" style="
-                        margin-top: 20px;
-                        display: flex;
-                        gap: 10px;
-                        justify-content: center;
-                        flex-wrap: wrap;
-                    ">
-                        <button onclick="modifyQuote('${quoteData.quote_id || quote.doc_entry}')" class="btn btn-primary">
-                            ✏️ Modifier
-                        </button>
-                        <button onclick="printQuote('${quoteData.quote_id || quote.doc_entry}')" class="btn btn-accent">
-                            🖨️ Imprimer
-                        </button>
-                        <button onclick="newQuote()" class="btn btn-outline">
-                            📄 Nouveau devis
-                        </button>
+
+                        <div class="quote-client-info" style="
+                            background: var(--bg-primary); color: var(--text-primary);
+                            border-radius: 8px; padding: 15px; margin-bottom: 20px; border-left: 4px solid var(--accent-teal);
+                        ">
+                            <h4 style="margin: 0 0 10px 0; color: var(--text-primary); display: flex; align-items: center;">
+                                🏢 Client
+                            </h4>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 0.9em;">
+                                <div><strong>Nom:</strong> ${cardName}</div>
+                                <div><strong>Code:</strong> ${cardCode}</div>
+                            </div>
+                        </div>
+
+                        <div class="quote-lines" style="
+                            background: var(--bg-tertiary); border-radius: 8px; padding: 15px; border-left: 4px solid var(--accent-violet);
+                        ">
+                            <h4 style="margin: 0 0 15px 0; color: var(--text-primary); display: flex; align-items: center;">
+                                📦 Produits (${linesCount} article${linesCount > 1 ? "s" : ""})
+                            </h4>
+                            ${linesTable}
+                        </div>
+
+                        ${comments ? `
+                            <div class="quote-comments" style="
+                                background: #fffbeb; border-radius: 8px; padding: 15px; margin-top: 20px; border-left: 4px solid #f59e0b;
+                            ">
+                                <h4 style="margin: 0 0 10px 0; color: #0f172a; display: flex; align-items: center;">
+                                    💬 Commentaires
+                                </h4>
+                                <p style="margin: 0; color: #374151; font-size: 0.9em;">${comments}</p>
+                            </div>
+                        ` : ""}
+
+                        <div class="quote-actions" style="
+                            margin-top: 20px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;
+                        ">
+                            <button onclick="modifyQuote('${quoteData.quote_id || docEntry}')" class="btn btn-primary">✏️ Modifier</button>
+                            <button onclick="printQuote('${quoteData.quote_id || docEntry}')" class="btn btn-accent">🖨️ Imprimer</button>
+                            <button onclick="newQuote()" class="btn btn-outline">📄 Nouveau devis</button>
+                        </div>
                     </div>
-                </div>
-            `;
-            
-            // Ajouter le HTML au chat
-            addMessage(detailsHtml, 'system');
+                `;
+
+                addMessage(detailsHtml, "system");
+            } catch (e) {
+                console.error("displayQuoteDetails error:", e);
+                addMessage("❌ Erreur inattendue lors de l'affichage du devis.", "system");
+            }
         }
+
         
         function printQuote(quoteId) {
             console.log('Impression du devis:', quoteId);
