@@ -2176,28 +2176,6 @@ class DevisWorkflow:
                 "status": "error",
                 "error": str(e)
             }
-    async def _continue_workflow_after_client_selection(self, client_data, original_context):
-        # CORRECTION: Utiliser _process_products_retrieval qui gère les sélections
-        products_result = await self._process_products_retrieval(products)
-        if products_result.get("status") == "product_selection_required":
-             # Envoyer l'interaction WebSocket avant de s'arrêter
-            try:
-                await self._send_product_selection_interaction(products_result.get("products", []))
-            except Exception as ws_error:
-                logger.warning(f"⚠️ Erreur envoi WebSocket interaction produits: {ws_error}")
-            # Préparer l'interaction WebSocket pour sélection produits
-            try:
-                await websocket_manager.send_user_interaction_required(self.task_id, {
-                    "type": "product_selection",
-                    "products": products_result.get("products", []),
-                    "message": "Sélection de produits requise"
-                })
-            except Exception as ws_error:
-                logger.warning(f"⚠️ Erreur envoi WebSocket (non bloquant): {ws_error}")
-            return products_result
-        return products_result
-        return products_result
-
 
     async def _validate_products_with_suggestions(self, products: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
@@ -6409,6 +6387,25 @@ class DevisWorkflow:
                     extracted_info = _safe_dict(_safe_dict(sel.get("original_context")).get("extracted_info"))
 
                 products = extracted_info.get("products", [])
+                # 🔐 Assurer la présence de duplicate_check (reprise après interaction)
+                duplicate_check = self.context.get("duplicate_check")
+                if not isinstance(duplicate_check, dict):
+                    # Recalcule si absent du contexte (ex.: contexte non restauré)
+                    client_info_for_duplicates = self.context.get("client_info") or {"data": selected_client_data}
+                    try:
+                        duplicate_check = await self._check_duplicate_quotes(
+                            client_info=client_info_for_duplicates,
+                            products=products
+                        )
+                    except Exception as e:
+                        logger.warning(f"⚠️ Impossible de recalculer duplicate_check: {e}")
+                        duplicate_check = {}
+                    self.context["duplicate_check"] = duplicate_check
+                    self._save_context_to_task()
+
+                # Garde-fou pour éviter toute NoneType sur get()
+                duplicate_check = duplicate_check or {}
+
                 if products and not isinstance(products, list):
                     products = [products]
                 
@@ -7323,6 +7320,8 @@ class DevisWorkflow:
             )
             
             self.context["duplicate_check"] = duplicate_check
+            # Persister dans la tâche pour la reprise après interaction
+            self._save_context_to_task()
             # NOUVEAU: Toujours proposer de voir les devis existants s'il y en a
             total_existing_quotes = (
                 len(duplicate_check.get('recent_quotes', [])) +
