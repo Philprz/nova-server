@@ -351,7 +351,8 @@ class DevisWorkflow:
 
             elif interaction_type == "duplicate_resolution":
                 return await self._handle_duplicate_resolution(user_input, context)
-
+            elif interaction_type == "existing_quotes_review":
+                return await self._handle_existing_quotes_review(user_input, context)
             else:
                 return self._build_error_response("Type d'interaction non reconnu", f"Type: {interaction_type}")
 
@@ -6373,54 +6374,47 @@ class DevisWorkflow:
                     products = [products]
 
                 # 5) Vérification de doublons (APRÈS sélection client, AVANT produits)
-                logger.info("🔍 === Vérification des doublons après sélection client ===")
-                duplicate_check = await self._check_duplicate_quotes(
-                    {"data": selected_client_data, "found": True, "name": client_display_name},
-                    products
+                logger.info(f"🔍 Vérification doublons terminée: {len(duplicate_check.get('recent_quotes', [])) + len(duplicate_check.get('draft_quotes', [])) + len(duplicate_check.get('similar_quotes', []))} devis trouvé(s)")
+                
+                # NOUVEAU: Toujours proposer de voir les devis existants s'il y en a
+                total_existing_quotes = (
+                    len(duplicate_check.get('recent_quotes', [])) +
+                    len(duplicate_check.get('draft_quotes', [])) +
+                    len(duplicate_check.get('similar_quotes', []))
                 )
-                self.context["duplicate_check"] = duplicate_check
-
-                if duplicate_check.get("requires_user_decision"):
-                    logger.warning("⚠️ Doublons détectés - Interaction utilisateur requise")
-                    duplicate_interaction_data = {
-                        "type": "duplicate_resolution",
-                        "interaction_type": "duplicate_resolution",
+                
+                if total_existing_quotes > 0 and not duplicate_check.get("requires_user_decision"):
+                    # Proposer de voir les devis existants même s'ils ne sont pas des doublons stricts
+                    logger.info(f"📋 {total_existing_quotes} devis existant(s) trouvé(s) - Proposition d'affichage")
+                    
+                    devis_interaction_data = {
+                        "type": "existing_quotes_review",
+                        "interaction_type": "existing_quotes_review",
                         "client_name": client_display_name,
-                        "alert_message": duplicate_check.get("alert_message"),
+                        "message": f"Il existe {total_existing_quotes} devis pour ce client.",
                         "recent_quotes": duplicate_check.get("recent_quotes", []),
                         "draft_quotes": duplicate_check.get("draft_quotes", []),
                         "similar_quotes": duplicate_check.get("similar_quotes", []),
-                        "extracted_info": extracted_info,
                         "options": [
-                            {"value": "proceed", "label": "Créer un nouveau devis malgré les doublons"},
-                            {"value": "consolidate", "label": "Consolider avec un devis existant"},
-                            {"value": "review", "label": "Examiner les devis existants d'abord"},
-                            {"value": "cancel", "label": "Annuler la demande"},
+                            {"value": "view_quotes", "label": f"📋 Voir les {total_existing_quotes} devis existants"},
+                            {"value": "create_new", "label": "➕ Créer un nouveau devis directement"},
                         ],
-                        "input_type": "choice",
+                        "input_type": "choice"
                     }
-
-                    if self.current_task:
-                        self.current_task.status = TaskStatus.PENDING
-                        self.current_task.require_user_validation(
-                            "duplicate_resolution", "duplicate_resolution", duplicate_interaction_data
-                        )
-
+                    
                     try:
-                        from services.websocket_manager import websocket_manager
-                        await websocket_manager.send_user_interaction_required(self.task_id, duplicate_interaction_data)
-                        logger.info("✅ Alerte de doublon envoyée via WebSocket")
+                        await websocket_manager.send_user_interaction_required(self.task_id, devis_interaction_data)
+                        logger.info("✅ Proposition devis existants envoyée via WebSocket")
                     except Exception as ws_error:
-                        logger.warning(f"⚠️ Erreur envoi WebSocket alerte doublon: {ws_error}")
-
+                        logger.warning(f"⚠️ Erreur envoi WebSocket: {ws_error}")
+                    
                     return {
                         "status": "user_interaction_required",
-                        "type": "duplicate_resolution",
-                        "message": duplicate_check.get("alert_message"),
+                        "type": "existing_quotes_review",
+                        "message": f"Devis existants trouvés pour {client_display_name}",
                         "task_id": self.task_id,
-                        "interaction_data": duplicate_interaction_data,
+                        "interaction_data": devis_interaction_data
                     }
-
                 # 6) Continuer le workflow standard (utilise la fonction dédiée qui gère produits/WS)
                 return await self._continue_workflow_after_client_selection(
                     selected_client_data,
@@ -6442,7 +6436,54 @@ class DevisWorkflow:
             logger.exception(f"Erreur _handle_client_selection: {e}")
             return self._build_error_response("Erreur sélection client", str(e))
 
-
+    async def _handle_existing_quotes_review(self, user_input: Dict, context: Dict) -> Dict[str, Any]:
+        """Gère la revue des devis existants après sélection client"""
+        try:
+            action = user_input.get("action") or user_input.get("value")
+            logger.info(f"🔄 Traitement revue devis existants: {action}")
+            
+            if action == "view_quotes":
+                # Récupérer les devis depuis le contexte de doublon
+                duplicate_check = self.context.get("duplicate_check", {})
+                all_quotes = []
+                
+                # Combiner tous les types de devis
+                if duplicate_check.get("recent_quotes"):
+                    all_quotes.extend(duplicate_check["recent_quotes"])
+                if duplicate_check.get("draft_quotes"):
+                    all_quotes.extend(duplicate_check["draft_quotes"])
+                if duplicate_check.get("similar_quotes"):
+                    all_quotes.extend(duplicate_check["similar_quotes"])
+                
+                # Retourner les devis pour affichage
+                return {
+                    "status": "display_quotes",
+                    "quotes": all_quotes,
+                    "message": f"Voici les {len(all_quotes)} devis existants",
+                    "next_action": "allow_continue_or_select"
+                }
+                
+            elif action == "create_new":
+                # Continuer vers la création d'un nouveau devis
+                logger.info("➕ Création d'un nouveau devis demandée")
+                
+                # Récupérer le client et les produits du contexte
+                client_data = self.context.get("client_info", {}).get("data", {})
+                extracted_info = self.context.get("extracted_info", {})
+                products = extracted_info.get("products", [])
+                
+                # Continuer le workflow normal
+                return await self._continue_workflow_after_client_selection(
+                    client_data,
+                    {"extracted_info": extracted_info}
+                )
+                
+            else:
+                return self._build_error_response("Action non reconnue", f"Action: {action}")
+                
+        except Exception as e:
+            logger.exception(f"Erreur gestion revue devis existants: {e}")
+            return self._build_error_response("Erreur revue devis", str(e))
     async def _handle_new_client_creation(self, client_name: str, workflow_context: Dict) -> Dict:
         """
         🔧 CRÉATION CLIENT PUIS CONTINUATION WORKFLOW

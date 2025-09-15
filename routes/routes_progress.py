@@ -233,9 +233,57 @@ async def handle_user_response_task(task_id: str, response_data: dict):
         elif response_type == "duplicate_resolution":
             # Traiter la résolution des doublons
             await handle_duplicate_resolution_task(task_id, response_data)    
+        elif response_type == "existing_quotes_review":
+            # Traiter la revue des devis existants
+            await handle_existing_quotes_review(task_id, response_data)
     except Exception as e:
         logger.error(f"❌ Erreur traitement réponse task {task_id}: {e}")
 
+async def handle_existing_quotes_review(task_id: str, response_data: Dict[str, Any]):
+    """Traite la revue des devis existants"""
+    try:
+        logger.info(f"📋 Traitement revue devis existants pour {task_id}")
+        
+        task = progress_tracker.get_task(task_id)
+        if not task:
+            logger.error(f"❌ Tâche {task_id} introuvable")
+            return
+            
+        action = response_data.get("action") or response_data.get("value")
+        
+        # Créer le workflow
+        workflow = DevisWorkflow(task_id=task_id, force_production=True)
+        
+        # Restaurer le contexte
+        if hasattr(task, 'context') and task.context:
+            workflow.context = task.context.copy()
+            
+        # Préparer l'input utilisateur
+        user_input = {
+            "action": action,
+            "value": action
+        }
+        
+        context = {
+            "interaction_type": "existing_quotes_review"
+        }
+        
+        # Continuer le workflow
+        result = await workflow.continue_after_user_input(user_input, context)
+        
+        # Notifier via WebSocket si nécessaire
+        if result.get("status") == "display_quotes":
+            await websocket_manager.send_task_update(task_id, {
+                "type": "quotes_display",
+                "quotes": result.get("quotes", []),
+                "message": result.get("message")
+            })
+            
+        logger.info(f"✅ Revue devis traitée pour {task_id}")
+        
+    except Exception as e:
+        logger.exception(f"❌ Erreur traitement revue devis {task_id}: {e}")
+        
 async def handle_client_selection_task(task_id: str, response_data: dict):
     """Traite la sélection client (création ou sélection existante) pour une tâche donnée."""
     try:
