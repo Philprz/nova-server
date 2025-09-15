@@ -3915,7 +3915,7 @@ class DevisWorkflow:
         try:
             
             # Récupérer tous les brouillons
-            draft_result = await sap_list_draft_quotes()
+            draft_result = await MCPConnector.call_sap_mcp("sap_list_draft_quotes", {})
             
             if not draft_result.get("success"):
                 return []
@@ -6572,12 +6572,36 @@ class DevisWorkflow:
                 # Envoyer l'interaction WebSocket
                 await self._send_product_selection_interaction(products_result.get("products", []))
                 return products_result
-                
-            # Si produits validés, continuer vers génération devis
-            return await self._continue_quote_generation(products_result)
+            # Si produits validés, créer le devis final
+            if products_result.get("status") == "success":
+                # Préparer les données pour la génération finale
+                validated_data = {
+                    "client": {"data": client_data, "found": True},
+                    "products": products_result.get("products", [])
+                }
+                return await self._continue_quote_generation(validated_data)
+            else:
+                # Erreur dans la validation des produits
+                return products_result
         else:
-            # Si pas de produits, demander à l'utilisateur
-            return self._build_product_selection_interface(client_data.get("Name", ""))
+            # Si pas de produits, continuer avec un workflow de recherche de produits
+            logger.info("⚠️ Aucun produit dans la demande originale")
+            # Demander à l'utilisateur de préciser les produits
+            try:
+                await websocket_manager.send_user_interaction_required(self.task_id, {
+                    "type": "product_request",
+                    "message": f"Veuillez préciser les produits souhaités pour {client_data.get('Name', 'ce client')}",
+                    "client_name": client_data.get('Name', '')
+                })
+            except Exception as ws_error:
+                logger.warning(f"⚠️ Erreur envoi WebSocket: {ws_error}")
+            
+            return {
+                "status": "user_interaction_required",
+                "interaction_type": "product_request",
+                "message": "Précision des produits requise",
+                "client_selected": client_data.get('Name', '')
+            }
     def _generate_client_efficiency_tip(self, searched_name: str, found_client: Dict) -> str:
         """Génère des conseils d'efficacité pour l'utilisateur"""
         tips = []
