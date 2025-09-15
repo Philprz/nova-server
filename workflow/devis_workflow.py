@@ -3857,19 +3857,20 @@ class DevisWorkflow:
 
                 # Créer le message d'alerte personnalisé et demander décision utilisateur
                 if duplicate_check.get("duplicates_found"):
-                    alert_message = f"⚠️ ATTENTION: Devis existants détectés pour {client_name}"
-
-                    if recent_quotes:
-                        alert_message += f"\n📋 {len(recent_quotes)} devis récent(s) d'imprimantes"
-                    if draft_quotes:
-                        alert_message += f"\n✏️ {len(draft_quotes)} devis en brouillon"
-                    if similar_quotes:
-                        alert_message += f"\n🔄 {len(similar_quotes)} devis avec produits similaires"
-
+                    total_quotes = len(duplicate_check.get("recent_quotes", [])) + len(duplicate_check.get("draft_quotes", [])) + len(duplicate_check.get("similar_quotes", []))
+                    printer_quotes_count = await self._count_printer_quotes_for_client(
+                        client_name,
+                        duplicate_check.get("recent_quotes", []),
+                        duplicate_check.get("draft_quotes", []),
+                        duplicate_check.get("similar_quotes", [])
+                        )
+                    alert_message = (
+                        f"Il y a déjà {total_quotes} devis, dont {printer_quotes_count} qui concernent des imprimantes pour {client_name}.\n\n"
+                        "Voulez-vous reprendre un devis et le modifier ou en créer un nouveau from scratch ?"
+                        )
                     duplicate_check["alert_message"] = alert_message
                     duplicate_check["requires_user_decision"] = True
-
-                    logger.warning(f"⚠️ {len(duplicate_check.get('warnings', []))} doublons détectés")
+                    logger.warning(f"⚠️ Doublons: {total_quotes} devis dont {printer_quotes_count} avec imprimantes pour {client_name}")
 
                     return duplicate_check
             
@@ -7279,11 +7280,10 @@ class DevisWorkflow:
                     "similar_quotes": duplicate_check.get("similar_quotes", []),
                     "extracted_info": extracted_info,
                     "options": [
-                        {"value": "proceed", "label": "Créer un nouveau devis malgré les doublons"},
-                        {"value": "consolidate", "label": "Consolider avec un devis existant"},
-                        {"value": "review", "label": "Examiner les devis existants d'abord"},
+                        {"value": "proceed", "label": "Créer un nouveau devis from scratch"},
+                        {"value": "consolidate", "label": "Reprendre un devis et le modifier"},
                         {"value": "cancel", "label": "Annuler la demande"}
-                    ],
+                        ],
                     "input_type": "choice"
                 }
                 
@@ -7505,6 +7505,46 @@ class DevisWorkflow:
         except Exception as e:
             logger.error(f"❌ Erreur préparation aperçu devis: {str(e)}")
             return {"error": str(e)}
+    
+    async def _count_printer_quotes_for_client(self, client_name: str, recent_quotes: List, draft_quotes: List, similar_quotes: List) -> int:
+        """Compte les devis contenant des imprimantes pour un client (tous clients)"""
+        try:
+            printer_keywords = ['imprimante', 'printer', 'laser', "jet d'encre", 'multifonction', 'xerox', 'hp', 'canon', 'epson', 'brother']
+            printer_count = 0
+            for quote in list(recent_quotes) + list(draft_quotes) + list(similar_quotes):
+                if await self._quote_contains_printers(quote, printer_keywords):
+                    printer_count += 1
+            logger.info(f"✅ Comptage imprimantes pour {client_name}: {printer_count}/{len(recent_quotes)+len(draft_quotes)+len(similar_quotes)}")
+            return printer_count
+        except Exception as e:
+            logger.warning(f"⚠️ Erreur comptage imprimantes: {e}")
+            return 0
+
+    async def _quote_contains_printers(self, quote: Dict, printer_keywords: List[str]) -> bool:
+        """Vérifie si un devis contient des produits d'impression"""
+        try:
+            # Lignes du devis
+            for line in quote.get("DocumentLines", []):
+                item_desc = (line.get("ItemDescription") or "").lower()
+                if any(k in item_desc for k in printer_keywords):
+                    return True
+            # Commentaires
+            comments = (quote.get("Comments") or "").lower()
+            if any(k in comments for k in printer_keywords):
+                return True
+            # Produits correspondants (devis similaires)
+            for product in quote.get("matching_products", []):
+                if isinstance(product, str) and any(k in product.lower() for k in printer_keywords):
+                    return True
+            # Champs texte additionnels
+            for field in ("card_name", "CardName", "doc_comments"):
+                val = (quote.get(field) or "").lower()
+                if val and any(k in val for k in printer_keywords):
+                    return True
+            return False
+        except Exception as e:
+            logger.warning(f"⚠️ Erreur vérif imprimantes: {e}")
+            return False
 
 
     async def _process_other_action(self, extracted_info: Dict[str, Any]) -> Dict[str, Any]:
