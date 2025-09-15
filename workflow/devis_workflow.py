@@ -6629,9 +6629,11 @@ class DevisWorkflow:
             try:
                 await websocket_manager.send_user_interaction_required(self.task_id, {
                     "type": "product_request",
+                    "interaction_type": "product_request",  # ✅ évite 'non_spécifié'
                     "message": f"Veuillez préciser les produits souhaités pour {client_data.get('Name', 'ce client')}",
                     "client_name": client_data.get('Name', '')
                 })
+
             except Exception as ws_error:
                 logger.warning(f"⚠️ Erreur envoi WebSocket: {ws_error}")
             
@@ -7988,19 +7990,39 @@ class DevisWorkflow:
                     logger.warning("⚠️ current_task absent: impossible de pousser la validation dans le tracker")
             except Exception as e:
                 logger.error(f"❌ Erreur lors du require_user_validation: {e}")
+            # 🔗 Contexte initial (client + produits) pour reprise fiable après sélection
+            extracted_info_ctx = (self.context.get("extracted_info") or {})
+            products_ctx = extracted_info_ctx.get("products", []) or []
 
-            # 9) Emission WebSocket
-            interaction_message = {
-                "type": "client_selection",
-                "interaction_type": "client_selection",
+            validation_data = {
                 "options": client_options,
                 "clients": client_options,
                 "client_options": client_options,
                 "total_options": len(client_options),
                 "original_client_name": client_name,
                 "allow_create_new": True,
-                "message": f"Sélection client requise - {len(client_options)} options disponibles"
+                "interaction_type": "client_selection",
+                "original_context": {
+                    "extracted_info": {
+                        "client": client_name,
+                        "products": products_ctx,
+                    }
+                },
             }
+
+            # 💾 Sauvegarder le contexte et enregistrer l’attente d’interaction
+            self._save_context_to_task()
+            if self.current_task:
+                self.current_task.require_user_validation("client_selection", "client_selection", validation_data)
+
+            # 9) Emission WebSocket
+            interaction_message = {
+                "type": "client_selection",
+                "interaction_type": "client_selection",
+                **validation_data,
+                "message": f"Sélection client requise - {len(client_options)} options disponibles",
+            }
+
             try:
                 await websocket_manager.send_user_interaction_required(self.task_id, interaction_message)
                 logger.info(f"✅ Message WebSocket envoyé pour task {self.task_id} avec {len(client_options)} options")

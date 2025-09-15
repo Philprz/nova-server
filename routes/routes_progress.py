@@ -419,6 +419,9 @@ async def handle_client_selection_task(task_id: str, response_data: dict):
             }
 
             logger.info(f"➡️ Poursuite workflow (création client) pour {task_id}")
+            # ✅ S'assurer que le contexte restauré (avec extracted_info) est bien passé
+            context["original_context"] = getattr(workflow, "context", {}) or {}
+
             await workflow.continue_after_user_input(user_input, context)
 
         elif action == "select_existing":
@@ -468,7 +471,10 @@ async def handle_client_selection_task(task_id: str, response_data: dict):
                 })
                 
                 logger.info(f"✅ Client info sauvegardé: {selected_client.get('name', selected_client.get('Name', 'Inconnu'))}")
-            await workflow.continue_after_user_input(user_input, context)
+                # ✅ S'assurer que le contexte restauré (avec extracted_info) est bien passé
+                context["original_context"] = getattr(workflow, "context", {}) or {}
+
+                await workflow.continue_after_user_input(user_input, context)
 
         else:
             logger.error(f"❌ Action non reconnue: {action}")
