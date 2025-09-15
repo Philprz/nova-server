@@ -1563,6 +1563,8 @@ class DevisWorkflow:
                 extracted_info.get("products", [])
             )
             self.context["duplicate_check"] = duplicate_check
+            # Persister le contexte pour la reprise après interaction
+            self._save_context_to_task()
             # Extraire le nom du client pour l'utiliser dans les messages
             client_name = client_info.get("data", {}).get("Name", client_info.get("name", "Client"))
             # NOUVEAU: Toujours proposer de voir les devis existants s'il y en a
