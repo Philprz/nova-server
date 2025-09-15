@@ -8,7 +8,7 @@ import json
 import logging
 import asyncio
 from fastapi import APIRouter, HTTPException
-
+from services.progress_tracker import TaskStatus
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Any, Optional
 from difflib import SequenceMatcher
@@ -329,6 +329,12 @@ class DevisWorkflow:
         """
 
         try:
+            # CORRECTION: Restaurer le contexte complet de la tâche si disponible
+            if self.task_id:
+                task = progress_tracker.get_task(self.task_id)
+                if task and hasattr(task, 'context') and task.context:
+                    self.context.update(task.context)
+                    logger.info(f"✅ Contexte tâche restauré dans continue_after_user_input")
             interaction_type = context.get("interaction_type")
 
             if interaction_type == "client_selection":
@@ -6257,135 +6263,125 @@ class DevisWorkflow:
         }
     
     async def _handle_client_selection(self, user_input: Dict, context: Dict) -> Dict[str, Any]:
-        """🔧 Gère la sélection de client par l'utilisateur avec continuation workflow"""
+        """🔧 Gère la sélection de client par l'utilisateur avec continuation du workflow"""
+        # Import nécessaire pour TaskStatus
+        
         try:
             action = user_input.get("action")
 
             if action == "select_existing":
-                # Initialisation des variables nécessaires
+                # 1) Récupération et normalisation des données client
                 selected_client_data = user_input.get("selected_data")
-                client_name = context.get("original_client_name", "")
-
-                # Récupérer le code SAP depuis selected_data
-                if selected_client_data and isinstance(selected_client_data, dict) and selected_client_data.get("sap_code"):
-                    self.context["client_sap_code"] = selected_client_data["sap_code"]
-                    logger.info(f"✅ Code SAP récupéré depuis client sélectionné: {selected_client_data['sap_code']}")
-
-                # Récupérer aussi depuis selected_client si selected_data manque
                 if not selected_client_data:
                     alt = user_input.get("selected_client")
-                    if alt and isinstance(alt, dict):
+                    if isinstance(alt, dict):
                         selected_client_data = alt
 
-                # Préserver/compléter les données Salesforce si présentes
-                if selected_client_data and isinstance(selected_client_data, dict) and selected_client_data.get("sf_id"):
-                    sf_id = selected_client_data.get("sf_id")
-                    if sf_id and not selected_client_data.get("Id"):
-                        try:
-                            sf_query = (
-                                "SELECT Id, Name, AccountNumber, Phone, BillingStreet, "
-                                "BillingCity, BillingPostalCode, BillingCountry "
-                                f"FROM Account WHERE Id = '{sf_id}'"
-                            )
-                            sf_result = await self.mcp_connector.call_mcp(
-                                "salesforce_mcp", "salesforce_query", {"query": sf_query}
-                            )
-                            if sf_result.get("totalSize", 0) > 0:
-                                sf_data = sf_result["records"][0]
-                                if isinstance(sf_data, dict):
-                                    selected_client_data.update(sf_data)
-                                    logger.info(f"✅ Données Salesforce récupérées pour {sf_data.get('Name')}")
-                        except Exception as e:
-                            logger.warning(f"⚠️ Erreur récupération données SF: {str(e)}")
+                if not isinstance(selected_client_data, dict) or not selected_client_data:
+                    return self._build_error_response("Client manquant", "Aucune donnée de client valide fournie")
 
-                if selected_client_data and isinstance(selected_client_data, dict):
-                    # Mettre à jour avec le nom réel depuis les données
-                    client_name = (
-                        selected_client_data.get("Name")
-                        or selected_client_data.get("name")
-                        or selected_client_data.get("CardName")
-                        or client_name
-                    )
+                # Nom client (plusieurs clés possibles)
+                client_name = (
+                    context.get("original_client_name")
+                    or selected_client_data.get("Name")
+                    or selected_client_data.get("name")
+                    or selected_client_data.get("CardName")
+                    or selected_client_data.get("DisplayName")
+                    or ""
+                )
+                client_display_name = (
+                    selected_client_data.get("Name")
+                    or selected_client_data.get("CardName")
+                    or client_name
+                    or "Client sans nom"
+                )
+
+                # 2) Enrichissements rapides (codes + Salesforce)
+                sap_code = (
+                    selected_client_data.get("sap_code")
+                    or selected_client_data.get("CardCode")
+                    or selected_client_data.get("BPCode")
+                )
+                if sap_code:
+                    self.context["client_sap_code"] = sap_code
+                    logger.info(f"✅ Code SAP détecté: {sap_code}")
+
+                # Enrichissement Salesforce si un sf_id est fourni
+                sf_id = selected_client_data.get("sf_id") or selected_client_data.get("Id")
+                if sf_id and not selected_client_data.get("Id"):
                     try:
-                        await self.cache_manager.cache_client(client_name, selected_client_data)
+                        sf_query = (
+                            "SELECT Id, Name, AccountNumber, Phone, BillingStreet, "
+                            "BillingCity, BillingPostalCode, BillingCountry "
+                            f"FROM Account WHERE Id = '{sf_id}'"
+                        )
+                        sf_result = await self.mcp_connector.call_mcp(
+                            "salesforce_mcp", "salesforce_query", {"query": sf_query}
+                        )
+                        if sf_result.get("totalSize", 0) > 0 and isinstance(sf_result.get("records", []), list):
+                            sf_data = sf_result["records"][0]
+                            if isinstance(sf_data, dict):
+                                selected_client_data.update(sf_data)
+                                logger.info(f"✅ Données Salesforce récupérées pour {sf_data.get('Name')}")
                     except Exception as e:
-                        logger.warning(f"⚠️ Cache client échoué: {e}")
-                else:
-                    logger.warning("⚠️ selected_data manquant - utilisation nom par défaut")
+                        logger.warning(f"⚠️ Erreur récupération données SF: {str(e)}")
 
-                # Mise à jour du contexte (unique source de vérité)
-                self.context["client_info"] = {"data": selected_client_data, "found": bool(selected_client_data)}
-                self.context["client_validated"] = True  # (dédupliqué)
-
-                # Sauvegarder le contexte dans la tâche
-                self._save_context_to_task()
-
-                # Persistance complémentaire
+                # 3) Persistance contexte & tâche
+                self.context["client_info"] = {"data": selected_client_data, "found": True}
+                self.context["client_validated"] = True
                 self.context["validated_client"] = selected_client_data
                 self.context["selected_client"] = selected_client_data
+                self.context["selected_client_display"] = client_display_name
 
-                # Sauvegarder dans la tâche si disponible
-                if getattr(self, "current_task", None):
-                    if not hasattr(self.current_task, "context") or not isinstance(self.current_task.context, dict):
+                try:
+                    if hasattr(self, 'cache_manager') and self.cache_manager:
+                        await self.cache_manager.cache_client(client_display_name, selected_client_data)
+                    else:
+                        logger.warning("⚠️ Cache manager non disponible")
+                except Exception as e:
+                    logger.warning(f"⚠️ Cache client échoué: {e}")
+
+
+                if hasattr(self, 'current_task') and self.current_task:
+                    if not isinstance(getattr(self.current_task, "context", None), dict):
                         self.current_task.context = {}
-                    self.current_task.context["client_info"] = {"data": selected_client_data, "found": bool(selected_client_data)}
+                    # 👉 Toujours écrire client_info, même si context existait déjà
+                    self.current_task.context["client_info"] = {"data": selected_client_data, "found": True}
                     logger.info("✅ Client info sauvegardé dans la tâche")
 
-                # Affichage : protéger si selected_client_data est None
-                if isinstance(selected_client_data, dict):
-                    client_display_name = (
-                        selected_client_data.get("Name")
-                        or selected_client_data.get("CardName")
-                        or client_name
-                        or "Client sans nom"
-                    )
-                else:
-                    client_display_name = client_name or "Client sans nom"
-                # Récupérer original_extracted_info depuis le contexte ou interaction_data
-                original_extracted_info = context.get("workflow_context", {}).get("extracted_info", {})
-                if not original_extracted_info:
-                    original_extracted_info = context.get("original_context", {}).get("extracted_info", {})
-                if not original_extracted_info and hasattr(self, 'context'):
-                    original_extracted_info = self.context.get("extracted_info", {})
-                    
-                # Fallback si toujours pas trouvé
-                if not original_extracted_info:
-                    original_extracted_info = {}
-                    logger.warning("⚠️ original_extracted_info vide - utilisation fallback")
-                self.context["selected_client_display"] = client_display_name
-                logger.info(f"✅ Client sélectionné: {client_display_name}")
 
-                # Poursuite du workflow
-                workflow_ctx = context.get("workflow_context", {}) or {}
-                extracted_info = (workflow_ctx.get("extracted_info") or {}) if isinstance(workflow_ctx, dict) else {}
+                # 4) Récupération unifiée de extracted_info & products (ordre de priorité)
+                def _safe_dict(d):
+                    return d if isinstance(d, dict) else {}
 
-                # Récupérer les produits depuis le contexte ou depuis la tâche
-                original_products = (extracted_info.get("products") or []) if isinstance(extracted_info, dict) else []
-                # CORRECTION: Récupérer les produits depuis extracted_info du contexte
-                if not original_products and hasattr(self, 'context') and self.context.get('extracted_info'):
-                    original_products = self.context.get('extracted_info', {}).get('products', [])
-                    logger.info(f"🔄 Produits récupérés depuis contexte: {len(original_products)} produit(s)")
-                # Si pas de produits dans le contexte, essayer de les récupérer depuis la tâche
-                if not original_products and getattr(self, "current_task", None):
-                    validation_data = getattr(self.current_task, "validation_data", None)
-                    if isinstance(validation_data, dict):
-                        client_validation = validation_data.get("client_selection", {}) or {}
-                        original_context = client_validation.get("original_context", {}) or {}
-                        original_products = (original_context.get("extracted_info", {}) or {}).get("products", []) or []
-                        logger.info(f"🔍 Produits récupérés depuis validation_data de la tâche: {len(original_products)} produit(s)")
+                workflow_ctx = _safe_dict(context.get("workflow_context"))
+                original_ctx = _safe_dict(context.get("original_context"))
+                extracted_info = (
+                    _safe_dict(workflow_ctx.get("extracted_info"))
+                    or _safe_dict(original_ctx.get("extracted_info"))
+                    or _safe_dict(getattr(self, "context", {}).get("extracted_info"))
+                )
 
-                # CORRECTION: Vérifier doublons APRÈS sélection client mais AVANT produits
-                logger.info("🔍 === DÉBUT VÉRIFICATION DOUBLONS APRÈS SÉLECTION CLIENT ===")
+                # Si toujours vide, tenter via la tâche (validation_data)
+                if not extracted_info and getattr(self, "current_task", None):
+                    vd = _safe_dict(getattr(self.current_task, "validation_data", {}))
+                    sel = _safe_dict(vd.get("client_selection"))
+                    extracted_info = _safe_dict(_safe_dict(sel.get("original_context")).get("extracted_info"))
+
+                products = extracted_info.get("products", [])
+                if products and not isinstance(products, list):
+                    products = [products]
+
+                # 5) Vérification de doublons (APRÈS sélection client, AVANT produits)
+                logger.info("🔍 === Vérification des doublons après sélection client ===")
                 duplicate_check = await self._check_duplicate_quotes(
                     {"data": selected_client_data, "found": True, "name": client_display_name},
-                    original_products
+                    products
                 )
                 self.context["duplicate_check"] = duplicate_check
 
-                # Si doublons trouvés ET nécessite une décision utilisateur
                 if duplicate_check.get("requires_user_decision"):
-                    logger.warning(f"⚠️ DOUBLONS DÉTECTÉS - Interaction utilisateur requise")
-                    
+                    logger.warning("⚠️ Doublons détectés - Interaction utilisateur requise")
                     duplicate_interaction_data = {
                         "type": "duplicate_resolution",
                         "interaction_type": "duplicate_resolution",
@@ -6394,80 +6390,46 @@ class DevisWorkflow:
                         "recent_quotes": duplicate_check.get("recent_quotes", []),
                         "draft_quotes": duplicate_check.get("draft_quotes", []),
                         "similar_quotes": duplicate_check.get("similar_quotes", []),
-                        "extracted_info": original_extracted_info,
+                        "extracted_info": extracted_info,
                         "options": [
                             {"value": "proceed", "label": "Créer un nouveau devis malgré les doublons"},
                             {"value": "consolidate", "label": "Consolider avec un devis existant"},
                             {"value": "review", "label": "Examiner les devis existants d'abord"},
-                            {"value": "cancel", "label": "Annuler la demande"}
+                            {"value": "cancel", "label": "Annuler la demande"},
                         ],
-                        "input_type": "choice"
+                        "input_type": "choice",
                     }
-                    
-                    # Marquer la tâche en attente d'interaction
+
                     if self.current_task:
-                        from services.progress_tracker import TaskStatus
                         self.current_task.status = TaskStatus.PENDING
                         self.current_task.require_user_validation(
-                            "duplicate_resolution",
-                            "duplicate_resolution", 
-                            duplicate_interaction_data
+                            "duplicate_resolution", "duplicate_resolution", duplicate_interaction_data
                         )
-                    
-                    # Envoyer via WebSocket
+
                     try:
                         from services.websocket_manager import websocket_manager
-                        await websocket_manager.send_user_interaction_required(
-                            self.task_id,
-                            duplicate_interaction_data
-                        )
+                        await websocket_manager.send_user_interaction_required(self.task_id, duplicate_interaction_data)
                         logger.info("✅ Alerte de doublon envoyée via WebSocket")
-                        
-                        return {
-                            "success": True,
-                            "status": "user_interaction_required", 
-                            "type": "duplicate_resolution",
-                            "message": duplicate_check.get("alert_message"),
-                            "task_id": self.task_id,
-                            "interaction_data": duplicate_interaction_data
-                        }
                     except Exception as ws_error:
                         logger.warning(f"⚠️ Erreur envoi WebSocket alerte doublon: {ws_error}")
 
-                # Si pas de doublons ou utilisateur veut continuer
-                if original_products:
-                    
-                    self._track_step_start("lookup_products", f"📦 Recherche de {len(original_products)} produit(s)")
-                    await self._process_products_retrieval(original_products)
+                    return {
+                        "status": "user_interaction_required",
+                        "type": "duplicate_resolution",
+                        "message": duplicate_check.get("alert_message"),
+                        "task_id": self.task_id,
+                        "interaction_data": duplicate_interaction_data,
+                    }
 
-                    # Récupérer extracted_info depuis le contexte de la tâche
-                    extracted_info = self.context.get("extracted_info", {})
-                    original_extracted_info = extracted_info  # Définir la variable avant utilisation
-                    
-                    # Si extracted_info disponible, continuer le workflow
-                    if isinstance(extracted_info, dict) and extracted_info:
-                        return await self._continue_workflow_after_client_selection(
-                            selected_client_data, {"extracted_info": extracted_info}
-                        )
-                    elif isinstance(original_extracted_info, dict) and original_extracted_info:
-                        return await self._continue_workflow_after_client_selection(
-                            selected_client_data, {"extracted_info": original_extracted_info}
-                        )
-                    elif isinstance(extracted_info, dict) and extracted_info:
-                        return await self._process_quote_workflow(extracted_info)
-
-                    else:
-                        # Fallback minimal si aucun extracted_info complet
-                        return await self._continue_workflow_after_client_selection(
-                            selected_client_data, {"extracted_info": {"products": original_products}}
-                        )
-
-                return self._build_error_response("Workflow incomplet", "Produits manquants pour continuer")
+                # 6) Continuer le workflow standard (utilise la fonction dédiée qui gère produits/WS)
+                return await self._continue_workflow_after_client_selection(
+                    selected_client_data,
+                    {"extracted_info": {"products": products} if products else {"products": []}}
+                )
 
             elif action == "create_new":
                 client_name = user_input.get("client_name", context.get("original_client_name", ""))
-                # CORRECTION: Appeler directement _handle_new_client_creation avec le contexte workflow
-                workflow_context = context.get("workflow_context", {})
+                workflow_context = context.get("workflow_context", {}) or {}
                 return await self._handle_new_client_creation(client_name, workflow_context)
 
             elif action == "cancel":
@@ -6479,6 +6441,7 @@ class DevisWorkflow:
         except Exception as e:
             logger.exception(f"Erreur _handle_client_selection: {e}")
             return self._build_error_response("Erreur sélection client", str(e))
+
 
     async def _handle_new_client_creation(self, client_name: str, workflow_context: Dict) -> Dict:
         """
@@ -7313,7 +7276,6 @@ class DevisWorkflow:
                 
                 # Marquer la tâche en attente d'interaction
                 if self.current_task:
-                    from services.progress_tracker import TaskStatus
                     self.current_task.status = TaskStatus.PENDING
                     self.current_task.require_user_validation(
                         "duplicate_resolution",

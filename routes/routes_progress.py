@@ -604,6 +604,10 @@ async def handle_duplicate_resolution_task(task_id: str, response_data: dict):
         
         
         # Créer instance workflow pour continuer le traitement
+        # CORRECTION: Restaurer le contexte original de la tâche avec les produits
+        if hasattr(task, 'context') and task.context:
+            workflow.context.update(task.context)
+            logger.info(f"✅ Contexte original restauré: {list(workflow.context.keys())}")
         from workflow.devis_workflow import DevisWorkflow
         workflow = DevisWorkflow(task_id=task_id, force_production=True)
         
@@ -1081,7 +1085,10 @@ async def handle_client_validation(task_id: str, step_id: str, response_data: di
                 "action": "select_existing",
                 "selected_data": client_data
             }
-            context = {"interaction_type": "client_selection"}
+            context = {
+                "interaction_type": "client_selection",
+                "original_context": workflow.context
+            }
             continuation_result = await workflow.continue_after_user_input(user_input, context)
             
         elif selected_option == "create_new":
@@ -1092,7 +1099,10 @@ async def handle_client_validation(task_id: str, step_id: str, response_data: di
                 "action": "create_new",
                 "client_name": client_name
             }
-            context = {"interaction_type": "client_selection"}
+            context = {
+                "interaction_type": "client_selection",
+                "original_context": workflow.context
+            }
             continuation_result = await workflow.continue_after_user_input(user_input, context)
             
         else:
