@@ -1565,7 +1565,46 @@ class DevisWorkflow:
             self.context["duplicate_check"] = duplicate_check
             # Extraire le nom du client pour l'utiliser dans les messages
             client_name = client_info.get("data", {}).get("Name", client_info.get("name", "Client"))
-
+            # NOUVEAU: Toujours proposer de voir les devis existants s'il y en a
+            total_existing_quotes = (
+                len(duplicate_check.get('recent_quotes', [])) +
+                len(duplicate_check.get('draft_quotes', [])) +
+                len(duplicate_check.get('similar_quotes', []))
+            )
+            
+            if total_existing_quotes > 0 and not duplicate_check.get("requires_user_decision"):
+                # Proposer de voir les devis existants même s'ils ne sont pas des doublons stricts
+                logger.info(f"📋 {total_existing_quotes} devis existant(s) trouvé(s) - Proposition d'affichage")
+                
+                devis_interaction_data = {
+                    "type": "existing_quotes_review",
+                    "interaction_type": "existing_quotes_review",
+                    "client_name": client_display_name,
+                    "message": f"Il existe {total_existing_quotes} devis pour ce client.",
+                    "recent_quotes": duplicate_check.get("recent_quotes", []),
+                    "draft_quotes": duplicate_check.get("draft_quotes", []),
+                    "similar_quotes": duplicate_check.get("similar_quotes", []),
+                    "options": [
+                        {"value": "view_quotes", "label": f"📋 Voir les {total_existing_quotes} devis existants"},
+                        {"value": "create_new", "label": "➕ Créer un nouveau devis directement"},
+                    ],
+                    "input_type": "choice"
+                }
+                
+                try:
+                    from services.websocket_manager import websocket_manager
+                    await websocket_manager.send_user_interaction_required(self.task_id, devis_interaction_data)
+                    logger.info("✅ Proposition devis existants envoyée via WebSocket")
+                except Exception as ws_error:
+                    logger.warning(f"⚠️ Erreur envoi WebSocket: {ws_error}")
+                
+                return {
+                    "status": "user_interaction_required",
+                    "type": "existing_quotes_review",
+                    "message": f"Devis existants trouvés pour {client_display_name}",
+                    "task_id": self.task_id,
+                    "interaction_data": devis_interaction_data
+                }
             # Gérer l'affichage des alertes de doublon
             if duplicate_check.get("requires_user_decision"):
                 self._track_step_progress(
@@ -6372,9 +6411,6 @@ class DevisWorkflow:
                 products = extracted_info.get("products", [])
                 if products and not isinstance(products, list):
                     products = [products]
-
-                # 5) Vérification de doublons (APRÈS sélection client, AVANT produits)
-                logger.info(f"🔍 Vérification doublons terminée: {len(duplicate_check.get('recent_quotes', [])) + len(duplicate_check.get('draft_quotes', [])) + len(duplicate_check.get('similar_quotes', []))} devis trouvé(s)")
                 
                 # NOUVEAU: Toujours proposer de voir les devis existants s'il y en a
                 total_existing_quotes = (
@@ -7287,7 +7323,46 @@ class DevisWorkflow:
             )
             
             self.context["duplicate_check"] = duplicate_check
+            # NOUVEAU: Toujours proposer de voir les devis existants s'il y en a
+            total_existing_quotes = (
+                len(duplicate_check.get('recent_quotes', [])) +
+                len(duplicate_check.get('draft_quotes', [])) +
+                len(duplicate_check.get('similar_quotes', []))
+            )
             
+            if total_existing_quotes > 0 and not duplicate_check.get("requires_user_decision"):
+                # Proposer de voir les devis existants même s'ils ne sont pas des doublons stricts
+                logger.info(f"📋 {total_existing_quotes} devis existant(s) trouvé(s) - Proposition d'affichage")
+                
+                devis_interaction_data = {
+                    "type": "existing_quotes_review",
+                    "interaction_type": "existing_quotes_review",
+                    "client_name": client_display_name,
+                    "message": f"Il existe {total_existing_quotes} devis pour ce client.",
+                    "recent_quotes": duplicate_check.get("recent_quotes", []),
+                    "draft_quotes": duplicate_check.get("draft_quotes", []),
+                    "similar_quotes": duplicate_check.get("similar_quotes", []),
+                    "options": [
+                        {"value": "view_quotes", "label": f"📋 Voir les {total_existing_quotes} devis existants"},
+                        {"value": "create_new", "label": "➕ Créer un nouveau devis directement"},
+                    ],
+                    "input_type": "choice"
+                }
+                
+                try:
+                    from services.websocket_manager import websocket_manager
+                    await websocket_manager.send_user_interaction_required(self.task_id, devis_interaction_data)
+                    logger.info("✅ Proposition devis existants envoyée via WebSocket")
+                except Exception as ws_error:
+                    logger.warning(f"⚠️ Erreur envoi WebSocket: {ws_error}")
+                
+                return {
+                    "status": "user_interaction_required",
+                    "type": "existing_quotes_review",
+                    "message": f"Devis existants trouvés pour {client_display_name}",
+                    "task_id": self.task_id,
+                    "interaction_data": devis_interaction_data
+                }            
             # Si doublons trouvés ET nécessite une décision utilisateur
             if duplicate_check.get("requires_user_decision"):
                 client_name_for_alert = (
