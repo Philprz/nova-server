@@ -1392,7 +1392,8 @@ mcp_functions = {
     "_get_customer_details": _get_customer_details,
     "sap_search_quotes": sap_search_quotes,
     "sap_modify_quote": sap_modify_quote,
-    "sap_update_quotation": sap_update_quotation
+    "sap_update_quotation": sap_update_quotation,
+    "sap_list_draft_quotes": sap_list_draft_quotes
 }   
 
 # Initialisation au démarrage

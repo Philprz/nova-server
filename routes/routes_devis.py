@@ -92,10 +92,10 @@ async def list_draft_quotes():
     try:
         logger.info("Récupération des devis en brouillon...")
         
-        # Utiliser l'appel direct (pas MCP Connector qui a des soucis d'encodage)
-        from sap_mcp import sap_list_draft_quotes
+        # Utiliser MCPConnector au lieu de l'import direct
+        from services.mcp_connector import MCPConnector
         
-        result = await sap_list_draft_quotes()
+        result = await MCPConnector.call_sap_mcp("sap_list_draft_quotes", {})
         
         if result and result.get("success"):
             logger.info(f"✅ {result.get('count', 0)} devis en brouillon récupérés")

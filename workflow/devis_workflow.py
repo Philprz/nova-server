@@ -3914,7 +3914,7 @@ class DevisWorkflow:
         """Récupère les devis en brouillon pour un client"""
         try:
             
-            # Récupérer tous les brouillons
+            # Récupérer tous les brouillons via MCPConnector
             draft_result = await MCPConnector.call_sap_mcp("sap_list_draft_quotes", {})
             
             if not draft_result.get("success"):
