@@ -205,6 +205,14 @@ class DevisWorkflow:
         return response
 
     def _save_context_to_task(self):
+        # Si la tâche n'est pas encore rattachée (ex.: task créée après l'init), essayer de la récupérer
+        if not getattr(self, "current_task", None) and getattr(self, "task_id", None):
+            try:
+                from services.progress_tracker import progress_tracker
+                self.current_task = progress_tracker.get_task(self.task_id)
+            except Exception:
+                self.current_task = None
+
         """Sauvegarde le contexte actuel dans la tâche"""
         if self.current_task:
             if not hasattr(self.current_task, 'context'):
@@ -335,6 +343,14 @@ class DevisWorkflow:
                 if task and hasattr(task, 'context') and task.context:
                     self.context.update(task.context)
                     logger.info(f"✅ Contexte tâche restauré dans continue_after_user_input")
+            # ✅ Filet de sécurité : si extracted_info absent du contexte tâche, le reconstituer depuis context.workflow_context
+            if not self.context.get("extracted_info"):
+                extracted_from_ctx = (context.get("workflow_context") or {}).get("extracted_info")
+                if extracted_from_ctx:
+                    self.context["extracted_info"] = extracted_from_ctx
+                    self._save_context_to_task()
+                    logger.info("✅ extracted_info reconstitué depuis context.workflow_context")
+
             interaction_type = context.get("interaction_type")
 
             if interaction_type == "client_selection":
@@ -8019,15 +8035,30 @@ class DevisWorkflow:
             interaction_message = {
                 "type": "client_selection",
                 "interaction_type": "client_selection",
-                **validation_data,
-                "message": f"Sélection client requise - {len(client_options)} options disponibles",
+                "options": client_options,
+                "clients": client_options,
+                "client_options": client_options,
+                "total_options": len(client_options),
+                "original_client_name": client_name,
+                "allow_create_new": True,
+                # ✅ Contexte d'origine pour la reprise (produits du prompt)
+                "original_context": {
+                    "extracted_info": {
+                        "client": client_name,
+                        "products": products_list  # déjà calculé plus haut
+                    }
+                },
+                "message": f"Sélection client requise - {len(client_options)} options disponibles"
             }
+            # ✅ Persister le contexte (même si la tâche a été créée juste après l'init)
+            self._save_context_to_task()
 
             try:
                 await websocket_manager.send_user_interaction_required(self.task_id, interaction_message)
                 logger.info(f"✅ Message WebSocket envoyé pour task {self.task_id} avec {len(client_options)} options")
             except Exception as ws_error:
-                logger.warning(f"⚠️ Impossible d'envoyer via WebSocket: {ws_error}")
+                logger.warning(f"⚠️ Échec envoi WebSocket: {ws_error} - tentative fallback")
+
 
             # 10) Retour API
             return {
