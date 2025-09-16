@@ -1216,108 +1216,89 @@ class DevisWorkflow:
             logger.exception(f"Erreur création opportunité Salesforce: {str(e)}")
             return {"success": False, "error": str(e)}
 
-    async def process_prompt(self, user_prompt: str, task_id: str = None) -> Dict[str, Any]:
-        """IMPORTANT: Utiliser le task_id fourni, ne jamais le régénérer"""
+    async def process_prompt(self, user_prompt: str, task_id: str = None, draft_mode: bool = False) -> Dict[str, Any]:
         """
-        Traite un prompt avec tracking de progression
+        🔧 MÉTHODE UNIFIÉE : Traite un prompt avec extraction, validation et génération
+        Fusion de process_prompt et process_quote_request pour éviter la duplication
         """
         extracted_info: Optional[Dict[str, Any]] = None
-        """Process le prompt utilisateur via LLM et workflow"""
         try:
-            # 🔧 MODIFICATION : Utiliser le task_id fourni si disponible
+            # Utiliser le task_id fourni si disponible
             if task_id:
                 self.task_id = task_id
                 logger.info(f"✅ Utilisation du task_id fourni: {task_id}")
-                # Récupérer la tâche existante créée par start_quote_workflow
                 self.current_task = progress_tracker.get_task(task_id)
                 if not self.current_task:
-                # Si pas trouvée (ne devrait pas arriver), la créer
                     self.current_task = progress_tracker.create_task(
-                    user_prompt=user_prompt,
-                    draft_mode=self.draft_mode,
-                    task_id=task_id
+                        user_prompt=user_prompt,
+                        draft_mode=self.draft_mode or draft_mode,
+                        task_id=task_id
                     )
-            # Si pas de task existante, en créer une nouvelle
+            
+            # Mode brouillon si spécifié
+            if draft_mode:
+                self.draft_mode = draft_mode
+                
+            # Initialiser le tracking si nécessaire
             if not self.current_task:
                 self.task_id = self._initialize_task_tracking(user_prompt)
 
-            logger.info(f"=== DÉMARRAGE WORKFLOW - Tâche {self.task_id} ===")
-
-            # 🔧 MODIFICATION : Démarrer le tracking de progression
-            self._track_step_start("parse_prompt", "🔍 Analyse de votre demande")
-
-            # Extraction des informations (code existant adapté)
-            extracted_info = await self.llm_extractor.extract_quote_info(user_prompt)
-            if not extracted_info:
-                raise ValueError("Extraction des informations échouée")
-            self._track_step_progress("parse_prompt", 100, "✅ Demande analysée")
-            self._track_step_complete("parse_prompt")
-
-            # 🔧 MODIFICATION : Vérification du mode production
+            logger.info(f"=== DÉMARRAGE WORKFLOW UNIFIÉ - Tâche {self.task_id} ===")
+            
+            # Vérification du mode
             mode = "PRODUCTION" if not self.draft_mode else "DRAFT"
             logger.info(f"🔧 MODE {mode} ACTIVÉ")
 
-            # Vérifier les connexions
+            # PHASE 1: Analyse du prompt
+            self._track_step_start("parse_prompt", "🔍 Analyse de votre demande")
+            extracted_info = await self.llm_extractor.extract_quote_info(user_prompt)
+            if not extracted_info:
+                return self._build_error_response("Extraction échouée", "Impossible d'analyser votre demande")
+            
+            # Sauvegarder dans le contexte
+            self.context["extracted_info"] = extracted_info
+            self._save_context_to_task()
+            self._track_step_complete("parse_prompt", "✅ Demande analysée")
+
+            # PHASE 2: Vérification des connexions 
             self._track_step_start("validate_input", "🔧 Vérification des connexions")
             connections_ok = await self._check_connections()
             if not connections_ok:
                 raise Exception("Connexions SAP/Salesforce indisponibles")
             self._track_step_complete("validate_input", "✅ Connexions validées")
 
-            # Router selon le type d'action
+            # PHASE 3: Exécution du workflow
             action_type = extracted_info.get("action_type", "DEVIS")
-
             if action_type == "DEVIS":
-                try:
-                    result = await self._process_quote_workflow(extracted_info)
-                    if result.get("status") == "client_validation_required":
-                        return result
-                except Exception as e:
-                    logger.error(f"❌ Erreur process_prompt: {str(e)}")
-                    return {"success": False, "error": str(e)}
+                result = await self._process_quote_workflow(extracted_info)
+                # Gestion spéciale pour validation client
+                if result.get("status") == "client_validation_required":
+                    return result
             else:
                 result = await self._process_other_action(extracted_info)
 
+            # PHASE 4: Finalisation conditionnelle
+            if result.get("status") == "user_interaction_required":
+                # Laisser la tâche en attente d'interaction - ne pas la terminer
+                logger.info(f"⏸️ Tâche {self.task_id} en attente d'interaction utilisateur")
+                return result
 
-            # 🔧 CORRECTION : Ne marquer comme terminée QUE si workflow réellement terminé
-            if self.current_task:
-                if result.get("status") == "user_interaction_required":
-                    # Laisser la tâche en attente d'interaction - ne pas la terminer
-                    logger.info(f"⏸️ Tâche {self.task_id} en attente d'interaction utilisateur")
-                    # ARRÊT COMPLET - Pas d'appel à complete_task ni de broadcast
-                    return result
-        
-            # Assurer que le résultat final est envoyé via WebSocket SEULEMENT si terminé
+            # Finaliser la tâche seulement si terminée
             if result.get("status") != "user_interaction_required":
                 try:
                     # Envoyer le résultat via WebSocket
-                    await websocket_manager.broadcast_to_task(
-                        self.task_id,
-                        {
-                            "type": "quote_generation_completed",
-                            "task_id": self.task_id,
-                            "result": result,
-                            "status": "completed",
-                            "timestamp": datetime.now().isoformat(),
-                        }
-                    )
-                    logger.info(f"🔔 Résultat final envoyé via WebSocket pour la tâche {self.task_id}")
-
+                    await self._send_final_result(result)
+                    
                     # Attendre brièvement pour s'assurer que le client a reçu le message
                     await asyncio.sleep(1.0)
-
-                except Exception as ws_error:
-                    logger.error(f"❌ Erreur lors de l'envoi du résultat via WebSocket pour {self.task_id}: {ws_error}")
-                    raise  # Relever l'erreur pour éviter de marquer la tâche comme terminée si l'envoi échoue
-
-                # Marquer la tâche comme terminée uniquement si l'envoi WebSocket a réussi
-                if self.current_task:
-                    try:
-                        progress_tracker.complete_task(self.task_id, result)
-                        logger.info(f"✅ Tâche {self.task_id} marquée comme terminée avec succès.")
-                    except Exception as complete_error:
-                        logger.error(f"❌ Erreur lors de la finalisation de la tâche {self.task_id}: {complete_error}")
-                        raise  # Relever l'erreur pour éviter de laisser la tâche dans un état incohérent
+                    
+                    # Marquer la tâche comme terminée
+                    progress_tracker.complete_task(self.task_id, result)
+                    logger.info(f"✅ Tâche {self.task_id} marquée comme terminée avec succès.")
+                    
+                except Exception as complete_error:
+                    logger.error(f"❌ Erreur finalisation tâche {self.task_id}: {complete_error}")
+                    raise
 
             return result
             
@@ -1326,60 +1307,34 @@ class DevisWorkflow:
             if self.current_task:
                 progress_tracker.fail_task(self.task_id, str(e))
             raise
-    
-    async def _execute_full_workflow(self, prompt: str) -> Dict[str, Any]:
-        """
-        🔧 MÉTHODE AJOUTÉE : Wrapper pour exécution complète du workflow
-        
-        ⚠️ NOTE : Cette méthode est appelée dans process_prompt mais semble redondante
-        car le workflow principal est déjà traité par _process_quote_workflow
-        
-        Args:
-            prompt: Demande utilisateur originale
-            
-        Returns:
-            Dict avec le résultat complet du workflow
-        """
-        try:
-            logger.info("🔄 Exécution du workflow complet")
-            
-            # 🔧 ATTENTION : Cette méthode ne devrait pas être nécessaire
-            # Le workflow est déjà traité dans process_prompt par :
-            # - _process_quote_workflow pour les devis
-            # - _process_other_action pour les autres actions
-            
-            # Si cette méthode est appelée, retourner le résultat déjà calculé
-            if hasattr(self, '_current_workflow_result'):
-                logger.info("✅ Retour du résultat déjà calculé")
-                return self._current_workflow_result
-            
-            # Sinon, re-exécuter l'extraction et le workflow de base
-            logger.warning("⚠️ Ré-exécution du workflow - ceci indique un problème de logique")
-            
-            # Extraction de base
-            extracted_info = await self.llm_extractor.extract_quote_info(prompt)
-            
-            # Router selon le type d'action
-            action_type = extracted_info.get("action_type", "DEVIS")
-            
-            # Exécuter le workflow approprié et sauvegarder le résultat
-            if action_type == "DEVIS":
-                self._current_workflow_result = await self._process_quote_workflow(extracted_info)
-            else:
-                self._current_workflow_result = await self._process_other_action(extracted_info)
 
-            # Utiliser le résultat sauvegardé (pas de re-calcul)
-            result = self._current_workflow_result
-            
-            return result
-            
-        except Exception as e:
-            logger.error(f"❌ Erreur _execute_full_workflow: {str(e)}")
-            return {
-                "success": False,
-                "error": str(e),
-                "message": "Erreur lors de l'exécution du workflow complet"
-            }
+    # Méthode helper pour l'envoi du résultat final
+    async def _send_final_result(self, result: Dict[str, Any]) -> None:
+        """Envoie le résultat final via WebSocket"""
+        try:
+            await websocket_manager.broadcast_to_task(
+                self.task_id,
+                {
+                    "type": "quote_generation_completed",
+                    "task_id": self.task_id,
+                    "result": result,
+                    "status": "completed",
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )
+            logger.info(f"🔔 Résultat final envoyé via WebSocket pour la tâche {self.task_id}")
+        except Exception as ws_error:
+            logger.error(f"❌ Erreur lors de l'envoi du résultat via WebSocket pour {self.task_id}: {ws_error}")
+            raise
+
+    def _build_error_response(self, error_type: str, message: str) -> Dict[str, Any]:
+        """Construit une réponse d'erreur standardisée"""
+        return {
+            "success": False,
+            "error": message,
+            "error_type": error_type,
+            "task_id": self.task_id
+        }
     
     async def process_prompt_original(self, prompt: str, task_id: str = None, draft_mode: bool = False) -> Dict[str, Any]:
         """
@@ -3835,6 +3790,28 @@ class DevisWorkflow:
             logger.exception(f"Erreur validation client avec suggestions: {str(e)}")
             return {"found": False, "error": str(e)}
     
+    def _prepare_duplicate_interaction_data(self, client_name: str, duplicate_check: Dict[str, Any], extracted_info: Optional[Dict] = None) -> Dict[str, Any]:
+        """
+        🔧 CENTRALISATION : Prépare les données d'interaction pour la résolution de doublons
+        Évite la duplication de code entre les différentes méthodes
+        """
+        return {
+        "type": "duplicate_resolution",
+        "interaction_type": "duplicate_resolution",
+        "client_name": client_name,
+        "alert_message": duplicate_check.get("alert_message"),
+        "recent_quotes": duplicate_check.get("recent_quotes", []),
+        "draft_quotes": duplicate_check.get("draft_quotes", []),
+        "similar_quotes": duplicate_check.get("similar_quotes", []),
+        "extracted_info": extracted_info,
+        "options": [
+        {"value": "proceed", "label": "➕ Créer un nouveau devis"},
+        {"value": "consolidate", "label": "📝 Reprendre un devis existant"},
+        {"value": "review", "label": "📋 Voir les devis existants"},
+        {"value": "cancel", "label": "❌ Annuler"}
+        ],
+        "input_type": "choice"
+        }
     async def _check_duplicate_quotes(self, client_info: Dict[str, Any], products: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
         Vérifie s'il existe déjà des devis similaires pour éviter les doublons
@@ -7402,6 +7379,7 @@ class DevisWorkflow:
             # Persister dans la tâche pour la reprise après interaction
             self._save_context_to_task()
             # CORRECTION: Si on a des devis ET requires_user_decision, proposer l'interaction
+            
             if duplicate_check.get("requires_user_decision"):
                 logger.info(f"📋 Proposition interaction pour {total_existing_quotes} devis existants")
                 
@@ -7424,10 +7402,19 @@ class DevisWorkflow:
                 
                 try:
                     from services.websocket_manager import websocket_manager
-                    await websocket_manager.send_user_interaction_required(self.task_id, duplicate_interaction_data)
+                    await asyncio.wait_for(
+                    websocket_manager.send_user_interaction_required(self.task_id, duplicate_interaction_data),
+                    timeout=10.0
+                    )
                     logger.info("✅ Interaction doublons envoyée via WebSocket")
+                except asyncio.TimeoutError:
+                    logger.error(f"❌ WEBSOCKET_TIMEOUT: Timeout 10s dépassé - Task: {self.task_id}",
+                    extra={"task_id": self.task_id, "error_type": "websocket_timeout"})
+                    # Continuer le workflow sans WebSocket
                 except Exception as ws_error:
-                    logger.warning(f"⚠️ Erreur WebSocket: {ws_error}")
+                    logger.error(f"❌ WEBSOCKET_ERROR: Échec envoi interaction doublons - Task: {self.task_id} - Error: {ws_error}",
+                    extra={"task_id": self.task_id, "error_type": "websocket", "action": "duplicate_interaction"})
+                    # Continuer le workflow même en cas d'erreur WebSocket
                 
                 return {
                     "status": "user_interaction_required",
@@ -7633,7 +7620,31 @@ class DevisWorkflow:
                 "message": "Erreur interne pendant le workflow de devis",
                 "error": str(e)
             }
-
+    def _normalize_client_display_name(self, client_info: Dict[str, Any], fallback_name: str = "") -> str:
+        """
+        🔧 NORMALISATION : Extrait le nom d'affichage client de manière cohérente
+        Évite les incohérences entre les différentes sources de données
+        """
+        if not client_info:
+            return fallback_name
+        # Priorité aux données structurées
+        if "data" in client_info and isinstance(client_info["data"], dict):
+            data = client_info["data"]
+            return (
+                data.get("Name") or
+                data.get("CardName") or  
+                data.get("CompanyName") or
+                data.get("name") or
+                fallback_name
+            )
+        
+        # Sinon, données directes
+        return (
+            client_info.get("Name") or
+            client_info.get("CardName") or
+            client_info.get("name") or
+            fallback_name
+        )
     async def _prepare_quote_preview(self, client_result: Dict[str, Any], products_result: Dict[str, Any]) -> Dict[str, Any]:
         """Prépare l'aperçu du devis pour validation utilisateur"""
         try:

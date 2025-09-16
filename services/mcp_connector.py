@@ -715,9 +715,9 @@ class MCPConnector:
     # MÉTHODES D'INSTANCE AVEC CACHE ET TRACKING
     # ===================================================================
 
-    async def call_mcp(self, server_name: str, action: str, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Méthode d'instance pour appeler MCP avec cache et tracking de progression"""
-        
+    async def call_mcp(self, server_name: str, action: str, params: Dict[str, Any], timeout: Optional[int] = None) -> Dict[str, Any]:
+        """Méthode d'instance pour appeler MCP avec cache, tracking et timeout configurable"""
+
         # Génération de la clé de cache
         cache_key = None
         if self.cache_manager:
@@ -733,8 +733,6 @@ class MCPConnector:
         # Support du tracking de progression
         try:
             from services.progress_tracker import progress_tracker
-                       
-            
             current_task = getattr(progress_tracker, '_current_task', None)
             if current_task and hasattr(current_task, 'update_step_progress'):
                 step_message = f"🔄 Appel {server_name}.{action}"
@@ -743,32 +741,52 @@ class MCPConnector:
             logger.debug(f"Tracking progression non disponible: {e}")
             current_task = None
 
-        # Appel MCP selon le serveur
+        # Détermination du timeout effectif
         try:
-            if server_name == "salesforce_mcp":
-                result = await MCPConnector.call_salesforce_mcp(action, params)
-            elif server_name == "sap_mcp":
-                result = await MCPConnector.call_sap_mcp(action, params)
-            else:
-                result = await MCPConnector._call_mcp(server_name, action, params)
-            
+            try:
+                # Import explicite avec fallback si indisponible
+                from services.mcp_connector import get_timeout_for_action  # type: ignore
+                default_timeout = get_timeout_for_action(action)
+            except Exception:
+                default_timeout = 30  # fallback sûr
+            effective_timeout = timeout or default_timeout
+
+            async def _do_call():
+                if server_name == "salesforce_mcp":
+                    return await MCPConnector.call_salesforce_mcp(action, params)
+                elif server_name == "sap_mcp":
+                    return await MCPConnector.call_sap_mcp(action, params)
+                else:
+                    return await MCPConnector._call_mcp(server_name, action, params)
+
+            # Appel avec gestion du timeout
+            result = await asyncio.wait_for(_do_call(), timeout=effective_timeout)
+
             # Tracking de fin
             if current_task and hasattr(current_task, 'update_step_progress'):
                 success_msg = f"✅ {server_name}.{action} terminé"
                 current_task.update_step_progress("mcp_call", 100, success_msg)
-            
-            # Mise en cache
+
+            # Mise en cache (éviter de cacher une erreur)
             if self.cache_manager and cache_key:
                 try:
-                    await self.cache_manager.cache_data(cache_key, result)
+                    if not (isinstance(result, dict) and "error" in result):
+                        await self.cache_manager.cache_data(cache_key, result)
                 except Exception as e:
                     logger.warning(f"Erreur mise en cache: {e}")
-            
+
             return result
-            
+
+        except asyncio.CancelledError:
+            logger.info(f"❕ Appel MCP annulé pour {server_name}.{action}")
+            raise
+        except asyncio.TimeoutError:
+            logger.error(f"❌ Timeout {effective_timeout}s atteint pour {server_name}.{action}")
+            return {"error": f"Timeout après {effective_timeout}s"}
         except Exception as e:
             logger.exception(f"Erreur appel MCP {server_name}.{action}: {e}")
             return {"error": str(e)}
+
 
     # ===================================================================
     # MÉTHODES D'INSTANCE DIRECTES (SANS MCP)
