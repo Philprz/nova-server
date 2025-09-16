@@ -25,6 +25,10 @@ from services.price_engine import PriceEngineService
 from services.cache_manager import referential_cache
 from workflow.validation_workflow import SequentialValidator
 from services.local_product_search import LocalProductSearchService
+from managers.client_manager import ClientManager
+from managers.product_manager import ProductManager
+from managers.quote_manager import QuoteManager
+
 
 # Configuration sécurisée pour Windows
 if sys.platform == "win32":
@@ -615,17 +619,27 @@ class DevisWorkflowRefactored:
         self.mcp_connector = MCPConnector()
         self.llm_extractor = LLMExtractor()
 
-        # Gestionnaire d'état centralisé
+        # Gestionnaire d'état centralisé (AVANT d'utiliser self.state)
         self.state = WorkflowState(task_id)
+        
+        # Ajout de l'attribut context pour compatibilité
+        self.context = self.state.context
 
-        # Gestionnaires spécialisés
-        client_validator = ClientValidator() if validation_enabled and VALIDATOR_AVAILABLE else None
-        self.client_manager = ClientManager(self.mcp_connector, client_validator)
-
+        # Services spécialisés (une seule initialisation par service)
         suggestion_engine = SuggestionEngine()
-        self.product_manager = ProductManager(self.mcp_connector, suggestion_engine)
-
         price_engine = PriceEngineService()
+        
+        # Services de validation
+        client_validator = None
+        if validation_enabled and VALIDATOR_AVAILABLE:
+            try:
+                client_validator = ClientValidator()
+            except Exception as e:
+                logger.warning(f"Validateur client non disponible: {e}")
+
+        # Gestionnaires spécialisés avec injection des services
+        self.client_manager = ClientManager(self.mcp_connector, client_validator)
+        self.product_manager = ProductManager(self.mcp_connector, suggestion_engine)
         self.quote_manager = QuoteManager(self.mcp_connector, price_engine)
 
         # Moteur de validation
@@ -658,136 +672,169 @@ class DevisWorkflowRefactored:
         except Exception as e:
             logger.error(f"Erreur initialisation tâche {task_id}: {e}")
             self.current_task = None
-
+            
+    async def _extract_info_from_prompt(self, user_prompt: str) -> Dict[str, Any]:
+        """Extrait les informations du prompt utilisateur"""
+        try:
+            return await self.llm_extractor.extract_quote_info(user_prompt)
+        except Exception as e:
+            logger.error(f"Erreur extraction prompt: {e}")
+            return {}
+        
+    def _save_context_to_task(self):
+        """Sauvegarde le contexte dans la tâche courante"""
+        try:
+            if self.current_task and hasattr(self.current_task, 'context'):
+                if not isinstance(self.current_task.context, dict):
+                    self.current_task.context = {}
+                self.current_task.context.update(self.state.context)
+                logger.debug(f"✅ Contexte sauvegardé dans la tâche {self.task_id}")
+        except Exception as e:
+            logger.warning(f"Erreur sauvegarde contexte: {e}")
     async def process_quote_request(self, user_prompt: str, draft_mode: bool = False) -> Dict[str, Any]:
         """
         Méthode principale pour traiter une demande de devis
-
-        Args:
-            user_prompt: Demande en langage naturel
-            draft_mode: Mode brouillon si True
-
-        Returns:
-            Résultat du traitement avec statut et données
         """
         try:
-            # Configuration du mode
-            if draft_mode:
-                self.draft_mode = draft_mode
+            # Configuration du mode (toujours explicite)
+            self.draft_mode = draft_mode
 
             # Initialiser le tracking si nécessaire
-            if not self.current_task:
+            if not getattr(self, "current_task", None):
                 self.task_id = self._initialize_task_tracking(user_prompt)
 
             logger.info(f"=== DÉMARRAGE WORKFLOW REFACTORISÉ - Tâche {self.task_id} ===")
 
             # Phase 1: Extraction des informations
-            self._track_step_complete("extract_entities", "✅ Demande analysée")
+            self._track_step_start("extract_info", "🔎 Analyse de la demande")
             extracted_info = await self.llm_extractor.extract_quote_info(user_prompt)
-
             if not extracted_info:
                 return self._build_error_response("Extraction échouée", "Impossible d'analyser votre demande")
 
             self.state.extracted_info = extracted_info
-            self.state.save_to_task(progress_tracker)
+            try:
+                self.state.save_to_task(progress_tracker)
+            except Exception as _e:
+                logger.warning(f"Impossible de sauvegarder l'état (extraction): {_e!r}")
             self._track_step_complete("extract_info", "✅ Demande analysée")
 
             # Phase 2: Validation du client
             self._track_step_start("search_client", "👤 Validation du client")
             client_result = await self._process_client_validation(extracted_info.get("client"))
-
             if client_result.get("status") == "user_interaction_required":
                 return client_result
-
             if not client_result.get("success"):
-                return self._build_error_response("Validation client échouée", client_result.get("error"))
+                return self._build_error_response("Validation client échouée", client_result.get("error") or "Erreur inconnue")
 
             self.state.client_info = client_result.get("client_info", {})
+            try:
+                self.state.save_to_task(progress_tracker)
+            except Exception as _e:
+                logger.warning(f"Impossible de sauvegarder l'état (client): {_e!r}")
             self._track_step_complete("search_client", "✅ Client validé")
 
             # Phase 3: Validation des produits
             self._track_step_start("validate_products", "📦 Validation des produits")
             products_result = await self._process_products_validation(extracted_info.get("products", []))
-
             if products_result.get("status") == "user_interaction_required":
                 return products_result
-
             if not products_result.get("success"):
-                return self._build_error_response("Validation produits échouée", products_result.get("error"))
+                return self._build_error_response("Validation produits échouée", products_result.get("error") or "Erreur inconnue")
 
             self.state.products_info = products_result.get("products", [])
+            try:
+                self.state.save_to_task(progress_tracker)
+            except Exception as _e:
+                logger.warning(f"Impossible de sauvegarder l'état (produits): {_e!r}")
             self._track_step_complete("validate_products", "✅ Produits validés")
 
             # Phase 4: Vérification des doublons
             self._track_step_start("check_duplicates", "🔍 Vérification des doublons")
             duplicate_result = await self._check_duplicate_quotes()
-
+            duplicate_result = duplicate_result or {}
             if duplicate_result.get("requires_user_decision"):
                 return {
                     "status": "user_interaction_required",
                     "interaction_type": "duplicate_resolution",
                     "message": duplicate_result.get("alert_message"),
-                    "duplicate_data": duplicate_result
+                    "duplicate_data": duplicate_result,
                 }
-
             self._track_step_complete("check_duplicates", "✅ Vérification terminée")
 
             # Phase 5: Validation finale
             self._track_step_start("final_validation", "✅ Validation finale")
             validation_result = await self.validation_engine.validate_quote_data(
-                self.state.client_info.get("data", {}),
-                self.state.products_info
+                (self.state.client_info.get("data", {}) or {}),
+                (self.state.products_info or [])
             )
-
             if not validation_result.get("valid"):
-                return self._build_error_response("Validation finale échouée", "; ".join(validation_result.get("errors", [])))
-
+                errors = validation_result.get("errors") or []
+                msg = "; ".join(map(str, errors)) if errors else "Données invalides"
+                return self._build_error_response("Validation finale échouée", msg)
             self._track_step_complete("final_validation", "✅ Données validées")
 
             # Phase 6: Création du devis
             self._track_step_start("create_quote", "📄 Création du devis")
-            quote_result = await self.quote_manager.create_quote(
-                self.state.client_info.get("data", {}),
-                self.state.products_info
-            )
-
+            client_data = self.state.client_info.get("data", {}) or {}
+            products = self.state.products_info or []
+            quote_result = await self.quote_manager.create_quote(client_data, products)
             if not quote_result.get("success"):
-                return self._build_error_response("Création devis échouée", quote_result.get("error"))
-
+                return self._build_error_response("Création devis échouée", quote_result.get("error") or "Erreur inconnue")
             self._track_step_complete("create_quote", "✅ Devis créé avec succès")
 
             # Finalisation
             final_result = self._build_success_response(quote_result)
+            # Sauvegarde finale utile à la reprise / audit
+            try:
+                self.state.last_quote_result = quote_result
+                self.state.save_to_task(progress_tracker)
+            except Exception as _e:
+                logger.warning(f"Impossible de sauvegarder l'état final: {_e!r}")
 
             # Terminer la tâche
-            if self.current_task:
+            if getattr(self, "current_task", None):
                 progress_tracker.complete_task(self.task_id, final_result)
 
             return final_result
 
         except Exception as e:
-            logger.exception(f"Erreur workflow principal: {e}")
-            if self.current_task:
+            logger.exception(f"Erreur workflow principal: {e!r}")
+            if getattr(self, "current_task", None):
                 progress_tracker.fail_task(self.task_id, str(e))
             return self._build_error_response("Erreur système", str(e))
 
+
+
     async def continue_after_user_input(self, user_input: Dict, context: Dict) -> Dict[str, Any]:
-        """
-        Continue le workflow après une interaction utilisateur
-
-        Args:
-            user_input: Réponse de l'utilisateur
-            context: Contexte de l'interaction
-
-        Returns:
-            Résultat de la continuation
-        """
+        """Continue le workflow après une interaction utilisateur"""
         try:
-            # Restaurer le contexte si nécessaire
-            if self.task_id:
-                task = progress_tracker.get_task(self.task_id)
-                if task and hasattr(task, 'context') and task.context:
-                    self.state.context.update(task.context)
+            # Normalisation d'entrée
+            if not isinstance(context, dict):
+                return self._build_error_response("Contexte invalide", "Le contexte doit être un dictionnaire")
+            if not isinstance(user_input, dict):
+                return self._build_error_response("Entrée invalide", "user_input doit être un dictionnaire")
+
+            # Restaurer le contexte complet de la tâche si disponible
+            if getattr(self, "task_id", None):
+                try:
+                    task = progress_tracker.get_task(self.task_id)
+                    if task and hasattr(task, "context") and isinstance(task.context, dict) and task.context:
+                        self.state.context.update(task.context)
+                        logger.info("✅ Contexte tâche restauré dans continue_after_user_input")
+                except Exception as err:
+                    logger.warning(f"⚠️ Impossible de restaurer le contexte tâche: {err}")
+
+            # Reconstituer extracted_info si absent
+            if not self.state.context.get("extracted_info"):
+                extracted_from_ctx = (context.get("workflow_context") or {}).get("extracted_info")
+                if extracted_from_ctx:
+                    self.state.context["extracted_info"] = extracted_from_ctx
+                    self.state.extracted_info = extracted_from_ctx
+                    try:
+                        self._save_context_to_task()
+                    except Exception as err:
+                        logger.warning(f"⚠️ Échec sauvegarde contexte tâche: {err}")
+                    logger.info("✅ extracted_info reconstitué depuis context.workflow_context")
 
             interaction_type = context.get("interaction_type")
 
@@ -797,74 +844,246 @@ class DevisWorkflowRefactored:
                 return await self._handle_client_creation(user_input, context)
             elif interaction_type == "product_selection":
                 return await self._handle_product_selection(user_input, context)
+            elif interaction_type == "quantity_adjustment":
+                return await self._handle_quantity_adjustment(user_input, context)
             elif interaction_type == "duplicate_resolution":
                 return await self._handle_duplicate_resolution(user_input, context)
+            elif interaction_type == "existing_quotes_review":
+                return await self._handle_existing_quotes_review(user_input, context)
             else:
+                logger.warning(f"⚠️ Type d'interaction non reconnu: {interaction_type!r}")
                 return self._build_error_response("Type d'interaction non reconnu", f"Type: {interaction_type}")
 
         except Exception as e:
-            logger.exception(f"Erreur continuation workflow: {e}")
+            logger.exception(f"Erreur continuation workflow: {str(e)}")
             return self._build_error_response("Erreur continuation", str(e))
 
+    async def _handle_quantity_adjustment(self, user_input: Dict, context: Dict) -> Dict[str, Any]:
+        """Gère l'ajustement des quantités par l'utilisateur"""
+        try:
+            adjusted_products = user_input.get("adjusted_products", [])
+            if not adjusted_products:
+                return self._build_error_response("Données manquantes", "Produits ajustés manquants")
+
+            self.state.products_info = adjusted_products
+            self.state.save_to_task(progress_tracker)
+
+            # Continuer avec la création du devis
+            quote_result = await self.quote_manager.create_quote(
+                self.state.client_info.get("data", {}),
+                self.state.products_info
+            )
+
+            if not quote_result.get("success"):
+                return self._build_error_response("Création devis échouée", quote_result.get("error"))
+
+            return self._build_success_response(quote_result)
+
+        except Exception as e:
+            logger.exception(f"Erreur ajustement quantités: {e}")
+            return self._build_error_response("Erreur ajustement", str(e))
+
+    async def _handle_existing_quotes_review(self, user_input: Dict, context: Dict) -> Dict[str, Any]:
+        """Gère la revue des devis existants"""
+        try:
+            action = user_input.get("action")
+            
+            if action == "display_quotes":
+                duplicate_check = self.state.context.get("duplicate_check", {})
+                all_quotes = []
+                
+                if duplicate_check.get("recent_quotes"):
+                    all_quotes.extend(duplicate_check["recent_quotes"])
+                if duplicate_check.get("draft_quotes"):
+                    all_quotes.extend(duplicate_check["draft_quotes"])
+                if duplicate_check.get("similar_quotes"):
+                    all_quotes.extend(duplicate_check["similar_quotes"])
+                
+                return {
+                    "status": "display_quotes",
+                    "quotes": all_quotes,
+                    "message": f"Voici les {len(all_quotes)} devis existants",
+                    "next_action": "allow_continue_or_select"
+                }
+                
+            elif action == "create_new":
+                logger.info("➕ Création d'un nouveau devis demandée")
+                
+                client_data = self.state.client_info.get("data", {})
+                extracted_info = self.state.extracted_info
+                
+                return await self._continue_workflow_after_client_selection(
+                    client_data,
+                    {"extracted_info": extracted_info}
+                )
+                
+            else:
+                return self._build_error_response("Action non reconnue", f"Action: {action}")
+                
+        except Exception as e:
+            logger.exception(f"Erreur revue devis existants: {e}")
+            return self._build_error_response("Erreur revue devis", str(e))  
+
+    async def _continue_workflow_after_client_selection(self, client_data: Dict, workflow_context: Dict) -> Dict[str, Any]:
+        """Continue le workflow après sélection du client"""
+        try:
+            # Mettre à jour l'état
+            self.state.client_info = {"data": client_data, "found": True}
+            self.state.save_to_task(progress_tracker)
+            
+            # Continuer avec la validation des produits
+            extracted_info = workflow_context.get("extracted_info", {})
+            return await self._process_products_validation(extracted_info.get("products", []))
+            
+        except Exception as e:
+            logger.exception(f"Erreur continuation après sélection client: {e}")
+            return self._build_error_response("Erreur continuation", str(e))    
+                  
     async def _process_client_validation(self, client_name: str) -> Dict[str, Any]:
-        """Traite la validation du client"""
-        if not client_name:
-            return {"success": False, "error": "Nom du client manquant"}
+        """Traite la validation du client via ClientManager (flux homogène + robustesse)"""
+        try:
+            # Normalisation simple
+            name = (client_name or "").strip()
+            if not name:
+                return {
+                    "success": False,
+                    "status": "user_interaction_required",
+                    "interaction_type": "client_identification",
+                    "message": "Nom du client requis",
+                    "fields_required": ["client_name"]
+                }
 
-        client_info = await self.client_manager.validate_client(client_name)
+            # Compatibilité ascendante: utiliser find_client si dispo, sinon validate_client
+            manager = getattr(self.client_manager, "find_client", None)
+            client_result = await (manager(name) if manager else self.client_manager.validate_client(name))
 
-        if client_info.get("found"):
-            return {"success": True, "client_info": client_info}
-        elif client_info.get("suggestions"):
-            return {
-                "success": False,
-                "status": "user_interaction_required",
-                "interaction_type": "client_selection",
-                "suggestions": client_info["suggestions"],
-                "message": client_info.get("message")
-            }
-        else:
-            # Client non trouvé, proposer la création
+            if client_result.get("found"):
+                return {
+                    "success": True,
+                    "client_info": client_result
+                }
+
+            if client_result.get("suggestions"):
+                return {
+                    "success": False,
+                    "status": "user_interaction_required",
+                    "interaction_type": "client_selection",
+                    "message": client_result.get("message") or f"Client « {name} » non trouvé",
+                    "suggestions": client_result["suggestions"],
+                    "client_name": name
+                }
+
+            # Client non trouvé, proposer la création (conserver le nom pour l'UI)
             return {
                 "success": False,
                 "status": "user_interaction_required",
                 "interaction_type": "client_creation",
-                "client_name": client_name,
-                "message": f"Client '{client_name}' non trouvé. Souhaitez-vous le créer ?"
+                "message": f"Souhaitez-vous créer le client « {name} » ?",
+                "client_name": name
             }
 
+        except Exception as e:
+            logger.error(f"Erreur validation client: {e}")
+            return {"success": False, "error": str(e)}
+
+
     async def _process_products_validation(self, products: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Traite la validation des produits"""
+        """Traite la validation des produits (batch si dispo, fallback recherche unitaire), conserve le contrat de sortie et ajoute la quantité + message d'interaction."""
         if not products:
             return {"success": False, "error": "Aucun produit spécifié"}
 
-        validated_products = await self.product_manager.validate_products(products)
+        # Normalisation minimale + garde-fous
+        normalized: List[Dict[str, Any]] = []
+        invalid_requests: List[Dict[str, Any]] = []
+        for p in products:
+            name = (p.get("name") or p.get("Name") or "").strip()
+            code = (p.get("code") or p.get("ItemCode") or "").strip()
+            qty = p.get("quantity", 1) or 1
+            if not name and not code:
+                invalid_requests.append({"original_request": p, "reason": "Ni 'name' ni 'code'"})
+            else:
+                normalized.append({"name": name, "code": code, "quantity": qty, "original": p})
 
-        # Vérifier s'il y a des produits nécessitant une sélection
+        if invalid_requests and not normalized:
+            return {"success": False, "error": f"Requêtes produits invalides: {len(invalid_requests)} sans nom ni code"}
+
+        # 1) Préférence: utiliser l'API publique batch si disponible
+        validated_products: List[Dict[str, Any]] = []
+        try:
+            if hasattr(self.product_manager, "validate_products") and callable(self.product_manager.validate_products):
+                # Étend chaque item avec la quantité mais conserve le schéma attendu du ProductManager
+                pm_input = [n["original"] for n in normalized]
+                pm_result = await self.product_manager.validate_products(pm_input)  # présumé: renvoie [{found:bool, ...}]
+                # Réattacher la quantité proprement
+                for item, n in zip(pm_result, normalized):
+                    item["quantity"] = n["quantity"]
+                    validated_products.append(item)
+            else:
+                # 2) Fallback: recherche unitaire (sans utiliser de méthodes privées si possible)
+                async def _search_one(n):
+                    # Préférence: méthode publique par code puis par nom
+                    if n["code"] and hasattr(self.product_manager, "find_by_code") and callable(self.product_manager.find_by_code):
+                        res = await self.product_manager.find_by_code(n["code"])
+                    elif n["name"] and hasattr(self.product_manager, "search_by_name") and callable(self.product_manager.search_by_name):
+                        res = await self.product_manager.search_by_name(n["name"])
+                    else:
+                        # Dernier recours: si seules méthodes privées existent, on garde compat (évite crash)
+                        if n["code"] and hasattr(self.product_manager, "_find_single_product"):
+                            res = await self.product_manager._find_single_product(n["code"])
+                        else:
+                            res = await self.product_manager._search_products_by_name(n["name"])
+                    if res.get("found"):
+                        return {"found": True, "data": res.get("data", res), "quantity": n["quantity"]}
+                    return {
+                        "found": False,
+                        "suggestions": res.get("suggestions", []),
+                        "original_request": n["original"],
+                        "quantity": n["quantity"],
+                    }
+
+                # Paralléliser les I/O
+                import asyncio
+                validated_products = await asyncio.gather(*[_search_one(n) for n in normalized])
+        except Exception as e:
+            logger.error(f"Erreur validation produits: {e}")
+            return {"success": False, "error": str(e)}
+
+        # Interaction requise si au moins un non trouvé avec suggestions
         products_with_suggestions = [p for p in validated_products if not p.get("found") and p.get("suggestions")]
-
         if products_with_suggestions:
             return {
                 "success": False,
                 "status": "user_interaction_required",
                 "interaction_type": "product_selection",
                 "products": validated_products,
-                "message": f"{len(products_with_suggestions)} produit(s) nécessitent votre attention"
+                "message": f"{len(products_with_suggestions)} produit(s) nécessitent votre attention",
             }
 
-        # Vérifier qu'au moins un produit est valide
-        valid_products = [p for p in validated_products if p.get("found")]
-        if not valid_products:
+        # Vérifier qu'au moins un produit valide
+        if not any(p.get("found") for p in validated_products):
             return {"success": False, "error": "Aucun produit valide trouvé"}
 
         return {"success": True, "products": validated_products}
 
+
     async def _check_duplicate_quotes(self) -> Dict[str, Any]:
-        """Vérifie les doublons de devis"""
-        return await self.quote_manager.check_duplicate_quotes(
-            self.state.client_info,
-            self.state.products_info
-        )
+        """Vérifie les doublons de devis via QuoteManager"""
+        try:
+            # Utiliser QuoteManager pour vérifier les doublons
+            client_data = self.state.client_info.get("data", {})
+            client_name = client_data.get("Name", "")
+            
+            if not client_name:
+                return {"requires_user_decision": False}
+            
+            # Rechercher les devis récents pour ce client
+            # Note: Cette fonctionnalité dépend de l'implémentation dans QuoteManager
+            # Pour l'instant, on retourne pas de doublons
+            return {"requires_user_decision": False}
+            
+        except Exception as e:
+            logger.error(f"Erreur vérification doublons: {e}")
+            return {"requires_user_decision": False}
 
     async def _handle_client_selection(self, user_input: Dict, context: Dict) -> Dict[str, Any]:
         """Gère la sélection de client par l'utilisateur"""
@@ -946,7 +1165,12 @@ class DevisWorkflowRefactored:
 
         else:
             return self._build_error_response("Action non reconnue", f"Action: {action}")
-
+    async def _check_duplicate_quotes(self) -> Dict[str, Any]:
+        """Vérifie les doublons de devis"""
+        return await self.quote_manager.check_duplicate_quotes(
+        self.state.client_info,
+        self.state.products_info
+        )
     def _initialize_task_tracking(self, user_prompt: str) -> str:
         """Initialise le tracking de tâche"""
         try:
