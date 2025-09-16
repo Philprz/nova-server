@@ -1173,7 +1173,7 @@ async def sap_get_quote(doc_entry: int) -> dict:
         log(f"❌ Erreur récupération devis {doc_entry}: {str(e)}", "ERROR")
         return {"success": False, "error": str(e)}
 @mcp.tool(name="sap_search_quotes")
-async def sap_search_quotes(client_name: str, date_from: str = None, limit: int = 10) -> dict:
+async def sap_search_quotes(client_name: str = None, card_code: str = None, date_from: str = None, limit: int = 10) -> dict:
     """
     Recherche les devis SAP pour un client avec filtres optionnels
     
@@ -1185,8 +1185,19 @@ async def sap_search_quotes(client_name: str, date_from: str = None, limit: int 
     try:
         log(f"Recherche devis SAP pour client: {client_name}")
         
-        # Recherche insensible à la casse avec tolower
-        filters = [f"contains(tolower(CardName),'{client_name.lower()}')"]
+        # Construire le filtre - Utiliser CardCode en priorité
+        filters = []
+        
+        # Si CardCode fourni, l'utiliser directement (plus fiable)
+        if card_code:
+            filters.append(f"CardCode eq '{card_code}'")
+            log(f"✅ Recherche par CardCode: {card_code}")
+        # Sinon, rechercher par nom
+        elif client_name:
+            filters.append(f"contains(CardName,'{client_name}')")
+            log(f"🔍 Recherche par nom: {client_name}")
+        else:
+            return {"success": False, "error": "CardCode ou client_name requis"}
         
         if date_from:
             filters.append(f"DocDate ge '{date_from}'")

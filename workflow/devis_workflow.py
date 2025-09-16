@@ -3857,21 +3857,43 @@ class DevisWorkflow:
         }
         
         try:
-            # Récupérer les identifiants client
+            # Récupérer les identifiants client - PRIORITÉ au CardCode SAP
             client_name = client_info.get("data", {}).get("Name", "")
+            client_sap_code = (
+                client_info.get("data", {}).get("sap_code") or
+                client_info.get("data", {}).get("CardCode") or
+                self.context.get("client_sap_code") or
+                self.context.get("selected_client", {}).get("sap_code")
+            )
+            
+            if client_sap_code:
+                logger.info(f"✅ Utilisation du CardCode SAP pour recherche: {client_sap_code}")
+            elif client_name:
+                logger.warning(f"⚠️ Pas de CardCode, recherche par nom: {client_name}")
             
             if not client_name:
                 logger.warning("Aucun nom client pour vérification doublons")
                 return duplicate_check
             
             # 1. Vérifier les devis SAP récents (max 2 mois)
-            recent_quotes = await self._get_recent_sap_quotes(client_name, hours=1440)
+            recent_quotes = await self._get_recent_sap_quotes(
+                client_name=client_name, 
+                card_code=client_sap_code,
+                hours=1440  # 60 jours
+            )
             
             # 2. Vérifier les devis brouillons existants
-            draft_quotes = await self._get_client_draft_quotes(client_name)
+            draft_quotes = await self._get_client_draft_quotes(
+                client_name=client_name,
+                card_code=client_sap_code
+            )
             
             # 3. Analyser la similarité des produits
-            similar_quotes = await self._find_similar_product_quotes(client_name, products)
+            similar_quotes = await self._find_similar_product_quotes(
+                client_name=client_name,
+                card_code=client_sap_code,
+                products=products
+            )
             
             # Populate results
             duplicate_check["recent_quotes"] = recent_quotes
@@ -3935,7 +3957,7 @@ class DevisWorkflow:
             duplicate_check["warnings"].append(f"❌ Erreur vérification doublons: {str(e)}")
             return duplicate_check
 
-    async def _get_recent_sap_quotes(self, client_name: str, hours: int = 48) -> List[Dict[str, Any]]:
+    async def _get_recent_sap_quotes(self, client_name: str = None, card_code: str = None, hours: int = 1440) -> List[Dict[str, Any]]:
         """Récupère les devis SAP récents pour un client"""
         try:
             
@@ -3943,12 +3965,21 @@ class DevisWorkflow:
             cutoff_date = datetime.now() - timedelta(hours=hours)
             cutoff_str = cutoff_date.strftime("%Y-%m-%d")
             
-            # Rechercher dans SAP avec filtre date et client
+            # Utiliser CardCode en priorité, sinon le nom
+            search_params = {}
+            if card_code:
+                search_params["card_code"] = card_code
+                logger.info(f"🔍 Recherche par CardCode: {card_code}")
+            else:
+                search_params["client_name"] = client_name
+                logger.info(f"🔍 Recherche par nom: {client_name}")
+            
+            # Rechercher dans SAP
             
             result = await MCPConnector.call_sap_mcp("sap_search_quotes", {
-                "client_name": client_name,
+                **search_params,
                 "date_from": cutoff_str,
-                "limit": 10
+                "limit": 50
             })
             
             if result.get("success") and result.get("quotes"):
@@ -3960,7 +3991,7 @@ class DevisWorkflow:
             logger.warning(f"Erreur recherche devis récents: {str(e)}")
             return []
 
-    async def _get_client_draft_quotes(self, client_name: str) -> List[Dict[str, Any]]:
+    async def _get_client_draft_quotes(self, client_name: str = None, card_code: str = None) -> List[Dict[str, Any]]:
         """Récupère les devis en brouillon pour un client"""
         try:
             
@@ -3970,11 +4001,19 @@ class DevisWorkflow:
             if not draft_result.get("success"):
                 return []
             
-            # Filtrer par nom client (recherche insensible à la casse et partielle)
-            client_drafts = [
-                quote for quote in draft_result.get("draft_quotes", [])
-                if client_name.lower() in quote.get("card_name", "").lower()
-            ]
+            # Filtrer par CardCode en priorité, sinon par nom
+            client_drafts = []
+            for quote in draft_result.get("draft_quotes", []):
+                # Si on a un CardCode, l'utiliser en priorité
+                if card_code and quote.get("card_code") == card_code:
+                    client_drafts.append(quote)
+                # Sinon, filtrer par nom
+                elif not card_code and client_name:
+                    quote_card_name = quote.get("card_name", "").lower()
+                    if client_name.lower() in quote_card_name:
+                        client_drafts.append(quote)
+            
+            logger.info(f"📝 {len(client_drafts)} brouillons trouvés pour {card_code or client_name}")
             
             return client_drafts
             
@@ -3982,7 +4021,7 @@ class DevisWorkflow:
             logger.warning(f"Erreur recherche brouillons client: {str(e)}")
             return []
 
-    async def _find_similar_product_quotes(self, client_name: str, requested_products: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    async def _find_similar_product_quotes(self, client_name: str = None, card_code: str = None, products: List[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """Trouve les devis avec des produits similaires"""
         try:
             # Pour l'instant, implémentation simplifiée
@@ -4002,8 +4041,12 @@ class DevisWorkflow:
 
             logger.info(f"Recherche produits similaires pour {client_name}: codes={requested_codes}, mots-clés={requested_names}")
 
-            # Rechercher dans les devis récents du client (30 jours au lieu de 7)
-            recent_quotes = await self._get_recent_sap_quotes(client_name, hours=720)
+            # Rechercher dans les devis récents du client (30 jours)
+            recent_quotes = await self._get_recent_sap_quotes(
+                client_name=client_name,
+                card_code=card_code,
+                hours=720
+            )
             similar_quotes = []
 
             for quote in recent_quotes:
