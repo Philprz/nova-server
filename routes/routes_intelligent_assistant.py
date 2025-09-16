@@ -21,7 +21,7 @@ import json
 router = APIRouter(tags=["Assistant Intelligent"])
 # Import du système de progression
 from services.progress_tracker import progress_tracker, TaskStatus
-from workflow. import DevisWorkflow
+from workflow.devis_workflow DevisWorkflow
 from workflow.client_creation_workflow import ClientCreationWorkflow
 logger = logging.getLogger(__name__)
 

@@ -13,7 +13,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from scripts.sync_sap_products import SAPProductSyncer
 from services.local_product_search import LocalProductSearchService
-from workflow. import DevisWorkflow
+from workflow.devis_workflow DevisWorkflow
 
 logger = logging.getLogger('migration')
 

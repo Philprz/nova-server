@@ -152,7 +152,7 @@ class ClaudeDiagnostic:
         try:
             # Importer le workflow
             sys.path.insert(0, '.')
-            from workflow. import DevisWorkflow
+            from workflow.devis_workflow DevisWorkflow
             
             # Test avec un workflow simplifié
             workflow = DevisWorkflow()
@@ -184,7 +184,7 @@ class ClaudeDiagnostic:
         try:
             # Importer le workflow
             sys.path.insert(0, '.')
-            from workflow. import DevisWorkflow
+            from workflow.devis_workflow DevisWorkflow
             
             # Test complet avec un prompt réaliste
             workflow = DevisWorkflow()
