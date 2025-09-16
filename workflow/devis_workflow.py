@@ -7381,24 +7381,20 @@ class DevisWorkflow:
             # CORRECTION: Si on a des devis ET requires_user_decision, proposer l'interaction
             
             if duplicate_check.get("requires_user_decision"):
+                # Calculer le total pour le log
+                total_existing_quotes = (
+                    len(duplicate_check.get('recent_quotes', [])) +
+                    len(duplicate_check.get('draft_quotes', [])) +
+                    len(duplicate_check.get('similar_quotes', []))
+                    )
                 logger.info(f"📋 Proposition interaction pour {total_existing_quotes} devis existants")
-                
-                duplicate_interaction_data = {
-                    "type": "duplicate_resolution",
-                    "interaction_type": "duplicate_resolution",
-                    "client_name": client_display_name,
-                    "alert_message": duplicate_check.get("alert_message"),
-                    "recent_quotes": duplicate_check.get("recent_quotes", []),
-                    "draft_quotes": duplicate_check.get("draft_quotes", []),
-                    "similar_quotes": duplicate_check.get("similar_quotes", []),
-                    "options": [
-                        {"value": "proceed", "label": "➕ Créer un nouveau devis"},
-                        {"value": "consolidate", "label": "📝 Reprendre un devis existant"},
-                        {"value": "review", "label": "📋 Voir les devis existants"},
-                        {"value": "cancel", "label": "❌ Annuler"}
-                    ],
-                    "input_type": "choice"
-                }
+                # Utiliser la méthode centralisée existante
+                client_name = self.context.get("client_info", {}).get("data", {}).get("Name", "Client")
+                duplicate_interaction_data = self._prepare_duplicate_interaction_data(
+                client_name,
+                duplicate_check,
+                    self.context.get("extracted_info")
+                    )
                 
                 try:
                     from services.websocket_manager import websocket_manager
