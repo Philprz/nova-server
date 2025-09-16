@@ -99,7 +99,7 @@ class ClientManager:
 
         try:
             # Recherche dans les systèmes
-            client_info = await find_client_everywhere(client_name, self.mcp_connector)
+            client_info = await find_client_everywhere(client_name)
 
             if client_info.get("found"):
                 return self._normalize_client_info(client_info)
