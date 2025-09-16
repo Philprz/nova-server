@@ -1185,8 +1185,8 @@ async def sap_search_quotes(client_name: str, date_from: str = None, limit: int 
     try:
         log(f"Recherche devis SAP pour client: {client_name}")
         
-        # Construire le filtre
-        filters = [f"contains(CardName,'{client_name}')"]
+        # Recherche insensible à la casse avec tolower
+        filters = [f"contains(tolower(CardName),'{client_name.lower()}')"]
         
         if date_from:
             filters.append(f"DocDate ge '{date_from}'")

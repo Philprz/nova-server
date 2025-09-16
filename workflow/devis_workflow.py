@@ -3864,8 +3864,8 @@ class DevisWorkflow:
                 logger.warning("Aucun nom client pour vérification doublons")
                 return duplicate_check
             
-            # 1. Vérifier les devis SAP récents (dernières 48h)
-            recent_quotes = await self._get_recent_sap_quotes(client_name, hours=48)
+            # 1. Vérifier les devis SAP récents (max 2 mois)
+            recent_quotes = await self._get_recent_sap_quotes(client_name, hours=1440)
             
             # 2. Vérifier les devis brouillons existants
             draft_quotes = await self._get_client_draft_quotes(client_name)
@@ -3920,6 +3920,14 @@ class DevisWorkflow:
                 duplicate_check["suggestions"].append("✅ Aucun doublon détecté - Création sécurisée")
                 
             logger.info(f"Vérification doublons terminée: {total_findings} potentiel(s) doublon(s)")
+            # FORCER la proposition même sans doublons stricts si des devis existent
+            if total_findings > 0 and not duplicate_check.get("requires_user_decision"):
+                logger.info(f"📋 Forcer proposition: {total_findings} devis existant(s) trouvé(s)")
+                duplicate_check["requires_user_decision"] = True
+                duplicate_check["alert_message"] = (
+                    f"Il existe {total_findings} devis pour {client_name}.\n"
+                    "Voulez-vous reprendre un devis existant ou en créer un nouveau ?"
+                )
             return duplicate_check
             
         except Exception as e:
@@ -3962,10 +3970,10 @@ class DevisWorkflow:
             if not draft_result.get("success"):
                 return []
             
-            # Filtrer par nom client
+            # Filtrer par nom client (recherche insensible à la casse et partielle)
             client_drafts = [
                 quote for quote in draft_result.get("draft_quotes", [])
-                if quote.get("card_name", "").lower() == client_name.lower()
+                if client_name.lower() in quote.get("card_name", "").lower()
             ]
             
             return client_drafts
@@ -3994,8 +4002,8 @@ class DevisWorkflow:
 
             logger.info(f"Recherche produits similaires pour {client_name}: codes={requested_codes}, mots-clés={requested_names}")
 
-            # Rechercher dans les devis récents du client (ex: 7 jours)
-            recent_quotes = await self._get_recent_sap_quotes(client_name, hours=168)
+            # Rechercher dans les devis récents du client (30 jours au lieu de 7)
+            recent_quotes = await self._get_recent_sap_quotes(client_name, hours=720)
             similar_quotes = []
 
             for quote in recent_quotes:
