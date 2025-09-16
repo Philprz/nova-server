@@ -671,6 +671,10 @@ async def handle_duplicate_resolution_task(task_id: str, response_data: dict):
             logger.info(f"✅ Contexte restauré pour duplicate_resolution")
         
         # Préparer les données pour le workflow
+        # CORRECTION: S'assurer que le contexte contient duplicate_check
+        if not original_context.get("duplicate_check"):
+            logger.warning("⚠️ duplicate_check manquant, reconstruction...")
+            original_context["duplicate_check"] = task.context.get("duplicate_check", {})
         user_input = {
             "action": decision,
             "selected_quote_id": selected_quote_id
