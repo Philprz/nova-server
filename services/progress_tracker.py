@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 BUSINESS_STEPS_PARALLEL = {
     "analyze_request": [
         ("parse_prompt", "🔍 Analyse de votre demande"),
+        ("extract_info", "📊 Extraction des informations"),
         ("extract_entities", "📋 Identification des besoins"),
         ("validate_input", "✅ Demande comprise")
     ],

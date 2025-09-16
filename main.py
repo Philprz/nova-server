@@ -33,7 +33,30 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
+def setup_robust_logging():
+    """Configuration logging robuste anti-corruption"""
+    formatter = logging.Formatter(
+    '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+    )
 
+    # Handler avec buffer élargi
+    handler = logging.StreamHandler()
+    handler.setFormatter(formatter)
+    if hasattr(handler, 'buffer_size'):
+        handler.buffer_size = 8192
+
+    # Configuration UTF-8 forcée
+    if sys.platform == 'win32':
+        import codecs
+        sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, errors='replace')
+        sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, errors='replace')
+
+    logging.basicConfig(
+        level=logging.INFO,
+        handlers=[handler],
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
 # Variables globales
 HEALTH_CHECK_RESULTS = None
 

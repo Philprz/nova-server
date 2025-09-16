@@ -706,7 +706,7 @@ class DevisWorkflowRefactored:
             logger.info(f"=== DÉMARRAGE WORKFLOW REFACTORISÉ - Tâche {self.task_id} ===")
 
             # Phase 1: Extraction des informations
-            self._track_step_start("extract_info", "🔎 Analyse de la demande")
+            self._track_step_start("parse_prompt", "🔎 Analyse de la demande")
             extracted_info = await self.llm_extractor.extract_quote_info(user_prompt)
             if not extracted_info:
                 return self._build_error_response("Extraction échouée", "Impossible d'analyser votre demande")
@@ -716,7 +716,7 @@ class DevisWorkflowRefactored:
                 self.state.save_to_task(progress_tracker)
             except Exception as _e:
                 logger.warning(f"Impossible de sauvegarder l'état (extraction): {_e!r}")
-            self._track_step_complete("extract_info", "✅ Demande analysée")
+            self._track_step_complete("parse_prompt", "✅ Demande analysée")
 
             # Phase 2: Validation du client
             self._track_step_start("search_client", "👤 Validation du client")
@@ -1259,7 +1259,7 @@ class EnhancedDevisWorkflow(DevisWorkflowRefactored):
         """Version parallélisée du traitement de devis"""
         try:
             # Phase 1: Extraction (séquentielle)
-            self._track_step_start("extract_info", "🔍 Analyse de votre demande")
+            self._track_step_start("parse_prompt", "🔎 Analyse de la demande")
             extracted_info = await self.llm_extractor.extract_quote_info(user_prompt)
 
             if not extracted_info:
