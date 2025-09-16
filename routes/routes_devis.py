@@ -25,7 +25,7 @@ async def generate_quote(request: DevisPromptRequest):
     CORRIGÉ: Vérifie le bon champ pour déterminer le succès
     """
     try:
-        from workflow.devis_workflow DevisWorkflow
+        from workflow.devis_workflow import DevisWorkflow
         
         logger.info(f"Début génération devis: {request.prompt}")
         logger.info(f"Mode draft: {request.draft_mode}")
@@ -139,7 +139,7 @@ async def resolve_duplicates(request: dict):
         
         if action == "create_new":
             # Forcer la création d'un nouveau devis malgré les doublons
-            from workflow.devis_workflow DevisWorkflow
+            from workflow.devis_workflow import DevisWorkflow
             
             workflow = DevisWorkflow()
             # Désactiver temporairement la vérification doublons
@@ -196,7 +196,7 @@ async def confirm_quote(request: QuoteConfirmationRequest):
     try:
         logger.info(f"Confirmation devis - Action: {request.action}, TaskID: {request.task_id}, Confirmé: {request.confirmed}")
         
-        from workflow.devis_workflow DevisWorkflow
+        from workflow.devis_workflow import DevisWorkflow
         from services.progress_tracker import get_task_result
         
         # Récupérer le résultat intermédiaire depuis le tracker de progression

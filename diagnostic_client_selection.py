@@ -7,7 +7,7 @@ import asyncio
 import json
 import logging
 from utils.client_lister import find_client_everywhere
-from workflow.devis_workflow DevisWorkflow
+from workflow.devis_workflow import DevisWorkflow
 
 # Configuration logging
 logging.basicConfig(
