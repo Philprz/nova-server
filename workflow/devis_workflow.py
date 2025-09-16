@@ -3815,16 +3815,9 @@ class DevisWorkflow:
     async def _check_duplicate_quotes(self, client_info: Dict[str, Any], products: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
         Vérifie s'il existe déjà des devis similaires pour éviter les doublons
-        
-        Args:
-            client_info: Informations du client validé
-            products: Liste des produits demandés
-            
-        Returns:
-            Dict avec statut de vérification et actions suggérées
         """
         logger.info("🔍 Vérification des doublons de devis...")
-        
+
         duplicate_check = {
             "duplicates_found": False,
             "recent_quotes": [],
@@ -3834,103 +3827,111 @@ class DevisWorkflow:
             "suggestions": [],
             "warnings": []
         }
-        
+
         try:
             # Récupérer les identifiants client - PRIORITÉ au CardCode SAP
-            client_name = client_info.get("data", {}).get("Name", "")
+            client_data = client_info.get("data", {}) if isinstance(client_info, dict) else {}
+            client_name = client_data.get("Name", "")
             client_sap_code = (
-                client_info.get("data", {}).get("sap_code") or
-                client_info.get("data", {}).get("CardCode") or
-                self.context.get("client_sap_code") or
-                self.context.get("selected_client", {}).get("sap_code")
+                client_data.get("sap_code")
+                or client_data.get("CardCode")
+                or (self.context.get("selected_client", {}) or {}).get("sap_code")
+                or (self.context.get("selected_client", {}) or {}).get("CardCode")
+                or self.context.get("client_sap_code")
             )
-            
+
             if client_sap_code:
                 logger.info(f"✅ Utilisation du CardCode SAP pour recherche: {client_sap_code}")
             elif client_name:
                 logger.warning(f"⚠️ Pas de CardCode, recherche par nom: {client_name}")
-            
+
             if not client_name:
                 logger.warning("Aucun nom client pour vérification doublons")
                 return duplicate_check
-            
-            # 1. Vérifier les devis SAP récents (max 2 mois)
+
+            # 1. Devis SAP récents (60 jours = 1440 h)
             recent_quotes = await self._get_recent_sap_quotes(
-                client_name=client_name, 
+                client_name=client_name,
                 card_code=client_sap_code,
-                hours=1440  # 60 jours
+                hours=1440
             )
-            
-            # 2. Vérifier les devis brouillons existants
+
+            # 2. Brouillons
             draft_quotes = await self._get_client_draft_quotes(
                 client_name=client_name,
                 card_code=client_sap_code
             )
-            
-            # 3. Analyser la similarité des produits
+
+            # 3. Similaires sur produits
             similar_quotes = await self._find_similar_product_quotes(
                 client_name=client_name,
                 card_code=client_sap_code,
                 products=products
             )
-            
-            # Populate results
-            duplicate_check["recent_quotes"] = recent_quotes
-            duplicate_check["draft_quotes"] = draft_quotes  
-            duplicate_check["similar_quotes"] = similar_quotes
-            
-            # Analyser les résultats
-            total_findings = len(recent_quotes) + len(draft_quotes) + len(similar_quotes)
-            
-            # CORRECTION: Si on trouve des devis, toujours marquer comme trouvé
-            if total_findings > 0:
-                logger.info(f"📊 Devis trouvés pour {client_name}:")
-                logger.info(f"  - Récents: {len(recent_quotes)}")
-                logger.info(f"  - Brouillons: {len(draft_quotes)}")
-                logger.info(f"  - Similaires: {len(similar_quotes)}")
 
+            # Populate
+            duplicate_check["recent_quotes"] = recent_quotes
+            duplicate_check["draft_quotes"] = draft_quotes
+            duplicate_check["similar_quotes"] = similar_quotes
+
+            # Analyse
+            n_recent = len(recent_quotes)
+            n_draft = len(draft_quotes)
+            n_similar = len(similar_quotes)
+            total_findings = n_recent + n_draft + n_similar
+
+            if total_findings > 0:
                 duplicate_check["duplicates_found"] = True
                 duplicate_check["action_required"] = True
-                
-                # Log détaillé
-                logger.info(f"📊 Devis trouvés - Récents: {len(recent_quotes)}, Brouillons: {len(draft_quotes)}, Similaires: {len(similar_quotes)}")
 
-                # Messages d'alerte
-                if recent_quotes:
-                    duplicate_check["warnings"].append(f"⚠️ {len(recent_quotes)} devis récent(s) trouvé(s) pour {client_name}")
+                # Log synthétique (évite doublons)
+                logger.info(f"📊 Devis trouvés pour {client_name} — Récents:{n_recent} / Brouillons:{n_draft} / Similaires:{n_similar}")
 
-                if draft_quotes:
-                    duplicate_check["warnings"].append(f"📝 {len(draft_quotes)} devis en brouillon pour {client_name}")
+                # Messages
+                if n_recent:
+                    duplicate_check["warnings"].append(f"⚠️ {n_recent} devis récent(s) trouvé(s) pour {client_name}")
+                if n_draft:
+                    duplicate_check["warnings"].append(f"📝 {n_draft} devis en brouillon pour {client_name}")
                     duplicate_check["suggestions"].append("💡 Considérez consolider avec les brouillons existants")
-
-                if similar_quotes:
-                    duplicate_check["warnings"].append(f"🔄 {len(similar_quotes)} devis avec produits similaires")
+                if n_similar:
+                    duplicate_check["warnings"].append(f"🔄 {n_similar} devis avec produits similaires")
                     duplicate_check["suggestions"].append("💡 Vérifiez s'il s'agit d'une mise à jour ou d'un nouveau besoin")
 
-                # TOUJOURS proposer si des devis existent
-                if total_findings > 0:  # Changé de duplicate_check.get("duplicates_found")
-                    total_quotes = len(duplicate_check.get("recent_quotes", [])) + len(duplicate_check.get("draft_quotes", [])) + len(duplicate_check.get("similar_quotes", []))
-                    printer_quotes_count = await self._count_printer_quotes_for_client(
-                        client_name,
-                        duplicate_check.get("recent_quotes", []),
-                        duplicate_check.get("draft_quotes", []),
-                        duplicate_check.get("similar_quotes", [])
-                        )
-                    alert_message = (
-                        f"Il y a déjà {total_quotes} devis, dont {printer_quotes_count} qui concernent des imprimantes pour {client_name}.\n\n"
-                        "Voulez-vous reprendre un devis et le modifier ou en créer un nouveau from scratch ?"
-                        )
-                    duplicate_check["alert_message"] = alert_message
-                    duplicate_check["requires_user_decision"] = True
-                    logger.warning(f"⚠️ Doublons: {total_quotes} devis dont {printer_quotes_count} avec imprimantes pour {client_name}")
+                total_quotes = n_recent + n_draft + n_similar
+                printer_quotes_count = await self._count_printer_quotes_for_client(
+                    client_name,
+                    recent_quotes,
+                    draft_quotes,
+                    similar_quotes
+                )
 
-                    return duplicate_check
-            
+                duplicate_check["alert_message"] = (
+                    f"Il y a déjà {total_quotes} devis, dont {printer_quotes_count} qui concernent des imprimantes pour {client_name}.\n\n"
+                    "Voulez-vous reprendre un devis et le modifier ou en créer un nouveau from scratch ?"
+                )
+                duplicate_check["requires_user_decision"] = True
+                logger.warning(f"⚠️ Doublons: {total_quotes} devis dont {printer_quotes_count} avec imprimantes pour {client_name}")
+
+                # Interaction data
+                client_name_for_interaction = (
+                    client_data.get("Name")
+                    or client_data.get("CardName")
+                    or client_name
+                    or "Client"
+                )
+                duplicate_check["interaction_data"] = self._prepare_duplicate_interaction_data(
+                    client_name_for_interaction,
+                    duplicate_check,
+                    client_info
+                )
+
+                return duplicate_check
             else:
                 duplicate_check["suggestions"].append("✅ Aucun doublon détecté - Création sécurisée")
-                
+
             logger.info(f"Vérification doublons terminée: {total_findings} potentiel(s) doublon(s)")
-            # FORCER la proposition même sans doublons stricts si des devis existent
+
+            # Forcer proposition si des devis existent (chemin sans early-return)
             if total_findings > 0 and not duplicate_check.get("requires_user_decision"):
                 logger.info(f"📋 Forcer proposition: {total_findings} devis existant(s) trouvé(s)")
                 duplicate_check["requires_user_decision"] = True
@@ -3938,12 +3939,25 @@ class DevisWorkflow:
                     f"Il existe {total_findings} devis pour {client_name}.\n"
                     "Voulez-vous reprendre un devis existant ou en créer un nouveau ?"
                 )
+                client_name_for_interaction = (
+                    client_data.get("Name")
+                    or client_data.get("CardName")
+                    or client_name
+                    or "Client"
+                )
+                duplicate_check["interaction_data"] = self._prepare_duplicate_interaction_data(
+                    client_name_for_interaction,
+                    duplicate_check,
+                    client_info
+                )
+
             return duplicate_check
-            
+
         except Exception as e:
             logger.exception(f"Erreur vérification doublons devis: {str(e)}")
             duplicate_check["warnings"].append(f"❌ Erreur vérification doublons: {str(e)}")
             return duplicate_check
+
 
     async def _get_recent_sap_quotes(self, client_name: str = None, card_code: str = None, hours: int = 1440) -> List[Dict[str, Any]]:
         """Récupère les devis SAP récents pour un client"""
@@ -6498,7 +6512,7 @@ class DevisWorkflow:
                         "type": "duplicate_resolution",
                         "message": duplicate_check.get("alert_message"),
                         "task_id": self.task_id,
-                        "interaction_data": duplicate_interaction_data
+                        "interaction_data": duplicate_check.get("interaction_data")
                     }
 
                 # 6) Continuer le workflow standard (utilise la fonction dédiée qui gère produits/WS)
