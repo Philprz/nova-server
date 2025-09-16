@@ -682,7 +682,7 @@ class DevisWorkflowRefactored:
             logger.info(f"=== DÉMARRAGE WORKFLOW REFACTORISÉ - Tâche {self.task_id} ===")
 
             # Phase 1: Extraction des informations
-            self._track_step_start("extract_info", "🔍 Analyse de votre demande")
+            self._track_step_complete("extract_entities", "✅ Demande analysée")
             extracted_info = await self.llm_extractor.extract_quote_info(user_prompt)
 
             if not extracted_info:
@@ -693,7 +693,7 @@ class DevisWorkflowRefactored:
             self._track_step_complete("extract_info", "✅ Demande analysée")
 
             # Phase 2: Validation du client
-            self._track_step_start("validate_client", "👤 Validation du client")
+            self._track_step_start("search_client", "👤 Validation du client")
             client_result = await self._process_client_validation(extracted_info.get("client"))
 
             if client_result.get("status") == "user_interaction_required":
@@ -703,7 +703,7 @@ class DevisWorkflowRefactored:
                 return self._build_error_response("Validation client échouée", client_result.get("error"))
 
             self.state.client_info = client_result.get("client_info", {})
-            self._track_step_complete("validate_client", "✅ Client validé")
+            self._track_step_complete("search_client", "✅ Client validé")
 
             # Phase 3: Validation des produits
             self._track_step_start("validate_products", "📦 Validation des produits")
