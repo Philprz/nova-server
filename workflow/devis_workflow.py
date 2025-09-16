@@ -958,10 +958,21 @@ class DevisWorkflowRefactored:
             client_result = await (manager(name) if manager else self.client_manager.validate_client(name))
 
             if client_result.get("found"):
-                return {
+                # Cas multi-clients (plusieurs résultats exacts trouvés)
+                if isinstance(client_result.get("data"), list) and len(client_result["data"]) > 1:
+                    return {
+                    "success": False,
+                    "status": "user_interaction_required",
+                    "interaction_type": "client_selection",
+                    "message": f"{len(client_result['data'])} clients trouvés pour « {name} », choisissez le bon",
+                    "suggestions": client_result["data"],
+                    "client_name": name
+                    }
+                else:
+                    return {
                     "success": True,
                     "client_info": client_result
-                }
+                    }
 
             if client_result.get("suggestions"):
                 return {
