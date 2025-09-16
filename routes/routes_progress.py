@@ -521,12 +521,12 @@ async def handle_product_selection_task(task_id: str, response_data: Dict[str, A
 
         # CORRECTION: Restaurer le contexte de la tâche dans le workflow
         if hasattr(task, 'context') and task.context:
-            workflow.context = task.context.copy()
+            workflow.devis_workflow.context = task.context.copy()
             # CORRECTION: S'assurer que client_info est bien dans le contexte
             if hasattr(task, 'context') and task.context.get("client_info"):
-                workflow.context["client_info"] = task.context["client_info"]
-                logger.info(f"✅ Client info restauré dans le workflow: {workflow.context['client_info'].get('data', {}).get('Name', 'Unknown')}")
-            logger.info(f"✅ Contexte restauré pour le workflow: {list(workflow.context.keys())}")
+                workflow.devis_workflow.context["client_info"] = task.context["client_info"]
+                logger.info(f"✅ Client info restauré dans le workflow: {workflow.devis_workflow.context['client_info'].get('data', {}).get('Name', 'Unknown')}")
+            logger.info(f"✅ Contexte restauré pour le workflow: {list(workflow.devis_workflow.context.keys())}")
         else:
             logger.warning("⚠️ Aucun contexte trouvé dans la tâche")
 
@@ -586,7 +586,7 @@ async def handle_product_selection_task(task_id: str, response_data: Dict[str, A
         context = {"interaction_type": "product_selection"}
 
         # Continuer le workflow
-        continuation_result = await workflow.continue_after_user_input(user_input, context)
+        continuation_result = await workflow.devis_workflow.continue_after_user_input(user_input, context)
 
         # S'assurer que le résultat final est bien transmis à l'interface
         if continuation_result and continuation_result.get("success"):
@@ -660,14 +660,14 @@ async def handle_duplicate_resolution_task(task_id: str, response_data: dict):
         # Créer instance workflow pour continuer le traitement
         # CORRECTION: Restaurer le contexte original de la tâche avec les produits
         if hasattr(task, 'context') and task.context:
-            workflow.context.update(task.context)
-            logger.info(f"✅ Contexte original restauré: {list(workflow.context.keys())}")
+            workflow.devis_workflow.context.update(task.context)
+            logger.info(f"✅ Contexte original restauré: {list(workflow.devis_workflow.context.keys())}")
         from workflow.devis_workflow import DevisWorkflow
         workflow = DevisWorkflow(task_id=task_id, force_production=True)
         
         # Restaurer le contexte du workflow si disponible
         if hasattr(task, 'context') and task.context:
-            workflow.context = task.context.copy()
+            workflow.devis_workflow.context = task.context.copy()
             logger.info(f"✅ Contexte restauré pour duplicate_resolution")
         
         # Préparer les données pour le workflow
@@ -681,13 +681,13 @@ async def handle_duplicate_resolution_task(task_id: str, response_data: dict):
         }
         
         # Continuer le workflow avec la décision utilisateur
-        continuation_result = await workflow.continue_after_user_input(user_input, original_context)
+        continuation_result = await workflow.devis_workflow.continue_after_user_input(user_input, original_context)
         
         logger.info(f"✅ Résultat continuation workflow: {continuation_result.get('status', 'N/A')}")
         # Répercuter le contexte du workflow dans la tâche (persistance)
         try:
             if hasattr(workflow, "context") and task:
-                task.context = (task.context or {}) | (workflow.context or {})
+                task.context = (task.context or {}) | (workflow.devis_workflow.context or {})
                 logger.info("💾 Contexte de workflow répercuté dans la tâche")
         except Exception as sync_err:
             logger.warning(f"⚠️ Échec sauvegarde contexte vers la tâche: {sync_err}")
@@ -868,7 +868,7 @@ async def _execute_quote_generation(task_id: str, prompt: str, draft_mode: bool)
         )
         
         # Exécuter le workflow
-        workflow_result = await workflow.process_prompt(prompt, task_id=task_id)
+        workflow_result = await workflow.devis_workflow.process_prompt(prompt, task_id=task_id)
         logger.info(f"🔍 DEBUG: Résultat workflow - Status: {workflow_result.get('status')}")
         
         # Interaction utilisateur requise ? NE PAS ENVOYER DE COMPLETION
@@ -1057,7 +1057,7 @@ async def _execute_quote_generation(task_id: str, prompt: str, draft_mode: bool)
         workflow = EnhancedDevisWorkflow(validation_enabled=True, draft_mode=draft_mode)
         
         # Exécuter le workflow (il gérera automatiquement le tracking)
-        await workflow.process_prompt(prompt, task_id=task_id)
+        await workflow.devis_workflow.process_prompt(prompt, task_id=task_id)
         
         # Le workflow gère automatiquement le completion de la tâche
         # donc rien à faire ici si tout s'est bien passé
@@ -1145,9 +1145,9 @@ async def handle_client_validation(task_id: str, step_id: str, response_data: di
             }
             context = {
                 "interaction_type": "client_selection",
-                "original_context": workflow.context
+                "original_context": workflow.devis_workflow.context
             }
-            continuation_result = await workflow.continue_after_user_input(user_input, context)
+            continuation_result = await workflow.devis_workflow.continue_after_user_input(user_input, context)
             
         elif selected_option == "create_new":
             # Création nouveau client
@@ -1159,9 +1159,9 @@ async def handle_client_validation(task_id: str, step_id: str, response_data: di
             }
             context = {
                 "interaction_type": "client_selection",
-                "original_context": workflow.context
+                "original_context": workflow.devis_workflow.context
             }
-            continuation_result = await workflow.continue_after_user_input(user_input, context)
+            continuation_result = await workflow.devis_workflow.continue_after_user_input(user_input, context)
             
         else:
             logger.error(f"❌ Option non reconnue: {selected_option}")
@@ -1204,7 +1204,7 @@ async def handle_product_selection(task_id: str, step_id: str, response_data: di
         workflow = DevisWorkflow(task_id=task_id, force_production=True)
         
         # Continuer avec les produits sélectionnés
-        continuation_result = await workflow.continue_with_products(selected_products)
+        continuation_result = await workflow.devis_workflow.continue_with_products(selected_products)
         
         # Notifier via WebSocket
         await websocket_manager.send_task_update(task_id, {

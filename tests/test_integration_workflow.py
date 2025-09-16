@@ -15,7 +15,7 @@ from datetime import datetime
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # Import des modules principaux
-from workflow.devis_workflow import DevisWorkflow
+from workflow. import DevisWorkflow
 from services.mcp_connector import MCPConnector
 from services.llm_extractor import LLMExtractor
 

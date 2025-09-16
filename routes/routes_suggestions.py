@@ -10,7 +10,7 @@ async def apply_client_choice(request: Dict[str, Any]):
     """Applique le choix utilisateur pour une suggestion client"""
     try:
         workflow = DevisWorkflow()
-        result = await workflow.apply_client_suggestion(
+        result = await workflow.devis_workflow.apply_client_suggestion(
             request.get("choice"),
             request.get("workflow_context")
         )
@@ -23,7 +23,7 @@ async def apply_product_choices(request: Dict[str, Any]):
     """Applique les choix utilisateur pour les suggestions produits"""
     try:
         workflow = DevisWorkflow()
-        result = await workflow.apply_product_suggestions(
+        result = await workflow.devis_workflow.apply_product_suggestions(
             request.get("choices"),
             request.get("workflow_context")
         )
