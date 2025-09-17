@@ -1,34 +1,41 @@
 # workflow/devis_workflow_refactored.py - VERSION REFACTORISÉE AVEC ARCHITECTURE MODULAIRE
 
-import re
-import sys
+import asyncio
+from datetime import datetime, timedelta, timezone
+from difflib import SequenceMatcher
 import io
-import os
 import json
 import logging
-import asyncio
+import os
+import re
+import sys
+from typing import Any, Dict, List, Optional
+
 from fastapi import APIRouter, HTTPException
-from services.progress_tracker import TaskStatus
-from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Any, Optional
-from difflib import SequenceMatcher
-from services.llm_extractor import LLMExtractor
-from services.mcp_connector import MCPConnector, call_mcp_with_progress, test_mcp_connections_with_progress
-from services.progress_tracker import progress_tracker, QuoteTask, TaskStatus
-from services.suggestion_engine import SuggestionEngine
-from services.websocket_manager import websocket_manager
-from services.company_search_service import company_search_service
-from utils.client_lister import find_client_everywhere
-from services.product_search_engine import ProductSearchEngine
-from workflow.client_creation_workflow import client_creation_workflow
-from services.price_engine import PriceEngineService
-from services.cache_manager import referential_cache
-from workflow.validation_workflow import SequentialValidator
-from services.local_product_search import LocalProductSearchService
+
 from managers.client_manager import ClientManager
 from managers.product_manager import ProductManager
 from managers.quote_manager import QuoteManager
-
+from services.cache_manager import referential_cache
+from services.cache_manager import CacheManager
+from services.company_search_service import company_search_service
+from services.llm_extractor import LLMExtractor
+from services.local_product_search import LocalProductSearchService
+from services.mcp_connector import (
+    MCPConnector,
+    call_mcp_with_progress,
+    test_mcp_connections_with_progress,
+)
+from services.price_engine import PriceEngineService
+from services.product_search_engine import ProductSearchEngine
+from services.progress_tracker import TaskStatus
+from services.progress_tracker import QuoteTask, TaskStatus, progress_tracker
+from services.progress_tracker import ProgressTracker
+from services.suggestion_engine import SuggestionEngine
+from services.websocket_manager import websocket_manager
+from utils.client_lister import find_client_everywhere
+from workflow.client_creation_workflow import client_creation_workflow
+from workflow.validation_workflow import SequentialValidator
 
 # Configuration sécurisée pour Windows
 if sys.platform == "win32":
