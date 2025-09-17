@@ -30,6 +30,7 @@ from services.product_search_engine import ProductSearchEngine
 from services.progress_tracker import TaskStatus
 from services.progress_tracker import QuoteTask, TaskStatus, progress_tracker
 from services.progress_tracker import ProgressTracker
+from typing import Any  # Import Any si pas déjà fait
 from services.suggestion_engine import SuggestionEngine
 from services.websocket_manager import websocket_manager
 from utils.client_lister import find_client_everywhere
@@ -1279,7 +1280,7 @@ class DevisWorkflow(DevisWorkflowRefactored):
         self,
         task_id: str,
         progress_tracker: ProgressTracker,
-        cache_manager: CacheManager,
+        cache_manager: Any,  # Temporairement Any car CacheManager n'existe pas
         *args,
         **kwargs
     ):
