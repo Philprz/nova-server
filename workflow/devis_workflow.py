@@ -17,7 +17,6 @@ from managers.client_manager import ClientManager
 from managers.product_manager import ProductManager
 from managers.quote_manager import QuoteManager
 from services.cache_manager import referential_cache
-from services.cache_manager import CacheManager
 from services.company_search_service import company_search_service
 from services.llm_extractor import LLMExtractor
 from services.local_product_search import LocalProductSearchService
@@ -1288,7 +1287,7 @@ class DevisWorkflow(DevisWorkflowRefactored):
         super().__init__(task_id=task_id, *args, **kwargs)
         self.task_id = task_id  # ✅ toujours le task_id externe
         self.progress: ProgressTracker = progress_tracker
-        self.cache: CacheManager = cache_manager
+        self.cache = referential_cache
         self.context = {"task_id": task_id}
         logger.info("✅ Initialisation du workflow avec task_id : %s", task_id)
 

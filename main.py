@@ -1,24 +1,26 @@
 #main.py - CORRECTIONS CRITIQUES POUR NOVA
 
-import uvicorn
-import logging
-from pathlib import Path
-import os
-import sys
 import asyncio
-from datetime import datetime
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse, HTMLResponse
-from fastapi.staticfiles import StaticFiles
+from datetime import datetime
+import logging
+import os
+from pathlib import Path
+import sys
 
-from routes.routes_intelligent_assistant import router as assistant_router
-from routes.routes_clients import router as clients_router  
-from routes.routes_devis import router as devis_router
-from routes.routes_progress import router as progress_router
-from routes.routes_client_listing import router as client_listing_router
-from routes.routes_websocket import router as websocket_router
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+import uvicorn
+
 from routes import routes_quote_details
+from routes import routes_intelligent_assistant, routes_websocket
+from routes.routes_client_listing import router as client_listing_router
+from routes.routes_clients import router as clients_router
+from routes.routes_devis import router as devis_router
+from routes.routes_intelligent_assistant import router as assistant_router
+from routes.routes_progress import router as progress_router
+from routes.routes_websocket import router as websocket_router
 if sys.platform == "win32":
     os.environ["PYTHONIOENCODING"] = "utf-8"
 
@@ -60,6 +62,18 @@ def setup_robust_logging():
 # Variables globales
 HEALTH_CHECK_RESULTS = None
 
+# Initialiser FastAPI
+app = FastAPI(title="NOVA Server")
+
+
+app.include_router(routes_intelligent_assistant.router)
+app.include_router(routes_websocket.router)
+
+# Debug startup log
+@app.on_event("startup")
+async def startup_event():
+    import logging
+    logging.getLogger(__name__).info("=== DÉMARRAGE DU SERVEUR NOVA ===")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Gestionnaire de cycle de vie de l'application"""
