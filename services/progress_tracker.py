@@ -350,8 +350,7 @@ class ProgressTracker:
         if task_id in self.active_tasks:
             logger.info(f"♻️ Tâche existante récupérée: {task_id}")
             return self.active_tasks[task_id]
-
-        task = QuoteTask(task_id=task_id, user_prompt=user_prompt, draft_mode=draft_mode, title=title or task_id)
+        task = QuoteTask(task_id=task_id, user_prompt=user_prompt, draft_mode=draft_mode)
         self.active_tasks[task.task_id] = task
         logger.info(f"🆕 Nouvelle tâche créée: {task.task_id}")
         return task
