@@ -136,15 +136,14 @@ async def start_quote_workflow(
         # 1. Génération de task_id si nécessaire
         task_id = request.websocket_task_id or f"quote_{datetime.now():%Y%m%d_%H%M%S}_{secrets.token_hex(4)}"
         logger.info(f"🔑 Démarrage du DevisWorkflow pour task_id={task_id}")
-        # CORRECTION: Créer immédiatement la tâche dans le tracker
+        # CORRECTION: Créer immédiatement la tâche dans le tracker AVEC le task_id fixe
         task = progress_tracker.create_task(
             user_prompt=request.message,
             draft_mode=request.draft_mode,
             task_id=task_id
-        )
-
-        # 2. Instanciation du workflow
-        workflow = DevisWorkflow(validation_enabled=True, draft_mode=True, force_production=True)
+            )
+        # 2. Instanciation du workflow AVEC le même task_id
+        workflow = DevisWorkflow(validation_enabled=True, draft_mode=request.draft_mode, force_production=request.force_production, task_id=task_id)
 
         # 3. Lancement en arrière-plan
         background_tasks.add_task(workflow.process_prompt, request.message, task_id)

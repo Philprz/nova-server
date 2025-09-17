@@ -242,13 +242,31 @@ class WebSocketManager:
                 logger.info(f"🚀 Auto-sélection détectée - 1 seul client disponible, pas d'envoi WebSocket")
                 return  # Ne pas envoyer d'interaction si auto-sélection possible            
 
-        # Log des informations client si disponibles
-        if interaction_data.get('client_options'):
-            logger.info(f"📊 Nombre de clients: {len(interaction_data.get('client_options', []))}")
-            for i, client in enumerate(interaction_data.get('client_options', [])):
-                logger.info(f"📊 Client {i+1}: {client.get('name')} ({client.get('source')})")
+        # Log des informations selon le type d'interaction
+        interaction_type = interaction_data.get('interaction_type')
+
+        if interaction_type == 'client_selection':
+            client_options = interaction_data.get('client_options', [])
+            if client_options:
+                logger.info(f"📊 Sélection client: {len(client_options)} options")
+                for i, client in enumerate(client_options):
+                    logger.info(f"📊 Client {i+1}: {client.get('name')} ({client.get('source')})")
+            else:
+                logger.warning(f"⚠️ Sélection client sans options")
+
+        elif interaction_type == 'client_creation':
+            client_name = interaction_data.get('client_name')
+            if client_name:
+                logger.info(f"📊 Création client: {client_name}")
+            else:
+                logger.warning(f"⚠️ Création client sans nom")
+
+        elif interaction_type == 'product_selection':
+            options = interaction_data.get('options', [])
+            logger.info(f"📊 Sélection produit: {len(options)} options")
+
         else:
-            logger.warning(f"⚠️ Pas de client_options dans interaction_data: {json.dumps(interaction_data, indent=2, default=json_serializer)}")
+            logger.info(f"📊 Type d'interaction: {interaction_type}")
 
         message = {
             "type": "user_interaction_required",
@@ -328,30 +346,39 @@ class WebSocketManager:
         """
         Tente d'envoyer les messages stockés avec back-off jusqu'à échec ou succès.
         """
-        delay = INITIAL_DELAY
-        delay = 2.0  # Démarrer avec un délai plus court
+        delay = 2.0  # Start with shorter delay
         for retry in range(1, MAX_RETRIES + 1):
             await asyncio.sleep(delay)
             sockets = self.task_connections.get(task_id)
-            if sockets:
-                pending = self.pending_messages.pop(task_id, [])
-                for msg in pending:
-                    # Filtrer les messages déjà envoyés
-                    unsent_msgs = [msg for msg in pending if not msg.get('_sent')]
-                    for msg in unsent_msgs:
-                        try:
-                            await self.send_task_update(task_id, msg)
-                            logger.info(
-                                f"✅ Message envoyé au retry {retry} pour {task_id}: {msg.get('type')}"
-                            )
-                        except Exception as e:
-                            logger.error(
-                                f"❌ Échec au retry {retry} pour {task_id}: {e}"
-                            )
-                return
-            delay = min(delay * 1.2, 15)  # Progression plus douce, maximum plus élevé
-            logger.info(f"⏳ Retry {retry}/{MAX_RETRIES} après {delay:.1f}s – pas encore connecté")
             
+            if sockets:
+                pending = self.pending_messages.get(task_id, [])
+                unsent_msgs = [msg for msg in pending if not msg.get('_sent')]
+                
+                if not unsent_msgs:
+                    logger.info(f"✅ All messages sent for {task_id}")
+                    self.pending_messages.pop(task_id, None)
+                    return
+                    
+                success_count = 0
+                for msg in unsent_msgs:
+                    try:
+                        await self.send_task_update(task_id, msg)
+                        msg['_sent'] = True  # Mark as sent
+                        success_count += 1
+                        logger.info(f"✅ Message sent on retry {retry} for {task_id}: {msg.get('type')}")
+                    except Exception as e:
+                        logger.error(f"❌ Failed on retry {retry} for {task_id}: {e}")
+                
+                # Only increase delay if no messages were sent
+                if success_count == 0:
+                    delay = min(delay * 1.2, 15)
+                else:
+                    # Reset delay on partial success
+                    delay = max(delay * 0.8, 2.0)
+            else:
+                delay = min(delay * 1.2, 15)
+                logger.info(f"⏳ Retry {retry}/{MAX_RETRIES} after {delay:.1f}s – not connected yet")            
             
         logger.error(f"❌ ÉCHEC FINAL: Impossible d'envoyer {task_id} après {MAX_RETRIES} tentatives")
         # Notification d'échec
