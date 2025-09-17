@@ -341,17 +341,21 @@ class ProgressTracker:
         self.completed_tasks: List[Dict[str, Any]] = []
         self.max_completed_history = 50  # Garder les 50 dernières tâches
     
-    def create_task(self, user_prompt: str = "", draft_mode: bool = False, task_id: str = None) -> QuoteTask:
-        """Crée une nouvelle tâche de génération de devis avec idempotence"""
-        # Vérifier si la tâche existe déjà
-        if task_id and task_id in self.active_tasks:
+    def create_task(self, task_id: Optional[str] = None, *, title: Optional[str] = None, user_prompt: str = "", draft_mode: bool = False) -> QuoteTask:
+        """Crée (ou récupère) une tâche de génération de devis avec idempotence et journalisation."""
+        if task_id is None:
+            task_id = self._generate_task_id(prefix="quote")
+
+        # Vérification d'idempotence
+        if task_id in self.active_tasks:
             logger.info(f"♻️ Tâche existante récupérée: {task_id}")
             return self.active_tasks[task_id]
-        
-        task = QuoteTask(task_id=task_id, user_prompt=user_prompt, draft_mode=draft_mode)
+
+        task = QuoteTask(task_id=task_id, user_prompt=user_prompt, draft_mode=draft_mode, title=title or task_id)
         self.active_tasks[task.task_id] = task
         logger.info(f"🆕 Nouvelle tâche créée: {task.task_id}")
         return task
+
     
     def get_task(self, task_id: str) -> Optional[QuoteTask]:
         """Récupère une tâche par son ID"""

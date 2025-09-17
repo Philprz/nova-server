@@ -657,7 +657,7 @@ class DevisWorkflowRefactored:
         logger.info("✅ Workflow refactorisé initialisé avec architecture modulaire")
 
     def _initialize_existing_task(self, task_id: str):
-        """Initialise une tâche existante"""
+        """Initialise une tâche existante ou en crée une nouvelle si introuvable."""
         try:
             self.current_task = progress_tracker.get_task(task_id)
             if self.current_task:
@@ -667,11 +667,14 @@ class DevisWorkflowRefactored:
                     self.state.context.update(self.current_task.context)
                     logger.info(f"✅ Contexte restauré: {list(self.state.context.keys())}")
             else:
-                logger.warning(f"⚠️ Tâche {task_id} introuvable")
-
+                logger.warning(f"⚠️ Tâche {task_id} introuvable - réinitialisation sous le même ID")
+                self.current_task = progress_tracker.create_task(task_id=task_id, title=f"Workflow devis {task_id}")
+                logger.info(f"✅ Tâche prête: {task_id}")
         except Exception as e:
             logger.error(f"Erreur initialisation tâche {task_id}: {e}")
             self.current_task = None
+            raise  # ✅ Ajout pour propager l'erreur si nécessaire
+
             
     async def _extract_info_from_prompt(self, user_prompt: str) -> Dict[str, Any]:
         """Extrait les informations du prompt utilisateur"""
@@ -1193,19 +1196,30 @@ class DevisWorkflowRefactored:
         self.state.products_info
         )
     def _initialize_task_tracking(self, user_prompt: str) -> str:
-        """Initialise le tracking de tâche"""
+        """Initialise le tracking de tâche avec gestion optimisée des IDs existants."""
         try:
-            self.current_task = progress_tracker.create_task(
-                user_prompt=user_prompt,
-                draft_mode=self.draft_mode
-            )
-            task_id = self.current_task.task_id
-            self.state.task_id = task_id
-            logger.info(f"✅ Tâche créée: {task_id}")
-            return task_id
+            if hasattr(self, 'task_id') and self.task_id:  # Vérification explicite de l'existence de l'attribut
+                self.current_task = progress_tracker.create_task(
+                    task_id=self.task_id,
+                    user_prompt=user_prompt,
+                    draft_mode=self.draft_mode
+                )
+                logger.info(f"✅ Tâche réutilisée avec ID existant: {self.task_id}")
+                return self.task_id
+            else:
+                self.current_task = progress_tracker.create_task(
+                    user_prompt=user_prompt,
+                    draft_mode=self.draft_mode
+                )
+                task_id = self.current_task.task_id
+                self.task_id = task_id  # Stockage redondant pour cohérence
+                self.state.task_id = task_id
+                logger.info(f"✅ Nouvelle tâche créée: {task_id}")
+                return task_id
         except Exception as e:
-            logger.error(f"Erreur création tâche: {e}")
+            logger.error(f"✅ Erreur création tâche: {e}", exc_info=True)  # Ajout de `exc_info` pour le débogage
             return f"task_{int(datetime.now().timestamp())}"
+
 
     def _track_step_start(self, step_id: str, message: str = ""):
         """Démarre le tracking d'une étape"""
@@ -1255,9 +1269,22 @@ class DevisWorkflowRefactored:
 class DevisWorkflow(DevisWorkflowRefactored):
     """Classe de compatibilité qui hérite du workflow refactorisé"""
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        logger.info("✅ Utilisation du workflow refactorisé via interface de compatibilité")
+    def __init__(
+        self,
+        task_id: str,
+        progress_tracker: ProgressTracker,
+        cache_manager: CacheManager,
+        *args,
+        **kwargs
+    ):
+        # ✅ CORRECTION: Passer task_id au parent AVANT d'initialiser
+        super().__init__(task_id=task_id, *args, **kwargs)
+        self.task_id = task_id  # ✅ toujours le task_id externe
+        self.progress: ProgressTracker = progress_tracker
+        self.cache: CacheManager = cache_manager
+        self.context = {"task_id": task_id}
+        logger.info("✅ Initialisation du workflow avec task_id : %s", task_id)
+
 
     # Méthodes de compatibilité pour maintenir l'API existante
     async def process_prompt(self, user_prompt: str, task_id: str = None, draft_mode: bool = False) -> Dict[str, Any]:
