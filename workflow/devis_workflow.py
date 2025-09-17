@@ -697,7 +697,9 @@ class DevisWorkflowRefactored:
         """
         try:
             # Configuration du mode (toujours explicite)
-            self.draft_mode = draft_mode
+            # Utiliser le task_id fourni au constructeur si disponible
+            if self.task_id and not getattr(self, "current_task", None):
+                self.current_task = progress_tracker.get_task(self.task_id)
 
             # Initialiser le tracking si nécessaire
             if not getattr(self, "current_task", None):
@@ -721,8 +723,16 @@ class DevisWorkflowRefactored:
             # Phase 2: Validation du client
             self._track_step_start("search_client", "👤 Validation du client")
             client_result = await self._process_client_validation(extracted_info.get("client"))
-            if client_result.get("status") == "user_interaction_required":
-                return client_result
+            if client_result and client_result.get("status") == "user_interaction_required":
+                # Envoyer l'interaction via WebSocket au lieu d'arrêter brutalement
+                await websocket_manager.send_user_interaction_required(self.task_id, client_result)
+                # Retourner un statut d'attente plutôt qu'un arrêt
+                return {
+                    "status": "waiting_for_user_input",
+                    "task_id": self.task_id,
+                    "interaction_sent": True,
+                    "message": "Interaction utilisateur envoyée via WebSocket"
+                }
             if not client_result.get("success"):
                 return self._build_error_response("Validation client échouée", client_result.get("error") or "Erreur inconnue")
 

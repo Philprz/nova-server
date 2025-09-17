@@ -868,7 +868,7 @@ async def _execute_quote_generation(task_id: str, prompt: str, draft_mode: bool)
         )
         
         # Exécuter le workflow
-        workflow_result = await workflow.devis_workflow.process_prompt(prompt, task_id=task_id)
+        workflow_result = await workflow.process_prompt(prompt, task_id=task_id)
         logger.info(f"🔍 DEBUG: Résultat workflow - Status: {workflow_result.get('status')}")
         
         # Interaction utilisateur requise ? NE PAS ENVOYER DE COMPLETION
