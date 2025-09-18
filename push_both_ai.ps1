@@ -423,8 +423,11 @@ if ($statusOutput -and $statusOutput.Trim() -ne "") {
         Write-Host $suggestion -ForegroundColor "White"
         Write-Host "========================================" -ForegroundColor "DarkGray"
 
-        Write-Host "`nUtiliser ce message? (O/n) " -NoNewline -ForegroundColor "Yellow"
-        $response = Read-Host
+        # je force l'utilisation du message créé par IA 
+        # Write-Host "`nUtiliser ce message? (O/n) " -NoNewline -ForegroundColor "Yellow"
+        # $response = Read-Host
+        # Forcer l'acceptation du message suggéré
+        $response = "O"
         if ($response -eq "" -or $response -eq "O" -or $response -eq "o") {
             $CommitMessage = $suggestion
         } else {
