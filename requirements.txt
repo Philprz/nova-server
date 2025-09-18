@@ -18,3 +18,5 @@ psycopg2-binary==2.9.9
 sqlalchemy==2.0.23
 pytest==7.4.3
 pytest-asyncio==0.21.1
+thefuzz[speedup]==0.22.1
+alembic
