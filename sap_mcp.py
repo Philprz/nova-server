@@ -375,7 +375,7 @@ async def sap_create_quotation_complete(quotation_data: Dict[str, Any]) -> dict:
             "DocDate": quotation_data.get("DocDate", datetime.now().strftime("%Y-%m-%d")),
             "DocDueDate": quotation_data.get("DocDueDate", (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")),
             "DocCurrency": quotation_data.get("DocCurrency", "EUR"),
-            "Comments": quotation_data.get("Comments", "Devis créé via NOVA Middleware"),
+            "Comments": quotation_data.get("Comments", "Devis cree via NOVA Middleware"),
             "SalesPersonCode": quotation_data.get("SalesPersonCode", -1),
             "DocumentLines": valid_lines
         }
