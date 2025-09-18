@@ -2754,7 +2754,7 @@ class DevisWorkflow:
                     "DocDate": doc_date,
                     "DocDueDate": due_date,
                     "DocCurrency": "EUR",
-                    "Comments": f"Devis créé automatiquement via NOVA le {today.strftime('%d/%m/%Y %H:%M')} - Mode: {'DRAFT' if self.draft_mode else 'NORMAL'}",
+                    "Comments": f"Devis cree automatiquement via NOVA le {today.strftime('%d/%m/%Y %H:%M')} - Mode: {'DRAFT' if self.draft_mode else 'NORMAL'}",
                     "SalesPersonCode": -1,
                     "DocumentLines": document_lines,
                     "DocTotal": total_amount,
