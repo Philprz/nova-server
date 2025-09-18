@@ -30,6 +30,7 @@ from services.suggestion_engine import SuggestionEngine, SuggestionResult
 from services.client_validator import ClientValidator
 from services.progress_tracker import ProgressTracker
 from services.mcp_connector import MCPConnector
+from services.cache_manager import cache_manager  # à ajouter
 # Import des routes existantes pour réutiliser la logique
 import asyncio
 import httpx
