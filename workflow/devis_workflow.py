@@ -2255,7 +2255,7 @@ class DevisWorkflow:
                 "Currency": "EUR",
                 "Valid": "tYES",
                 "Frozen": "tNO",
-                "Notes": "Client créé automatiquement via NOVA avec validation",
+                "Notes": f"Client cree automatiquement par NOVA le {datetime.now().strftime('%d/%m/%Y')}",
                 "FederalTaxID": salesforce_client.get("id", "")[:32]  # Référence croisée
             }
             
@@ -3488,12 +3488,12 @@ class DevisWorkflow:
                         "tva_amount": round(total_amount * 0.2, 2),
                         "total_ttc": round(total_amount * 1.2, 2)
                     },
-                    "terms": "Devis valable 30 jours - Paiement à 30 jours",
+                    "terms": "Devis valable 30 jours - Paiement a 30 jours",
                     "created_by": "NOVA Assistant",
                     "company_info": {
                         "name": "IT SPIRIT",
-                        "address": "39, rue Carnot - 92100 BOULOGNE BILLANCOURT",
-                        "phone": "01 41 86 06 12",
+                        "address": "305, rue Gabriel Voisin, 69400 Villefranche-sur-Saône",
+                        "phone": "06 26 26 74 21",
                         "website": "www.it-spirit.fr"
                     }
                 },
@@ -7799,7 +7799,7 @@ class DevisWorkflow:
                     "Type": "Customer",
                     "Industry": "Technology",
                     "BillingCountry": "France",
-                    "Description": f"Client créé automatiquement depuis SAP ({card_code})"
+                    "Description": f"Client cree automatiquement depuis SAP ({card_code})"
                 }
 
                 sf_result = await self.mcp_connector.call_mcp(
