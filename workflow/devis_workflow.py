@@ -3651,8 +3651,8 @@ class DevisWorkflow:
                 logger.warning("Aucun nom client pour vérification doublons")
                 return duplicate_check
             
-            # 1. Vérifier les devis SAP récents (dernières 48h)
-            recent_quotes = await self._get_recent_sap_quotes(client_name, hours=48)
+            # 1. Vérifier les devis SAP récents (dernières 1440h = 2 mois)
+            recent_quotes = await self._get_recent_sap_quotes(client_name, hours=1440)
             
             # 2. Vérifier les devis brouillons existants
             draft_quotes = await self._get_client_draft_quotes(client_name)
@@ -3713,7 +3713,7 @@ class DevisWorkflow:
             duplicate_check["warnings"].append(f"❌ Erreur vérification doublons: {str(e)}")
             return duplicate_check
 
-    async def _get_recent_sap_quotes(self, client_name: str, hours: int = 48) -> List[Dict[str, Any]]:
+    async def _get_recent_sap_quotes(self, client_name: str, hours: int = 1440) -> List[Dict[str, Any]]:
         """Récupère les devis SAP récents pour un client"""
         try:
             
