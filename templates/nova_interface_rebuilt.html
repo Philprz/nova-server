@@ -2084,8 +2084,6 @@
 
             // Validation du message utilisateur
             const validation = validateUserInput(message);
-
-            // Gestion des erreurs de validation
             if (!validation.valid) {
                 console.error("❌ Erreur de validation :", validation.error);
                 return showValidationError(validation.error);
@@ -2094,23 +2092,20 @@
             // Si tout est valide, récupération du message nettoyé
             const msg = validation.message;
 
-
-
             // Détection si c'est un devis avec nom de client
             const clientMatch = msg.match(/devis.pour\s+([A-Za-z\s]+?)(?:\s+pour|\s$)/i);
             if (clientMatch) {
                 const clientName = clientMatch[1].trim();
-                
+
                 // Recherche immédiate des clients
                 try {
                     const searchResp = await fetch('/api/assistant/search_clients', {
                         method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({client_name: clientName})
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ client_name: clientName })
                     });
-                    
+
                     const searchResult = await searchResp.json();
-                    
                     if (searchResult.requires_selection) {
                         // Afficher le message utilisateur avant la sélection
                         addMessage(message, 'user');
@@ -2155,9 +2150,20 @@
                     throw new Error(`HTTP ${resp.status} — ${details}`);
                 }
 
-
+                // Traitement des sources et suggestions
                 const result = await resp.json();
-                hideTyping();
+                if (result.sources && result.sources.length > 0) {
+                    addMessage(result.message, 'assistant', result.sources);
+                } else {
+                    addMessage(result.message || 'Réponse reçue', 'assistant');
+                }
+
+                if (result.suggestions && result.suggestions.length > 0) {
+                    const formattedSuggestions = result.suggestions.map(s =>
+                        typeof s === 'string' ? { text: s, action: s } : s
+                    );
+                    addEnhancedSuggestions(formattedSuggestions);
+                }
 
                 if (result?.task_id) {
                     initializeTaskTracking(result.task_id);
@@ -2166,7 +2172,6 @@
                 } else {
                     handleDirectResponse(result);
                 }
-
             } catch (error) {
                 hideTyping();
                 addMessage(`Erreur de connexion : ${error.message}`, 'system');
@@ -2175,8 +2180,10 @@
                 isProcessing = false;
                 updateSendButton();
                 input?.focus();
+                hideTyping(); // Déplacé ici pour s'assurer qu'il s'exécute toujours
             }
         }
+
 
 
 
