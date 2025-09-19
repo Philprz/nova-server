@@ -2605,15 +2605,12 @@
                 console.error("❌ TaskId requis pour WebSocket");
                 return;
             }
-
             if (websocket && (websocket.readyState === WebSocket.OPEN || websocket.readyState === WebSocket.CONNECTING)) {
                 console.log("🌐 WebSocket déjà connecté ou en cours de connexion");
                 return;
             }
-
             const wsProtocol = (location.protocol === "https:") ? "wss" : "ws";
             const wsUrl = `${wsProtocol}://${location.host}/ws/assistant/${taskId}`;
-
             try {
                 console.log(`🔌 Connexion WebSocket à ${wsUrl}`);
                 websocket = new WebSocket(wsUrl);
@@ -2622,61 +2619,53 @@
                 startLightPolling(taskId);
                 return;
             }
-
             websocket.onopen = () => {
                 console.log("✅ WebSocket connecté");
                 wsActive = true;
-
                 // Nettoyage des intervalles éventuellement actifs
                 if (typeof progressInterval !== "undefined" && progressInterval) {
-                clearInterval(progressInterval);
-                progressInterval = null;
+                    clearInterval(progressInterval);
+                    progressInterval = null;
                 }
                 if (typeof reconnectInterval !== "undefined" && reconnectInterval) {
-                clearInterval(reconnectInterval);
-                reconnectInterval = null;
+                    clearInterval(reconnectInterval);
+                    reconnectInterval = null;
                 }
-
                 addMessage("Connexion établie.", "system");
                 if (typeof checkPendingValidations === "function") {
-                checkPendingValidations(taskId);
+                    checkPendingValidations(taskId);
                 }
             };
-
             websocket.onmessage = (event) => {
                 // Gestion prioritaire des duplicate_resolution
                 try {
                     const data = JSON.parse(event.data);
-
                     if (data.type === 'interaction_required'
                         && data.interaction_data
                         && data.interaction_data.interaction_type === 'duplicate_resolution') {
-
                         console.log("⚠️ Duplicate resolution détecté (priorité directe)");
-
                         if (typeof hideProgress === 'function') {
                             try {
                                 hideProgress();
                             } catch (e) {}
                         }
-
                         if (data.interaction_data?.recent_quotes?.length > 0 || data.interaction_data?.draft_quotes?.length > 0) {
                             if (typeof displayExistingQuotesInChat === 'function') {
                                 displayExistingQuotesInChat(data.interaction_data);
                             }
                         }
-
                         if (typeof addDuplicateResolutionOptions === 'function') {
                             addDuplicateResolutionOptions(data.interaction_data);
                         }
-
                         return;
                     }
-
+                } catch (error) {
+                    console.error("❌ Erreur lors du traitement du message:", error);
+                }
+            };
             websocket.onclose = (event) => {
                 wsActive = false;
                 console.warn(`🔌 WebSocket fermé - Code: ${event.code}, Raison: ${event.reason}`);
-
                 if (!taskCompletedHandled && currentTaskId) {
                     const shouldReconnect = [1005, 1006, 1011, 1012, 1013].includes(event.code) || event.code >= 3000;
                     if (shouldReconnect) {
@@ -2687,7 +2676,6 @@
                     }
                 }
             };
-
             websocket.onerror = (error) => {
                 console.error("❌ Erreur WebSocket:", error);
                 wsActive = false;
@@ -2695,7 +2683,8 @@
                     startLightPolling(taskId);
                 }
             };
-            }
+        }
+
         // Polling de secours très léger
         
         function startLightPolling(taskId) {
