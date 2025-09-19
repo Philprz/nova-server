@@ -92,15 +92,16 @@ echo "# Migrations - spécifiques à chaque environnement" >> .gitignore
 echo "alembic/versions/*.py" >> .gitignore
 echo "!alembic/versions/__init__.py" >> .gitignore
 
-# Environnement Python
+# Environnements Python
 venv/
+.venv/
+ENV/
+env/
+.Python
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
-.Python
-env/
-ENV/
 
 # Configuration sensible
 .env
@@ -145,8 +146,7 @@ docs/_build/
 # Sauvegardes
 *.bak
 *.backup
-venv/
-.venv/
+
 # Fichiers de configuration locale pour les scripts push
 .ai_commit_initialized
 .push_selector_initialized
