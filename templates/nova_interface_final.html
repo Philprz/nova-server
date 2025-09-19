@@ -2673,24 +2673,18 @@
                         return;
                     }
 
-                    handleWebSocketMessage(data);
-                } catch (error) {
-                    console.error("❌ Erreur parsing WebSocket:", error);
-                }
-
-
             websocket.onclose = (event) => {
                 wsActive = false;
                 console.warn(`🔌 WebSocket fermé - Code: ${event.code}, Raison: ${event.reason}`);
 
                 if (!taskCompletedHandled && currentTaskId) {
-                const shouldReconnect = [1005, 1006, 1011, 1012, 1013].includes(event.code) || event.code >= 3000;
-                if (shouldReconnect) {
-                    console.log("🔄 Tentative de reconnexion...");
-                    setTimeout(() => connectWebSocket(taskId), 2000);
-                } else {
-                    startLightPolling(taskId);
-                }
+                    const shouldReconnect = [1005, 1006, 1011, 1012, 1013].includes(event.code) || event.code >= 3000;
+                    if (shouldReconnect) {
+                        console.log("🔄 Tentative de reconnexion...");
+                        setTimeout(() => connectWebSocket(taskId), 2000);
+                    } else {
+                        startLightPolling(taskId);
+                    }
                 }
             };
 
@@ -2698,7 +2692,7 @@
                 console.error("❌ Erreur WebSocket:", error);
                 wsActive = false;
                 if (!taskCompletedHandled) {
-                startLightPolling(taskId);
+                    startLightPolling(taskId);
                 }
             };
             }
@@ -2761,26 +2755,31 @@
                     taskCompletedHandled = true;
                     break;
 
-                
-                case 'interaction_required':
-                case 'user_interaction_required': {
-                    if (data.interaction_data) {
-                        if (data.interaction_data.interaction_type === 'duplicate_resolution') {
-                            console.log("⚠️ Duplicate resolution détecté");
-                            if (typeof hideProgress === 'function') {
-                                try {
-                                    hideProgress();
-                                } catch (e) {}
-                            }
+                case 'task_update':
+                    console.log("📋 Mise à jour tâche:", data);
+                    if (data.data && data.data.message) {
+                        if (typeof addMessage === 'function') {
+                            addMessage(data.data.message, 'system');
+                        }
+                    }
+                    if (data.progress !== undefined && typeof updateProgress === 'function') {
+                        updateProgress(data.progress, data.message || 'Mise à jour...', data.step_id);
+                    }
+                    break;
 
-                            if (data.interaction_data?.recent_quotes?.length > 0 || data.interaction_data?.draft_quotes?.length > 0) {
-                                if (typeof displayExistingQuotesInChat === 'function') {
-                                    displayExistingQuotesInChat(data.interaction_data);
-                                } else if (typeof addMessage === 'function') {
-                                    addMessage("⚠️ Devis existants détectés", 'system');
-                                }
-                            } else if (typeof addMessage === 'function') {
-                                addMessage("⚠️ Devis existants détectés (liste vide ou non fournie).", 'system');
+                case 'user_response_processed':
+                    console.log("✅ Réponse utilisateur traitée:", data);
+                    if (typeof addMessage === 'function') {
+                        addMessage('Votre réponse a été traitée avec succès.', 'system');
+                    }
+                    break;
+
+                case 'interaction_required':
+                case 'user_interaction_required':
+                    if (data.interaction_data) {
+                        if (data.interaction_data.interaction_type === 'duplicate_detection') {
+                            if (typeof displayExistingQuotesInChat === 'function') {
+                                displayExistingQuotesInChat(data.interaction_data);
                             }
 
                             if (typeof addDuplicateResolutionOptions === 'function') {
@@ -2800,9 +2799,7 @@
                         }
                     }
                     break;
-                }
 
-                
                 case 'error':
                     if (typeof handleTaskError === 'function') {
                         handleTaskError(data.error);
@@ -2815,14 +2812,29 @@
                         addMessage(`[LOG] ${data.message}`, 'system');
                     }
                     break;
+                    case 'task_update':
+                        console.log("📋 Mise à jour tâche:", data);
+                        if (data.data && data.data.message) {
+                            if (typeof addMessage === 'function') {
+                                addMessage(data.data.message, 'system');
+                            }
+                        }
+                        if (data.progress !== undefined && typeof updateProgress === 'function') {
+                            updateProgress(data.progress, data.message || 'Mise à jour...', data.step_id);
+                        }
+                        break;
 
+                    case 'user_response_processed':
+                        console.log("✅ Réponse utilisateur traitée:", data);
+                        if (typeof addMessage === 'function') {
+                            addMessage('Votre réponse a été traitée avec succès.', 'system');
+                        }
+                        break;
                 default:
                     console.warn("ℹ️ Type de message non géré:", data.type);
                     break;
-
             }
         }
-    }
         
         // Fonction pour vérifier les validations en attente
         async function checkPendingValidations(taskId) {
