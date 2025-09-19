@@ -86,7 +86,8 @@ docker-compose.yml
 # config Claude Desktop, ne pas versionner
 claude_desktop_config.json
 venv
-
+.venv
+.venv/
 # 1. Ajouter au .gitignore
 echo "# Migrations - spécifiques à chaque environnement" >> .gitignore
 echo "alembic/versions/*.py" >> .gitignore
