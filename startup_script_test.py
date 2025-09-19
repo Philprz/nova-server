@@ -10,6 +10,8 @@ from datetime import datetime
 import asyncio
 from dotenv import load_dotenv
 load_dotenv()
+from sqlalchemy import create_engine, text
+from sqlalchemy.exc import OperationalError
 
 # Configuration de l'encodage pour Windows
 if sys.platform == "win32":
@@ -64,7 +66,7 @@ def print_banner():
         ║                                                      ║
         ║   Assistant IA - SAP - Salesforce                    ║
         ║   v2.1.0 CORRIGE - IT Spirit - 2025                  ║
-        ║                                                      ║
+        ║           !!!!!  Version TEST !!!!                   ║
         ╚══════════════════════════════════════════════════════╝
     """
     print(banner)
@@ -111,7 +113,28 @@ def check_environment():
         return False
         
     return True
+def check_database():
+    """Vérifie la connexion à la base PostgreSQL définie dans .env"""
+    db_url = os.getenv("DATABASE_URL")
+    if not db_url:
+        logger.error("DATABASE_URL non trouvée dans le .env")
+        return False
 
+    try:
+        engine = create_engine(db_url, pool_pre_ping=True, future=True)
+        with engine.connect() as conn:
+            version = conn.execute(text("SELECT version();")).scalar_one()
+            dbname = conn.execute(text("SELECT current_database();")).scalar_one()
+            user = conn.execute(text("SELECT current_user;")).scalar_one()
+            logger.info(f"✅ DB OK → {dbname} (user={user}, version={version})")
+        engine.dispose()
+        return True
+    except OperationalError as e:
+        logger.error(f"❌ Connexion PostgreSQL échouée: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"❌ Erreur inattendue connexion DB: {type(e).__name__}: {e}")
+        return False
 def start_mcp_services():
     """Démarre les services MCP (Model Context Protocol)"""
     logger.info("Démarrage des services MCP...")
