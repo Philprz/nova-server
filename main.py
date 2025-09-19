@@ -179,7 +179,7 @@ async def itspirit_interface():
     """Sert l'interface IT Spirit personnalisée"""
     try:
         with open('templates/nova_interface_final.html', 'r', encoding='utf-8') as f: 
-            return HTMLResponse(content=f.read( media_type="text/html; charset=utf-8"))
+            return HTMLResponse(content=f.read(), media_type="text/html; charset=utf-8")
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Interface IT Spirit non trouvée")
 
