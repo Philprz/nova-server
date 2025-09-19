@@ -2721,7 +2721,6 @@
                 console.warn("⚠️ Message WebSocket invalide:", data);
                 return;
             }
-
             // Gestion des différents types de messages
             switch (data.type) {
                 case 'progress':
@@ -2730,7 +2729,6 @@
                         updateProgress(data.progress, data.message, data.step || data.step_id);
                     }
                     break;
-
                 case 'completion':
                 case 'quote_generation_completed':
                 case 'workflow_complete':
@@ -2743,7 +2741,6 @@
                     }
                     taskCompletedHandled = true;
                     break;
-
                 case 'task_update':
                     console.log("📋 Mise à jour tâche:", data);
                     if (data.data && data.data.message) {
@@ -2755,14 +2752,12 @@
                         updateProgress(data.progress, data.message || 'Mise à jour...', data.step_id);
                     }
                     break;
-
                 case 'user_response_processed':
                     console.log("✅ Réponse utilisateur traitée:", data);
                     if (typeof addMessage === 'function') {
                         addMessage('Votre réponse a été traitée avec succès.', 'system');
                     }
                     break;
-
                 case 'interaction_required':
                 case 'user_interaction_required':
                     if (data.interaction_data) {
@@ -2770,7 +2765,6 @@
                             if (typeof displayExistingQuotesInChat === 'function') {
                                 displayExistingQuotesInChat(data.interaction_data);
                             }
-
                             if (typeof addDuplicateResolutionOptions === 'function') {
                                 addDuplicateResolutionOptions(data.interaction_data);
                             } else if (typeof addMessage === 'function') {
@@ -2778,52 +2772,31 @@
                             }
                             break;
                         }
-
                         if (typeof hideProgress === 'function') {
                             hideProgress();
                         }
-
                         if (typeof handleUserInteraction === 'function') {
                             handleUserInteraction(data.interaction_data);
                         }
                     }
                     break;
-
                 case 'error':
                     if (typeof handleTaskError === 'function') {
                         handleTaskError(data.error);
                     }
                     taskCompletedHandled = true;
                     break;
-
                 case 'log':
                     if (data.message && typeof addMessage === 'function') {
                         addMessage(`[LOG] ${data.message}`, 'system');
                     }
                     break;
-                    case 'task_update':
-                        console.log("📋 Mise à jour tâche:", data);
-                        if (data.data && data.data.message) {
-                            if (typeof addMessage === 'function') {
-                                addMessage(data.data.message, 'system');
-                            }
-                        }
-                        if (data.progress !== undefined && typeof updateProgress === 'function') {
-                            updateProgress(data.progress, data.message || 'Mise à jour...', data.step_id);
-                        }
-                        break;
-
-                    case 'user_response_processed':
-                        console.log("✅ Réponse utilisateur traitée:", data);
-                        if (typeof addMessage === 'function') {
-                            addMessage('Votre réponse a été traitée avec succès.', 'system');
-                        }
-                        break;
                 default:
                     console.warn("ℹ️ Type de message non géré:", data.type);
                     break;
             }
         }
+
         
         // Fonction pour vérifier les validations en attente
         async function checkPendingValidations(taskId) {
