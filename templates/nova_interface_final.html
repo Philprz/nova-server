@@ -1172,6 +1172,7 @@
         let websocket = null;
         let reconnectInterval = null;
         let clientSelectionMode = false;
+        let activeSources = [];
         let availableClients = [];
         let originalClientName = '';
         let wsActive = false;
@@ -1238,8 +1239,10 @@
                 sources.forEach((source, index) => {
                     const citationNum = index + 1;
                     addSource(source.name, source.type, source.details);
+                    // Échapper les caractères spéciaux du marqueur pour regex
+                    const escapedMarker = source.marker.replace(/[{}]/g, '\\$&');
                     processedContent = processedContent.replace(
-                        new RegExp(source.marker, 'g'),
+                        new RegExp(escapedMarker, 'g'),
                         `<span class="citation-ref" onclick="showSourceDetails('${source.name}')">${citationNum}</span>`
                     );
                 });
@@ -1270,8 +1273,6 @@
             messagesContainer.appendChild(suggestionsDiv);
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
         }
-        // Gestion des sources
-        let activeSources = [];
 
         function addContextualSuggestions(context, lastQuery = '') {
             let suggestions = [];
@@ -1387,8 +1388,11 @@
             }
         }
         function handleSuggestionClick(suggestion) {
-            document.getElementById('chatInput').value = suggestion;
-            sendMessage();
+            const input = document.getElementById('message-input');
+            if (input) {
+                input.value = suggestion;
+                sendMessage();
+            }
         }
 
         function addClientSelection(clients, originalClientName) {
@@ -2072,6 +2076,7 @@
         }
 
         async function sendMessage() {
+            let result = null;
             const input = document.getElementById('chatInput');
             const errorDiv = document.getElementById('validationError');
             const message = (input?.value || '').trim();
@@ -2151,19 +2156,38 @@
                 }
 
                 // Traitement des sources et suggestions
-                const result = await resp.json();
+                result = await resp.json();
+                hideTyping();
+                
+                // TOUJOURS traiter les sources et suggestions d'abord
                 if (result.sources && result.sources.length > 0) {
-                    addMessage(result.message, 'assistant', result.sources);
-                } else {
-                    addMessage(result.message || 'Réponse reçue', 'assistant');
+                    result.sources.forEach(source => {
+                        addSource(source.name, source.type, source.details);
+                    });
                 }
-
+                
                 if (result.suggestions && result.suggestions.length > 0) {
                     const formattedSuggestions = result.suggestions.map(s =>
                         typeof s === 'string' ? { text: s, action: s } : s
                     );
                     addEnhancedSuggestions(formattedSuggestions);
                 }
+                
+                // Traiter le message avec citations
+                let messageToDisplay = result.message || 'Réponse reçue';
+                if (result.sources && result.sources.length > 0) {
+                    result.sources.forEach((source, index) => {
+                        const citationNum = index + 1;
+                        // Échapper les caractères spéciaux du marqueur pour regex
+                        const escapedMarker = source.marker.replace(/[{}]/g, '\\$&');
+                        messageToDisplay = messageToDisplay.replace(
+                            new RegExp(escapedMarker, 'g'),
+                            `<span class="citation-ref" onclick="showSourceDetails('${source.name}')">${citationNum}</span>`
+                        );
+                    });
+                }
+                
+                addMessage(messageToDisplay, 'assistant');
 
                 if (result?.task_id) {
                     initializeTaskTracking(result.task_id);
@@ -2188,6 +2212,19 @@
 
 
         function handleDirectResponse(result) {
+            // Traitement des sources et suggestions pour les réponses directes
+            if (result.sources && result.sources.length > 0) {
+                result.sources.forEach(source => {
+                    addSource(source.name, source.type, source.details);
+                });
+            }
+            
+            if (result.suggestions && result.suggestions.length > 0) {
+                const formattedSuggestions = result.suggestions.map(s =>
+                    typeof s === 'string' ? { text: s, action: s } : s
+                );
+                addEnhancedSuggestions(formattedSuggestions);
+            }
             if (result.status === 'client_creation_required') {
                 addMessage(`Client "${result.client_name}" non trouvé. Recherche d'informations...`, 'system');
 
@@ -3001,6 +3038,19 @@
                 });
             });
         function displayQuoteResult(result) {
+            // Traitement des sources et suggestions pour les résultats WebSocket
+            if (result.sources && result.sources.length > 0) {
+                result.sources.forEach(source => {
+                    addSource(source.name, source.type, source.details);
+                });
+            }
+            
+            if (result.suggestions && result.suggestions.length > 0) {
+                const formattedSuggestions = result.suggestions.map(s =>
+                    typeof s === 'string' ? { text: s, action: s } : s
+                );
+                addEnhancedSuggestions(formattedSuggestions);
+            }
 
             if (typeof window.escapeHtml !== 'function') {
                 window.escapeHtml = (s) => {
