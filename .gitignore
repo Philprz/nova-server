@@ -146,7 +146,7 @@ docs/_build/
 *.bak
 *.backup
 venv/
-
+.venv/
 # Fichiers de configuration locale pour les scripts push
 .ai_commit_initialized
 .push_selector_initialized
