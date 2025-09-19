@@ -289,6 +289,71 @@
             padding: 6px 12px;
             font-size: 12px;
         }        
+        .sources-container {
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            margin: 12px 0;
+            border: 1px solid var(--border-color);
+        }
+
+        .sources-header {
+            padding: 12px 16px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            color: var(--text-primary);
+            font-weight: 500;
+            transition: background-color 0.2s ease;
+        }
+
+        .sources-header:hover {
+            background: var(--bg-tertiary);
+        }
+
+        .sources-content {
+            border-top: 1px solid var(--border-color);
+            padding: 16px;
+        }
+
+        .source-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 12px;
+            margin: 4px 0;
+            background: var(--bg-primary);
+            border-radius: 6px;
+            border-left: 3px solid var(--primary-blue);
+        }
+
+        .source-name {
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+
+        .source-type {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            padding: 2px 8px;
+            background: var(--bg-tertiary);
+            border-radius: 12px;
+        }
+
+        .citation-ref {
+            background: linear-gradient(135deg, var(--primary-blue), var(--primary-violet));
+            color: white;
+            padding: 2px 6px;
+            border-radius: 10px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.1s ease;
+        }
+
+        .citation-ref:hover {
+            transform: scale(1.1);
+        }
         .client-selection-button.create-new:hover {
             color: #02B9FD;
             background-color: var(--success-color);
@@ -332,13 +397,13 @@
 /*MARINA*/
         .header {
             background: var(--bg-primary);
-  border-radius: 8px;
-  padding: 0px 24px 0px 24px;
-  margin-bottom: 20px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
+            border-radius: 8px;
+            padding: 0px 24px 0px 24px;
+            margin-bottom: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 12px;
         }
 
         .header > div.logo-container {
@@ -391,13 +456,13 @@
             margin-bottom: 20px;
         }
 
-.message {
-  margin-bottom: 16px;
-  padding: 10px 16px;
-  border-radius: 30px;
-  max-width: 85%;
-  margin-top: 16px;
-}
+        .message {
+        margin-bottom: 16px;
+        padding: 10px 16px;
+        border-radius: 30px;
+        max-width: 85%;
+        margin-top: 16px;
+        }
 
         .message.assistant {
             background: var(--bg-secondary);
@@ -405,31 +470,31 @@
         }
 
         .message.user {
-    color: white;
-    margin-left: auto;
-    border-radius: 30px !important;
-    background: linear-gradient(135deg, #02b9fd2b, #832dfe0d, #e220fb26);
-}
+            color: white;
+            margin-left: auto;
+            border-radius: 30px !important;
+            background: linear-gradient(135deg, #02b9fd2b, #832dfe0d, #e220fb26);
+        }
 
-.message.system {
-  margin: 12px 0px 12px 0px;  text-align: center;
-  max-width: 100%;
-  color: #ffffff63;
-  font-style: italic;
-}
+        .message.system {
+        margin: 12px 0px 12px 0px;  text-align: center;
+        max-width: 100%;
+        color: #ffffff63;
+        font-style: italic;
+        }
 /*MARINA*/
         .welcome-message {
             text-align: center;
-  padding: 4px;
-  border-radius: 1px;
-  margin-bottom: 4px;
+            padding: 4px;
+            border-radius: 1px;
+            margin-bottom: 4px;
         }
 /*MARINA*/
         .welcome-title {
-  font-size: 20px;
-  font-weight: 400;
-  color: #FFFFFF;
-  margin-bottom: 12px;
+            font-size: 20px;
+            font-weight: 400;
+            color: #FFFFFF;
+            margin-bottom: 12px;
         }
 
         .welcome-subtitle {
@@ -1005,6 +1070,18 @@
 
     <div class="main-container">
         <header class="header">
+            <!-- Section Sources -->
+            <div class="sources-container" id="sourcesContainer" style="display: none;">
+                <div class="sources-header" onclick="toggleSources()">
+                    <span>📚 Sources consultées</span>
+                    <i class="bi bi-chevron-down" id="sourcesChevron"></i>
+                </div>
+                <div class="sources-content" id="sourcesContent" style="display: none;">
+                    <div class="sources-list" id="sourcesList">
+                        <!-- Sources ajoutées dynamiquement -->
+                    </div>
+                </div>
+            </div>
             <div style="display: flex; align-items: center; justify-content: center; gap: 0px; flex-wrap: wrap;">
                     <img src="/static/Nova.png" alt="Nova" style="height: 200px; display: block; border-radius: 8px;">
                 </a>
@@ -1150,21 +1227,33 @@
             });
         }
         // Gestion des messages
-        function addMessage(content, type = 'assistant') {
+        function addMessage(content, type = 'assistant', sources = []) {
             const messagesContainer = document.getElementById('chatMessages');
             const messageDiv = document.createElement('div');
             messageDiv.className = `message ${type}`;
             
+            // Traitement des citations si présentes
+            let processedContent = content;
+            if (sources && sources.length > 0) {
+                sources.forEach((source, index) => {
+                    const citationNum = index + 1;
+                    addSource(source.name, source.type, source.details);
+                    processedContent = processedContent.replace(
+                        new RegExp(source.marker, 'g'),
+                        `<span class="citation-ref" onclick="showSourceDetails('${source.name}')">${citationNum}</span>`
+                    );
+                });
+            }
+            
             if (type === 'user') {
-                messageDiv.innerHTML = `<strong>Vous:</strong> ${content}`;
+                messageDiv.innerHTML = `<strong>Vous:</strong> ${processedContent}`;
             } else {
-                messageDiv.innerHTML = content;
+                messageDiv.innerHTML = processedContent;
             }
             
             messagesContainer.appendChild(messageDiv);
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
         }
-
         function addSuggestions(suggestions) {
             const messagesContainer = document.getElementById('chatMessages');
             const suggestionsDiv = document.createElement('div');
@@ -1181,7 +1270,122 @@
             messagesContainer.appendChild(suggestionsDiv);
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
         }
+        // Gestion des sources
+        let activeSources = [];
 
+        function addContextualSuggestions(context, lastQuery = '') {
+            let suggestions = [];
+            
+            // Suggestions basées sur le contexte
+            if (context.includes('client') || context.includes('RONDOT')) {
+                suggestions.push({
+                    text: "Afficher tous les clients disponibles",
+                    action: "Lister les clients"
+                });
+                if (context.includes('sélectionner') || context.includes('RONDOT')) {
+                    suggestions.push({
+                        text: "Sélectionner directement RONDOT",
+                        action: "Sélectionner client RONDOT"
+                    });
+                }
+            }
+            
+            if (context.includes('imprimante') || context.includes('produit')) {
+                suggestions.push({
+                    text: "Voir les imprimantes en stock",
+                    action: "Afficher stock imprimantes"
+                });
+                suggestions.push({
+                    text: "Spécifier le modèle d'imprimante",
+                    action: "Je veux une imprimante HP LaserJet"
+                });
+            }
+            
+            if (context.includes('devis')) {
+                suggestions.push({
+                    text: "Voir mes devis en cours",
+                    action: "Lister mes devis"
+                });
+                suggestions.push({
+                    text: "Créer un nouveau devis",
+                    action: "Créer un devis pour "
+                });
+            }
+            
+            // Suggestions génériques toujours présentes
+            suggestions.push({
+                text: "Aide sur les commandes disponibles",
+                action: "Quelles sont les commandes disponibles ?"
+            });
+            
+            addEnhancedSuggestions(suggestions);
+        }
+
+        function addEnhancedSuggestions(suggestions) {
+            const messagesContainer = document.getElementById('chatMessages');
+            const suggestionsDiv = document.createElement('div');
+            suggestionsDiv.className = 'suggestion-buttons';
+            suggestionsDiv.innerHTML = `
+                <div style="margin-bottom: 8px; font-size: 0.9rem; color: var(--text-secondary); font-weight: 500;">
+                    💡 Suggestions contextuelles :
+                </div>
+            `;
+            
+            suggestions.forEach(suggestion => {
+                const button = document.createElement('button');
+                button.className = 'suggestion-button';
+                button.textContent = suggestion.text;
+                button.onclick = () => handleSuggestionClick(suggestion.action);
+                suggestionsDiv.appendChild(button);
+            });
+            
+            messagesContainer.appendChild(suggestionsDiv);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+        function toggleSources() {
+            const content = document.getElementById('sourcesContent');
+            const chevron = document.getElementById('sourcesChevron');
+            
+            if (content.style.display === 'none') {
+                content.style.display = 'block';
+                chevron.className = 'bi bi-chevron-up';
+            } else {
+                content.style.display = 'none';
+                chevron.className = 'bi bi-chevron-down';
+            }
+        }
+
+        function addSource(sourceName, sourceType, details = '') {
+            if (!activeSources.find(s => s.name === sourceName)) {
+                activeSources.push({ name: sourceName, type: sourceType, details });
+                updateSourcesDisplay();
+                showSourcesContainer();
+            }
+        }
+
+        function updateSourcesDisplay() {
+            const sourcesList = document.getElementById('sourcesList');
+            sourcesList.innerHTML = activeSources.map((source, index) => `
+                <div class="source-item" onclick="showSourceDetails('${source.name}')">
+                    <div>
+                        <span class="source-name">${source.name}</span>
+                        ${source.details ? `<br><small>${source.details}</small>` : ''}
+                    </div>
+                    <span class="source-type">${source.type}</span>
+                </div>
+            `).join('');
+        }
+
+        function showSourcesContainer() {
+            document.getElementById('sourcesContainer').style.display = 'block';
+        }
+
+        function showSourceDetails(sourceName) {
+            const source = activeSources.find(s => s.name === sourceName);
+            if (source) {
+                addMessage(`📚 Source: ${source.name} (${source.type})<br>${source.details || 'Aucun détail disponible'}`, 'system');
+            }
+        }
         function handleSuggestionClick(suggestion) {
             document.getElementById('chatInput').value = suggestion;
             sendMessage();
@@ -2017,6 +2221,8 @@
             }
 
             if (result.status === 'success' || result.success === true) {
+                // Ajouter suggestions contextuelles après succès
+                addContextualSuggestions('devis créé client ' + clientName, '');
                 // Déterminer les informations du devis
                 const clientName =
                     result.client?.name ||
@@ -2349,277 +2555,166 @@
             }
         }
 
+        // Connexion WebSocket (version améliorée)
         function connectWebSocket(taskId) {
-            if (websocket && (websocket.readyState === WebSocket.OPEN || websocket.readyState === WebSocket.CONNECTING)) {
-                console.log("🌐 WebSocket déjà connecté ou en cours de connexion.");
-                return;}
-            const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-            const wsUrl = `${wsProtocol}://${window.location.host}/ws/assistant/${taskId}`;
+            if (!taskId) {
+                console.error("❌ TaskId requis pour WebSocket");
+                return;
+            }
 
-            console.log(`🔌 Tentative de connexion à ${wsUrl}`);
-            websocket = new WebSocket(wsUrl);
+            if (websocket && (websocket.readyState === WebSocket.OPEN || websocket.readyState === WebSocket.CONNECTING)) {
+                console.log("🌐 WebSocket déjà connecté ou en cours de connexion");
+                return;
+            }
+
+            const wsProtocol = (location.protocol === "https:") ? "wss" : "ws";
+            const wsUrl = `${wsProtocol}://${location.host}/ws/assistant/${taskId}`;
+
+            try {
+                console.log(`🔌 Connexion WebSocket à ${wsUrl}`);
+                websocket = new WebSocket(wsUrl);
+            } catch (error) {
+                console.error("❌ Erreur initialisation WebSocket:", error);
+                startLightPolling(taskId);
+                return;
+            }
 
             websocket.onopen = () => {
-                console.log("✅ WebSocket connecté !");
+                console.log("✅ WebSocket connecté");
                 wsActive = true;
-                if (progressInterval) { clearInterval(progressInterval); progressInterval = null; }
-                // NE PAS cacher la progression automatiquement
-                // hideProgress(); // SUPPRIMÉ
-                addMessage("Connexion établie.", 'system');
-                if(reconnectInterval) clearInterval(reconnectInterval);
+
+                // Nettoyage des intervalles éventuellement actifs
+                if (typeof progressInterval !== "undefined" && progressInterval) {
+                clearInterval(progressInterval);
+                progressInterval = null;
+                }
+                if (typeof reconnectInterval !== "undefined" && reconnectInterval) {
+                clearInterval(reconnectInterval);
+                reconnectInterval = null;
+                }
+
+                addMessage("Connexion établie.", "system");
+                if (typeof checkPendingValidations === "function") {
+                checkPendingValidations(taskId);
+                }
             };
 
             websocket.onmessage = (event) => {
-                const data = parseWebSocketMessage(event);
-                if (!data || typeof data !== 'object') {
-                    console.warn("⚠️ Message WebSocket invalide ou inattendu:", event?.data);
-                    return;
-                }
-                
-                            
                 try {
-                    // Early guard for duplicate_resolution
-                    if (typeof data !== 'undefined' && data && data.type === 'interaction_required' &&
-                        data.interaction_data && data.interaction_data.interaction_type === 'duplicate_resolution') {
-                        console.log("⚠️ Duplicate resolution détecté (early guard)");
-                        if (typeof hideProgress === 'function') { try { hideProgress(); } catch(e){} }
-
-                        if (data.interaction_data?.recent_quotes?.length > 0 || data.interaction_data?.draft_quotes?.length > 0) {
-                            if (typeof displayExistingQuotesInChat === 'function') {
-                                displayExistingQuotesInChat(data.interaction_data);
-                            } else {
-                                if (typeof addMessage === 'function') { addMessage("⚠️ Devis existants détectés", 'system'); }
-                            }
-                        } else {
-                            if (typeof addMessage === 'function') { addMessage("⚠️ Devis existants détectés (liste vide ou non fournie).", 'system'); }
-                        }
-
-                        if (typeof addDuplicateResolutionOptions === 'function') {
-                            addDuplicateResolutionOptions(data.interaction_data);
-                        } else if (typeof addMessage === 'function') {
-                            addMessage("Sélectionnez une option : créer un nouveau devis, examiner, consolider ou annuler.", 'system');
-                        }
-                        return;
-                    }
-                } catch(e) {
-                    console.error("Duplicate resolution early-guard error:", e);
-                }
-
-                // Gestion des messages de progression
-                if (data.type === 'progress' || data.type === 'progress_update') {
-                    const pc = document.getElementById('progressContainer');
-                    if (pc && !pc.classList.contains('active')) {
-                        showProgress();
-                    }
-                    updateProgress?.(data.progress, data.message, data.step || data.step_id);
-                }
-                // Gestion des messages de complétion ou de génération de devis
-                else if (data.type === 'completion' || data.type === 'quote_generation_completed' || data.type === 'workflow_complete') {
-                    console.log("🎯 Devis terminé reçu:", data);
-                    hideProgress?.();
-                    try {
-                        const result = (data && (data.result ?? data.data)) || null;
-                        if (result) displayQuoteResult(result);
-                    } catch (e) {
-                        console.error("❌ displayQuoteResult a échoué:", e);
-                    }
-                    closeWebSocketWithDelay(websocket, 1000, "Task completed");
-                }
-                // Gestion des tâches terminées
-                else if (data.type === 'task_completed') {
-                    console.log("🏁 Tâche terminée:", data);
-                    hideProgress?.();
-                    closeWebSocketWithDelay(websocket, 1000, "Task completed");
-                }
-                // Gestion des interactions utilisateur
-                else if (data.type === 'interaction_required' || data.type === 'user_interaction_required') {
-                    if (data.interaction_data) {
-                        if (data.interaction_data.interaction_type === 'client_selection') {
-                            hideProgress();
-                            handleUserInteraction(data.interaction_data);
-                            const opts = data.interaction_data.client_options || data.interaction_data.options || data.interaction_data.clients || [];
-                            const name = data.interaction_data.original_client_name || data.interaction_data.client_name || '';
-                            if (typeof addClientSelection === 'function') {
-                                addClientSelection(opts, name);
-                            } else {
-                                console.error("❌ Fonction addClientSelection non disponible");
-                                addMessage("Erreur: Interface de sélection client non disponible", 'system');
-                            }
-                        } else if (data.interaction_data.interaction_type === 'product_selection') {
-                            console.log("📦 Product selection détecté");
-                            hideProgress?.();
-                            if (typeof handleProductSelection === 'function') {
-                                handleProductSelection(data.interaction_data);
-                            } else {
-                                console.error("❌ Fonction handleProductSelection non disponible");
-                                addMessage("Erreur: Interface de sélection produit non disponible", 'system');
-                            }
-                        
-                        } else if (data.interaction_data.interaction_type === 'duplicate_resolution') {
-                            console.log("⚠️ Duplicate resolution détecté");
-                            if (typeof hideProgress === 'function') { try { hideProgress(); } catch(e){} }
-                            if (data.interaction_data?.recent_quotes?.length > 0 || data.interaction_data?.draft_quotes?.length > 0) {
-                                if (typeof displayExistingQuotesInChat === 'function') {
-                                    displayExistingQuotesInChat(data.interaction_data);
-                                } else if (typeof addMessage === 'function') {
-                                    addMessage("⚠️ Devis existants détectés", 'system');
-                                }
-                            } else if (typeof addMessage === 'function') {
-                                addMessage("⚠️ Devis existants détectés (liste vide ou non fournie).", 'system');
-                            }
-                            if (typeof addDuplicateResolutionOptions === 'function') {
-                                addDuplicateResolutionOptions(data.interaction_data);
-                            } else if (typeof addMessage === 'function') {
-                                addMessage("Sélectionnez une option : créer un nouveau devis, examiner, consolider ou annuler.", 'system');
-                            }
-                }
-                    }
-                }
-                // Gestion de la sélection de client
-                else if (data.type === 'client_selection_required') {
-                    hideProgress?.();
-                    const clients = data.client_options || data.clients || [];
-                    const originalName = data.original_client_name || '';
-                    handleUserInteraction(data.interaction_data);
-                    if (typeof addClientSelection === 'function') {
-                        addClientSelection(clients, originalName);
-                    } else {
-                        
-                        console.error("❌ Fonction addClientSelection non disponible");
-                        addMessage("Erreur: Interface de sélection client non disponible", 'system');
-                    }
-                }
-                // Gestion des erreurs
-                else if (data.type === 'error') {
-                    handleTaskError?.(data.error);
-                    closeWebSocketWithDelay(websocket, 1011, "Task error");
-                }
-                // Gestion des logs
-                else if (data.type === 'log') {
-                    if (data.message) addMessage?.(`[LOG] ${data.message}`, 'system');
-                }
-                // Gestion des réponses utilisateur traitées
-                else if (data.type === 'user_response_processed') {
-                    console.log("✅ Réponse utilisateur traitée:", data);
-                    addMessage?.('Réponse utilisateur prise en compte...', 'system');
-                }
-                // Gestion des messages quote_created
-                // Gestion des réponses utilisateur traitées
-                else if (data.type === 'user_response_processed') {
-                    console.log("✅ Réponse utilisateur traitée:", data);
-                    addMessage?.('Réponse utilisateur prise en compte...', 'system');
-                }
-                // Gestion des messages quote_created
-                else if (data.type === 'quote_created') {
-                    console.log("✅ Devis créé:", data);
-                    if (data.quote_data) {
-                        addMessage?.('Devis créé avec succès', 'system');
-                        if (data.quote_data.quote_id) {
-                            globalQuoteIdRaw = data.quote_data.quote_id;
-                        }
-                    }
-                }
-                // Gestion des messages product_selection_processed
-                else if (data.type === 'product_selection_processed') {
-                    console.log("📦 Sélection produit traitée:", data);
-                    if (data.result) {
-                        addMessage?.('Sélection de produits traitée', 'system');
-                    }
-                }
-                // Gestion des messages de recherche parallèle
-                else if (data.type === 'parallel_search_started') {
-                    addMessage(`🚀 Recherche parallèle en cours : client "${data.client_query}" et ${data.product_count} produit(s)...`, 'system');
-                    showProgress();
-                }
-                // Type de message non géré
-                // Gestion des messages task_update
-                else if (data.type === 'task_update') {
-                    console.log("📋 Mise à jour de tâche:", data);
-                    
-                    // Gestion des événements spécifiques dans task_update
-                    if (data.event === 'parallel_search_started') {
-                        const clientQuery = data.data?.client_query || 'client';
-                        const productCount = data.data?.product_count || 0;
-                        addMessage(`🚀 Recherche parallèle en cours : client "${clientQuery}" et ${productCount} produit(s)...`, 'system');
-                        showProgress();
-                    }
-                    else if (data.event === 'client_validation_started') {
-                        addMessage('🔍 Validation du client en cours...', 'system');
-                    }
-                    else if (data.event === 'product_validation_started') {
-                        addMessage('📦 Validation des produits en cours...', 'system');
-                    }
-                    else if (data.event === 'quote_generation_started') {
-                        addMessage('📝 Génération du devis en cours...', 'system');
-                    }
-                    else {
-                        // Autres événements task_update
-                        if (data.data?.message) {
-                            addMessage(data.data.message, 'system');
-                        }
-                    }
-                }
-                else {
-                    console.warn("ℹ️ Type de message non géré:", data.type, data);
+                const data = JSON.parse(event.data);
+                handleWebSocketMessage(data);
+                } catch (error) {
+                console.error("❌ Erreur parsing WebSocket:", error);
                 }
             };
-
-
-            // Fonction utilitaire pour fermer le WebSocket après un délai
-            function closeWebSocketWithDelay(ws, code, reason) {
-                setTimeout(() => {
-                    try {
-                        if (ws && ws.readyState === WebSocket.OPEN) {
-                            ws.close(code, reason);
-                        }
-                    } catch (_) {}
-                }, 500);
-            }
-
-
-
 
             websocket.onclose = (event) => {
                 wsActive = false;
-                if (websocket === window.websocket) {
-                    window.websocket = null;
-                }
-                const code = event?.code ?? 0;
-                const reason = (event?.reason && String(event.reason).trim()) || 'Aucune raison fournie';
-                const wasClean = event?.wasClean === true;
-                console.warn(`🔌 WebSocket déconnecté${wasClean ? ' proprement' : ''}. Code: ${code}, Raison: ${reason}`);
+                console.warn(`🔌 WebSocket fermé - Code: ${event.code}, Raison: ${event.reason}`);
 
-                if (currentTaskId) {
-                    const shouldReconnect = (code === 1005 || code === 1006 || code === 1011 || code === 1012 || code === 1013 || code >= 3000);
-                    if (shouldReconnect) {
-                        try { addMessage("La connexion a été perdue. Tentative de reconnexion...", 'system'); } catch (e) {}
-                        if (typeof improvedReconnection === 'function') {
-                            improvedReconnection(currentTaskId);
-                        } else {
-                            if (!window.reconnectInProgress) {
-                                window.reconnectInProgress = true;
-                                window.reconnectTimeout = setTimeout(() => {
-                                    connectWebSocket(currentTaskId);
-                                    window.reconnectInProgress = false;
-                                }, 2000);
-                            }
-                        }
-                    }
+                if (!taskCompletedHandled && currentTaskId) {
+                const shouldReconnect = [1005, 1006, 1011, 1012, 1013].includes(event.code) || event.code >= 3000;
+                if (shouldReconnect) {
+                    console.log("🔄 Tentative de reconnexion...");
+                    setTimeout(() => connectWebSocket(taskId), 2000);
+                } else {
+                    startLightPolling(taskId);
+                }
                 }
             };
 
-                        websocket.onerror = (error) => {
+            websocket.onerror = (error) => {
                 console.error("❌ Erreur WebSocket:", error);
                 wsActive = false;
-                try { addMessage("Une erreur de connexion est survenue.", 'system'); } catch (e) {}
-
-                if (reconnectInterval) { clearInterval(reconnectInterval); reconnectInterval = null; }
+                if (!taskCompletedHandled) {
+                startLightPolling(taskId);
+                }
             };
+            }
+        // Polling de secours très léger
+        
+        function startLightPolling(taskId) {
+            if (progressInterval) return;
 
-            // Vérifier s'il y a des validations en attente après connexion
-            setTimeout(() => checkPendingValidations(taskId), 1000);
+            progressInterval = setInterval(async () => {
+                try {
+                    const r = await fetch(`/progress/task/${taskId}`);
+                    if (!r.ok) return; // best-effort
+
+                    const d = await r.json();
+                    if (d.status === 'completed' || d.completed) {
+                        clearInterval(progressInterval);
+                        progressInterval = null;
+                        hideProgress();
+                        addMessage('Traitement terminé avec succès !', 'system');
+                        taskCompletedHandled = true;
+                    } else if (d.status === 'failed' || d.status === 'cancelled') {
+                        clearInterval(progressInterval);
+                        progressInterval = null;
+                        hideProgress();
+                        addMessage(`Erreur: ${d.error || 'Tâche échouée'}`, 'system');
+                    } else {
+                        updateProgress(d.overall_progress || 0, d.current_step_title || 'Traitement en cours...', d.completed_steps || 0);
+                    }
+                } catch {
+                    /* silence */
+                }
+            }, 1200);
         }
 
+        function handleWebSocketMessage(data) {
+            if (!data || typeof data !== 'object') {
+                console.warn("⚠️ Message WebSocket invalide:", data);
+                return;
+            }
+
+            // Gestion des différents types de messages
+            switch (data.type) {
+                case 'progress':
+                case 'progress_update':
+                if (typeof updateProgress === 'function') {
+                    updateProgress(data.progress, data.message, data.step || data.step_id);
+                }
+                break;
+                
+                case 'completion':
+                case 'quote_generation_completed':
+                case 'workflow_complete':
+                console.log("🎯 Tâche terminée:", data);
+                if (typeof hideProgress === 'function') hideProgress();
+                if (data.result || data.data) {
+                    displayQuoteResult(data.result || data.data);
+                }
+                taskCompletedHandled = true;
+                break;
+                
+                case 'interaction_required':
+                case 'user_interaction_required':
+                if (typeof hideProgress === 'function') hideProgress();
+                if (typeof handleUserInteraction === 'function') {
+                    handleUserInteraction(data.interaction_data);
+                }
+                break;
+                
+                case 'error':
+                if (typeof handleTaskError === 'function') {
+                    handleTaskError(data.error);
+                }
+                taskCompletedHandled = true;
+                break;
+                
+                case 'log':
+                if (data.message && typeof addMessage === 'function') {
+                    addMessage(`[LOG] ${data.message}`, 'system');
+                }
+                break;
+                
+                default:
+                console.warn("ℹ️ Type de message non géré:", data.type);
+            }
+            }
+
+        
         // Fonction pour vérifier les validations en attente
         async function checkPendingValidations(taskId) {
             try {
