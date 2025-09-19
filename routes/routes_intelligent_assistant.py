@@ -1236,7 +1236,7 @@ async def intelligent_interface():
     """Sert l'interface de l'assistant intelligent"""
     try:
         with open('templates/intelligent_assistant.html', 'r', encoding='utf-8') as f:
-            return HTMLResponse(content=f.read())
+            return HTMLResponse(content=f.read(, media_type="text/html; charset=utf-8"))
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Interface non trouvée")
 
