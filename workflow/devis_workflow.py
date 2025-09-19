@@ -1,30 +1,36 @@
 # workflow/devis_workflow.py - VERSION COMPLÈTE AVEC VALIDATEUR CLIENT
 
-import re
-import sys
+import asyncio
+from datetime import datetime, timedelta, timezone
+from difflib import SequenceMatcher
 import io
-import os
 import json
 import logging
-import asyncio
+import os
+import re
+import sys
+import functools
+import uuid
+from typing import Optional, Callable, Awaitable, Any, Dict, List
 from fastapi import APIRouter, HTTPException
 
-from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Any, Optional
-from difflib import SequenceMatcher
+from services.cache_manager import referential_cache
+from services.company_search_service import company_search_service
 from services.llm_extractor import LLMExtractor
-from services.mcp_connector import MCPConnector, call_mcp_with_progress, test_mcp_connections_with_progress
-from services.progress_tracker import progress_tracker, QuoteTask, TaskStatus
+from services.local_product_search import LocalProductSearchService
+from services.mcp_connector import (
+    MCPConnector,
+    call_mcp_with_progress,
+    test_mcp_connections_with_progress,
+)
+from services.price_engine import PriceEngineService
+from services.product_search_engine import ProductSearchEngine
+from services.progress_tracker import QuoteTask, TaskStatus, progress_tracker
 from services.suggestion_engine import SuggestionEngine
 from services.websocket_manager import websocket_manager
-from services.company_search_service import company_search_service
 from utils.client_lister import find_client_everywhere
-from services.product_search_engine import ProductSearchEngine
 from workflow.client_creation_workflow import client_creation_workflow
-from services.price_engine import PriceEngineService
-from services.cache_manager import referential_cache
 from workflow.validation_workflow import SequentialValidator
-from services.local_product_search import LocalProductSearchService
 # Configuration sécurisée pour Windows
 if sys.platform == "win32":
     os.environ["PYTHONIOENCODING"] = "utf-8"
@@ -51,6 +57,70 @@ except ImportError as e:
     VALIDATOR_AVAILABLE = False
     logger.warning(f"⚠️ Validateur client non disponible: {str(e)}")
 
+def trace_source(*, system: str, label: Optional[str] = None, marker_prefix: Optional[str] = None):
+    """
+    Décorateur pour méthodes async de DevisWorkflow qui font des appels MCP.
+    - system: "SAP" | "Salesforce"
+    - label: titre court pour 'details' (sinon le nom de la fonction sera utilisé)
+    - marker_prefix: préfixe stable pour le marqueur (ex: "SAP_DEVIS", "SF_FIND_ACCOUNT")
+    """
+    def _decorator(func: Callable[..., Awaitable[Any]]):
+        @functools.wraps(func)
+        async def _wrapper(self, *args, **kwargs):
+            # 1) Avant l'appel, conserver quelques indices lisibles (selon convention des kwargs courants)
+            # Essaie d'extraire des informations utiles : action, query, endpoint, critères...
+            action = kwargs.get("action") or kwargs.get("mcp_action") or func.__name__
+            params = kwargs.get("params") or kwargs.get("mcp_params") or {}
+            label_local = label or func.__name__
+            marker = self._gen_marker(system, marker_prefix or label_local)
+
+            # 2) Appel réel
+            result = await func(self, *args, **kwargs)
+
+            # 3) Déterminer un détail résumé côté provenance
+            #    On tente de piocher des ID familiers: DocNum, Id, CardCode, ItemCode, etc.
+            details_bits = []
+            # côté paramètres
+            for k in ("CardCode", "AccountId", "ItemCode", "query", "filter", "name", "endpoint"):
+                v = params.get(k)
+                if v:
+                    details_bits.append(f"{k}={v}")
+            # côté résultat
+            # - Selon structure standard: dict ou liste de dicts
+            def _extract_from_obj(obj: Dict[str, Any]):
+                for k in ("DocNum", "DocEntry", "Id", "OpportunityId", "CardCode", "ItemCode", "DisplayName", "Name"):
+                    if k in obj and obj[k]:
+                        details_bits.append(f"{k}={obj[k]}")
+
+            if isinstance(result, dict):
+                _extract_from_obj(result)
+                # parfois payload dans 'data'/'result'
+                for subkey in ("data", "result"):
+                    sub = result.get(subkey)
+                    if isinstance(sub, dict):
+                        _extract_from_obj(sub)
+                    elif isinstance(sub, list) and sub and isinstance(sub[0], dict):
+                        _extract_from_obj(sub[0])
+            elif isinstance(result, list) and result and isinstance(result[0], dict):
+                _extract_from_obj(result[0])
+
+            details_str = f"{label_local} | {action}"
+            if details_bits:
+                details_str += " | " + ", ".join(details_bits[:6])
+
+            # 4) Enregistrement de la source
+            self._add_source(system=system, details=details_str, marker=marker)
+
+            # 5) Si la fonction a envie de réutiliser le marqueur (pour le message),
+            #    on l'injecte de manière non cassante: retour dict + _marker
+            if isinstance(result, dict):
+                result.setdefault("_trace", {})  # canal discret pour la suite
+                result["_trace"].setdefault("markers", {})
+                result["_trace"]["markers"][func.__name__] = marker
+            return result
+        return _wrapper
+    return _decorator
+
 class DevisWorkflow:
     """Coordinateur du workflow de devis entre Claude, Salesforce et SAP - VERSION AVEC VALIDATEUR CLIENT"""
     
@@ -73,7 +143,8 @@ class DevisWorkflow:
         self.current_task = None
         self.context = {}
         self.workflow_steps = []
-
+        self.collected_sources: list[dict] = []
+        self.collected_suggestions: list[str] = []
         # Configuration mode production/démo
         self.demo_mode = not force_production
         if force_production:
@@ -203,6 +274,46 @@ class DevisWorkflow:
             response["context"] = context
 
         return response
+    
+    def _gen_marker(self, system: str, prefix: Optional[str] = None) -> str:
+        """Génère un marqueur unique pour citation UI, ex: {{SRC_SAP_DEVIS_ab12}}"""
+        short = str(uuid.uuid4())[:4]
+        sys_norm = system.upper().strip()
+        base = prefix.upper().strip() if prefix else "GEN"
+        return f"{{{{SRC_{sys_norm}_{base}_{short}}}}}"
+
+    def _system_name_and_type(self, system: str) -> tuple[str, str]:
+        s = system.upper().strip()
+        if s == "SAP":
+            return "SAP B1 Service Layer", "ERP"
+        if s == "SALESFORCE":
+            return "Salesforce API", "CRM"
+        if s == "AI":
+            return "Estimation interne NOVA", "AI"
+        return s, "OTHER"
+
+    def _add_source(self, *, system: str, name: Optional[str] = None, details: str,
+                    marker: str, confidence: float = 1.0) -> None:
+        sys_name, sys_type = self._system_name_and_type(system)
+        if name:
+            sys_name = name
+        self.collected_sources.append({
+            "system": system.upper().strip(),
+            "name": sys_name,
+            "type": sys_type,
+            "details": details,
+            "marker": marker,
+            "confidence": confidence
+        })
+
+    def _add_suggestion(self, text: str) -> None:
+        if text and text.strip():
+            self.collected_suggestions.append(text.strip())
+
+    def _reset_evidence(self) -> None:
+        self.collected_sources.clear()
+        self.collected_suggestions.clear()
+
 
     def _save_context_to_task(self):
         """Sauvegarde le contexte actuel dans la tâche"""
@@ -213,6 +324,39 @@ class DevisWorkflow:
             logger.info(f"💾 Contexte sauvegardé: {list(self.context.keys())}")
         else:
             logger.warning("⚠️ Impossible de sauvegarder le contexte - pas de tâche courante")
+    
+    async def mcp_call(self, *, system: str, server_name: str, action: str, params: Dict[str, Any],
+                    label: Optional[str] = None, marker_prefix: Optional[str] = None,
+                    confidence: float = 1.0) -> Dict[str, Any]:
+        """
+        Enveloppe standard des appels MCP avec traçage de source.
+        À utiliser dans les méthodes où le décorateur n'est pas pratique.
+        """
+        result = await self.mcp_connector.call_mcp(server_name, action, params)
+        marker = self._gen_marker(system, marker_prefix or action)
+        # Construire details
+        details_bits = []
+        for k in ("CardCode", "AccountId", "ItemCode", "query", "filter", "name", "endpoint"):
+            v = params.get(k)
+            if v:
+                details_bits.append(f"{k}={v}")
+        # Résumé résultat
+        if isinstance(result, dict):
+            for k in ("DocNum", "DocEntry", "Id", "OpportunityId"):
+                if k in result and result[k]:
+                    details_bits.append(f"{k}={result[k]}")
+
+        details = (label or f"{server_name}:{action}")
+        if details_bits:
+            details += " | " + ", ".join(details_bits[:6])
+
+        self._add_source(system=system, details=details, marker=marker, confidence=confidence)
+        # Ajouter le marqueur dans un canal discret
+        if isinstance(result, dict):
+            result.setdefault("_trace", {})
+            result["_trace"].setdefault("markers", {})
+            result["_trace"]["markers"][f"{server_name}.{action}"] = marker
+        return result
 
     def _normalize_client_info(self, client_info: Any) -> Dict[str, Any]:
         """Normalise la structure client_info pour éviter les erreurs de type None"""
@@ -856,6 +1000,14 @@ class DevisWorkflow:
                 if price == 0:
                     # Estimation en dernier recours
                     estimated = self._estimate_product_price(product.get("ItemName", product.get("name", "")))
+                    self._add_source(
+                        system="AI",
+                        name="Estimation interne NOVA",
+                        details=f"Prix estimé pour {product.get('ItemName', product.get('name','produit'))}: {estimated}",
+                        marker="{{SRC_AI_PRICE}}",
+                        confidence=0.6
+                    )
+
                     normalized_product["Price"] = estimated
                     normalized_product["UnitPrice"] = estimated
                     normalized_product["unit_price"] = estimated
@@ -908,6 +1060,28 @@ class DevisWorkflow:
                 # Si pas de doc_num dans sap, essayer d'autres sources
                 if not sap_doc_num:
                     sap_doc_num = quote_data.get("sap_doc_num") or quote_data.get("quote_number") or "UNKNOWN"
+                # Construire un message lisible AVEC marqueurs de citation (les <span> seront posés côté UI)
+                client_label = (
+                    client_data.get("CardName") or client_data.get("Name") or client_data.get("DisplayName") or "le client"
+                )
+                products_txt = ", ".join([f"{p.get('ItemName') or p.get('name')} x{int(p.get('Quantity') or p.get('quantity',1))}" for p in products_data])
+
+                # Marqueurs utilisés ci-dessus via _add_source: {{SRC_SAP_DEVIS}} / {{SRC_SF_OPP}}
+                message_with_citations = (
+                    f"Devis créé pour **{client_label}** : {products_txt}. "
+                    f"Numéro SAP: {sap_doc_num} {{SRC_SAP_DEVIS}}. "
+                    f"Opportunité Salesforce: {sf_id or 'N/A'} {{SRC_SF_OPP}}."
+                )
+
+                if any(source["system"] == "AI" for source in self.collected_sources):
+                    message_with_citations += " Certaines valeurs sont estimées {{SRC_AI_PRICE}}."
+
+
+                # Suggestions intelligentes de base (tu peux remplacer par ton SuggestionEngine si dispo dans ce contexte)
+                self._add_suggestion("Voir les lignes du devis SAP")
+                self._add_suggestion("Ouvrir l’opportunité dans Salesforce")
+                self._add_suggestion("Ajouter un second produit")
+                self._add_suggestion("Modifier les quantités")
 
                 return {
                     "success": True,
@@ -933,8 +1107,13 @@ class DevisWorkflow:
                     "salesforce_quote_id": sf_id,
                     "date": datetime.now().strftime('%Y-%m-%d'),
                     "quote_status": "Créé",
-                    "message": f"Devis créé avec succès pour {validated_data.get('client', {}).get('name', 'le client')}"
+
+                    # 👇 NOUVEAUX CHAMPS POUR L’UI
+                    "message": message_with_citations,
+                    "sources": self.collected_sources,
+                    "suggestions": self.collected_suggestions
                 }
+
             else:
                 self._track_step_fail("generate_quote", "Erreur SAP", sap_quote.get("error"))
                 return self._build_error_response("Erreur génération", sap_quote.get("error"))
@@ -952,6 +1131,14 @@ class DevisWorkflow:
             self.context["products_info"] = products_data
 
             result = await self._create_quote_in_salesforce(client_data, products_data, quote_data)
+            # Ex: on a bien interrogé SAP pour créer le devis:
+            sap_doc = result.get("sap_quote_number") or "UNKNOWN"
+            self._add_source(
+                system="SAP",
+                name="SAP B1 Service Layer",
+                details=f"Création devis DocNum={sap_doc}",
+                marker="{{SRC_SAP_DEVIS}}"
+            )
             return {
                 "success": result.get("success", False),
                 "quote_number": result.get("sap_quote_number"),
@@ -1011,17 +1198,31 @@ class DevisWorkflow:
 
         return {"status": "error", "message": "Action non reconnue"}
 
-    async def _create_salesforce_opportunity(self, client_data: Dict, products_data: List[Dict], sap_quote: Dict) -> Dict[str, Any]:
+    async def _create_salesforce_opportunity(
+        self, client_data: Dict, products_data: List[Dict], sap_quote: Dict
+    ) -> Dict[str, Any]:
         """Crée l'opportunité dans Salesforce"""
         try:
+            opp_id = sap_quote.get("salesforce_opportunity_id")
             # Cette méthode est déjà gérée dans _create_quote_in_salesforce
-            return {
+            result = {
                 "success": True,
-                "opportunity_id": sap_quote.get("salesforce_opportunity_id")
+                "opportunity_id": opp_id,
             }
+
+            if opp_id:
+                self._add_source(
+                    system="Salesforce",
+                    name="Salesforce API",
+                    details=f"Opportunity liée au devis (Id={opp_id})",
+                    marker="{{SRC_SF_OPP}}"
+                )
+
+            return result
         except Exception as e:
             logger.exception(f"Erreur création opportunité Salesforce: {str(e)}")
             return {"success": False, "error": str(e)}
+
 
     async def process_prompt(self, user_prompt: str, task_id: str = None) -> Dict[str, Any]:
         """IMPORTANT: Utiliser le task_id fourni, ne jamais le régénérer"""
@@ -2917,11 +3118,16 @@ class DevisWorkflow:
                 
                 try:
                     # Utiliser try/catch spécifique pour Salesforce
-                    opportunity_result = await MCPConnector.call_salesforce_mcp("salesforce_create_record", {
-                        "sobject": "Opportunity",
-                        "data": opportunity_data
-                    })
-                    
+                    opportunity_result = await self.mcp_call(
+                        system="Salesforce",
+                        server_name="salesforce_mcp",
+                        action="salesforce_create_record",
+                        params={"sobject": "Opportunity", "data": opportunity_data},
+                        label="Création Opportunité",
+                        marker_prefix="SF_CREATE_OPP"
+                    )
+                    opportunity_id = opportunity_result.get("id") or opportunity_result.get("opportunity_id")
+                    sf_marker = opportunity_result.get("_trace", {}).get("markers", {}).get("salesforce_mcp.salesforce_create_record", "")
                     logger.info(f"📊 Résultat brut Salesforce: {opportunity_result}")
                     
                     # Validation robuste du résultat
@@ -3537,8 +3743,16 @@ class DevisWorkflow:
             query = f"SELECT Id, Name, AccountNumber, AnnualRevenue, LastActivityDate FROM Account WHERE Name LIKE '%{client_name}%' LIMIT 10"
             logger.debug(f"📝 Requête Salesforce: {query}")
 
-            sf_result = await self.mcp_connector.call_salesforce_mcp("salesforce_query", {"query": query})
-
+            sf_result = await self.mcp_call(
+                system="Salesforce",
+                server_name="salesforce_mcp",
+                action="salesforce_query",
+                params={"query": query},
+                label="Recherche compte par nom",
+                marker_prefix="SF_QUERY_ACCOUNT"
+            )
+            # (Optionnel) Pour récupérer le marqueur posé par le helper:
+            sf_marker = sf_result.get("_trace", {}).get("markers", {}).get("salesforce_mcp.salesforce_query", "")
             logger.info(f"📊 RÉSULTAT SALESFORCE BRUT: {json.dumps(sf_result, indent=2, ensure_ascii=False)}")
 
             # Client trouvé directement
@@ -3842,9 +4056,15 @@ class DevisWorkflow:
                 # PROBLÈME ICI : Si product_code est vide, on ne fait rien
                 if product_code:
                     # Recherche par code exact (existant)
-                    product_details = await MCPConnector.call_sap_mcp("sap_get_product_details", {
-                        "item_code": product_code
-                    })
+                    # APRÈS (trace auto: system=SAP)
+                    product_details = await self.mcp_call(
+                        system="SAP",
+                        server_name="sap_mcp",
+                        action="sap_get_product_details",
+                        params={"item_code": product_code},
+                        label="Détails produit",
+                        marker_prefix="SAP_GET_PRODUCT"
+                    )
                 elif product_name:
                     # NOUVELLE LOGIQUE : Recherche par nom
                     logger.info(f"🔍 Produit sans code, recherche par nom: {product_name}")
@@ -3902,14 +4122,14 @@ class DevisWorkflow:
             similar_products = []
             
             for keyword in keywords[:2]:  # Limiter à 2 mots-clés
-                search_result = await self.mcp_connector.call_mcp(
-                    "sap_mcp",
-                    "sap_search",
-                    {
-                        "query": keyword,
-                        "entity_type": "Items",
-                        "limit": 3
-                    }
+                # APRÈS (trace auto: system=SAP)
+                search_result = await self.mcp_call(
+                    system="SAP",
+                    server_name="sap_mcp",
+                    action="sap_search",
+                    params={"query": keyword, "entity_type": "Items", "limit": 3},
+                    label=f"Recherche similaire ({keyword})",
+                    marker_prefix="SAP_SEARCH_SIMILAR"
                 )
                 
                 if search_result.get("success") and search_result.get("results"):
@@ -3937,14 +4157,13 @@ class DevisWorkflow:
             logger.info(f"🔍 Recherche SAP par nom: {product_name}")
             
             # Utiliser la méthode MCP de recherche générale
-            search_result = await self.mcp_connector.call_mcp(
-                "sap_mcp",
-                "sap_search",
-                {
-                    "query": product_name,
-                    "entity_type": "Items",
-                    "limit": 10
-                }
+            search_result = await self.mcp_call(
+                system="SAP",
+                server_name="sap_mcp",
+                action="sap_search",
+                params={"query": product_name, "entity_type": "Items", "limit": 10},
+                label="Recherche produit par nom",
+                marker_prefix="SAP_SEARCH_ITEM"
             )
             
             if search_result.get("success") and search_result.get("results"):
