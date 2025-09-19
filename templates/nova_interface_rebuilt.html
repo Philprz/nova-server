@@ -2729,7 +2729,7 @@
                                 } catch (e) {}
                             }
 
-                            if (data.interaction_data?.recent_outes?.length > 0 || data.interaction_data?.draft_quotes?.length > 0) {
+                            if (data.interaction_data?.recent_quotes?.length > 0 || data.interaction_data?.draft_quotes?.length > 0) {
                                 if (typeof displayExistingQuotesInChat === 'function') {
                                     displayExistingQuotesInChat(data.interaction_data);
                                 } else if (typeof addMessage === 'function') {
