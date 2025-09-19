@@ -21,7 +21,7 @@ export default class CompanySearchComponent extends NavigationMixin(LightningEle
     @track enrichmentData = null;
     
     // Configuration
-    novaApiUrl = 'http://178.33.233.120:8000'; // URL de l'API NOVA
+    novaApiUrl = 'http://178.33.233.120:8200'; // URL de l'API NOVA
     maxResults = 10;
     
     // Computed properties

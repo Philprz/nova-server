@@ -56,5 +56,5 @@ async def salesforce_delete_record(sobject: str, record_id: str) -> Dict[str, An
             "error": f"Erreur lors de la suppression: {str(e)}"
         }
 """)
-print("\n✅ L'interface sera accessible à : http://localhost:8000/quote-management")
+print("\n✅ L'interface sera accessible à : http://localhost:8200/quote-management")
 print("\n⚠️ Note: Assurez-vous que les services MCP SAP et Salesforce sont actifs")

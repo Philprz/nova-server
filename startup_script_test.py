@@ -143,7 +143,7 @@ def test_api_health():
     import httpx
     try:
         with httpx.Client() as client:
-            response = client.get("http://localhost:8000/health", timeout=5.0)
+            response = client.get("http://localhost:8200/health", timeout=5.0)
             if response.status_code == 200:
                 return True
     except:
@@ -202,13 +202,13 @@ def start_nova_server():
         import uvicorn
 
         # Afficher toutes les URLs sur une seule ligne
-        logger.info("NOVA démarré → http://localhost:8000 | Docs: /docs | Interface: /interface/itspirit | Santé: /health")
+        logger.info("NOVA démarré → http://localhost:8200 | Docs: /docs | Interface: /interface/itspirit | Santé: /health")
 
         # Correction: Configuration simplifiée pour éviter les conflits I/O
         uvicorn.run(
             app,
             host="0.0.0.0",
-            port=8000,
+            port=8200,
             log_level="warning"  # Réduire le niveau de log pour moins de verbosité
         )
 

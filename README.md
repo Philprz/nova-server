@@ -4,9 +4,9 @@
 
 ## ðŸš€ AccÃ¨s Direct
 
-- **Interface Principal :** http://178.33.233.120:8000/api/assistant/interface
-- **API SantÃ© :** http://178.33.233.120:8000/health
-- **Documentation :** http://178.33.233.120:8000/docs
+- **Interface Principal :** http://178.33.233.120:8200/api/assistant/interface
+- **API SantÃ© :** http://178.33.233.120:8200/health
+- **Documentation :** http://178.33.233.120:8200/docs
 
 ## ðŸ“‹ Vue d'Ensemble
 
@@ -44,7 +44,7 @@ Interface Web â†’ FastAPI â†’ Claude LLM
 
 ### Utilisateurs
 ```
-1. AccÃ©dez Ã  : http://178.33.233.120:8000/api/assistant/interface
+1. AccÃ©dez Ã  : http://178.33.233.120:8200/api/assistant/interface
 2. Tapez : "CrÃ©er un devis pour 100 rÃ©f A00025 pour Edge Communications"
 3. NOVA traite automatiquement la demande
 ```
@@ -52,7 +52,7 @@ Interface Web â†’ FastAPI â†’ Claude LLM
 ### DÃ©veloppeurs
 ```bash
 # Test API
-curl -X POST "http://178.33.233.120:8000/api/assistant/chat" \
+curl -X POST "http://178.33.233.120:8200/api/assistant/chat" \
   -H "Content-Type: application/json" \
   -d '{"message": "Bonjour NOVA"}'
 ```
@@ -63,7 +63,7 @@ curl -X POST "http://178.33.233.120:8000/api/assistant/chat" \
 .\start_nova.ps1
 
 # VÃ©rification
-Invoke-RestMethod -Uri "http://localhost:8000/health"
+Invoke-RestMethod -Uri "http://localhost:8200/health"
 ```
 
 ## ðŸ“¡ APIs Principales
@@ -152,7 +152,7 @@ python tests/test_workflow_demo.py
 
 ## ðŸ”’ SÃ©curitÃ©
 
-- Pare-feu Windows configurÃ© (port 8000)
+- Pare-feu Windows configurÃ© (port 8200)
 - API Keys sÃ©curisÃ©es
 - Authentification SAP/SF
 - **TODO :** HTTPS + authentification utilisateur
