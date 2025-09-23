@@ -5003,8 +5003,8 @@ class DevisWorkflow:
                             self.mcp_connector.call_mcp(
                                 "sap_mcp",
                                 "sap_search",
-                                {"search_term": term, "search_fields": ["ItemName", "U_Description"], "limit": 2}
-                            )
+                                {"query": term, "entity_type": "Items", "limit": 2}
+                                )
                         )
                         try:
                             alt_result = await asyncio.wait_for(alt_task, timeout=10.0)
@@ -5129,73 +5129,102 @@ class DevisWorkflow:
         return None
 
     async def _search_local_intelligent(self, product_name: str, criteria: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Recherche intelligente locale avec LLM et SQL optimisé"""
+        """Recherche intelligente locale avec LLM et SQL optimisé (sync engine conservé)"""
         try:
+            import os
+            from typing import Dict, Any, List
             from sqlalchemy import create_engine, text
             from sqlalchemy.orm import sessionmaker
 
             keywords = criteria.get("keywords", []) or []
             category = criteria.get("category", "autre") or "autre"
+            limit = int(criteria.get("limit", 10) or 10)
+            offset = int(criteria.get("offset", 0) or 0)
+            min_stock = int(criteria.get("min_stock", 1) or 1)
+            include_oos = bool(criteria.get("include_oos", False))
 
             # Conditions SQL
             search_conditions = ["(LOWER(item_name) LIKE :search_term OR LOWER(u_description) LIKE :search_term)"]
-            params = {"search_term": f"%{product_name.lower()}%"}
+            params: Dict[str, Any] = {"search_term": f"%{(product_name or '').lower()}%"}
 
             for i, keyword in enumerate(keywords[:3]):
-                param_name = f"keyword_{i}"
-                search_conditions.append(f"(LOWER(item_name) LIKE :{param_name} OR LOWER(u_description) LIKE :{param_name})")
-                params[param_name] = f"%{keyword.lower()}%"
+                if keyword:  # éviter les mots-clés vides
+                    param_name = f"keyword_{i}"
+                    search_conditions.append(
+                        f"(LOWER(item_name) LIKE :{param_name} OR LOWER(u_description) LIKE :{param_name})"
+                    )
+                    params[param_name] = f"%{(keyword or '').lower()}%"
 
+            # Assurer l'existence du paramètre :category (utilisé dans le CASE)
+            params["category"] = None
             if category != "autre":
                 search_conditions.append("(LOWER(item_name) LIKE :category OR LOWER(u_description) LIKE :category)")
                 params["category"] = f"%{category.lower()}%"
+
+            # Filtres stock
+            stock_filter = " (on_hand > 0) " if not include_oos else " (on_hand >= 0) "
+            if min_stock > 0:
+                stock_filter = f" (on_hand >= :min_stock) "
+                params["min_stock"] = min_stock
 
             query = f"""
             SELECT item_code, item_name, u_description, avg_price, on_hand,
                 items_group_code, manufacturer, sales_unit,
                 (
                     CASE 
-                    WHEN LOWER(item_name) LIKE :search_term THEN 100
-                    WHEN LOWER(u_description) LIKE :search_term THEN 80
-                    WHEN :category IS NOT NULL AND LOWER(item_name) LIKE :category THEN 60
-                    ELSE 40
+                        WHEN LOWER(item_name) LIKE :search_term THEN 100
+                        WHEN LOWER(u_description) LIKE :search_term THEN 80
+                        WHEN :category IS NOT NULL AND LOWER(item_name) LIKE :category THEN 60
+                        ELSE 40
                     END
-                ) as relevance_score
+                ) AS relevance_score
             FROM produits_sap 
-            WHERE valid = true 
-            AND on_hand > 0
+            WHERE valid = true
+            AND {stock_filter}
             AND ({' OR '.join(search_conditions)})
             ORDER BY relevance_score DESC, on_hand DESC
-            LIMIT 10
+            LIMIT :limit OFFSET :offset
             """
+
+            params["limit"] = limit
+            params["offset"] = offset
 
             db_url = os.getenv("DATABASE_URL")
             if not db_url:
                 logger.warning("DATABASE_URL manquant pour recherche locale intelligente")
                 return []
+
             engine = create_engine(db_url, pool_pre_ping=True)
             SessionLocal = sessionmaker(bind=engine)
             with SessionLocal() as session:
-                results = session.execute(text(query), params).fetchall()
+                # Exécuter en deux temps pour supporter les SET LOCAL + SELECT
+                for stmt in query.strip().split(";"):
+                    if not stmt.strip():
+                        continue
+                    results = session.execute(text(stmt), params) if "SELECT " in stmt else session.execute(text(stmt))
+                rows = results.fetchall() if results is not None else []
                 formatted_results: List[Dict[str, Any]] = []
-                for row in results or []:
+                for row in rows or []:
+                    on_hand_val = int(getattr(row, 'on_hand', 0) or 0)
                     formatted_results.append({
-                        "ItemCode": row.item_code,
-                        "ItemName": row.item_name,
-                        "U_Description": row.u_description or "",
-                        "AvgPrice": float(row.avg_price or 0),
-                        "OnHand": int(row.on_hand or 0),
-                        "QuantityOnStock": int(row.on_hand or 0),
-                        "ItemsGroupCode": row.items_group_code or "",
-                        "Manufacturer": row.manufacturer or "",
-                        "SalesUnit": row.sales_unit or "UN",
+                        "ItemCode": getattr(row, 'item_code'),
+                        "ItemName": getattr(row, 'item_name'),
+                        "U_Description": getattr(row, 'u_description') or "",
+                        "AvgPrice": float(getattr(row, 'avg_price', 0) or 0),
+                        "OnHand": on_hand_val,
+                        "QuantityOnStock": on_hand_val,
+                        "ItemsGroupCode": getattr(row, 'items_group_code') or "",
+                        "Manufacturer": getattr(row, 'manufacturer') or "",
+                        "SalesUnit": (getattr(row, 'sales_unit') or "UN"),
                         "source": "local_db",
-                        "relevance_score": float(row.relevance_score or 0.0)
+                        "relevance_score": float(getattr(row, 'relevance_score', 0.0) or 0.0),
                     })
                 return formatted_results
+
         except Exception as e:
             logger.error(f"❌ Erreur recherche locale intelligente: {str(e)}")
         return []
+
 
     async def _search_local_fuzzy(self, product_name: str) -> List[Dict[str, Any]]:
         """Recherche fuzzy locale - Version compatible sans pg_trgm"""
@@ -5736,7 +5765,15 @@ class DevisWorkflow:
 
             # 3. Recherche intelligente avec mots-clés
             logger.info(f"🔍 Recherche intelligente pour: {product_name}")
-            keywords = self._extract_product_keywords(product_name)
+            keyword_result = await self.mcp_connector.call_mcp(
+                "sap_mcp",
+                "sap_search",
+                {
+                "query": keyword,
+                "entity_type": "Items",
+                "limit": 3
+                }
+                )
             
             for keyword in keywords[:2]:  # Tester 2 mots-clés max
                 keyword_result = await self.mcp_connector.call_mcp(
@@ -9748,11 +9785,11 @@ class EnhancedDevisWorkflow(DevisWorkflow):
                             "sap_mcp",
                             "sap_search",
                             {
-                                "query": term,
-                                "entity_type": "Items", 
-                                "limit": 3
+                            "query": term,
+                            "entity_type": "Items",
+                            "limit": 3
                             }
-                        )
+                            )
                         
                         if alt_result and alt_result.get("success") and alt_result.get("results"):
                             best_match = alt_result["results"][0]
