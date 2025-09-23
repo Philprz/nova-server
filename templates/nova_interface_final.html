@@ -1810,58 +1810,77 @@
             }
 
             const type = data.interaction_type || data.type || "unknown";
-            console.log("🤝 Interaction utilisateur reçue:", type, data);
+            console.log("🤝 Interaction utilisateur reçue :", type, data);
 
             switch (type) {
                 case "client_selection": {
                     const clients = data.client_options || data.options || data.clients || [];
                     const originalName = data.original_client_name || data.client_name || "";
-                    
+
                     if (Array.isArray(clients) && clients.length > 0) {
+                        // Garde-fou supplémentaire : éviter double traitement du même timestamp
+                        const interactionTimestamp = data.timestamp || new Date().toISOString();
+                        if (window.lastClientSelectionTimestamp === interactionTimestamp) {
+                            console.warn("⚠️ Interaction client_selection déjà traitée (même timestamp), ignorée");
+                            break; // sort de la case sans retraiter
+                        }
+                        window.lastClientSelectionTimestamp = interactionTimestamp;
+
                         if (typeof addClientSelection === "function") {
                             addClientSelection(clients, originalName);
                         } else {
                             console.error("❌ Fonction addClientSelection non définie !");
                         }
+
                     } else {
                         console.warn("⚠️ Aucune option client disponible pour la sélection");
-                        addMessage("Aucun client proposé pour la sélection.", "system");
+                        if (typeof addMessage === "function") {
+                            addMessage("Aucun client proposé pour la sélection.", "system");
+                        }
                     }
                     break;
                 }
 
                 case "duplicate_resolution": {
-                // Afficher d'abord les devis existants s'il y en a
-                try {
-                    if ((data?.recent_quotes?.length > 0) || (data?.draft_quotes?.length > 0)) {
-                        if (typeof displayExistingQuotesInChat === 'function') {
-                            displayExistingQuotesInChat(data);
+                    // Afficher d'abord les devis existants s'il y en a
+                    try {
+                        if ((data.recent_quotes?.length > 0) || (data.draft_quotes?.length > 0)) {
+                            if (typeof displayExistingQuotesInChat === "function") {
+                                displayExistingQuotesInChat(data);
+                            }
                         }
+                    } catch (error) {
+                        console.error("Erreur lors de l'affichage des devis existants :", error);
                     }
-                } catch (_) {}
-                // Puis les options de résolution
-                if (typeof addDuplicateResolutionOptions === "function") {
-                    addDuplicateResolutionOptions(data);
-                } else if (typeof addMessage === "function") {
-                    addMessage("Sélectionnez une option : créer un nouveau devis, examiner, consolider ou annuler.", "system");
-                }
-                break;
 
-                default:
+                    // Puis les options de résolution
+                    if (typeof addDuplicateResolutionOptions === "function") {
+                        addDuplicateResolutionOptions(data);
+                    } else if (typeof addMessage === "function") {
+                        addMessage("Sélectionnez une option : créer un nouveau devis, examiner, consolider ou annuler.", "system");
+                    }
+                    break;
+                }
+
+                default: {
                     // Prise en charge des interactions génériques à choix multiples
-                    if (data?.input_type === 'choice' && Array.isArray(data?.options) && data.options.length) {
-                        if (typeof addChoiceInteraction === 'function') {
+                    if (data?.input_type === "choice" && Array.isArray(data.options) && data.options.length > 0) {
+                        if (typeof addChoiceInteraction === "function") {
                             addChoiceInteraction(data);
                         } else if (typeof addMessage === "function") {
                             addMessage("Veuillez sélectionner une option.", "system");
                         }
                     } else {
-                        addMessage(`Interaction requise: ${type}`, "system");
-                        console.warn("⚠️ Type d'interaction non géré:", data);
+                        if (typeof addMessage === "function") {
+                            addMessage(`Interaction requise : ${type}`, "system");
+                        }
+                        console.warn("⚠️ Type d'interaction non géré :", data);
                     }
                     break;
+                }
             }
         }
+
 
 
             // Gestion progression

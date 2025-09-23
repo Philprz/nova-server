@@ -293,6 +293,37 @@ class WebSocketManager:
         except Exception:
             logger.info("📨 Message WebSocket préparé (dump simplifié - objets non sérialisables)")
 
+        # 🛡️ Déduplication courte (≤2s) AVANT tout envoi/stockage :
+        #    même type + même interaction_type déjà émis ou en attente pour ce task_id
+        try:
+            current_time = datetime.now(timezone.utc)
+            pending = getattr(self, "pending_messages", {}).get(task_id, [])
+            recent_map = getattr(self, "_recent_emitted", {})
+            recent_for_task = recent_map.get(task_id, [])
+
+            msg_type = message.get("type")
+            msg_inter_type = (message.get("interaction_data") or {}).get("interaction_type") or "unknown"
+
+            def _is_same(m):
+                return (m.get("type") == msg_type) and ((m.get("interaction_data") or {}).get("interaction_type") == msg_inter_type)
+
+            # messages en attente (pending) OU récemment émis (≤2s)
+            in_pending = any(_is_same(m) for m in pending)
+            in_recent = any(
+                _is_same(m) and (
+                    current_time - datetime.fromisoformat(
+                        m.get("timestamp", "1970-01-01T00:00:00+00:00").replace('Z', '+00:00')
+                    )
+                ).total_seconds() < 2
+                for m in recent_for_task
+            )
+
+            if in_pending or in_recent:
+                logger.info(f"⏱️ Doublon {msg_type}/{msg_inter_type} ignoré (<2s) pour {task_id}")
+                return
+        except Exception as _e:
+            logger.debug(f"Déduplication courte non appliquée: {_e}")
+
         # 📦 Si aucune connexion active sur ce task_id : stocker + tenter reconnection + programmer retry
         has_connections = bool(getattr(self, "task_connections", {}).get(task_id))
         if not has_connections:
@@ -330,7 +361,22 @@ class WebSocketManager:
             except Exception as e:
                 logger.debug(f"ℹ️ _schedule_retry indisponible: {e}")
 
+            # 🔁 Mémoriser dans le buffer des messages émis récents (pour la fenêtre de 2s)
+            try:
+                recent_map = getattr(self, "_recent_emitted", {})
+                recent_for_task = recent_map.setdefault(task_id, [])
+                recent_for_task.append(message)
+                # purge minimale des anciens (> 10s) pour ne pas grossir la mémoire
+                ten_secs_ago = datetime.now(timezone.utc).timestamp() - 10
+                def _ts_iso_to_epoch(ts):
+                    return datetime.fromisoformat(ts.replace('Z', '+00:00')).timestamp()
+                recent_for_task[:] = [m for m in recent_for_task if _ts_iso_to_epoch(m.get("timestamp", "")) >= ten_secs_ago]
+                self._recent_emitted = recent_map
+            except Exception as _e:
+                logger.debug(f"recent_emitted non mis à jour: {_e}")
+
             return
+
 
         # 🚚 Envoi immédiat si connexion(s) active(s)
         try:

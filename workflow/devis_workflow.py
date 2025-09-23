@@ -7222,8 +7222,19 @@ class DevisWorkflow:
                             # Sécuriser l'interaction_type si absent
                             if "interaction_type" not in to_send and to_send.get("type") == "client_selection":
                                 to_send["interaction_type"] = "client_selection"
-                            await websocket_manager.send_user_interaction_required(self.task_id, to_send)
-                            logger.info("✅ Interaction (parallèle) envoyée via WebSocket")
+
+                            # Éviter double envoi si déjà traité en séquentiel/parallèle
+                            if not hasattr(self, '_interaction_sent_types'):
+                                self._interaction_sent_types = set()
+                            interaction_type = to_send.get("interaction_type", to_send.get("type", "unknown"))
+                            interaction_key = f"{interaction_type}_{self.task_id}"
+                            if interaction_key in self._interaction_sent_types:
+                                logger.info(f"🔄 Interaction {interaction_type} déjà envoyée, skip")
+                            else:
+                                self._interaction_sent_types.add(interaction_key)
+                                await websocket_manager.send_user_interaction_required(self.task_id, to_send)
+                                logger.info("✅ Interaction (parallèle) envoyée via WebSocket (unique)")
+
 
                         elif parallel_search_result.get("status") == "product_selection_required":
                             # Si ton helper existe déjà, appelle-le (cohérent avec la séquentielle)
