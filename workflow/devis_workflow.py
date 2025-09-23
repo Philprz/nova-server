@@ -7213,6 +7213,28 @@ class DevisWorkflow:
                 self._parallel_search_done = True
                 # Si interactions requises, s'arrêter ici
                 if parallel_search_result.get("status") in ["user_interaction_required", "product_selection_required"]:
+                    # [ADD] Émettre le WS si la recherche parallèle demande une interaction
+                    try:
+                        from services.websocket_manager import websocket_manager
+
+                        if parallel_search_result.get("status") == "user_interaction_required":
+                            to_send = parallel_search_result.get("interaction_data") or parallel_search_result
+                            # Sécuriser l'interaction_type si absent
+                            if "interaction_type" not in to_send and to_send.get("type") == "client_selection":
+                                to_send["interaction_type"] = "client_selection"
+                            await websocket_manager.send_user_interaction_required(self.task_id, to_send)
+                            logger.info("✅ Interaction (parallèle) envoyée via WebSocket")
+
+                        elif parallel_search_result.get("status") == "product_selection_required":
+                            # Si ton helper existe déjà, appelle-le (cohérent avec la séquentielle)
+                            try:
+                                await self._send_product_selection_interaction(parallel_search_result.get("products", []))
+                            except Exception as e:
+                                logger.warning(f"⚠️ Envoi WS produits (parallèle) échoué: {e}")
+
+                    except Exception as ws_error:
+                        logger.warning(f"⚠️ Envoi WS (parallèle) échoué (non bloquant): {ws_error}")
+
                     return parallel_search_result
                 # Si erreur, fallback vers séquentiel
                 if parallel_search_result.get("status") == "fallback_to_sequential":
@@ -7262,7 +7284,9 @@ class DevisWorkflow:
                 }
                 # Marquer la tâche et enregistrer l'attente d'interaction
                 if self.current_task:
-                    # 🔑 Un SEUL appel, avec le contexte complet
+                    # (Optionnel) expliciter le statut en attente pour homogénéité
+                    from services.progress_tracker import TaskStatus
+                    self.current_task.status = TaskStatus.PENDING
                     self.current_task.require_user_validation("client_selection", "client_selection", validation_data)
                 # Logs de debug utiles
                 if not client_options:
@@ -7271,13 +7295,25 @@ class DevisWorkflow:
                 else:
                     logger.info(f"✅ {len(client_options)} clients prêts pour sélection")
                 # Retour standardisé pour le front
+                # [ADD] Émettre le WS (client_selection) avant de retourner
+                try:
+                    from services.websocket_manager import websocket_manager
+                    to_send = {
+                        **validation_data,
+                        "interaction_type": "client_selection",  # redondance utile
+                        "message": f"Sélection client requise - {len(validation_data.get('client_options', []))} options"
+                    }
+                    await websocket_manager.send_user_interaction_required(self.task_id, to_send)
+                    logger.info("✅ Interaction client_selection envoyée via WebSocket")
+                except Exception as ws_error:
+                    logger.warning(f"⚠️ Envoi WS client_selection échoué (non bloquant): {ws_error}")
                 return {
                     "success": True,
                     "status": "user_interaction_required",
                     "type": "client_selection",
                     "message": "Sélection du client requise",
                     "task_id": self.task_id,
-                    "interaction_data": validation_data
+                    "interaction_data": to_send  # (optionnel) garder la même structure que le WS
                 }
             # 🔧 Statuts bloquants
             if client_result.get("status") in ["error", "cancelled"]:

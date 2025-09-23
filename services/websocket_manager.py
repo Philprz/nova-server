@@ -216,88 +216,140 @@ class WebSocketManager:
         await self.broadcast_to_task(task_id, message_data, wait, timeout)
 
     async def send_user_interaction_required(
-        self, task_id: str, interaction_data: dict
+        self,
+        task_id: str,
+        interaction_data: Dict[str, Any],
     ) -> None:
         """
-        Envoie demande d'interaction avec gestion robuste.
-
-        :param task_id: identifiant de la tâche
-        :param interaction_data: données pour l'interaction utilisateur
+        Envoie une demande d'interaction utilisateur via WebSocket, avec gestion robuste :
+        - normalisation du type de message
+        - auto-sélection si une seule option (ex: 1 seul client)
+        - stockage si aucune connexion active + retries
+        - déduplication des messages en attente
+        - validations d'entrée (task_id, dict) et copie défensive
         """
+        # ✅ Validations d'entrée
+        if not task_id:
+            logger.error("❌ send_user_interaction_required appelé sans task_id")
+            return
+        if not isinstance(interaction_data, dict):
+            logger.error(f"❌ interaction_data invalide (type={type(interaction_data)})")
+            return
+
+        # ✅ Copie défensive pour éviter de muter l'objet du caller
+        interaction = dict(interaction_data)
+
+        # 🔎 Logs de contexte (résilients)
         logger.info(f"🎯 Demande interaction pour task_id: {task_id}")
-        # 🔧 DEBUG CONNEXIONS: État actuel du gestionnaire
-        logger.debug(f"🔗 DEBUG CONNEXIONS TOTALES: {len(self.active_connections.get('all', []))}")
-        logger.debug(f"🔗 DEBUG TASK_CONNECTIONS: {list(self.task_connections.keys())}")
-        logger.debug(f"🔗 DEBUG CONNEXIONS pour {task_id}: {len(self.task_connections.get(task_id, []))}")
-        # 🔧 DEBUG AMÉLIORÉ: Log des données d'interaction
-        logger.info(f"📊 Type d'interaction: {interaction_data.get('interaction_type', 'non_spécifié')}")
-        
-        # 🆕 VÉRIFICATION AUTO-SÉLECTION - Éviter l'envoi si une seule option
-        interaction_type = interaction_data.get('interaction_type')
-        
-        # Vérification auto-sélection client
-        if interaction_type == 'client_selection':
-            client_options = interaction_data.get('client_options', [])
-            if len(client_options) == 1:
-                logger.info(f"🚀 Auto-sélection détectée - 1 seul client disponible, pas d'envoi WebSocket")
-                return  # Ne pas envoyer d'interaction si auto-sélection possible            
+        try:
+            total_all = len(self.active_connections.get("all", [])) if hasattr(self, "active_connections") else 0
+            logger.debug(f"🔗 DEBUG CONNEXIONS TOTALES: {total_all}")
+            logger.debug(f"🔗 DEBUG TASK_CONNECTIONS: {list(getattr(self, 'task_connections', {}).keys())}")
+            logger.debug(f"🔗 DEBUG CONNEXIONS pour {task_id}: {len(getattr(self, 'task_connections', {}).get(task_id, []))}")
+        except Exception as e:
+            logger.debug(f"ℹ️ Impossible d'afficher l'état des connexions: {e}")
 
-        # Log des informations client si disponibles
-        if interaction_data.get('client_options'):
-            logger.info(f"📊 Nombre de clients: {len(interaction_data.get('client_options', []))}")
-            for i, client in enumerate(interaction_data.get('client_options', [])):
-                logger.info(f"📊 Client {i+1}: {client.get('name')} ({client.get('source')})")
+        # 🧭 Normalisation du type d'interaction
+        interaction_type = interaction.get("interaction_type") or interaction.get("type") or "non_spécifié"
+        interaction["interaction_type"] = interaction_type  # on force la clé attendue côté UI
+        logger.info(f"📊 Type d'interaction: {interaction_type}")
+
+        # 🆕 Auto-sélection : si 1 seule option client, ne pas envoyer de message WS
+        if interaction_type == "client_selection":
+            client_options = interaction.get("client_options") or []
+            if isinstance(client_options, list) and len(client_options) == 1:
+                logger.info("🚀 Auto-sélection détectée - 1 seul client disponible, pas d'envoi WebSocket")
+                return
+            if not isinstance(client_options, list):
+                # ✅ Normaliser en liste si mauvaise forme
+                client_options = [client_options]
+                interaction["client_options"] = client_options
+
+        # 📋 Logs détaillés des options client (si présentes)
+        client_options = interaction.get("client_options") or []
+        if isinstance(client_options, list) and client_options:
+            logger.info(f"📊 Nombre de clients: {len(client_options)}")
+            for i, client in enumerate(client_options, start=1):
+                name = (client or {}).get("display_name") or (client or {}).get("CardName") or (client or {}).get("name") or "?"
+                source = (client or {}).get("source") or (client or {}).get("origin") or "n/c"
+                logger.info(f"📊 Client {i}: {name} (source={source})")
         else:
-            logger.warning(f"⚠️ Pas de client_options dans interaction_data: {json.dumps(interaction_data, indent=2, default=json_serializer)}")
+            try:
+                default_serializer = globals().get("json_serializer", str)
+                logger.warning("⚠️ Pas de client_options dans interaction: " + json.dumps(interaction, indent=2, default=default_serializer))
+            except Exception:
+                logger.warning("⚠️ Pas de client_options dans interaction (dump impossible)")
 
-        message = {
-            "type": "user_interaction_required",
+        # 📨 Message normalisé pour le front
+        message: Dict[str, Any] = {
+            "type": "user_interaction_required",  # ⚖️ normalisation côté front
             "task_id": task_id,
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "interaction_data": interaction_data,
+            "interaction_data": interaction,
         }
 
-        logger.info(f"📨 Message WebSocket préparé: {json.dumps(message, indent=2, default=str)}")
+        try:
+            logger.info("📨 Message WebSocket préparé: " + json.dumps(message, indent=2, default=str))
+        except Exception:
+            logger.info("📨 Message WebSocket préparé (dump simplifié - objets non sérialisables)")
 
-        # Si pas de connexions, stocker et planifier retry (éviter duplicatas)
-        if not self.task_connections.get(task_id):
-            # Vérifier si le message n'existe pas déjà pour éviter les duplicatas
-            existing_messages = self.pending_messages.get(task_id, [])
-            # Vérifier si un message similaire existe déjà
+        # 📦 Si aucune connexion active sur ce task_id : stocker + tenter reconnection + programmer retry
+        has_connections = bool(getattr(self, "task_connections", {}).get(task_id))
+        if not has_connections:
+            pending = getattr(self, "pending_messages", {}).get(task_id, [])
+            # Déduplication simple : même type + même interaction_type
+            msg_type = message.get("type")
+            msg_inter_type = (message.get("interaction_data") or {}).get("interaction_type")
             message_exists = any(
-                existing_msg.get('type') == message.get('type') and
-                existing_msg.get('interaction_data', {}).get('interaction_type') == 
-                message.get('interaction_data', {}).get('interaction_type')
-                for existing_msg in existing_messages
+                (m.get("type") == msg_type) and ((m.get("interaction_data") or {}).get("interaction_type") == msg_inter_type)
+                for m in pending
             )
-            
+
             if not message_exists:
                 logger.warning(f"⚠️ Pas de connexion active pour {task_id}, message stocké")
                 self.pending_messages.setdefault(task_id, []).append(message)
             else:
-                logger.info(f"📨 Message similaire déjà en attente pour {task_id}, ignorer duplication")
-                
-            # Vérifier si la tâche existe dans le progress_tracker
-            task = progress_tracker.get_task(task_id)
+                logger.info(f"📨 Message similaire déjà en attente pour {task_id}, on évite la duplication")
 
-            await self._attempt_reconnection(task_id)
-            self._schedule_retry(task_id)
+            # (Optionnel) Vérifier existence de la tâche si un tracker est utilisé
+            try:
+                progress_tracker = globals().get("progress_tracker")
+                if progress_tracker:
+                    _ = progress_tracker.get_task(task_id)  # lecture passive
+            except Exception as e:
+                logger.debug(f"ℹ️ progress_tracker indisponible: {e}")
+
+            # Tenter reconnection + programmer retry
+            try:
+                await self._attempt_reconnection(task_id)
+            except Exception as e:
+                logger.debug(f"ℹ️ _attempt_reconnection a échoué/indispo: {e}")
+
+            try:
+                self._schedule_retry(task_id)
+            except Exception as e:
+                logger.debug(f"ℹ️ _schedule_retry indisponible: {e}")
+
             return
-        
-        # Tenter envoi immédiat
+
+        # 🚚 Envoi immédiat si connexion(s) active(s)
         try:
-            logger.info(f"🔗 Connexions actives pour {task_id}: {len(self.task_connections.get(task_id, []))}")
-            # Utiliser broadcast_to_task au lieu de send_task_update pour éviter le double type
+            nb = len(self.task_connections.get(task_id, []))
+            logger.info(f"🔗 Connexions actives pour {task_id}: {nb}")
+            # broadcast_to_task envoie le payload tel quel (évite double enveloppe)
             await self.broadcast_to_task(task_id, message, wait=False)
             logger.info(f"✅ Interaction envoyée immédiatement pour {task_id}")
-            # CRUCIAL : Marquer comme envoyé pour éviter stockage ultérieur
-            message['_sent'] = True
+            message["_sent"] = True  # marquer envoyé (utile si re-usage interne)
         except Exception as e:
             logger.error(f"❌ Erreur envoi initial pour {task_id}: {e}")
-            # Seulement stocker si l'envoi a échoué
-            if not message.get('_sent'):
-                self.pending_messages.setdefault(task_id, []).append(message)
-                self._schedule_retry(task_id)
+            # Stocker pour retry seulement si non envoyé
+            if not message.get("_sent"):
+                try:
+                    self.pending_messages.setdefault(task_id, []).append(message)
+                    self._schedule_retry(task_id)
+                except Exception as ee:
+                    logger.error(f"❌ Impossible de stocker/programmer retry pour {task_id}: {ee}")
+
 
     async def _attempt_reconnection(self, task_id: str) -> None:
         """Tentative de reconnexion immédiate pour une tâche"""

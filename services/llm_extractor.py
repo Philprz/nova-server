@@ -251,7 +251,55 @@ Réponds UNIQUEMENT au format JSON suivant:
         except Exception as e:
             logger.error(f"Erreur extraction critères: {e}")
             return {"category": product_name, "main_keywords": [product_name]}
-        
+    async def extract_with_claude(self, text: str) -> Dict[str, Any]:
+        """
+        Méthode de compatibilité pour LocalProductSearchService
+        Utilise extract_quote_info en interne et adapte le format
+        """
+        try:
+            logger.info(f"extract_with_claude appelée avec: {text}")
+            
+            # Réutiliser la logique existante
+            result = await self.extract_quote_info(text)
+            
+            # Adapter le format pour LocalProductSearchService
+            if result.get("action_type") == "RECHERCHE_PRODUIT":
+                search_criteria = result.get("search_criteria", {})
+                return {
+                    "found": True,
+                    "products": [],  # Sera rempli par la recherche PostgreSQL
+                    "search_criteria": search_criteria,
+                    "category": search_criteria.get("category", ""),
+                    "characteristics": search_criteria.get("characteristics", []),
+                    "client": result.get("client", ""),
+                    "confidence": 85.0
+                }
+            elif result.get("action_type") == "DEVIS":
+                products = result.get("products", [])
+                return {
+                    "found": len(products) > 0,
+                    "products": products,
+                    "client": result.get("client", ""),
+                    "action_type": "DEVIS",
+                    "confidence": 90.0
+                }
+            else:
+                # Fallback pour autres types
+                return {
+                    "found": False,
+                    "products": [],
+                    "reason": f"Action type '{result.get('action_type')}' non supportée pour recherche produit",
+                    "confidence": 0.0
+                }
+                
+        except Exception as e:
+            logger.error(f"Erreur extract_with_claude: {str(e)}")
+            return {
+                "found": False,
+                "products": [],
+                "error": str(e),
+                "confidence": 0.0
+            }    
     def _extract_client_from_original_prompt(self, prompt: str) -> str:
         """Extrait le nom du client depuis le prompt original avec patterns robustes"""
         import re

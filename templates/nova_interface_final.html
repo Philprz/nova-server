@@ -1807,17 +1807,48 @@
 
 
         function handleUserInteraction(data) {
-            console.log("🤝 Interaction utilisateur requise:", data);
+            if (!data) {
+                console.warn("⚠️ Interaction vide ou invalide");
+                return;
+            }
 
-            if (data.interaction_type === 'client_selection') {
-                const clients = data.client_options || data.options || data.clients || [];
-                const originalName = data.original_client_name || data.client_name || '';
-                addClientSelection(clients, originalName);
-            } else {
-                addMessage(`Interaction requise: ${data.interaction_type}`, 'system');
-                console.warn("Type d'interaction non géré:", data);
+            const type = data.interaction_type || data.type || "unknown";
+            console.log("🤝 Interaction utilisateur reçue:", type, data);
+
+            switch (type) {
+                case "client_selection": {
+                    const clients = data.client_options || data.options || data.clients || [];
+                    const originalName = data.original_client_name || data.client_name || "";
+                    
+                    if (Array.isArray(clients) && clients.length > 0) {
+                        if (typeof addClientSelection === "function") {
+                            addClientSelection(clients, originalName);
+                        } else {
+                            console.error("❌ Fonction addClientSelection non définie !");
+                        }
+                    } else {
+                        console.warn("⚠️ Aucune option client disponible pour la sélection");
+                        addMessage("Aucun client proposé pour la sélection.", "system");
+                    }
+                    break;
+                }
+
+                case "duplicate_resolution": {
+                    if (typeof addDuplicateResolutionOptions === "function") {
+                        addDuplicateResolutionOptions(data);
+                    } else {
+                        console.error("❌ Fonction addDuplicateResolutionOptions non définie !");
+                    }
+                    break;
+                }
+
+                default:
+                    addMessage(`Interaction requise: ${type}`, "system");
+                    console.warn("⚠️ Type d'interaction non géré:", data);
+                    break;
             }
         }
+
 
         // Gestion progression
         function showProgress() {
@@ -2637,17 +2668,19 @@
                 }
             };
             websocket.onmessage = (event) => {
-                // Gestion prioritaire des duplicate_resolution
                 try {
                     const data = JSON.parse(event.data);
-                    if (data.type === 'interaction_required'
-                        && data.interaction_data
-                        && data.interaction_data.interaction_type === 'duplicate_resolution') {
+                    console.log("📨 Message WebSocket reçu:", data);
+
+                    // 🔴 Gestion prioritaire du cas duplicate_resolution
+                    if (
+                        (data.type === 'user_interaction_required' || data.type === 'interaction_required') &&
+                        data.interaction_data &&
+                        data.interaction_data.interaction_type === 'duplicate_resolution'
+                    ) {
                         console.log("⚠️ Duplicate resolution détecté (priorité directe)");
                         if (typeof hideProgress === 'function') {
-                            try {
-                                hideProgress();
-                            } catch (e) {}
+                            try { hideProgress(); } catch (e) {}
                         }
                         if (data.interaction_data?.recent_quotes?.length > 0 || data.interaction_data?.draft_quotes?.length > 0) {
                             if (typeof displayExistingQuotesInChat === 'function') {
@@ -2657,12 +2690,67 @@
                         if (typeof addDuplicateResolutionOptions === 'function') {
                             addDuplicateResolutionOptions(data.interaction_data);
                         }
-                        return;
+                        // ❗ NE PAS return -> on laisse passer le reste du switch
+                    }
+
+                    // ✅ Gestion complète des autres messages
+                    switch (data.type) {
+                        case 'user_interaction_required':
+                        case 'interaction_required':   // compat ancien type
+                            console.log("🤝 Interaction utilisateur reçue:", data);
+                            if (typeof hideProgress === 'function') {
+                                try { hideProgress(); } catch (e) {}
+                            }
+                            if (typeof handleUserInteraction === 'function') {
+                                handleUserInteraction(data.interaction_data);
+                            }
+                            break;
+
+                        case 'task_update':
+                            console.log("📈 Mise à jour tâche:", data);
+                            if (typeof updateProgress === 'function') {
+                                updateProgress(data.progress, data.message || 'Mise à jour…', data.step_id);
+                            }
+                            break;
+
+                        case 'quote_generation_completed':
+                        case 'completion':
+                            console.log("✅ Génération terminée:", data);
+                            if (typeof hideProgress === 'function') {
+                                try { hideProgress(); } catch (e) {}
+                            }
+                            if (typeof displayQuoteResult === 'function') {
+                                const payload = data.result || data.data || data;
+                                displayQuoteResult(payload);
+                            }
+                            taskCompletedHandled = true;
+                            break;
+
+                        case 'user_response_processed':
+                            console.log("✅ Réponse utilisateur traitée:", data);
+                            if (typeof addMessage === 'function') {
+                                addMessage('Votre réponse a été prise en compte.', 'system');
+                            }
+                            break;
+
+                        case 'error':
+                            console.log("❌ Erreur reçue:", data);
+                            if (typeof handleTaskError === 'function') {
+                                handleTaskError(data.error || data.message || 'Erreur inconnue');
+                            }
+                            taskCompletedHandled = true;
+                            break;
+
+                        default:
+                            console.log("ℹ️ Type de message non géré:", data.type);
+                            break;
                     }
                 } catch (error) {
                     console.error("❌ Erreur lors du traitement du message:", error);
                 }
             };
+
+
             websocket.onclose = (event) => {
                 wsActive = false;
                 console.warn(`🔌 WebSocket fermé - Code: ${event.code}, Raison: ${event.reason}`);
@@ -2721,81 +2809,113 @@
                 console.warn("⚠️ Message WebSocket invalide:", data);
                 return;
             }
-            // Gestion des différents types de messages
-            switch (data.type) {
-                case 'progress':
-                case 'progress_update':
-                    if (typeof updateProgress === 'function') {
-                        updateProgress(data.progress, data.message, data.step || data.step_id);
+
+            try {
+                // 🔴 Priorité: si interaction duplicate_resolution, on affiche immédiatement les options
+                if (
+                    (data.type === 'user_interaction_required' || data.type === 'interaction_required') &&
+                    data.interaction_data &&
+                    (
+                        data.interaction_data.interaction_type === 'duplicate_resolution' ||
+                        data.interaction_data.type === 'duplicate_resolution' ||     // compat
+                        data.interaction_data.interaction_type === 'duplicate_detection' // compat ancien nom
+                    )
+                ) {
+                    if (typeof hideProgress === 'function') { try { hideProgress(); } catch (_) {} }
+                    if (
+                        data.interaction_data?.recent_quotes?.length > 0 ||
+                        data.interaction_data?.draft_quotes?.length > 0
+                    ) {
+                        if (typeof displayExistingQuotesInChat === 'function') {
+                            displayExistingQuotesInChat(data.interaction_data);
+                        }
                     }
-                    break;
-                case 'completion':
-                case 'quote_generation_completed':
-                case 'workflow_complete':
-                    console.log("🎯 Tâche terminée:", data);
-                    if (typeof hideProgress === 'function') {
-                        hideProgress();
+                    if (typeof addDuplicateResolutionOptions === 'function') {
+                        addDuplicateResolutionOptions(data.interaction_data);
+                    } else if (typeof addMessage === 'function') {
+                        addMessage("Sélectionnez une option : créer un nouveau devis, examiner, consolider ou annuler.", 'system');
                     }
-                    if (data.result || data.data) {
-                        displayQuoteResult(data.result || data.data);
-                    }
-                    taskCompletedHandled = true;
-                    break;
-                case 'task_update':
-                    console.log("📋 Mise à jour tâche:", data);
-                    if (data.data && data.data.message) {
-                        if (typeof addMessage === 'function') {
+                    // ❗ On NE return PAS : on laisse le switch gérer le reste si nécessaire
+                }
+
+                // Gestion des différents types de messages
+                switch (data.type) {
+                    case 'progress':
+                    case 'progress_update':
+                    case 'task_update': {
+                        // Normaliser les champs progress
+                        const progress = data.progress;
+                        const message = data.message || (data.data && data.data.message) || 'Mise à jour…';
+                        const step = data.step_id || data.step;
+                        if (typeof updateProgress === 'function' && progress !== undefined) {
+                            updateProgress(progress, message, step);
+                        }
+                        // Message système facultatif
+                        if (data.data && data.data.message && typeof addMessage === 'function') {
                             addMessage(data.data.message, 'system');
                         }
+                        break;
                     }
-                    if (data.progress !== undefined && typeof updateProgress === 'function') {
-                        updateProgress(data.progress, data.message || 'Mise à jour...', data.step_id);
+
+                    case 'completion':
+                    case 'quote_generation_completed':
+                    case 'workflow_complete': {
+                        console.log("🎯 Tâche terminée:", data);
+                        if (typeof hideProgress === 'function') { try { hideProgress(); } catch (_) {} }
+                        const payload = data.result || data.data || data;
+                        if (typeof displayQuoteResult === 'function') {
+                            displayQuoteResult(payload);
+                        }
+                        taskCompletedHandled = true;
+                        break;
                     }
-                    break;
-                case 'user_response_processed':
-                    console.log("✅ Réponse utilisateur traitée:", data);
-                    if (typeof addMessage === 'function') {
-                        addMessage('Votre réponse a été traitée avec succès.', 'system');
-                    }
-                    break;
-                case 'interaction_required':
-                case 'user_interaction_required':
-                    if (data.interaction_data) {
-                        if (data.interaction_data.interaction_type === 'duplicate_detection') {
-                            if (typeof displayExistingQuotesInChat === 'function') {
-                                displayExistingQuotesInChat(data.interaction_data);
-                            }
-                            if (typeof addDuplicateResolutionOptions === 'function') {
-                                addDuplicateResolutionOptions(data.interaction_data);
+
+                    case 'interaction_required':
+                    case 'user_interaction_required': {
+                        if (data.interaction_data) {
+                            if (typeof hideProgress === 'function') { try { hideProgress(); } catch (_) {} }
+                            if (typeof handleUserInteraction === 'function') {
+                                handleUserInteraction(data.interaction_data);
                             } else if (typeof addMessage === 'function') {
-                                addMessage("Sélectionnez une option : créer un nouveau devis, examiner, consolider ou annuler.", 'system');
+                                addMessage("Une interaction utilisateur est requise.", 'system');
                             }
-                            break;
                         }
-                        if (typeof hideProgress === 'function') {
-                            hideProgress();
+                        break;
+                    }
+
+                    case 'user_response_processed': {
+                        console.log("✅ Réponse utilisateur traitée:", data);
+                        if (typeof addMessage === 'function') {
+                            addMessage('Votre réponse a été traitée avec succès.', 'system');
                         }
-                        if (typeof handleUserInteraction === 'function') {
-                            handleUserInteraction(data.interaction_data);
+                        break;
+                    }
+
+                    case 'error': {
+                        if (typeof handleTaskError === 'function') {
+                            handleTaskError(data.error || data.message || 'Erreur inconnue');
                         }
+                        taskCompletedHandled = true;
+                        break;
                     }
-                    break;
-                case 'error':
-                    if (typeof handleTaskError === 'function') {
-                        handleTaskError(data.error);
+
+                    case 'log': {
+                        if (data.message && typeof addMessage === 'function') {
+                            addMessage(`[LOG] ${data.message}`, 'system');
+                        }
+                        break;
                     }
-                    taskCompletedHandled = true;
-                    break;
-                case 'log':
-                    if (data.message && typeof addMessage === 'function') {
-                        addMessage(`[LOG] ${data.message}`, 'system');
+
+                    default: {
+                        console.warn("ℹ️ Type de message non géré:", data.type, data);
+                        break;
                     }
-                    break;
-                default:
-                    console.warn("ℹ️ Type de message non géré:", data.type);
-                    break;
+                }
+            } catch (err) {
+                console.error("❌ Erreur handleWebSocketMessage:", err, data);
             }
         }
+
 
         
         // Fonction pour vérifier les validations en attente
