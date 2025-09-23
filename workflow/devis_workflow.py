@@ -1078,10 +1078,24 @@ class DevisWorkflow:
 
 
                 # Suggestions intelligentes de base (tu peux remplacer par ton SuggestionEngine si dispo dans ce contexte)
-                self._add_suggestion("Voir les lignes du devis SAP")
-                self._add_suggestion("Ouvrir l’opportunité dans Salesforce")
-                self._add_suggestion("Ajouter un second produit")
-                self._add_suggestion("Modifier les quantités")
+                try:
+                    context_data = {
+                        "client": validated_data.get("client", {}),
+                        "products": validated_data.get("products", []),
+                        "total_amount": total_amount,
+                        "sap_doc_num": sap_doc_num,
+                        "sf_opportunity_id": sf_id
+                    }
+                    smart_suggestions = await self._generate_smart_suggestions(context_data)
+                    for suggestion in smart_suggestions:
+                        self._add_suggestion(suggestion)
+                except Exception as e:
+                    logger.warning(f"Fallback suggestions fixes : {e}")
+                    # Suggestions de base en fallback
+                    self._add_suggestion("💡 Voir le détail du devis SAP")
+                    self._add_suggestion("💡 Modifier les quantités")
+                    self._add_suggestion("💡 Ajouter d'autres produits")
+
 
                 return {
                     "success": True,
@@ -2986,9 +3000,29 @@ class DevisWorkflow:
                     # Choisir la méthode SAP selon le mode
                     if self.draft_mode:
                         logger.info("Appel SAP en mode DRAFT...")
-                        sap_quote = await MCPConnector.call_sap_mcp("sap_create_quotation_draft", {
-                            "quotation_data": quotation_data
-                        })
+
+                        # 🧾 Tracer la source SAP (preuve pour l'UI)
+                        try:
+                            sap_card_code = (
+                                quotation_data.get("CardCode")
+                                or (quotation_data.get("client") or {}).get("CardCode")
+                                or (quotation_data.get("client") or {}).get("sap_code")
+                                or "N/A"
+                            )
+                            self._add_source(
+                                system="SAP",
+                                details=f"Création du devis pour {sap_card_code}",
+                                marker=self._gen_marker("SAP", "DEVIS"),
+                                confidence=1.0
+                            )
+                        except Exception as e:
+                            logger.error(f"Erreur lors de l'ajout de la source SAP : {e}")
+
+                        sap_quote = await MCPConnector.call_sap_mcp(
+                            "sap_create_quotation_draft",
+                            {"quotation_data": quotation_data}
+                        )
+                      
                     else:
                         logger.info("Appel SAP en mode NORMAL...")
                         # Validation finale des prix avant envoi à SAP
@@ -3432,7 +3466,22 @@ class DevisWorkflow:
                 "sobject": "Opportunity",
                 "data": opportunity_data
             })
-            
+            if isinstance(opportunity_result, dict) and not opportunity_result.get("error") and opportunity_result.get("success"):
+                try:
+                    client_label = (
+                        (quote_data.get("client") or {}).get("Name")
+                        or (quote_data.get("client") or {}).get("name")
+                        or "client"
+                    )
+                    self._add_source(
+                        system="SALESFORCE",
+                        details=f"Opportunité créée pour {client_label}",
+                        marker=self._gen_marker("SALESFORCE", "OPP"),
+                        confidence=1.0
+                    )
+                except Exception as e:
+                    logger.error(f"Erreur lors de l'ajout de la source SALESFORCE : {e}")
+
             if "error" in opportunity_result or not opportunity_result.get("success"):
                 logger.error(f"❌ Erreur création opportunité: {opportunity_result.get('error', 'Erreur inconnue')}")
                 return {"success": False, "error": opportunity_result.get("error", "Échec création opportunité")}
@@ -9411,6 +9460,54 @@ class DevisWorkflow:
                 "event": event_type,
                 "data": data
             })
+    async def _generate_smart_suggestions(self, context: Dict[str, Any]) -> List[str]:
+        """Génère des suggestions contextuelles via Claude/GPT."""
+        try:
+            prompt = f"""
+            Basé sur ce devis créé, génère 4-5 suggestions courtes et pertinentes pour l'utilisateur :
+            CONTEXTE DEVIS :
+            Client : {context.get('client', {}).get('name', 'N/A')}
+            Produits : {len(context.get('products', []))} article(s)
+            Montant : {context.get('total_amount', 0)}€
+            SAP : {context.get('sap_doc_num', 'N/A')}
+            Salesforce : {context.get('sf_opportunity_id', 'N/A')}
+
+            RÈGLES :
+            - Format : "💡 [action courte]" (ex: "💡 Ajouter la garantie étendue")
+            - Maximum 8 mots par suggestion
+            - Suggestions ACTIONABLES et PERTINENTES au contexte
+            - Retourner SEULEMENT une liste JSON de strings
+            Exemple : ["💡 Ajouter la garantie étendue", "💡 Voir les détails", "💡 Modifier quantités"]
+            """
+
+            from services.llm_extractor import LLMExtractor
+            llm_response = await LLMExtractor().extract_suggestion_list(prompt)
+
+            if isinstance(llm_response, list) and len(llm_response) > 0:
+                return llm_response[:5]
+            else:
+                return self._get_fallback_suggestions(context)
+
+        except Exception as e:
+            logger.warning(f"Erreur suggestions IA : {e}")
+            return self._get_fallback_suggestions(context)
+
+    def _get_fallback_suggestions(self, context: Dict[str, Any]) -> List[str]:
+        """Retourne des suggestions de base si l'IA échoue."""
+        suggestions = ["💡 Voir le détail du devis SAP"]
+
+        if context.get('total_amount', 0) > 1000:
+            suggestions.append("💡 Négocier une remise volume")
+
+        if len(context.get('products', [])) == 1:
+            suggestions.append("💡 Ajouter produits complémentaires")
+
+        suggestions.extend([
+            "💡 Modifier les quantités",
+            "💡 Dupliquer pour autre client"
+        ])
+
+        return suggestions
 
 class EnhancedDevisWorkflow(DevisWorkflow):
     """Workflow enrichi avec recherche parallèle"""

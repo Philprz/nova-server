@@ -251,6 +251,49 @@ Réponds UNIQUEMENT au format JSON suivant:
         except Exception as e:
             logger.error(f"Erreur extraction critères: {e}")
             return {"category": product_name, "main_keywords": [product_name]}
+        
+    async def extract_suggestion_list(self, prompt: str) -> List[str]:
+        """Extrait une liste de suggestions contextuelles à partir d'un prompt donné."""
+        try:
+            system_prompt = """
+            Tu es NOVA, assistant intelligent. Génère 4-5 suggestions courtes et pertinentes.
+            RÈGLES STRICTES :
+            - Format exact : "💡 [action courte]"
+            - Maximum 8 mots par suggestion
+            - Suggestions ACTIONABLES et PERTINENTES
+            - Éviter les généralités
+            - Retourner SEULEMENT une liste JSON de strings
+
+            Exemple de réponse attendue :
+            ["💡 Ajouter la garantie étendue", "💡 Voir les détails du devis", "💡 Modifier les quantités", "💡 Créer un devis similaire"]
+            """
+
+            response = await self._call_claude(f"{system_prompt}\n\nCONTEXTE:\n{prompt}")
+
+            # Parser la réponse JSON
+            import json
+            import re
+
+            # Recherche d'une liste JSON dans la réponse
+            json_match = re.search(r'\[.*\]', response, re.DOTALL)
+            if json_match:
+                try:
+                    suggestions = json.loads(json_match.group())
+                    return [
+                        suggestion for suggestion in suggestions
+                        if isinstance(suggestion, str) and suggestion.startswith("💡")
+                    ][:5]
+
+                except json.JSONDecodeError:
+                    logger.warning("Réponse JSON invalide dans l'extraction des suggestions.")
+                    return []
+
+        except Exception as e:
+            logger.warning(f"Erreur lors de l'extraction des suggestions : {e}")
+            return []
+
+        return []
+
     async def extract_with_claude(self, text: str) -> Dict[str, Any]:
         """
         Méthode de compatibilité pour LocalProductSearchService
