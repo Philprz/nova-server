@@ -1084,9 +1084,6 @@
             </div>
             <div style="display: flex; align-items: center; justify-content: center; gap: 0px; flex-wrap: wrap;">
                     <img src="/static/Nova.png" alt="Nova" style="height: 200px; display: block; border-radius: 8px;">
-                </a>
-                
-
             </div>
         </header>
 
@@ -1834,23 +1831,40 @@
                 }
 
                 case "duplicate_resolution": {
-                    if (typeof addDuplicateResolutionOptions === "function") {
-                        addDuplicateResolutionOptions(data);
-                    } else {
-                        console.error("❌ Fonction addDuplicateResolutionOptions non définie !");
+                // Afficher d'abord les devis existants s'il y en a
+                try {
+                    if ((data?.recent_quotes?.length > 0) || (data?.draft_quotes?.length > 0)) {
+                        if (typeof displayExistingQuotesInChat === 'function') {
+                            displayExistingQuotesInChat(data);
+                        }
                     }
-                    break;
+                } catch (_) {}
+                // Puis les options de résolution
+                if (typeof addDuplicateResolutionOptions === "function") {
+                    addDuplicateResolutionOptions(data);
+                } else if (typeof addMessage === "function") {
+                    addMessage("Sélectionnez une option : créer un nouveau devis, examiner, consolider ou annuler.", "system");
                 }
+                break;
 
                 default:
-                    addMessage(`Interaction requise: ${type}`, "system");
-                    console.warn("⚠️ Type d'interaction non géré:", data);
+                    // Prise en charge des interactions génériques à choix multiples
+                    if (data?.input_type === 'choice' && Array.isArray(data?.options) && data.options.length) {
+                        if (typeof addChoiceInteraction === 'function') {
+                            addChoiceInteraction(data);
+                        } else if (typeof addMessage === "function") {
+                            addMessage("Veuillez sélectionner une option.", "system");
+                        }
+                    } else {
+                        addMessage(`Interaction requise: ${type}`, "system");
+                        console.warn("⚠️ Type d'interaction non géré:", data);
+                    }
                     break;
             }
         }
 
 
-        // Gestion progression
+            // Gestion progression
         function showProgress() {
             document.getElementById('progressContainer').classList.add('active');
         }
@@ -1882,6 +1896,16 @@
                 console.log("ℹ️ Task déjà initialisée et WebSocket actif pour :", taskId);
                 return;
             }
+            // Éviter les appels multiples avec un verrou temporaire
+            if (window.taskInitializationLock) {
+                console.log("🔒 Initialisation déjà en cours, ignoré");
+                return;
+            }
+            window.taskInitializationLock = true;
+            // Libérer le verrou après un délai
+            setTimeout(() => {
+                window.taskInitializationLock = false;
+            }, 2000);
 
             // Affichage de la progression
             showProgress();
@@ -4323,6 +4347,85 @@
                 </div>`;
             if (typeof addMessage === 'function') addMessage(html, 'system');
         }
+        <!-- === Helpers: interactions génériques à choix multiples & tips & citation === -->
+       
+        // Affiche un bloc de choix générique
+        function addChoiceInteraction(data) {
+            const title = data.message || data.alert_message || "Sélectionnez une option :";
+            const options = Array.isArray(data.options) ? data.options : [];
+            if (!options.length) {
+            console.warn("Aucune option disponible pour l'interaction");
+            return;
+            }
+            const esc = (s) => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+                                        .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+            const optionsHtml = options.map(option => {
+            const value = esc(option.value ?? option.id ?? option.code ?? "");
+            const label = esc(option.label ?? option.name ?? option.value ?? "Option");
+            return `
+                <button onclick="handleChoiceSelection('${value}', '${value}')"
+                        style="display:block;width:100%;margin:8px 0;padding:12px;border:0;border-radius:8px;
+                            background:linear-gradient(135deg,#02B9FD 0%,#832DFE 100%);color:#fff;
+                            font-weight:600;cursor:pointer;transition:all .3s ease;">
+                ${label}
+                </button>`;
+            }).join("");
+
+            const html = `
+            <div style="background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);
+                        border-radius:12px;padding:16px;margin:12px 0;backdrop-filter:blur(10px);">
+                <h4 style="margin:0 0 12px 0;text-align:center">${esc(title)}</h4>
+                <div>${optionsHtml}</div>
+            </div>`;
+            if (typeof addMessage === 'function') addMessage(html, 'system');
+        }
+
+        // Sélection d’un choix générique
+        function handleChoiceSelection(choice, value) {
+            console.log("Choix sélectionné:", choice, value);
+            // Utiliser la fonction existante si dispo (duplicate_resolution)
+            if (typeof resolveDuplicateDecision === 'function') {
+            try { resolveDuplicateDecision(choice); return; } catch (_) {}
+            }
+            // Fallback générique via endpoint de choix
+            if (currentTaskId) {
+            fetch('/progress/user_choice', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ task_id: currentTaskId, choice, value })
+            }).catch(err => console.error("Erreur envoi choix:", err));
+            }
+        }
+
+        // Petits conseils contextuels
+        function showUserTips(context) {
+            const tips = [];
+            const c = (context || '').toString().toLowerCase();
+            if (c.includes('client')) {
+            tips.push("💡 Pour cibler RONDOT uniquement, tapez « RONDOT ».");
+            tips.push("💡 Vous pouvez utiliser des noms partiels pour rechercher.");
+            }
+            if (c.includes('product') || c.includes('produit') || c.includes('imprimante')) {
+            tips.push("💡 Décrivez vos besoins en langage naturel.");
+            tips.push("💡 Précisez les quantités si vous les connaissez.");
+            }
+            if (!tips.length) return;
+            const tipsHtml = tips.map(t =>
+            `<div style="padding:8px;margin:4px 0;background:rgba(45,254,131,0.1);
+                        border-left:3px solid #2DFE83;border-radius:4px;font-size:.9em;">${t}</div>`
+            ).join('');
+            if (typeof addMessage === 'function') addMessage(`<div style="margin:10px 0;">${tipsHtml}</div>`, 'system');
+        }
+
+        // Ajoute un label de source sous un message
+        function addSourceCitation(message, source) {
+            const map = { 'sap':'📊 SAP Business One', 'salesforce':'☁️ Salesforce', 'nova':'🤖 NOVA Assistant' };
+            const label = (source && map[String(source).toLowerCase()]) || source;
+            return label
+            ? `${message}<br><small style="opacity:.7;font-style:italic;">Source: ${label}</small>`
+            : message;
+        }
+
 
         // ----- Envoi de la décision utilisateur vers le backend -----
         function resolveDuplicateDecision(decision, selectedQuoteId=null) {
