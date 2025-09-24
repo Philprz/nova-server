@@ -110,6 +110,55 @@ class ClientLister:
         except Exception as e:
             logger.error(f"❌ Exception lors de la récupération SAP: {str(e)}")
             return []
+    async def _search_salesforce_by_exact_name(self, client_name: str) -> List[Dict[str, Any]]:
+        """Recherche exacte dans Salesforce - NOUVEAU"""
+        try:
+            exact_query = f"""
+            SELECT Id, Name, AccountNumber, Phone, BillingCity, BillingCountry, BillingPostalCode, Type, Industry, Website 
+            FROM Account 
+            WHERE Name = '{client_name}' 
+            LIMIT 1
+            """.strip()
+            
+            result = await self.mcp_connector.call_mcp(
+                "salesforce_mcp",
+                "salesforce_query", 
+                {"query": exact_query}
+            )
+            
+            if "records" in result and result["records"]:
+                logger.info(f"✅ Match exact Salesforce: {result['records'][0]['Name']}")
+                return result["records"]
+            return []
+        except Exception as e:
+            logger.error(f"❌ Erreur recherche exacte Salesforce: {e}")
+            return []
+
+    async def _search_sap_by_exact_name(self, client_name: str) -> List[Dict[str, Any]]:
+        """Recherche exacte dans SAP - NOUVEAU"""
+        try:
+            result = await self.mcp_connector.call_mcp("sap_mcp", "sap_search", {
+                "query": f"CardName eq '{client_name}'",
+                "entity_type": "BusinessPartners", 
+                "limit": 1
+            })
+            
+            # Extraction clients selon structure SAP
+            clients = []
+            if isinstance(result, dict):
+                for k, v in result.items():
+                    if isinstance(v, list) and v and any(
+                        isinstance(item, dict) and 'CardName' in item and 
+                        item['CardName'] == client_name
+                        for item in v[:1]
+                    ):
+                        clients = [item for item in v if item.get('CardName') == client_name]
+                        logger.info(f"✅ Match exact SAP: {len(clients)} clients")
+                        break
+            return clients
+        except Exception as e:
+            logger.error(f"❌ Erreur recherche exacte SAP: {e}")
+            return []
     
     async def _search_salesforce_by_name(self, client_name: str) -> List[Dict[str, Any]]:
         """Recherche dans Salesforce avec différentes variantes - CORRIGÉ"""
@@ -120,7 +169,7 @@ class ClientLister:
             FROM Account 
             WHERE (Name = '{client_name}' 
             OR Name LIKE '{client_name} %' 
-            OR Name LIKE '% {client_name}' 
+            OR Name = '{client_name}' COLLATE Latin1_General_CS_AS
             OR Name LIKE '%{client_name}%')
             LIMIT 20
             """.strip()
@@ -298,6 +347,43 @@ class ClientLister:
             return result
 
         try:
+            # PRIORITÉ 1: Recherche EXACTE d'abord pour éviter les doublons
+            exact_match_found = False
+            exact_results = {"salesforce": [], "sap": []}
+
+            # Test exact Salesforce
+            sf_exact = await self._search_salesforce_by_exact_name(client_name)
+            if sf_exact:
+                exact_results["salesforce"] = sf_exact
+                exact_match_found = True
+                logger.info(f"✅ Match exact Salesforce trouvé: {len(sf_exact)} clients")
+
+            # Test exact SAP
+            sap_exact = await self._search_sap_by_exact_name(client_name)
+            if sap_exact:
+                exact_results["sap"] = sap_exact
+                exact_match_found = True
+                logger.info(f"✅ Match exact SAP trouvé: {len(sap_exact)} clients")
+
+            # Si match exact trouvé, retourner immédiatement
+            
+            if exact_match_found:
+                result["search_term"] = client_name
+                result["salesforce"]["clients"] = exact_results["salesforce"]
+                result["salesforce"]["found"] = len(exact_results["salesforce"]) > 0
+                result["salesforce"]["count"] = len(exact_results["salesforce"])
+                result["sap"]["clients"] = exact_results["sap"]
+                result["sap"]["found"] = len(exact_results["sap"]) > 0
+                result["sap"]["count"] = len(exact_results["sap"])
+
+                result["total_found"] = len(exact_results["salesforce"]) + len(exact_results["sap"])
+                result["deduplicated_clients"] = self._merge_similar_clients(exact_results["salesforce"] + exact_results["sap"])
+                result["match_type"] = "exact"  # NOUVEAU : Indiquer que c'est un match exact
+
+                logger.info(f"🎯 MATCH EXACT trouvé: {result['total_found']} client(s)")
+                return result
+            
+
             # Recherche parallèle dans les deux systèmes (avec timeout unitaire)
             # On conserve les mêmes noms de variables et la même structure.
             TIMEOUT_S = 5
