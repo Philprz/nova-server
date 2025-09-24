@@ -165,14 +165,17 @@ class ClientLister:
         try:
             # Requête SOQL corrigée - insensible à la casse + champs existants
             exact_query = f"""
-            SELECT Id, Name, AccountNumber, Phone, BillingCity, BillingCountry, BillingPostalCode, Type, Industry, Website 
-            FROM Account 
-            WHERE (Name = '{client_name}' 
-            OR Name LIKE '{client_name} %' 
-            OR Name = '{client_name}' COLLATE Latin1_General_CS_AS
-            OR Name LIKE '%{client_name}%')
-            LIMIT 20
-            """.strip()
+                SELECT Id, Name, AccountNumber, Phone, BillingCity, BillingCountry, BillingPostalCode, Type, Industry, Website
+                FROM Account
+                WHERE (Name LIKE '%{client_name}%'
+                OR Name LIKE '{client_name} %'
+                OR Name LIKE '% {client_name}%'
+                OR Name LIKE '{client_name} GROUP'
+                OR Name LIKE 'GROUP {client_name}'
+                OR Name LIKE '%{client_name} GROUP%'
+                OR Name LIKE '%GROUP {client_name}%')
+                LIMIT 30
+                """.strip()
             
             result = await self.mcp_connector.call_mcp(
                 "salesforce_mcp",
@@ -180,14 +183,17 @@ class ClientLister:
                 {"query": exact_query}
             )
             
-            # CORRECTION: Vérifier d'abord les données, puis les erreurs
-            # Gestion spéciale des sessions expirées
-            if result.get("error") and "EXPIRED_PASSWORD" in str(result.get("error")):
-                logger.error(f"🔐 Session Salesforce expirée - Reconnexion nécessaire")
-                return []
-            if "records" in result and result["records"]:
-                logger.info(f"✅ Recherche exacte Salesforce: {len(result['records'])} résultats")
-                return result["records"]
+            # Parsing robuste - tester toutes les clés possibles
+            clients_found = []
+            if "records" in result and isinstance(result["records"], list):
+                clients_found = result["records"]
+            elif "data" in result and isinstance(result["data"], list):
+                clients_found = result["data"]
+            elif "value" in result and isinstance(result["value"], list):
+                clients_found = result["value"]
+                if clients_found:
+                    logger.info(f"✅ Recherche Salesforce: {len(clients_found)} résultats")
+                    return clients_found
             elif "data" in result and result["data"]:
                 logger.info(f"✅ Recherche exacte Salesforce: {len(result['data'])} résultats")
                 return result["data"]

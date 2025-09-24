@@ -6521,10 +6521,41 @@ class DevisWorkflow:
                 # CORRECTION: Vérifier doublons APRÈS sélection client mais AVANT produits
                 logger.info("🔍 === DÉBUT VÉRIFICATION DOUBLONS APRÈS SÉLECTION CLIENT ===")
                 duplicate_check = await self._check_duplicate_quotes(
-                    {"data": selected_client_data, "found": True, "name": client_display_name},
-                    original_products
-                )
+                    client_info=client_info_for_duplicates,
+                    products=products
+                    )
                 self.context["duplicate_check"] = duplicate_check
+                self._track_step_complete("check_duplicates", "🔍 Vérification doublons terminée")
+                
+                # CORRECTION: Vérifier les doublons AVANT la sélection produit
+                if duplicate_check.get("has_duplicates") and duplicate_check.get("requires_user_decision"):
+                    logger.warning("⚠️ Devis en cours trouvés - interaction utilisateur requise")
+                    # Envoyer interaction WebSocket pour choix reprendre/nouveau
+                    try:
+                        from services.websocket_manager import websocket_manager
+                        duplicate_interaction = {
+                            "type": "duplicate_quotes_decision",
+                            "interaction_type": "duplicate_quotes_decision", 
+                            "duplicates_found": duplicate_check.get("duplicates", []),
+                            "message": f"Devis en cours trouvés pour ce client - Reprendre ou créer un nouveau ?",
+                            "options": [
+                                {"id": "resume", "label": "Reprendre un devis existant"},
+                                {"id": "new", "label": "Créer un nouveau devis"}
+                            ]
+                        }
+                        await websocket_manager.send_user_interaction_required(self.task_id, duplicate_interaction)
+                        logger.info("✅ Interaction doublons envoyée via WebSocket")
+                    except Exception as ws_error:
+                        logger.warning(f"⚠️ Envoi WS doublons échoué: {ws_error}")
+                    
+                    return {
+                        "success": True,
+                        "status": "user_interaction_required",
+                        "type": "duplicate_quotes_decision",
+                        "message": "Devis en cours trouvés - décision utilisateur requise",
+                        "task_id": self.task_id,
+                        "interaction_data": duplicate_interaction
+                    }
 
                 # Si doublons trouvés ET nécessite une décision utilisateur
                 if duplicate_check.get("requires_user_decision"):
@@ -7446,9 +7477,39 @@ class DevisWorkflow:
             duplicate_check = await self._check_duplicate_quotes(
                 client_info=client_info_for_duplicates,
                 products=products
-            )
-            
+                )
             self.context["duplicate_check"] = duplicate_check
+            self._track_step_complete("check_duplicates", "🔍 Vérification doublons terminée")
+            
+            # CORRECTION: Vérifier les doublons AVANT la sélection produit
+            if duplicate_check.get("has_duplicates") and duplicate_check.get("requires_user_decision"):
+                logger.warning("⚠️ Devis en cours trouvés - interaction utilisateur requise")
+                # Envoyer interaction WebSocket pour choix reprendre/nouveau
+                try:
+                    from services.websocket_manager import websocket_manager
+                    duplicate_interaction = {
+                        "type": "duplicate_quotes_decision",
+                        "interaction_type": "duplicate_quotes_decision", 
+                        "duplicates_found": duplicate_check.get("duplicates", []),
+                        "message": f"Devis en cours trouvés pour ce client - Reprendre ou créer un nouveau ?",
+                        "options": [
+                            {"id": "resume", "label": "Reprendre un devis existant"},
+                            {"id": "new", "label": "Créer un nouveau devis"}
+                        ]
+                    }
+                    await websocket_manager.send_user_interaction_required(self.task_id, duplicate_interaction)
+                    logger.info("✅ Interaction doublons envoyée via WebSocket")
+                except Exception as ws_error:
+                    logger.warning(f"⚠️ Envoi WS doublons échoué: {ws_error}")
+                
+                return {
+                    "success": True,
+                    "status": "user_interaction_required",
+                    "type": "duplicate_quotes_decision",
+                    "message": "Devis en cours trouvés - décision utilisateur requise",
+                    "task_id": self.task_id,
+                    "interaction_data": duplicate_interaction
+                }
             
             # Si doublons trouvés ET nécessite une décision utilisateur
             if duplicate_check.get("requires_user_decision"):
@@ -8080,10 +8141,24 @@ class DevisWorkflow:
         """Finalise la sélection client avec les options dédupliquées uniquement"""
         
         try:
-            # Auto-sélection si un seul client
+            # CORRECTION: Auto-sélection seulement si vraiment 1 client ET pas de variantes
             if len(client_options) == 1:
                 single_client = client_options[0]
                 client_display_name = single_client.get("name", "Client sans nom")
+                # Vérifier s'il pourrait y avoir des variantes (GROUP, filiales, etc.)
+                if any(keyword in client_display_name.lower() for keyword in ['group', 'groupe', 'holding', 'sa', 'sas', 'sarl']):
+                    logger.warning(f"⚠️ Auto-sélection désactivée pour '{client_display_name}' - variantes possibles")
+                    # Forcer la sélection manuelle
+                    validation_data = {
+                        "client_options": client_options,
+                        "total_options": len(client_options),
+                        "original_client_name": client_name if 'client_name' in locals() else client_display_name,
+                        "allow_create_new": True,
+                        "interaction_type": "client_selection",
+                        "warning": "Plusieurs variantes possibles - vérification requise"
+                    }
+                    return await self._request_client_selection_interaction(validation_data)
+                    
                 logger.info(f"✅ Auto-sélection client unique: {client_display_name}")
                 
                 # Mettre à jour le contexte
