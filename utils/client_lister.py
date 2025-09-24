@@ -1,4 +1,4 @@
-# utils/client_lister.py - VERSION CORRIGÉE
+# utils/client_lister.py - VERSION NOVA-SERVER-TEST
 """
 Fonctions utilitaires pour lister tous les clients de Salesforce et SAP
 CORRECTION: Traitement approprié des réponses MCP

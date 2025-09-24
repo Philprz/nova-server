@@ -1,4 +1,4 @@
-# workflow/devis_workflow.py - VERSION COMPLÈTE AVEC VALIDATEUR CLIENT
+# workflow/devis_workflow.py - VERSION NOVA-SERVER-TEST
 
 import asyncio
 from datetime import datetime, timedelta, timezone

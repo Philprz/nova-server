@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+<!-- Version NOVA-SERVER-TEST -->
 <html lang="fr" role="document">
 <head>
     <!-- QUOTE_ID_PLACEHOLDER -->
@@ -1098,7 +1099,7 @@
 
             <div class="progress-container" id="progressContainer">
                 <div class="progress-header">
-                    <div class="progress-title" id="progressTitle">Traitement en cours...</div>
+                    <div class="progress-title" id="progressTitle">Traitement en cours</div>
                     <div class="progress-percentage" id="progressPercentage">0%</div>
                 </div>
                 <div class="progress-bar">
@@ -1132,7 +1133,7 @@
 
             <div class="typing-indicator" id="typingIndicator">
                 <div class="typing-content">
-                    <span>NOVA traite...</span>
+                    <span>NOVA traite</span>
                     <div class="typing-dots">
                         <div class="typing-dot"></div>
                         <div class="typing-dot"></div>
@@ -1146,7 +1147,7 @@
                 <textarea
                     id="chatInput"
                     class="chat-input"
-                    placeholder="Exemple : Créer un devis de 12 imprimantes 50ppm pour RONDOT..."
+                    placeholder="Exemple : Créer un devis de 12 imprimantes 50ppm pour RONDOT"
                     rows="1"
                     aria-label="Message"
                     required
@@ -1426,157 +1427,115 @@
         }
 
         function addClientSelection(clients, originalClientName) {
-            // Log + validation d'entrée
             console.log("🤝 Sélection de client requise:", clients);
             if (!Array.isArray(clients) || clients.length === 0) {
                 addMessage("Aucun client disponible pour la sélection.", 'system');
                 return;
             }
 
-            // Éviter les doublons : si déjà en mode sélection, ne pas réafficher
-            if (clientSelectionMode) {
-                console.log("⚠️ Sélection client déjà en cours, ignoré pour éviter les doublons");
-                return;
-            }
-
+            if (clientSelectionMode) { console.warn("⚠️ Sélection client déjà en cours"); return; }
             clientSelectionMode = true;
-            availableClients = clients;
 
-            // Échappement HTML minimal (prévention XSS)
             const esc = (v) => String(v)
-                .replace(/&/g, "&amp;")
-                .replace(/</g, "&lt;")
-                .replace(/>/g, "&gt;")
-                .replace(/"/g, "&quot;")
-                .replace(/'/g, "&#39;");
+                .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+                .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
 
-            // Message d’explication
             addMessage(`Plusieurs clients correspondent à "${esc(originalClientName)}". Veuillez sélectionner :`, 'system');
 
             const messagesContainer = document.getElementById('chatMessages');
-            if (!messagesContainer) {
-                console.error("❌ Conteneur de messages introuvable (#chatMessages)");
-                return;
-            }
+            if (!messagesContainer) { console.error("❌ #chatMessages introuvable"); clientSelectionMode = false; return; }
 
-            // Créer les boutons de sélection
             const selectionDiv = document.createElement('div');
             selectionDiv.className = 'client-selection-container';
+            selectionDiv.setAttribute('role','group');
+            selectionDiv.dataset.role = 'client-selection';
 
-            const isSentinel = (v) => v === undefined || v === null || v === '' || v === 'null' || v === 'None' || v === 'N/A';
+            // Normalise tout de suite et stocke la version normalisée
+            const normalized = clients.map((raw, index) => ({
+                name: raw?.CardName || raw?.Name || raw?.name || '',
+                sap_code: raw?.CardCode || raw?.sap_code || raw?.code || '',
+                sf_id: raw?.Id || raw?.sf_id || '',
+                id: raw?.Id || raw?.CardCode || raw?.id || '',
+                index,
+                raw
+            }));
+            availableClients = normalized; // conserve l’accès pour d’autres handlers
 
-            clients.forEach((client, index) => {
-                const button = document.createElement('button');
-                button.className = 'client-selection-button';
+            const onSelect = (normClient, index, buttons) => {
+                // Désactive les autres boutons pour éviter multi-clics
+                buttons.forEach(b => b.disabled = true);
+                selectClient(normClient, index);
+            };
 
-                // DEBUG: Afficher les données reçues
-                console.log(`Client ${index}:`, {
-                    name: client?.name,
-                    source: client?.source, 
-                    source_raw: client?.source_raw,
-                    fullClient: client
-                });
-
-                const details = client && client.details ? client.details : {};
-                const info = [];
-
-                // Affichage structuré prioritaire (avec emojis)
-                if (!isSentinel(details.phone))  info.push(`📞 ${esc(details.phone)}`);
-                if (!isSentinel(details.address)) info.push(`📍 ${esc(details.address)}`);
-                if (!isSentinel(details.siret))   info.push(`🏷️ SIRET: ${esc(details.siret)}`);
-                if (!isSentinel(details.sf_id))   info.push(`🆔 SF: ${esc(String(details.sf_id).substring(0, 15))}...`);
-                if (!isSentinel(details.sap_code))info.push(`💼 SAP: ${esc(details.sap_code)}`);
-
-                // Complément générique (si d’autres clés utiles existent)
-                if (typeof details === 'object') {
-                    Object.entries(details).forEach(([k, v]) => {
-                        if (['phone','address','siret','sf_id','sap_code'].includes(k)) return;
-                        if (!isSentinel(v)) info.push(`${esc(k)}: ${esc(v)}`);
-                    });
-                } else if (typeof details === 'string' && !isSentinel(details)) {
-                    info.push(esc(details));
-                }
-
-                const detailsHtml = info.length > 0
-                    ? `<div class="client-details">${info.join('<br>')}</div>`
-                    : '<div class="client-details">Aucun détail disponible</div>';
-
-                const name = esc(client && client.name ? client.name : 'Client');
-                // Debug pour voir ce qui arrive réellement
-                console.log(`Client ${index} data:`, {
-                    source: client?.source,
-                    source_raw: client?.source_raw,
-                    fullClient: JSON.stringify(client)
-                });
-
-                // Utiliser source si disponible, sinon fallback sur source_raw avec mapping
-                let displaySource = 'Inconnue';
-                if (client && client.source && client.source !== '') {
-                    displaySource = client.source;
-                } else if (client && client.source_raw) {
-                    const sourceMapping = {
-                        'sap_salesforce': 'SAP & Salesforce',
-                        'sap': 'SAP',
-                        'salesforce': 'Salesforce'
-                    };
-                    displaySource = sourceMapping[client.source_raw] || client.source_raw;
-                }
-                const source = esc(displaySource);
-                button.innerHTML = `
-                    <div class="client-header">
-                        <strong>${name}</strong>
-                        <span class="client-source">${source}</span>
-                    </div>
-                    ${detailsHtml}
-                `;
-                button.onclick = () => selectClient(client, index);
-                selectionDiv.appendChild(button);
+            const createdButtons = [];
+            normalized.forEach((norm, index) => {
+                const btn = document.createElement('button');
+                btn.className = 'client-selection-button';
+                btn.type = 'button';
+                btn.textContent = `${norm.name}${norm.sap_code ? ' • ' + norm.sap_code : ''}`;
+                btn.addEventListener('click', () => onSelect(norm, index, createdButtons));
+                createdButtons.push(btn);
+                selectionDiv.appendChild(btn);
             });
 
-            // Bouton pour créer un nouveau client
-            const newClientButton = document.createElement('button');
-            newClientButton.className = 'client-selection-button create-new';
-            newClientButton.innerHTML = `
-                <i class="bi bi-plus-circle"></i> Créer un nouveau client "${esc(originalClientName)}"
-            `;
-            newClientButton.onclick = () => createNewClient(originalClientName);
-            selectionDiv.appendChild(newClientButton);
+            // Option: créer un nouveau client
+            const newBtn = document.createElement('button');
+            newBtn.className = 'client-selection-button create-new';
+            newBtn.type = 'button';
+            newBtn.textContent = `＋ Créer un nouveau client "${originalClientName}"`;
+            newBtn.addEventListener('click', () => {
+                try { createdButtons.forEach(b => b.disabled = true); } catch(e){}
+                clientSelectionMode = false;
+                if (typeof createNewClient === 'function') {
+                createNewClient(originalClientName);
+                } else {
+                addMessage("Fonction de création de client indisponible.", 'system');
+                }
+            });
+            selectionDiv.appendChild(newBtn);
 
             messagesContainer.appendChild(selectionDiv);
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
-        }
+            }
+
+        function selectClient(normClient, index) {
+            clientSelectionMode = false;
+            availableClients = [];
+
+            addMessage(`Vous avez sélectionné : ${normClient.name}`, 'user');
+
+            const payload = {
+                type: "user_response",
+                task_id: typeof currentTaskId !== 'undefined' ? currentTaskId : null,
+                data: {
+                response_type: "client_selection",
+                action: "select_existing",
+                selected_index: index,
+                selected_data: {
+                    name: normClient.name,
+                    sap_code: normClient.sap_code,
+                    sf_id: normClient.sf_id,
+                    id: normClient.id
+                }
+                }
+            };
+
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                sendWebSocketMessage(payload);
+            } else {
+                console.error("❌ WebSocket non connecté, fallback local");
+                if (typeof continueWithSelectedClient === 'function') {
+                // Fallback gracieux avec les infos normalisées
+                continueWithSelectedClient(normClient);
+                } else {
+                addMessage("❌ Connexion perdue. Rechargez la page.", 'system');
+                }
+            }
+            }
 
         // Fonction alternative si addClientSelection n'existe pas
         function handleClientSelection(clients, originalClientName) {
             addClientSelection(clients, originalClientName);
-        }
-
-
-        function selectClient(client, index) {
-            clientSelectionMode = false;
-            availableClients = [];
-
-            addMessage(`Vous avez sélectionné : ${client.name}`, 'user');
-
-            // Envoyer la sélection au serveur
-            if (websocket && websocket.readyState === WebSocket.OPEN) {
-                const response = {
-                    type: "user_response",
-                    task_id: currentTaskId,
-                    data: {
-                        response_type: "client_selection",
-                        action: "select_existing",
-                        client_id: client.id,
-                        client_name: client.name,
-                        selected_index: index
-                    }
-                };
-                console.log("📤 Sélection client:", response);
-                sendWebSocketMessage(response);
-            } else {
-                // Fallback si pas de WebSocket
-                continueWithSelectedClient(client);
-            }
         }
 
         function createNewClient(clientName) {
@@ -1610,7 +1569,7 @@
         }
 
         function continueWithNewClient(clientName) {
-            addMessage(`Création du nouveau client "${clientName}" en cours...`, 'system');
+            addMessage(`Création du nouveau client "${clientName}" en cours`, 'system');
             showProgress();
         }
         // Fonction pour gérer la sélection de produit
@@ -2051,7 +2010,7 @@
                     } else {
                         updateProgress(
                             data.overall_progress,
-                            data.current_step_title || 'Traitement en cours...',
+                            data.current_step_title || 'Traitement en cours',
                             data.completed_steps
                         );
                     }
@@ -2161,7 +2120,7 @@
         }
 
         function editClientData() {
-            addMessage('Fonctionnalité d\'édition en cours de développement...', 'system');
+            addMessage('Fonctionnalité d\'édition en cours de développement', 'system');
         }
 
         // Gestion messages principaux
@@ -2359,7 +2318,7 @@
                 addEnhancedSuggestions(formattedSuggestions);
             }
             if (result.status === 'client_creation_required') {
-                addMessage(`Client "${result.client_name}" non trouvé. Recherche d'informations...`, 'system');
+                addMessage(`Client "${result.client_name}" non trouvé. Recherche d'informations`, 'system');
 
                 setTimeout(() => {
                     const enrichedData = {
@@ -2562,7 +2521,7 @@
             input.focus();
         }
         function continuePreviousWorkflow() {
-            addMessage('Reprise de la génération du devis...', 'system');
+            addMessage('Reprise de la génération du devis', 'system');
         }
 
         // Gestion entrées et formulaire
@@ -2574,7 +2533,7 @@
 
             // Validation côté client
             if (isProcessing) {
-                showValidationError('Traitement en cours, veuillez patienter...');
+                showValidationError('Traitement en cours, veuillez patienter');
                 return false;
             }
 
@@ -2770,120 +2729,165 @@
                 }
             };
             websocket.onmessage = (event) => {
+                const dataRaw = event?.data;
+                let data = null;
+
+                // Parsing robuste
                 try {
-                    const data = JSON.parse(event.data);
-                    console.log("📨 Message WebSocket reçu:", data);
-
-                    // 🔴 Gestion prioritaire du cas duplicate_resolution
-                    if (
-                        (data.type === 'user_interaction_required' || data.type === 'interaction_required') &&
-                        data.interaction_data &&
-                        data.interaction_data.interaction_type === 'duplicate_resolution'
-                    ) {
-                        console.log("⚠️ Duplicate resolution détecté (priorité directe)");
-                        if (typeof hideProgress === 'function') {
-                            try { hideProgress(); } catch (e) {}
-                        }
-                        if (data.interaction_data?.recent_quotes?.length > 0 || data.interaction_data?.draft_quotes?.length > 0) {
-                            if (typeof displayExistingQuotesInChat === 'function') {
-                                displayExistingQuotesInChat(data.interaction_data);
-                            }
-                        }
-                        if (typeof addDuplicateResolutionOptions === 'function') {
-                            addDuplicateResolutionOptions(data.interaction_data);
-                        }
-                        // ❗ NE PAS return -> on laisse passer le reste du switch
-                    }
-
-                    // ✅ Gestion complète des autres messages
-                    switch (data.type) {
-                        case 'user_interaction_required':
-                        case 'interaction_required':   // compat ancien type
-                            console.log("🤝 Interaction utilisateur reçue:", data);
-                            if (typeof hideProgress === 'function') {
-                                try { hideProgress(); } catch (e) {}
-                            }
-                            if (typeof handleUserInteraction === 'function') {
-                                handleUserInteraction(data.interaction_data);
-                            }
-                            break;
-
-                        case 'task_update': {
-                            // Normaliser les champs progress
-                            const progress = data.progress;
-                            const message = data.message || (data.data && data.data.message) || 'Mise à jour…';
-                            const step = data.step_id || data.step;
-
-                            if (typeof updateProgress === 'function' && progress !== undefined) {
-                                updateProgress(progress, message, step);
-                            }
-
-                            // Ajout de la nouvelle logique pour gérer les sources et suggestions
-                            try {
-                                // Afficher un aperçu si le backend envoie déjà du contenu exploitable
-                                if (data.message && typeof addMessage === 'function') {
-                                    const s = Array.isArray(data.sources) ? data.sources : [];
-                                    addMessage(data.message, 'system', s);
-                                }
-
-                                if (Array.isArray(data.sources)) {
-                                    data.sources.forEach(src => addSource(src.name, src.type, src.details));
-                                }
-
-                                if (Array.isArray(data.suggestions) && data.suggestions.length) {
-                                    const formatted = data.suggestions.map(s =>
-                                        typeof s === 'string' ? { text: s, action: s } : s
-                                    );
-                                    addEnhancedSuggestions(formatted);
-                                }
-                            } catch (e) {
-                                console.warn('render task_update extras failed:', e);
-                            }
-
-                            // Message système facultatif (conservé à la fin pour éviter les interférences)
-                            if (data.data && data.data.message && typeof addMessage === 'function') {
-                                addMessage(data.data.message, 'system');
-                            }
-                            break;
-                        }
-
-
-                        case 'quote_generation_completed':
-                        case 'completion':
-                            console.log("✅ Génération terminée:", data);
-                            if (typeof hideProgress === 'function') {
-                                try { hideProgress(); } catch (e) {}
-                            }
-                            if (typeof displayQuoteResult === 'function') {
-                                const payload = data.result || data.data || data;
-                                displayQuoteResult(payload);
-                            }
-                            taskCompletedHandled = true;
-                            break;
-
-                        case 'user_response_processed':
-                            console.log("✅ Réponse utilisateur traitée:", data);
-                            if (typeof addMessage === 'function') {
-                                addMessage('Votre réponse a été prise en compte.', 'system');
-                            }
-                            break;
-
-                        case 'error':
-                            console.log("❌ Erreur reçue:", data);
-                            if (typeof handleTaskError === 'function') {
-                                handleTaskError(data.error || data.message || 'Erreur inconnue');
-                            }
-                            taskCompletedHandled = true;
-                            break;
-
-                        default:
-                            console.log("ℹ️ Type de message non géré:", data.type);
-                            break;
-                    }
-                } catch (error) {
-                    console.error("❌ Erreur lors du traitement du message:", error);
+                    data = (typeof dataRaw === 'string') ? JSON.parse(dataRaw) : dataRaw;
+                } catch (e) {
+                    console.warn("⚠️ Message WebSocket non JSON:", dataRaw);
+                    return;
                 }
-            };
+                if (!data || typeof data !== 'object') return;
+
+                // 🔴 Priorité duplicate_resolution (UX)
+                if (
+                    (data.type === 'user_interaction_required' || data.type === 'interaction_required') &&
+                    data.interaction_data &&
+                    data.interaction_data.interaction_type === 'duplicate_resolution'
+                ) {
+                    try { hideProgress?.(); } catch(e){}
+                    const ia = data.interaction_data;
+
+                    // Afficher les devis existants si présents
+                    try {
+                    if ((ia?.recent_quotes?.length > 0 || ia?.draft_quotes?.length > 0) && typeof displayExistingQuotesInChat === 'function') {
+                        displayExistingQuotesInChat(ia);
+                    }
+                    } catch (e) {
+                    console.warn('⚠️ displayExistingQuotesInChat failed:', e);
+                    }
+
+                    // Afficher les options de résolution
+                    try {
+                    if (typeof addDuplicateResolutionOptions === 'function') {
+                        addDuplicateResolutionOptions(ia);
+                    }
+                    } catch (e) {
+                    console.warn('⚠️ addDuplicateResolutionOptions failed:', e);
+                    }
+                    // ❗On NE return PAS : on laisse la suite traiter l'interaction de façon standard
+                }
+
+                // Progress (early return)
+                if (data.type === 'progress' || data.type === 'progress_update') {
+                    try {
+                    if (typeof updateProgress === 'function') {
+                        updateProgress(data.progress, data.message, data.step || data.step_id);
+                    }
+                    } catch (e) {
+                    console.warn('⚠️ updateProgress failed:', e);
+                    }
+                    return;
+                }
+
+                // Fin de tâche (early return)
+                if (data.type === 'task_completed' || data.type === 'completion' || data.type === 'workflow_complete' || data.type === 'quote_generation_completed') {
+                    try { hideProgress?.(); } catch(e){}
+                    try { closeWebSocketWithDelay?.(websocket, 1000, "Task completed"); } catch(e){}
+                    try {
+                    const payload = data.result || data.data || data;
+                    if (typeof displayQuoteResult === 'function') {
+                        displayQuoteResult(payload);
+                    }
+                    } catch (e) {
+                    console.warn('⚠️ displayQuoteResult failed:', e);
+                    }
+                    // Maintien de l’état de fin (pour polling/reco externes)
+                    try { taskCompletedHandled = true; } catch(e){}
+                    return;
+                }
+
+                // Interaction utilisateur
+                if (data.type === 'interaction_required' || data.type === 'user_interaction_required') {
+                    const ia = data.interaction_data || data.data || {};
+                    if (!ia || !ia.interaction_type) {
+                    console.warn('⚠️ Interaction invalide:', ia);
+                    return;
+                    }
+
+                    try { hideProgress?.(); } catch(e){}
+
+                    // Chemin dédié client_selection (UX améliorée)
+                    if (ia.interaction_type === 'client_selection') {
+                    const clients = ia.client_options || ia.options || ia.clients || [];
+                    const originalName = ia.original_client_name || ia.client_name || '';
+                    if (typeof addClientSelection === 'function') {
+                        try { addClientSelection(clients, originalName); } catch (e) { console.warn('⚠️ addClientSelection failed:', e); }
+                    } else if (typeof handleUserInteraction === 'function') {
+                        try { handleUserInteraction(ia); } catch (e) { console.warn('⚠️ handleUserInteraction(client_selection) failed:', e); }
+                    } else {
+                        try { addMessage?.(`Interaction requise: ${ia.interaction_type}`, 'system'); } catch(e){}
+                    }
+                    return;
+                    }
+
+                    // Autres interactions (duplicate_resolution déjà pré-traité, product_selection, etc.)
+                    if (typeof handleUserInteraction === 'function') {
+                    try { handleUserInteraction(ia); } catch (e) { console.warn('⚠️ handleUserInteraction failed:', e); }
+                    } else {
+                    try { addMessage?.(`Interaction requise: ${ia.interaction_type}`, 'system'); } catch(e){}
+                    }
+                    return;
+                }
+
+                // Task update / enrichissements (sources, suggestions, message system)
+                if (data.type === 'task_update') {
+                    // Progress éventuel normalisé
+                    try {
+                    const progress = data.progress;
+                    const message = data.message || (data.data && data.data.message) || 'Mise à jour…';
+                    const step = data.step_id || data.step;
+                    if (typeof updateProgress === 'function' && progress !== undefined) {
+                        updateProgress(progress, message, step);
+                    }
+                    } catch (e) {
+                    console.warn('⚠️ updateProgress in task_update failed:', e);
+                    }
+
+                    // Message système + sources + suggestions
+                    try {
+                    if (data.message && typeof addMessage === 'function') {
+                        const s = Array.isArray(data.sources) ? data.sources : [];
+                        addMessage(data.message, 'system', s);
+                    }
+                    if (Array.isArray(data.sources) && typeof addSource === 'function') {
+                        data.sources.forEach(src => {
+                        try { addSource(src.name, src.type, src.details); } catch(e){}
+                        });
+                    }
+                    if (Array.isArray(data.suggestions) && data.suggestions.length && typeof addEnhancedSuggestions === 'function') {
+                        const formatted = data.suggestions.map(s => (typeof s === 'string' ? { text: s, action: s } : s));
+                        try { addEnhancedSuggestions(formatted); } catch(e){}
+                    }
+                    // Message système complémentaire éventuel
+                    if (data.data?.message && typeof addMessage === 'function') {
+                        addMessage(data.data.message, 'system');
+                    }
+                    } catch (e) {
+                    console.warn('⚠️ render task_update extras failed:', e);
+                    }
+                    return;
+                }
+
+                // ACK de réponse utilisateur
+                if (data.type === 'user_response_processed') {
+                    try { addMessage?.('Votre réponse a été prise en compte.', 'system'); } catch(e){}
+                    return;
+                }
+
+                // Gestion d’erreur structurée
+                if (data.type === 'error') {
+                    try { handleTaskError?.(data.error || data.message || 'Erreur inconnue'); } catch(e){}
+                    try { taskCompletedHandled = true; } catch(e){}
+                    return;
+                }
+
+                // Type non géré : log léger (pas d’échec)
+                // console.log("ℹ️ Type de message non géré:", data.type);
+                };
+
 
 
             websocket.onclose = (event) => {
@@ -2892,7 +2896,7 @@
                 if (!taskCompletedHandled && currentTaskId) {
                     const shouldReconnect = [1005, 1006, 1011, 1012, 1013].includes(event.code) || event.code >= 3000;
                     if (shouldReconnect) {
-                        console.log("🔄 Tentative de reconnexion...");
+                        console.log("🔄 Tentative de reconnexion");
                         setTimeout(() => connectWebSocket(taskId), 2000);
                     } else {
                         startLightPolling(taskId);
@@ -2931,7 +2935,7 @@
                         hideProgress();
                         addMessage(`Erreur: ${d.error || 'Tâche échouée'}`, 'system');
                     } else {
-                        updateProgress(d.overall_progress || 0, d.current_step_title || 'Traitement en cours...', d.completed_steps || 0);
+                        updateProgress(d.overall_progress || 0, d.current_step_title || 'Traitement en cours', d.completed_steps || 0);
                     }
                 } catch {
                     /* silence */
@@ -3729,7 +3733,7 @@
                 }
                 
                 // Afficher un indicateur de chargement
-                addMessage(`🔍 Récupération du devis ${quoteId}...`, 'system');
+                addMessage(`🔍 Récupération du devis ${quoteId}`, 'system');
                 
                 // Appel API pour récupérer les détails du devis
                 const response = await fetch(`/api/quotes/details/${formattedQuoteId}`, {
@@ -3766,7 +3770,7 @@
         async function openQuoteEditor(quoteId) {
             try {
                 // Afficher un indicateur de chargement
-                addMessage(`⏳ Chargement du devis ${quoteId} pour modification...`, 'system');
+                addMessage(`⏳ Chargement du devis ${quoteId} pour modification`, 'system');
                 
                 // Formater l'ID si nécessaire
                 let formattedQuoteId = quoteId;
@@ -3880,7 +3884,7 @@
                             <input
                                 type="text"
                                 id="productSearch"
-                                placeholder="Tapez une référence ou description de produit..."
+                                placeholder="Tapez une référence ou description de produit"
                                 style="width: 100%; padding: 12px 16px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 16px;"
                                 autocomplete="off"
                             >
@@ -4062,7 +4066,7 @@
             resultsDiv.innerHTML = `
                 <div class="search-result-item" style="padding: 16px; text-align: center; color: #6b7280;">
                     <div class="spinner" style="display: inline-block; width: 16px; height: 16px; border: 2px solid #f3f4f6; border-top: 2px solid #3b82f6; border-radius: 50%; animation: spin 1s linear infinite;"></div>
-                    <span style="margin-left: 8px;">Recherche en cours...</span>
+                    <span style="margin-left: 8px;">Recherche en cours</span>
                 </div>
             `;
         }
@@ -4212,7 +4216,7 @@
 
         function createNewProductFromSearch(productRef) {
             hideProductSearchResults();
-            showNotification(`Création du produit "${productRef}" en cours...`, 'info');
+            showNotification(`Création du produit "${productRef}" en cours`, 'info');
 
             // Ici vous pouvez appeler votre logique de création de produit
             // ou rediriger vers un formulaire de création
@@ -4331,7 +4335,7 @@
                 });
 
                 // Afficher un message de traitement
-                addMessage('⏳ Enregistrement des modifications en cours...', 'system');
+                addMessage('⏳ Enregistrement des modifications en cours', 'system');
 
                 // Envoyer les modifications à l'API
                 const response = await fetch(`/api/quotes/modify/${formattedQuoteId}`, {

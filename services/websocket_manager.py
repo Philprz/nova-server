@@ -1,4 +1,4 @@
-# main.py
+# services/websocket_manager.py - VERSION NOVA-SERVER-TEST
 from __future__ import annotations
 
 import asyncio
