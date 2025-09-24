@@ -1469,6 +1469,14 @@
                 const button = document.createElement('button');
                 button.className = 'client-selection-button';
 
+                // DEBUG: Afficher les données reçues
+                console.log(`Client ${index}:`, {
+                    name: client?.name,
+                    source: client?.source, 
+                    source_raw: client?.source_raw,
+                    fullClient: client
+                });
+
                 const details = client && client.details ? client.details : {};
                 const info = [];
 
@@ -1494,8 +1502,26 @@
                     : '<div class="client-details">Aucun détail disponible</div>';
 
                 const name = esc(client && client.name ? client.name : 'Client');
-                const source = esc(client && client.source ? client.source : 'Inconnue');
+                // Debug pour voir ce qui arrive réellement
+                console.log(`Client ${index} data:`, {
+                    source: client?.source,
+                    source_raw: client?.source_raw,
+                    fullClient: JSON.stringify(client)
+                });
 
+                // Utiliser source si disponible, sinon fallback sur source_raw avec mapping
+                let displaySource = 'Inconnue';
+                if (client && client.source && client.source !== '') {
+                    displaySource = client.source;
+                } else if (client && client.source_raw) {
+                    const sourceMapping = {
+                        'sap_salesforce': 'SAP & Salesforce',
+                        'sap': 'SAP',
+                        'salesforce': 'Salesforce'
+                    };
+                    displaySource = sourceMapping[client.source_raw] || client.source_raw;
+                }
+                const source = esc(displaySource);
                 button.innerHTML = `
                     <div class="client-header">
                         <strong>${name}</strong>
