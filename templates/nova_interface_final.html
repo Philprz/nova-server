@@ -2830,7 +2830,7 @@
                                     data.sources.forEach(src => addSource(src.name, src.type, src.details));
                                 }
 
-                                if (Array.isArray(data.suggestions) && data.sources.length) {
+                                if (Array.isArray(data.suggestions) && data.suggestions.length) {
                                     const formatted = data.suggestions.map(s =>
                                         typeof s === 'string' ? { text: s, action: s } : s
                                     );
@@ -3005,7 +3005,7 @@
                             }
 
                             if (Array.isArray(data.suggestions) && data.suggestions.length) {
-                                const formatted = data.sources.map(s =>
+                                const formatted = data.suggestions.map(s =>
                                     typeof s === 'string' ? { text: s, action: s } : s
                                 );
                                 addEnhancedSuggestions(formatted);

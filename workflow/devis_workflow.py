@@ -1563,7 +1563,7 @@ class DevisWorkflow:
             # Étape 2.1: Recherche client
             self._track_step_start("search_client", "Recherche du client...")
             
-            client_info = await self.client_validator.validate_client_complete(extracted_info.get("client"))
+            client_info = await self.client_validator.validate_complete(extracted_info.get("client"))
             # CORRECTION : Gérer les suggestions client MÊME si trouvé (choix multiple)
             if client_info.get("suggestions") and len(client_info["suggestions"]) > 1:
                 self._track_step_progress("verify_client_info", 50, "Plusieurs clients trouvés - sélection requise")
