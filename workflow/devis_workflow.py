@@ -281,6 +281,10 @@ class DevisWorkflow:
         sys_norm = system.upper().strip()
         base = prefix.upper().strip() if prefix else "GEN"
         return f"{{{{SRC_{sys_norm}_{base}_{short}}}}}"
+    # Alias de compatibilité pour les appels existants
+    def _generate_source_marker(self, system: str, prefix: str) -> str:
+        """Alias pour compatibilité : délègue vers _gen_marker."""
+        return self._gen_marker(system, prefix)
 
     def _system_name_and_type(self, system: str) -> tuple[str, str]:
         s = system.upper().strip()
@@ -628,7 +632,15 @@ class DevisWorkflow:
             FROM Account 
             WHERE FederalTaxID LIKE '%{siren}%'
         """
-        result = await self.mcp_connector.call_mcp("salesforce_mcp", "salesforce_query", {"query": query})
+        result = await self.mcp_call(
+            system="SALESFORCE",
+            server_name="salesforce_mcp",
+            action="salesforce_query",
+            params={"query": query},
+            label=f"Salesforce Client Search (SIREN: {siren})",
+            marker_prefix="SF_DUP_SIREN",
+        )
+
         return result.get("data", []) if result.get("success") else []
 
 
@@ -644,7 +656,15 @@ class DevisWorkflow:
             FROM Account 
             WHERE {conditions}
         """
-        result = await self.mcp_connector.call_mcp("salesforce_mcp", "salesforce_query", {"query": query})
+        result = await self.mcp_call(
+            system="SALESFORCE",
+            server_name="salesforce_mcp",
+            action="salesforce_query",
+            params={"query": query},
+            label=f"Salesforce Client Search (NAME split: {name})",
+            marker_prefix="SF_DUP_NAME",
+        )
+
         return result.get("data", []) if result.get("success") else []
 
 
@@ -5046,12 +5066,16 @@ class DevisWorkflow:
                 try:
                     search_timeout = asyncio.create_task(asyncio.sleep(15))  # 15s max
                     search_task = asyncio.create_task(
-                        self.mcp_connector.call_mcp(
-                            "sap_mcp",
-                            "sap_search",
-                            {"query": product_name, "entity_type": "Items", "limit": 3}
+                        self.mcp_call(
+                            system="SAP",
+                            server_name="sap_mcp",
+                            action="sap_search",
+                            params={"query": product_name, "entity_type": "Items", "limit": 3},
+                            label=f"SAP B1 Inventory Search ({product_name})",
+                            marker_prefix="SAP_PRODUCTS"
                         )
                     )
+
                     done, pending = await asyncio.wait([search_task, search_timeout], return_when=asyncio.FIRST_COMPLETED)
                     for task in pending:
                         task.cancel()
@@ -5075,12 +5099,16 @@ class DevisWorkflow:
                     for term in english_terms[:2]:
                         logger.info(f"🔍 Recherche SAP alternative: {term}")
                         alt_task = asyncio.create_task(
-                            self.mcp_connector.call_mcp(
-                                "sap_mcp",
-                                "sap_search",
-                                {"query": term, "entity_type": "Items", "limit": 2}
-                                )
+                            self.mcp_call(
+                                system="SAP",
+                                server_name="sap_mcp",
+                                action="sap_search",
+                                params={"query": term, "entity_type": "Items", "limit": 3},
+                                label=f"SAP B1 Inventory Search (alt: {term})",
+                                marker_prefix="SAP_PRODUCTS_ALT"
+                            )
                         )
+
                         try:
                             alt_result = await asyncio.wait_for(alt_task, timeout=10.0)
                             if alt_result and alt_result.get("success") and alt_result.get("results"):
@@ -8281,7 +8309,14 @@ class DevisWorkflow:
                 LIMIT 1
             """
             self._track_step_progress("search_client", 10, f"🔍 Recherche exacte de '{client_name}'")
-            exact_result = await self.mcp_connector.call_mcp("salesforce_mcp", "salesforce_query", {"query": exact_query})
+            exact_result = await self.mcp_call(
+                system="SALESFORCE",
+                server_name="salesforce_mcp",
+                action="salesforce_query",
+                params={"query": exact_query},
+                label=f"Salesforce Client Search (exact: {client_name})",
+                marker_prefix="SF_FIND_ACCOUNT_EXACT",
+            )
 
             if exact_result.get("totalSize", 0) > 0:
                 client_data = exact_result["records"][0]
@@ -8301,7 +8336,14 @@ class DevisWorkflow:
                 LIMIT 5
             """
             self._track_step_progress("search_client", 20, "🔍 Recherche insensible à la casse")
-            ci_result = await self.mcp_connector.call_mcp("salesforce_mcp", "salesforce_query", {"query": ci_query})
+            ci_result = await self.mcp_call(
+                system="SALESFORCE",
+                server_name="salesforce_mcp",
+                action="salesforce_query",
+                params={"query": ci_query},
+                label="Salesforce Client Search (case-insensitive)",
+                marker_prefix="SF_FIND_ACCOUNT_CI",
+            )
 
             if ci_result.get("totalSize", 0) > 0:
                 for record in ci_result["records"]:
@@ -8322,7 +8364,14 @@ class DevisWorkflow:
                 LIMIT 10
             """
             self._track_step_progress("search_client", 40, "🔍 Recherche floue dans Salesforce")
-            fuzzy_result = await self.mcp_connector.call_mcp("salesforce_mcp", "salesforce_query", {"query": fuzzy_query})
+            fuzzy_result = await self.mcp_call(
+                system="SALESFORCE",
+                server_name="salesforce_mcp",
+                action="salesforce_query",
+                params={"query": fuzzy_query},
+                label=f"Salesforce Client Search (fuzzy: {client_name})",
+                marker_prefix="SF_FIND_ACCOUNT_FUZZY",
+            )
 
             if fuzzy_result.get("totalSize", 0) > 0:
                 suggestions = fuzzy_result["records"]
