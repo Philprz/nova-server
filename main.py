@@ -36,6 +36,47 @@ logger = logging.getLogger(__name__)
 # Variables globales
 HEALTH_CHECK_RESULTS = None
 
+async def main():
+    """Point d'entrée principal du serveur NOVA"""
+    
+    # Configuration automatique des logs console
+    import sys
+    import os
+    from datetime import datetime
+    
+    # Créer le dossier log-console s'il n'existe pas
+    os.makedirs("log-console", exist_ok=True)
+    
+    # Créer un nom de fichier horodaté
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    log_filename = f"log-console/nova_{timestamp}.log"
+    
+    # Classe pour dupliquer la sortie vers console ET fichier
+    class DualOutput:
+        def __init__(self, original, logfile):
+            self.terminal = original
+            self.log = open(logfile, 'w', encoding='utf-8', buffering=1)
+            
+        def write(self, message):
+            self.terminal.write(message)
+            self.log.write(message)
+            
+        def flush(self):
+            self.terminal.flush()
+            self.log.flush()
+            
+        def close(self):
+            self.log.close()
+    
+    # Rediriger stdout et stderr
+    sys.stdout = DualOutput(sys.stdout, log_filename)
+    sys.stderr = DualOutput(sys.stderr, log_filename)
+    
+    print("="*60)
+    print(f"[START] NOVA Server - Démarrage {timestamp}")
+    print(f"[LOG] Logs console : {log_filename}")
+    print("="*60)
+    
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Gestionnaire de cycle de vie de l'application"""
