@@ -3340,6 +3340,10 @@
 
             // Extraction du nom client
             const clientNameRaw = (
+                result?.client_validated?.data?.Name ||
+                result?.client_validated?.data?.name ||
+                result?.client_info?.data?.Name ||
+                result?.client_info?.data?.CardName ||
                 result?.validated_data?.client?.Name ||
                 result?.validated_data?.client?.name ||
                 result?.client?.Name ||
@@ -3348,8 +3352,8 @@
                 result?.sap_quote?.CardName ||
                 result?.raw_result?.CardName ||
                 (typeof result?.client === 'string' ? result.client : null) ||
-                'Client non identifié'
-            );
+                'Client à identifier'
+                );
 
             // ID devis
             const quoteIdRaw = (

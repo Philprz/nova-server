@@ -167,13 +167,14 @@ class ClientLister:
             exact_query = f"""
                 SELECT Id, Name, AccountNumber, Phone, BillingCity, BillingCountry, BillingPostalCode, Type, Industry, Website
                 FROM Account
-                WHERE (Name LIKE '%{client_name}%'
-                OR Name LIKE '{client_name} %'
-                OR Name LIKE '% {client_name}%'
-                OR Name LIKE '{client_name} GROUP'
-                OR Name LIKE 'GROUP {client_name}'
-                OR Name LIKE '%{client_name} GROUP%'
-                OR Name LIKE '%GROUP {client_name}%')
+                WHERE (UPPER(Name) LIKE UPPER('%{client_name}%')
+                OR UPPER(Name) LIKE UPPER('{client_name} %')
+                OR UPPER(Name) LIKE UPPER('% {client_name}%')
+                OR UPPER(Name) LIKE UPPER('%{client_name} GROUP%')
+                OR UPPER(Name) LIKE UPPER('%GROUP {client_name}%')
+                OR UPPER(Name) LIKE UPPER('{client_name}')
+                OR UPPER(Name) = UPPER('{client_name}'))
+                ORDER BY Name
                 LIMIT 30
                 """.strip()
             

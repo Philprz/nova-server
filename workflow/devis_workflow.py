@@ -7479,37 +7479,36 @@ class DevisWorkflow:
                 products=products
                 )
             self.context["duplicate_check"] = duplicate_check
-            self._track_step_complete("check_duplicates", "🔍 Vérification doublons terminée")
-            
-            # CORRECTION: Vérifier les doublons AVANT la sélection produit
-            if duplicate_check.get("has_duplicates") and duplicate_check.get("requires_user_decision"):
-                logger.warning("⚠️ Devis en cours trouvés - interaction utilisateur requise")
-                # Envoyer interaction WebSocket pour choix reprendre/nouveau
+            # CORRECTION: Vérifier doublons AVANT sélection produit
+            if duplicate_check.get("has_duplicates"):
+                logger.warning("⚠️ Devis en cours détectés")
+
                 try:
                     from services.websocket_manager import websocket_manager
                     duplicate_interaction = {
                         "type": "duplicate_quotes_decision",
-                        "interaction_type": "duplicate_quotes_decision", 
+                        "interaction_type": "duplicate_quotes_decision",
                         "duplicates_found": duplicate_check.get("duplicates", []),
-                        "message": f"Devis en cours trouvés pour ce client - Reprendre ou créer un nouveau ?",
+                        "client_name": client_name,
+                        "message": "Devis en cours trouvés - Reprendre ou créer nouveau ?",
                         "options": [
-                            {"id": "resume", "label": "Reprendre un devis existant"},
-                            {"id": "new", "label": "Créer un nouveau devis"}
+                            {"id": "resume", "label": "📋 Reprendre devis existant"},
+                            {"id": "new", "label": "📝 Créer nouveau devis"}
                         ]
                     }
                     await websocket_manager.send_user_interaction_required(self.task_id, duplicate_interaction)
-                    logger.info("✅ Interaction doublons envoyée via WebSocket")
+                    logger.info("✅ Interaction devis doublons envoyée")
+
+                    return {
+                        "success": True,
+                        "status": "user_interaction_required",
+                        "type": "duplicate_quotes_decision",
+                        "message": "Devis en cours - décision requise",
+                        "task_id": self.task_id
+                    }
                 except Exception as ws_error:
-                    logger.warning(f"⚠️ Envoi WS doublons échoué: {ws_error}")
-                
-                return {
-                    "success": True,
-                    "status": "user_interaction_required",
-                    "type": "duplicate_quotes_decision",
-                    "message": "Devis en cours trouvés - décision utilisateur requise",
-                    "task_id": self.task_id,
-                    "interaction_data": duplicate_interaction
-                }
+                    logger.warning(f"⚠️ Erreur WS doublons: {ws_error}")
+
             
             # Si doublons trouvés ET nécessite une décision utilisateur
             if duplicate_check.get("requires_user_decision"):
@@ -8369,13 +8368,22 @@ class DevisWorkflow:
             
             if total_found > 0:
                 logger.info(f"✅ {total_found} client(s) existant(s) trouvé(s) pour '{client_name}'")
-                
-                # 🔧 CORRECTION CRITIQUE: Détecter l'interaction utilisateur requise
+
+                # CORRECTION: TOUJOURS proposer la sélection, même pour 1 client
+                # Car il peut y avoir des variantes (GROUP, filiales, etc.)
                 selection_result = await self._propose_existing_clients_selection(client_name, comprehensive_search)
-                
-                
-                # Si pas d'interaction requise, continuer normalement
+
+                # Forcer l'interaction utilisateur si plusieurs options ou variantes possibles
+                if selection_result.get("status") == "auto_selected":
+                    # Vérifier s'il y a des variantes possibles (GROUP, etc.)
+                    client_name_lower = client_name.lower()
+                    if any(keyword in client_name_lower for keyword in ['group', 'groupe', 'sa', 'sas', 'sarl']) or total_found > 1:
+                        logger.info("🔄 Forcer sélection manuelle - variantes détectées")
+                        selection_result["status"] = "user_interaction_required"
+                        selection_result["requires_user_selection"] = True
+
                 return selection_result
+
             # === ÉTAPE 1: RECHERCHE EXACTE ===
             exact_query = f"""
                 SELECT Id, Name, AccountNumber, Phone, BillingCity, BillingCountry 
