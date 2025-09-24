@@ -1271,53 +1271,63 @@
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
         }
 
+        
         function addContextualSuggestions(context, lastQuery = '') {
-            let suggestions = [];
-            
-            // Suggestions basées sur le contexte
-            if (context.includes('client') || context.includes('RONDOT')) {
-                suggestions.push({
-                    text: "Afficher tous les clients disponibles",
-                    action: "Lister les clients"
-                });
-                if (context.includes('sélectionner') || context.includes('RONDOT')) {
-                    suggestions.push({
-                        text: "Sélectionner directement RONDOT",
-                        action: "Sélectionner client RONDOT"
-                    });
+            try {
+                const ctx = String(context || '').toLowerCase();
+                const suggestions = [];
+
+                // Petit utilitaire pour éviter les doublons
+                const push = (text, action = text) => {
+                    if (!text) return;
+                    if (!suggestions.some(s => s.text === text)) {
+                        suggestions.push({ text, action });
+                    }
+                };
+
+                // ---- Règles basées sur le contexte ----
+                // CLIENT
+                if (ctx.includes('client') || ctx.includes('rondot')) {
+                    push("Afficher tous les clients disponibles", "Lister les clients");
+                    push("Voir l'historique de ce client"); // Question-type
+                    push("Quels sont ses autres besoins ?"); // Question-type
+                    if (ctx.includes('sélectionner') || ctx.includes('rondot')) {
+                        push("Sélectionner directement RONDOT", "Sélectionner client RONDOT");
+                    }
                 }
+
+                // PRODUITS / IMPRIMANTES
+                if (ctx.includes('imprimante') || ctx.includes('produit')) {
+                    push("Voir les imprimantes en stock", "Afficher stock imprimantes");
+                    push("Spécifier le modèle d'imprimante", "Je veux une imprimante HP LaserJet");
+                }
+
+                // DEVIS
+                if (ctx.includes('devis')) {
+                    // Questions possibles, style Perplexity
+                    push("💡 Puis-je modifier les quantités ?");
+                    push("💡 Y a-t-il des remises disponibles ?");
+                    push("💡 Comment envoyer ce devis au client ?");
+                    push("💡 Créer un devis similaire pour un autre client ?");
+
+                    // Actions rapides existantes
+                    const actionNouvelDevis = `Créer un devis pour ${String(lastQuery || '').trim()}`;
+                    push("Créer un nouveau devis", actionNouvelDevis);
+                }
+
+                // ---- Suggestions génériques (toujours affichées) ----
+                push("Aide sur les commandes disponibles", "Quelles sont les commandes disponibles ?");
+
+                // Limiter le volume pour ne pas polluer le chat
+                const limited = suggestions.slice(0, 4);
+                addEnhancedSuggestions(limited);
+
+            } catch (e) {
+                console.warn('Erreur suggestions contextuelles :', e);
             }
-            
-            if (context.includes('imprimante') || context.includes('produit')) {
-                suggestions.push({
-                    text: "Voir les imprimantes en stock",
-                    action: "Afficher stock imprimantes"
-                });
-                suggestions.push({
-                    text: "Spécifier le modèle d'imprimante",
-                    action: "Je veux une imprimante HP LaserJet"
-                });
-            }
-            
-            if (context.includes('devis')) {
-                suggestions.push({
-                    text: "Voir mes devis en cours",
-                    action: "Lister mes devis"
-                });
-                suggestions.push({
-                    text: "Créer un nouveau devis",
-                    action: "Créer un devis pour "
-                });
-            }
-            
-            // Suggestions génériques toujours présentes
-            suggestions.push({
-                text: "Aide sur les commandes disponibles",
-                action: "Quelles sont les commandes disponibles ?"
-            });
-            
-            addEnhancedSuggestions(suggestions);
         }
+
+
 
         function addEnhancedSuggestions(suggestions) {
             const messagesContainer = document.getElementById('chatMessages');
@@ -1340,6 +1350,29 @@
             messagesContainer.appendChild(suggestionsDiv);
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
         }
+
+        function generateContextualQuestions(context) {
+            const questions = [];
+            const ctx = context.toLowerCase();
+
+            if (ctx.includes('devis')) {
+                questions.push("💡 Puis-je modifier les quantités ?");
+                questions.push("💡 Y a-t-il des remises disponibles ?");
+                questions.push("💡 Comment envoyer ce devis au client ?");
+                questions.push("💡 Créer un devis similaire pour un autre client ?");
+            }
+
+            if (ctx.includes('client')) {
+                questions.push("💡 Voir l'historique de ce client");
+                questions.push("💡 Quels sont ses autres besoins ?");
+            }
+
+            // Toujours proposer des questions générales (garde max 4)
+            questions.push("💡 Que puis-je faire d'autre avec NOVA ?");
+
+            return questions.slice(0, 4);
+            }
+
         function toggleSources() {
             const content = document.getElementById('sourcesContent');
             const chevron = document.getElementById('sourcesChevron');
@@ -2749,12 +2782,45 @@
                             }
                             break;
 
-                        case 'task_update':
-                            console.log("📈 Mise à jour tâche:", data);
-                            if (typeof updateProgress === 'function') {
-                                updateProgress(data.progress, data.message || 'Mise à jour…', data.step_id);
+                        case 'task_update': {
+                            // Normaliser les champs progress
+                            const progress = data.progress;
+                            const message = data.message || (data.data && data.data.message) || 'Mise à jour…';
+                            const step = data.step_id || data.step;
+
+                            if (typeof updateProgress === 'function' && progress !== undefined) {
+                                updateProgress(progress, message, step);
+                            }
+
+                            // Ajout de la nouvelle logique pour gérer les sources et suggestions
+                            try {
+                                // Afficher un aperçu si le backend envoie déjà du contenu exploitable
+                                if (data.message && typeof addMessage === 'function') {
+                                    const s = Array.isArray(data.sources) ? data.sources : [];
+                                    addMessage(data.message, 'system', s);
+                                }
+
+                                if (Array.isArray(data.sources)) {
+                                    data.sources.forEach(src => addSource(src.name, src.type, src.details));
+                                }
+
+                                if (Array.isArray(data.suggestions) && data.sources.length) {
+                                    const formatted = data.suggestions.map(s =>
+                                        typeof s === 'string' ? { text: s, action: s } : s
+                                    );
+                                    addEnhancedSuggestions(formatted);
+                                }
+                            } catch (e) {
+                                console.warn('render task_update extras failed:', e);
+                            }
+
+                            // Message système facultatif (conservé à la fin pour éviter les interférences)
+                            if (data.data && data.data.message && typeof addMessage === 'function') {
+                                addMessage(data.data.message, 'system');
                             }
                             break;
+                        }
+
 
                         case 'quote_generation_completed':
                         case 'completion':
@@ -2890,15 +2956,40 @@
                         const progress = data.progress;
                         const message = data.message || (data.data && data.data.message) || 'Mise à jour…';
                         const step = data.step_id || data.step;
+
                         if (typeof updateProgress === 'function' && progress !== undefined) {
                             updateProgress(progress, message, step);
                         }
+
                         // Message système facultatif
                         if (data.data && data.data.message && typeof addMessage === 'function') {
                             addMessage(data.data.message, 'system');
                         }
+
+                        // Ajout de la nouvelle logique pour gérer les sources et suggestions
+                        try {
+                            // Afficher un aperçu si le backend envoie déjà du contenu exploitable
+                            if (data.message && typeof addMessage === 'function') {
+                                const s = Array.isArray(data.sources) ? data.sources : [];
+                                addMessage(data.message, 'system', s);
+                            }
+
+                            if (Array.isArray(data.sources)) {
+                                data.sources.forEach(src => addSource(src.name, src.type, src.details));
+                            }
+
+                            if (Array.isArray(data.suggestions) && data.suggestions.length) {
+                                const formatted = data.sources.map(s =>
+                                    typeof s === 'string' ? { text: s, action: s } : s
+                                );
+                                addEnhancedSuggestions(formatted);
+                            }
+                        } catch (e) {
+                            console.warn('render task_update extras failed:', e);
+                        }
                         break;
                     }
+
 
                     case 'completion':
                     case 'quote_generation_completed':
@@ -3175,42 +3266,53 @@
                 });
             });
         function displayQuoteResult(result) {
-            // Traitement des sources et suggestions pour les résultats WebSocket
-            if (result.sources && result.sources.length > 0) {
-                result.sources.forEach(source => {
-                    addSource(source.name, source.type, source.details);
-                });
-            }
-            
-            if (result.suggestions && result.suggestions.length > 0) {
-                const formattedSuggestions = result.suggestions.map(s =>
-                    typeof s === 'string' ? { text: s, action: s } : s
-                );
-                addEnhancedSuggestions(formattedSuggestions);
-            }
-
+            // Définir escapeHtml si nécessaire
             if (typeof window.escapeHtml !== 'function') {
                 window.escapeHtml = (s) => {
                     if (s == null) return '';
-                    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+                    return String(s).replace(/&/g, '&amp/')
+                                    .replace(/</g, '&lt;')
+                                    .replace(/>/g, '&gt;')
+                                    .replace(/"/g, '&quot;')
+                                    .replace(/'/g, '&#39;');
                 };
             }
-            const safeFormatCurrency = (amount, curr = 'EUR') => {
-                try {
-                    const num = Number.isFinite(Number(amount)) ? Number(amount) : 0;
-                    return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: String(curr).toUpperCase() }).format(num);
-                } catch (e) {
-                    const num = Number.isFinite(Number(amount)) ? Number(amount).toFixed(2) : '0.00';
-                    return `${num} €`;
+            const esc = window.escapeHtml;
+
+            // 1) Message riche
+            try {
+                if (result && result.message && typeof addMessage === 'function') {
+                    const msgSources = Array.isArray(result.sources) ? result.sources : [];
+                    addMessage(result.message, 'assistant', msgSources);
                 }
-            };
-                  // Extraction robuste du nom client depuis plusieurs sources possibles
-            // Utils: échappement HTML minimal (si pas déjà définie)
-            if (typeof escapeHtml !== 'function') {
-                window.escapeHtml = (s) => String(s ?? '')
-                    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
-                    .replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+            } catch (e) {
+                console.warn('Affichage du message riche échoué :', e);
             }
+
+            // Traitement des sources et suggestions
+            if (Array.isArray(result?.sources) && result.sources.length > 0) {
+                if (typeof addSource === 'function') {
+                    result.sources.forEach(source => {
+                        try {
+                            addSource(source?.name, source?.type, source?.details);
+                        } catch (e) {
+                            console.warn('addSource error:', e);
+                        }
+                    });
+                }
+            }
+
+            if (Array.isArray(result?.suggestions) && result.suggestions.length > 0) {
+                const formattedSuggestions = result.suggestions.map(s =>
+                    typeof s === 'string' ? { text: s, action: s } : s
+                );
+                if (typeof addEnhancedSuggestions === 'function') {
+                    try { addEnhancedSuggestions(formattedSuggestions); }
+                    catch (e) { console.warn('addEnhancedSuggestions error:', e); }
+                }
+            }
+
+            // Extraction du nom client
             const clientNameRaw = (
                 result?.validated_data?.client?.Name ||
                 result?.validated_data?.client?.name ||
@@ -3223,17 +3325,26 @@
                 'Client non identifié'
             );
 
-            // ID devis solide, sans "SAP-undefined"
-            const quoteIdRaw =
+            // ID devis
+            const quoteIdRaw = (
                 (result?.quote_id && String(result.quote_id)) ||
                 (result?.sap_doc_num && String(result.sap_doc_num)) ||
                 (result?.sap_quote?.doc_num ? `SAP-${result.sap_quote.doc_num}` : null) ||
                 (result?.validated_data?.sap_quote?.doc_num ? `SAP-${result.validated_data.sap_quote.doc_num}` : null) ||
-                ('NOVA-' + Date.now().toString().slice(-6));
-                // Stocker dans les variables globales
-                globalQuoteIdRaw = quoteIdRaw;
-                globalClientName = clientNameRaw;
-            // Montant + devise
+                ('NOVA-' + Date.now().toString().slice(-6))
+            );
+
+            // Stocker les variables globales (éviter ReferenceError)
+            if (typeof window !== 'undefined') {
+                window.globalQuoteIdRaw = quoteIdRaw;
+                window.globalClientName = clientNameRaw;
+            } else {
+                // fallback non-browser
+                globalThis.globalQuoteIdRaw = quoteIdRaw;
+                globalThis.globalClientName = clientNameRaw;
+            }
+
+            // Montant et devise
             const totalAmountNum = Number(
                 result?.total_amount ??
                 result?.sap_quote?.total_amount ??
@@ -3241,6 +3352,7 @@
                 result?.validated_data?.total_amount ??
                 0
             );
+
             const currency = String(
                 result?.currency ??
                 result?.sap_quote?.currency ??
@@ -3250,7 +3362,7 @@
             const fmt = new Intl.NumberFormat('fr-FR', { style: 'currency', currency });
             const formattedAmount = fmt.format(Number.isFinite(totalAmountNum) ? totalAmountNum : 0);
 
-            // Produits (normalisation)
+            // Produits
             const rawProducts = result?.products ?? result?.quote_data?.products ?? result?.validated_data?.products ?? [];
             const products = Array.isArray(rawProducts) ? rawProducts.map(p => {
                 const qty = Number(p?.quantity ?? p?.Quantity ?? 0);
@@ -3265,11 +3377,10 @@
                 };
             }) : [];
 
-            /// Échapper pour affichage
-            const clientName = typeof escapeHtml === 'function' ? escapeHtml(clientNameRaw) : clientNameRaw;
-            const quoteId = typeof escapeHtml === 'function' ? escapeHtml(quoteIdRaw) : quoteIdRaw;
+            // Génération du HTML
+            const clientName = esc(clientNameRaw);
+            const quoteId = esc(quoteIdRaw);
 
-            // Génération du HTML produits
             let productsHtml = '';
             if (products.length > 0) {
                 productsHtml = `
@@ -3286,8 +3397,8 @@
                             </thead>
                             <tbody>
                                 ${products.map(product => {
-                                    const name = typeof escapeHtml === 'function' ? escapeHtml(product.name) : product.name;
-                                    const code = typeof escapeHtml === 'function' ? escapeHtml(product.code) : product.code;
+                                    const name = esc(product.name);
+                                    const code = esc(product.code);
                                     const qty = Number.isFinite(product.quantity) ? product.quantity : 0;
                                     const unit = Number.isFinite(product.unit_price) ? product.unit_price : 0;
                                     const line = Number.isFinite(product.total_price) ? product.total_price : (unit * qty);
@@ -3313,153 +3424,71 @@
             const sapBadge = result?.sap_quote ? '✅ Devis SAP créé' : '';
             const sfBadge  = result?.salesforce_opportunity ? '✅ Opportunité Salesforce créée' : '';
 
-            // Construction du message
+            // Construction du message final
+            const selectedName = esc(result?.selected_product_name || 'Imprimante HP type Color Laser Jet 4');
             const resultHtml = `
-                <div class="quote-result-container" style="
-                    background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-tertiary) 100%);
-                    border: 1px solid var(--primary-violet);
-                    border-radius: 12px;
-                    padding: 20px;
-                    margin: 15px 0;
-                    color: var(--text-primary);
-                    box-shadow: 0 8px 32px rgba(130, 45, 254, 0.2);
-                ">
-                    <div style="
-                        display: flex;
-                        align-items: center;
-                        justify-content: center;
-                        margin-bottom: 20px;
-                        padding-bottom: 15px;
-                    ">
+                <div class="quote-result-container" style="background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-tertiary) 100%); border: 1px solid var(--primary-violet); border-radius: 12px; padding: 20px; margin: 15px 0; color: var(--text-primary); box-shadow: 0 8px 32px rgba(130, 45, 254, 0.2);">
+                    <div style="display: flex; align-items: center; justify-content: center; margin-bottom: 20px; padding-bottom: 15px;">
                         <div style="font-size: 2em; margin-right: 10px; color: var(--success-color);">✅</div>
-                        <h3 style="
-                            color: var(--success-color);
-                            margin: 0;
-                            font-size: 1.4em;
-                            font-weight: 600;
-                        ">Vous avez sélectionné : ${typeof escapeHtml==='function' ? escapeHtml(result?.selected_product_name || 'Imprimante HP type Color Laser Jet 4') : (result?.selected_product_name || 'Imprimante HP type Color Laser Jet 4')}</h3>
+                        <h3 style="color: var(--success-color); margin: 0; font-size: 1.4em; font-weight: 600;">Vous avez sélectionné : ${selectedName}</h3>
                     </div>
-                    
-                    <div style="
-                        display: grid;
-                        grid-template-columns: 1fr 1fr;
-                        gap: 15px;
-                        margin-bottom: 20px;
-                    ">
-                        <div style="
-                            background: var(--bg-primary);
-                            padding: 15px;
-                            border-radius: 8px;
-                            border-left: 4px solid var(--primary-violet);
-                            border: 1px solid var(--border-color);
-                        ">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
+                        <div style="background: var(--bg-primary); padding: 15px; border-radius: 8px; border-left: 4px solid var(--primary-violet); border: 1px solid var(--border-color);">
                             <strong style="color: var(--primary-violet);">🏢 Client</strong><br>
-                            <span style="
-                                font-size: 1.1em;
-                                font-weight: bold;
-                                color: var(--text-primary);
-                            ">${typeof escapeHtml==='function' ? escapeHtml(clientNameRaw) : (clientNameRaw ?? '')}</span>
+                            <span style="font-size: 1.1em; font-weight: bold; color: var(--text-primary);">${clientName}</span>
                         </div>
-                        <div style="
-                            background: var(--bg-primary);
-                            padding: 15px;
-                            border-radius: 8px;
-                            border-left: 4px solid var(--success-color);
-                            border: 1px solid var(--border-color);
-                        ">
+                        <div style="background: var(--bg-primary); padding: 15px; border-radius: 8px; border-left: 4px solid var(--success-color); border: 1px solid var(--border-color);">
                             <strong style="color: var(--success-color);">💰 Montant Total</strong><br>
-                            <span style="
-                                font-size: 1.2em;
-                                font-weight: bold;
-                                color: var(--success-color);
-                            ">${formattedAmount}</span>
+                            <span style="font-size: 1.2em; font-weight: bold; color: var(--success-color);">${formattedAmount}</span>
                         </div>
                     </div>
-                    
-                    <div style="
-                        background: var(--bg-primary);
-                        padding: 15px;
-                        border-radius: 8px;
-                        margin-bottom: 15px;
-                        border: 1px solid var(--border-color);
-                    ">
+                    <div style="background: var(--bg-primary); padding: 15px; border-radius: 8px; margin-bottom: 15px; border: 1px solid var(--border-color);">
                         <strong style="color: var(--text-primary);">📋 Référence</strong><br>
-                        <span style="color: var(--text-secondary); font-family: monospace;">${typeof escapeHtml==='function' ? escapeHtml(quoteIdRaw) : (quoteIdRaw ?? '')}</span>
+                        <span style="color: var(--text-secondary); font-family: monospace;">${quoteId}</span>
                     </div>
-
                     ${productsHtml}
-
-                    <div style="
-                        display: flex;
-                        gap: 10px;
-                        flex-wrap: wrap;
-                        margin-top: 20px;
-                    ">
-                        <button type="button" onclick="(typeof viewQuote==='function' ? viewQuote('${globalQuoteIdRaw || quoteIdRaw}') : window.open('/pdf/quote/${globalQuoteIdRaw || quoteIdRaw}','_blank'))" style="
-                            background: linear-gradient(135deg, var(--primary-blue), var(--primary-violet));
-                            color: white;
-                            border: none;
-                            padding: 10px 15px;
-                            border-radius: 6px;
-                            cursor: pointer;
-                            display: flex;
-                            align-items: center;
-                            gap: 5px;
-                            font-weight: 500;
-                            transition: all 0.2s ease;
-                        " onmouseover="this.style.transform='translateY(-1px)'" onmouseout="this.style.transform='translateY(0)'">
+                    <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 20px;">
+                        <button type="button" onclick="(typeof viewQuote === 'function' ? viewQuote('${(typeof window!=='undefined'?window.globalQuoteIdRaw:globalThis.globalQuoteIdRaw) || quoteIdRaw}') : window.open('/pdf/quote/${(typeof window!=='undefined'?window.globalQuoteIdRaw:globalThis.globalQuoteIdRaw) || quoteIdRaw}','_blank'))" style="background: linear-gradient(135deg, var(--primary-blue), var(--primary-violet)); color: white; border: none; padding: 10px 15px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 5px; font-weight: 500; transition: all 0.2s ease;" onmouseover="this.style.transform='translateY(-1px)'" onmouseout="this.style.transform='translateY(0)'">
                             📄 Voir le devis
                         </button>
-                        <button type="button" onclick="(typeof modifyQuote==='function' ? modifyQuote('${globalQuoteIdRaw || quoteIdRaw}') : alert('Fonction de modification non disponible'))" style="
-                            background: linear-gradient(135deg, var(--primary-violet), var(--accent-color));
-                            color: white;
-                            border: none;
-                            padding: 10px 15px;
-                            border-radius: 6px;
-                            cursor: pointer;
-                            display: flex;
-                            align-items: center;
-                            gap: 5px;
-                            font-weight: 500;
-                            transition: all 0.2s ease;
-                        " onmouseover="this.style.transform='translateY(-1px)'" onmouseout="this.style.transform='translateY(0)'">
+                        <button type="button" onclick="(typeof modifyQuote === 'function' ? modifyQuote('${(typeof window!=='undefined'?window.globalQuoteIdRaw:globalThis.globalQuoteIdRaw) || quoteIdRaw}') : alert('Fonction de modification non disponible'))" style="background: linear-gradient(135deg, var(--primary-violet), var(--accent-color)); color: white; border: none; padding: 10px 15px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 5px; font-weight: 500; transition: all 0.2s ease;" onmouseover="this.style.transform='translateY(-1px)'" onmouseout="this.style.transform='translateY(0)'">
                             ✏️ Modifier
                         </button>
-                        <button type="button" onclick="(typeof newQuote==='function' ? newQuote() : null)" style="
-                            background: linear-gradient(135deg, var(--success-color), #22C767);
-                            color: white;
-                            border: none;
-                            padding: 10px 15px;
-                            border-radius: 6px;
-                            cursor: pointer;
-                            display: flex;
-                            align-items: center;
-                            gap: 5px;
-                            font-weight: 500;
-                            transition: all 0.2s ease;
-                        " onmouseover="this.style.transform='translateY(-1px)'" onmouseout="this.style.transform='translateY(0)'">
+                        <button type="button" onclick="(typeof newQuote === 'function' ? newQuote() : null)" style="background: linear-gradient(135deg, var(--success-color), #22C767); color: white; border: none; padding: 10px 15px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 5px; font-weight: 500; transition: all 0.2s ease;" onmouseover="this.style.transform='translateY(-1px)'" onmouseout="this.style.transform='translateY(0)'">
                             ➕ Nouveau devis
                         </button>
                     </div>
-
-                    <div style="
-                        margin-top: 15px;
-                        padding-top: 15px;
-                        border-top: 1px solid var(--border-color);
-                        font-size: 0.9em;
-                        color: var(--text-secondary);
-                        text-align: center;
-                    ">
+                    <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid var(--border-color); font-size: 0.9em; color: var(--text-secondary); text-align: center;">
                         ${[sapBadge, sfBadge].filter(Boolean).join(' ')}
                     </div>
                 </div>
             `;
 
-
             // Ajouter le message au chat
-            addMessage(resultHtml, 'system');
+            if (typeof addMessage === 'function') {
+                try { addMessage(resultHtml, 'system'); }
+                catch (e) { console.warn('addMessage HTML error:', e); }
+            }
             console.log("✅ Résultat du devis affiché avec succès");
+
+            // Suggestions contextuelles
+            if (typeof addContextualSuggestions === 'function') {
+                try {
+                    const cname = (
+                        result?.validated_data?.client?.Name ||
+                        result?.validated_data?.client?.name ||
+                        result?.client?.Name ||
+                        result?.client?.name ||
+                        result?.client_name ||
+                        'client'
+                    );
+                    addContextualSuggestions(`devis créé client ${cname}`, '');
+                } catch (e) {
+                    console.warn('contextual suggestions error:', e);
+                }
+            }
         }
+
 
         function displayQuoteDetails(quoteData) {
             console.log('Données du devis reçues:', quoteData);

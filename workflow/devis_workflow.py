@@ -380,24 +380,50 @@ class DevisWorkflow:
         """Envoie le résultat final du devis via WebSocket"""
         try:
             if hasattr(self, 'task_id') and self.task_id:
-
                 message = {
                     "type": "quote_generation_completed",
                     "task_id": self.task_id,
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                     "result": result_data,
                     "status": "completed"
-                }
-                
+                }  # Ajout de l'accolade fermante ici
+                # === Compléter le payload final pour le front ===
+                try:
+                    # 1) message riche avec citations (si disponible)
+                    final_text_with_citations = locals().get('final_text_with_citations') or result_data.get('message') or ''
+                    # 2) données validées pour questions possibles
+                    client_data = (locals().get('client_data')
+                                or self.context.get('client')
+                                or result_data.get('client')
+                                or {})
+                    products_data = (locals().get('products_data')
+                                    or self.context.get('products')
+                                    or result_data.get('products')
+                                    or [])
+                    # 3) intégrer systématiquement les "preuves & conseils"
+                    result_data.setdefault("message", final_text_with_citations)
+                    result_data.setdefault("sources", getattr(self, "collected_sources", []) or [])
+                    result_data.setdefault("suggestions", getattr(self, "collected_suggestions", []) or [])
+                    result_data.setdefault("validated_data", {"client": client_data, "products": products_data})
+                except Exception as _e:
+                    logger.warning(f"[finalize-result] enrich fail: {type(_e).__name__}: {str(_e)}")
+                logger.info(
+                    "🔔 Résultat final envoyé | task=%s | sources=%d | suggestions=%d | has_message=%s",
+                    self.task_id,
+                    len(result_data.get("sources", [])),
+                    len(result_data.get("suggestions", [])),
+                    "yes" if bool(result_data.get("message")) else "no",
+                )
                 await websocket_manager.broadcast_to_task(self.task_id, message)
                 logger.info(f"✅ Résultat final envoyé pour {self.task_id}")
-                
+
                 # Attendre pour s'assurer que le message est reçu
                 await asyncio.sleep(0.5)
             else:
                 logger.warning("⚠️ Impossible d'envoyer le résultat - task_id manquant")
         except Exception as e:
             logger.error(f"❌ Erreur envoi résultat final: {e}")
+
     # 🔧 NOUVELLE MÉTHODE PRINCIPALE AVEC VALIDATION SÉQUENTIELLE
     async def process_quote_request(self, user_prompt: str, draft_mode: bool = False) -> Dict[str, Any]:
         """
