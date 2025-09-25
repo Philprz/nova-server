@@ -7705,6 +7705,11 @@ class DevisWorkflow:
             # Inclure warning si présent
             if validation_data.get("warning"):
                 interaction_data["warning"] = validation_data["warning"]
+
+            # Inclure alerte variantes si présente
+            if validation_data.get("variants_warning"):
+                interaction_data["variants_warning"] = validation_data["variants_warning"]
+
             
             # Stocker les données d'interaction dans la tâche
             task = progress_tracker.get_task(self.task_id)
@@ -7903,13 +7908,22 @@ class DevisWorkflow:
             # Utiliser find_client_everywhere pour recherche exhaustive
             comprehensive_search = await find_client_everywhere(client_name)
             total_found = comprehensive_search.get("total_found", 0)
+
+            # Inclure l'alerte variantes dans validation_data si présente
+            variants_warning = comprehensive_search.get("variants_warning")
+
             
             if total_found > 0:
                 logger.info(f"✅ {total_found} client(s) existant(s) trouvé(s) pour '{client_name}'")
 
-                # CORRECTION: TOUJOURS proposer la sélection, même pour 1 client
+                # CORRECTION : TOUJOURS proposer la sélection, même pour 1 client
                 # Car il peut y avoir des variantes (GROUP, filiales, etc.)
                 selection_result = await self._propose_existing_clients_selection(client_name, comprehensive_search)
+
+                # Ajouter l'alerte variantes au résultat
+                if variants_warning:
+                    selection_result["variants_warning"] = variants_warning
+
 
                 # Forcer l'interaction utilisateur si plusieurs options ou variantes possibles
                 if selection_result.get("status") == "auto_selected":
