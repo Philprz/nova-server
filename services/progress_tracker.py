@@ -43,8 +43,21 @@ class TaskStatus(str, Enum):
     PENDING = "pending"
     RUNNING = "running" 
     COMPLETED = "completed"
+    WAITING_USER = "waiting_user"
     FAILED = "failed"
     CANCELLED = "cancelled"
+def set_waiting_for_user(self, task_id: str, reason: str = ""):
+    t = self.tasks.get(task_id)
+    if not t:
+        return
+    t.status = TaskStatus.WAITING_USER
+    meta = getattr(t, "meta", {}) or {}
+    meta["waiting_reason"] = reason
+    t.meta = meta
+
+def is_waiting_for_user(self, task_id: str) -> bool:
+    t = self.tasks.get(task_id)
+    return bool(t and getattr(t, "status", None) == TaskStatus.WAITING_USER)
 
 class ProgressStep:
     """Représente une étape de progression"""
@@ -358,7 +371,7 @@ class ProgressTracker:
     
     def complete_task(self, task_id: str, result: Dict[str, Any]):
         """
-        🔧 MODIFICATION : Termine une tâche et sauvegarde le résultat
+        Termine une tâche et sauvegarde le résultat
         """
         if task_id not in self.active_tasks:
             logger.warning(f"⚠️ Tentative de completion tâche inexistante: {task_id}")
@@ -371,10 +384,10 @@ class ProgressTracker:
             task.complete_task(result)
         except Exception as e:
             logger.error(f"❌ Échec complete_task({task_id}): {e}")
-            # On continue quand même l’archivage minimal
+            # On continue quand même l'archivage minimal
             # (option: return False si tu veux un échec strict)
         
-        # 🔧 MODIFICATION : Sauvegarder le résultat dans l'historique
+        # Sauvegarder le résultat dans l'historique
         try:
             task_data = task.get_overall_progress()
         except Exception as e:
@@ -391,50 +404,7 @@ class ProgressTracker:
 
         # Supprimer des tâches actives
         del self.active_tasks[task_id]
-        
-        # 🔧 CORRECTION CRITIQUE: Notification WebSocket de completion avec délai de fermeture
-        try:
-            from services.websocket_manager import websocket_manager
-            from datetime import datetime
-            import asyncio
-            import threading
-
-            payload = {
-                "type": "quote_generation_completed",
-                "task_id": task_id,
-                "data": result,
-                "status": "completed",
-                "timestamp": datetime.now().isoformat()
-                }
-
-            async def _notify_and_close():
-                try:
-                    await websocket_manager.broadcast_to_task(task_id, payload)
-                    logger.info(f"🔔 Notification WebSocket de completion envoyée pour {task_id}")
-                except Exception as e:
-                    logger.error(f"Erreur broadcast WebSocket completion: {e}")
-                    return
-                try:
-                    await asyncio.sleep(2.0)  # Laisser le client traiter
-                    await websocket_manager.close_task_connections(task_id)
-                    logger.info(f"🔌 Fermeture des connexions WebSocket pour {task_id}")
-                except Exception as e:
-                    logger.error(f"Erreur fermeture WebSocket pour {task_id}: {e}")
-
-            # Fire-and-forget robuste (boucle existante ou non)
-            def _spawn(coro):
-                try:
-                    loop = asyncio.get_running_loop()
-                    loop.create_task(coro)
-                except RuntimeError:
-                    # Pas de boucle en cours: lancer un thread dédié avec asyncio.run
-                    threading.Thread(target=lambda: asyncio.run(coro), daemon=True).start()
-
-            _spawn(_notify_and_close())
-
-        except Exception as e:
-            logger.error(f"Erreur notification WebSocket completion: {e}")
-        
+            
         logger.info(f"✅ Tâche {task_id} déplacée vers l'historique avec résultat")
         return True
 

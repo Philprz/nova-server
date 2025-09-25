@@ -396,6 +396,28 @@ class WebSocketManager:
                 except Exception as ee:
                     logger.error(f"❌ Impossible de stocker/programmer retry pour {task_id}: {ee}")
 
+    async def send_completion_if_ready(self, task_id: str, payload: dict) -> bool:
+        """
+        Send the final completion payload if we're not in an interaction state.
+        Also give the frontend a beat to render before closing sockets.
+        """
+        try:
+            await self.broadcast_to_task(task_id, payload)
+            logger.info(f"🔔 Résultat final envoyé via WebSocket pour la tâche {task_id}")
+        except Exception as e:
+            logger.error(f"❌ Erreur broadcast final pour {task_id}: {e}")
+            return False
+
+        # small grace period
+        try:
+            import asyncio
+            await asyncio.sleep(1.0)
+            await self.close_task_connections(task_id)
+            logger.info(f"🔌 Connexions WebSocket fermées pour {task_id}")
+        except Exception as e:
+            logger.warning(f"⚠️ Fermeture WebSocket échouée pour {task_id}: {e}")
+
+        return True
 
     async def _attempt_reconnection(self, task_id: str) -> None:
         """Tentative de reconnexion immédiate pour une tâche"""

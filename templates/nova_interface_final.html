@@ -1858,7 +1858,25 @@
                     }
                     break;
                 }
-
+                case "product_selection":
+                case "product_selection_required": {
+                // Garde anti-doublon (optionnelle, comme pour client_selection)
+                try {
+                    const ts = data.timestamp || new Date().toISOString();
+                    if (window.lastProductSelectionTimestamp === ts) {
+                    console.warn("⚠️ Interaction product_selection déjà traitée (même timestamp), ignorée");
+                    break;
+                    }
+                    window.lastProductSelectionTimestamp = ts;
+                } catch (_) {}
+                
+                if (typeof handleProductSelection === "function") {
+                    handleProductSelection(data);
+                } else if (typeof addMessage === "function") {
+                    addMessage("Sélection de produit requise.", "system");
+                }
+                break;
+                }
                 case "duplicate_resolution": {
                     // Afficher d'abord les devis existants s'il y en a
                     try {

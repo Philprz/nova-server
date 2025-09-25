@@ -35,6 +35,34 @@ import asyncio
 import httpx
 import secrets
 from services.websocket_manager import websocket_manager
+class ProductSelectionIn(BaseModel):
+    item_code: str
+    quantity: int = 1
+    # optionnel si tu véhicules le libellé/option d’origine
+    original_name: Optional[str] = None
+    # champ extensible pour d’autres méta
+    extra: Optional[Dict[str, Any]] = None
+@router.post("/assistant/interaction/{task_id}/product_selection")
+async def handle_product_selection(task_id: str, selection: ProductSelectionIn):
+    wf = DevisWorkflow(force_production=True)
+    wf.task_id = task_id
+
+    # (Optionnel) recharger wf.context depuis cache si tu le persistes
+    # wf.context = cache_manager.get(f"wf:{task_id}") or {}
+
+    user_input = {
+        "interaction_type": "product_selection",
+        "selection": selection.model_dump(),
+    }
+    result = await wf.continue_after_user_input(user_input, getattr(wf, "context", {}))
+
+    # (Optionnel) persister l'état mis à jour
+    # cache_manager.set(f"wf:{task_id}", {"context": wf.context, ...})
+
+    return {"ok": True, "result": result}
+
+
+
 # 🔧 MODIFICATION : Ajouter le modèle pour la progression
 class ProgressChatMessage(BaseModel):
     """Message de chat avec support progression"""
