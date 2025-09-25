@@ -6474,7 +6474,13 @@ class DevisWorkflow:
                 "message": f"{len(products_needing_selection)} produits nécessitent votre sélection",
                 "options": []
             }
-            
+            # CORRECTION CRITIQUE: Ajouter les prix dans products_needing_selection aussi
+            for product_info in products_needing_selection:
+                for option in product_info.get("options", []):
+                    if not option.get("Price") and not option.get("display_price"):
+                        estimated_price = option.get("AvgPrice") or self._estimate_product_price(option.get("ItemName", ""))
+                        option["Price"] = estimated_price
+                        option["display_price"] = f"{estimated_price}€"
             for product_info in products_needing_selection:
                 interaction_data["options"].append({
                     "name": product_info.get("original_name"),
@@ -7634,19 +7640,46 @@ class DevisWorkflow:
                     return await self._request_client_selection_interaction(validation_data)
                     
                 logger.info(f"✅ Auto-sélection client unique: {client_display_name}")
-                
-                # Mettre à jour le contexte
+
+                # Variantes possibles → privilégier une détection par mots entiers
+                import re
+                risk_terms = re.compile(r"\b(group|groupe|holding|sa|sas|sarl)\b", flags=re.IGNORECASE)
+                if risk_terms.search(client_display_name or ""):
+                    logger.warning(f"⚠️ Auto-sélection désactivée pour '{client_display_name}' - variantes possibles")
+                    validation_data = {
+                        "client_options": client_options,
+                        "total_options": len(client_options),
+                        "original_client_name": client_name,
+                        "allow_create_new": True,
+                        "interaction_type": "client_selection",
+                        "warning": "Plusieurs variantes possibles - vérification requise"
+                    }
+                    return await self._request_client_selection_interaction(validation_data)
+
+                # 1) MAJ contexte (une seule fois, sans doublons)
                 self.context.update({
                     "client_info": {"data": single_client, "found": True},
                     "client_validated": True,
-                    "selected_client_display": client_display_name
+                    "auto_selected_client": single_client,
+                    "selected_client_display": client_display_name,
+                    # Optionnel : pousse aussi un identifiant stable si dispo
+                    "selected_client_code": single_client.get("CardCode") or single_client.get("code") or None,
                 })
-                
+
+                # 2) Persistance dans la tâche
+                task = progress_tracker.get_task(self.task_id)
+                if task:
+                    if not hasattr(task, 'context') or not isinstance(task.context, dict):
+                        task.context = {}
+                    task.context.update(self.context)
+                    logger.info("✅ Contexte client auto-sélectionné sauvegardé dans la tâche")
+
                 return {
                     "status": "auto_selected",
                     "client_data": single_client,
                     "message": f"Client unique sélectionné: {client_display_name}"
                 }
+
             
             # Plusieurs clients - demander sélection
             validation_data = {
