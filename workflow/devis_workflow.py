@@ -7686,7 +7686,54 @@ class DevisWorkflow:
             logger.exception(f"Erreur finalisation sélection client: {str(e)}")
             return self._build_error_response("Erreur sélection client", str(e))
 
+    async def _request_client_selection_interaction(self, validation_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Envoie l'interaction de sélection de clients via WebSocket"""
+        try:
+            # Préparer les données d'interaction standardisées
+            interaction_data = {
+            "type": "client_selection",
+            "interaction_type": "client_selection",
+            "client_options": validation_data.get("client_options", []),
+            "total_options": validation_data.get("total_options", 0),
+            "original_client_name": validation_data.get("original_client_name", ""),
+            "allow_create_new": validation_data.get("allow_create_new", True),
+            "message": validation_data.get("message", f"Sélection client requise - {validation_data.get('total_options', 0)} options disponibles")
+            }
+            # Inclure les options et clients pour compatibilité interface
+            if validation_data.get("client_options"):
+                interaction_data["options"] = validation_data["client_options"]
+                interaction_data["clients"] = validation_data["client_options"]
+            
+            # Inclure warning si présent
+            if validation_data.get("warning"):
+                interaction_data["warning"] = validation_data["warning"]
+            
+            # Stocker les données d'interaction dans la tâche
+            task = progress_tracker.get_task(self.task_id)
+            if task:
+                task.interaction_data = interaction_data
+                logger.info(f"📦 Données d'interaction client stockées")
 
+            # Envoyer via WebSocket
+            await websocket_manager.send_user_interaction_required(self.task_id, interaction_data)
+            logger.info(f"✅ Interaction client envoyée pour {interaction_data['total_options']} options")
+            
+            # Retourner le statut d'interaction requise
+            return {
+                "status": "user_interaction_required",
+                "requires_user_selection": True,
+                "interaction_type": "client_selection",
+                "message": interaction_data["message"],
+                "task_id": self.task_id,
+                "interaction_data": interaction_data
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Erreur envoi interaction client: {e}")
+            return {
+                "status": "error",
+                "error": f"Erreur interaction client: {str(e)}"
+            }
     async def _create_client_automatically(self, client_name: str) -> Dict[str, Any]:
         """
         🆕 NOUVELLE MÉTHODE : Création automatique du client dans SAP et Salesforce
