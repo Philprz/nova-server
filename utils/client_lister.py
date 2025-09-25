@@ -116,9 +116,10 @@ class ClientLister:
             exact_query = f"""
             SELECT Id, Name, AccountNumber, Phone, BillingCity, BillingCountry, BillingPostalCode, Type, Industry, Website
             FROM Account
-            WHERE UPPER(Name) = UPPER('{client_name}')
+            WHERE Name = '{client_name}'
             LIMIT 1
             """.strip()
+
             
             result = await self.mcp_connector.call_mcp(
                 "salesforce_mcp",
@@ -163,20 +164,20 @@ class ClientLister:
     async def _search_salesforce_by_name(self, client_name: str) -> List[Dict[str, Any]]:
         """Recherche dans Salesforce avec différentes variantes - CORRIGÉ"""
         try:
-            # Requête SOQL corrigée - insensible à la casse + champs existants
+            # Requête SOQL simplifiée - pas de fonctions UPPER imbriquées
             exact_query = f"""
-                SELECT Id, Name, AccountNumber, Phone, BillingCity, BillingCountry, BillingPostalCode, Type, Industry, Website
-                FROM Account
-                WHERE (UPPER(Name) LIKE UPPER('%{client_name}%')
-                OR UPPER(Name) LIKE UPPER('{client_name} %')
-                OR UPPER(Name) LIKE UPPER('% {client_name}%')
-                OR UPPER(Name) LIKE UPPER('%{client_name} GROUP%')
-                OR UPPER(Name) LIKE UPPER('%GROUP {client_name}%')
-                OR UPPER(Name) LIKE UPPER('{client_name}')
-                OR UPPER(Name) = UPPER('{client_name}'))
-                ORDER BY Name
-                LIMIT 30
-                """.strip()
+            SELECT Id, Name, AccountNumber, Phone, BillingCity, BillingCountry, BillingPostalCode, Type, Industry, Website
+            FROM Account
+            WHERE (Name LIKE '%{client_name}%'
+                OR Name LIKE '{client_name} %'
+                OR Name LIKE '% {client_name}%'
+                OR Name LIKE '%{client_name} GROUP%'
+                OR Name LIKE '%GROUP {client_name}%'
+                OR Name = '{client_name}')
+            ORDER BY Name
+            LIMIT 30
+            """.strip()
+
             
             result = await self.mcp_connector.call_mcp(
                 "salesforce_mcp",
@@ -211,13 +212,22 @@ class ClientLister:
                 logger.error(f"❌ Erreur recherche exacte Salesforce: {error_msg}")
                 # Ne pas retourner ici, continuer avec la recherche approximative
             
+            # Log pour indiquer le début de la recherche exacte
+            logger.info(f"🔍 Recherche exacte Salesforce pour : {client_name}")
+
             # Si pas de résultat exact, recherche approximative simple
             fuzzy_query = f"""
-            SELECT Id, Name, AccountNumber, Phone, BillingCity, BillingCountry 
-            FROM Account 
-            WHERE Name LIKE '%{client_name}%' 
-            LIMIT 10
+            SELECT Id, Name, AccountNumber, Phone, BillingCity, BillingCountry, BillingPostalCode, Type, Industry, Website
+            FROM Account
+            WHERE (Name LIKE '%{client_name}%'
+                OR Name LIKE '{client_name} %'
+                OR Name LIKE '% {client_name}%'
+                OR Name LIKE '%{client_name} GROUP%'
+                OR Name LIKE '%GROUP {client_name}%')
+            ORDER BY Name
+            LIMIT 30
             """.strip()
+
             
             result = await self.mcp_connector.call_mcp(
                 "salesforce_mcp",
