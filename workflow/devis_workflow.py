@@ -1,6 +1,7 @@
 # workflow/devis_workflow.py - VERSION NOVA-SERVER-TEST
 
 import asyncio
+
 from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
 import io
@@ -11,6 +12,7 @@ import re
 import sys
 import functools
 import uuid
+import time
 from typing import Optional, Callable, Awaitable, Any, Dict, List
 from fastapi import APIRouter, HTTPException
 
@@ -2393,16 +2395,22 @@ class DevisWorkflow:
                 
                 # Vérifier que nous avons un client SAP
                 sap_card_code = None
-                if sap_client.get("data") and sap_client["data"].get("CardCode"):
+                if sap_client and sap_client.get("data") and sap_client["data"].get("CardCode"):
                     sap_card_code = sap_client["data"]["CardCode"]
                     logger.info(f"Client SAP confirmé: {sap_card_code}")
                 else:
-                    logger.error("❌ AUCUN CLIENT SAP DISPONIBLE")
-                    return {
-                        "success": False,
-                        "error": "Client SAP non disponible pour créer le devis"
+                    logger.warning("⚠️ Client SAP non trouvé, tentative de création...")
+                # Tenter la création automatique
+                if client_info and client_info.get("data"):
+                    sap_creation_result = await self._create_sap_client_if_needed(client_info)
+                if sap_creation_result.get("success"):
+                    self.context["sap_client"] = {
+                        "data": sap_creation_result["client"],
+                        "created": True
                     }
-                
+                sap_card_code = sap_creation_result["client"]["CardCode"]
+                logger.info(f"✅ Client SAP créé automatiquement: {sap_card_code}")
+                    
                 # ========== ÉTAPE 2: PRÉPARATION DES PRODUITS ==========
                 logger.info("=== PRÉPARATION DES LIGNES PRODUITS ===")
                 
@@ -2857,106 +2865,63 @@ class DevisWorkflow:
                 return 250.0
             else:
                 return 120.0
-            
-    async def _create_sap_client_if_needed(self, client_info):
-        """Crée un client SAP si nécessaire (robuste, schéma de retour stable)"""
-        import logging
-        from datetime import datetime
-        logger = logging.getLogger(__name__)
+    async def _create_sap_client_if_needed(self, client_info: Dict[str, Any]) -> Dict[str, Any]:
+        """Crée un client SAP si nécessaire.
 
-        # Helpers
-        def _has_method(obj, name: str) -> bool:
-            return hasattr(obj, name) and callable(getattr(obj, name))
+        Args:
+            client_info: Dictionnaire contenant les informations du client, incluant 'data.Name'.
 
-        async def _sap_call_search(query: str):
-            payload = {"query": query, "entity_type": "BusinessPartners", "limit": 5}
-            if _has_method(self.mcp_connector, "call_sap_mcp"):
-                return await self.mcp_connector.call_sap_mcp("sap_search", payload)
-            # fallback ancien schéma
-            if _has_method(self.mcp_connector, "call_mcp"):
-                return await self.mcp_connector.call_mcp("sap_mcp", "sap_search", payload)
-            raise RuntimeError("Aucune méthode SAP MCP disponible")
-
-        async def _sap_call_create(customer_data: dict):
-            if _has_method(self.mcp_connector, "call_sap_mcp"):
-                # tenter l’endpoint complet puis fallback
-                try:
-                    return await self.mcp_connector.call_sap_mcp(
-                        "sap_create_customer_complete", {"customer_data": customer_data}
-                    )
-                except Exception:
-                    return await self.mcp_connector.call_sap_mcp(
-                        "sap_create_customer", {"customer_data": customer_data}
-                    )
-            if _has_method(self.mcp_connector, "call_mcp"):
-                # fallback ancien schéma
-                try:
-                    return await self.mcp_connector.call_mcp(
-                        "sap_mcp", "sap_create_customer_complete", {"customer_data": customer_data}
-                    )
-                except Exception:
-                    return await self.mcp_connector.call_mcp(
-                        "sap_mcp", "sap_create_customer", {"customer_data": customer_data}
-                    )
-            raise RuntimeError("Aucune méthode SAP MCP disponible")
-
+        Returns:
+            Dict[str, Any]: Résultat de la création avec succès/erreur et données associées.
+        """
         try:
-            client_data = (client_info or {}).get("data", {})
-            client_name = (client_data.get("Name") or "").strip()
-
+            # Extraction et validation du nom du client
+            client_name = client_info.get("data", {}).get("Name")
             if not client_name:
                 return {"success": False, "error": "Nom client manquant"}
 
-            # 1) Recherche existant
-            search_result = await _sap_call_search(client_name)
-            if isinstance(search_result, dict) and "error" not in search_result:
-                candidates = []
-                if isinstance(search_result.get("value"), list):
-                    candidates = search_result["value"]
-                elif isinstance(search_result.get("results"), list):
-                    candidates = search_result["results"]
-                elif search_result.get("count", 0) > 0 and isinstance(search_result.get("results"), list):
-                    candidates = search_result["results"]
+            # Génération du CardCode unique
+            clean_name = re.sub(r"[^a-zA-Z0-9]", "", client_name)[:8].upper()
+            card_code = f"C{clean_name}{str(int(time.time()))[-4:]}"[:15]
 
-                if candidates:
-                    found = candidates[0]
-                    logger.info("✅ Client SAP trouvé: %s - %s",
-                                found.get("CardCode"), found.get("CardName"))
-                    return {"success": True, "client": found, "created": False}
-
-            # 2) Création
-            # CardCode <= 15, unique à la seconde: "C" + YYMMDDHHMMSS + 2 digits µs
-            card_code = f"C{datetime.now():%y%m%d%H%M%S}{datetime.now():%f}"[:15]
-
-            customer_data = {
+            # Configuration des données client SAP
+            sap_client_data = {
                 "CardCode": card_code,
-                "CardName": client_name,
+                "CardName": client_name.title(),
                 "CardType": "cCustomer",
+                "GroupCode": 100,
                 "Currency": "EUR",
+                "Valid": "tYES",
+                "Frozen": "tNO",
+                "Notes": f"Client créé automatiquement par NOVA le {time.strftime('%Y-%m-%d')}",
             }
-            # Conserver GroupCode si présent côté v1
-            if "GroupCode" in client_data:
-                customer_data["GroupCode"] = client_data["GroupCode"]
-            else:
-                # valeur raisonnable si besoin de groupe
-                customer_data["GroupCode"] = 100
 
-            create_result = await _sap_call_create(customer_data)
-            if isinstance(create_result, dict) and create_result.get("success"):
-                logger.info("✅ Client SAP créé: %s", card_code)
+            logger.info(f"Création du client SAP : {card_code} ({client_name})")
+
+            # Appel à l'API MCP pour créer le client
+            create_result = await self.mcp_connector.call_mcp(
+                "sap_mcp", "sap_create_customer_complete", {"customer_data": sap_client_data}
+            )
+
+            if create_result.get("success"):
+                logger.info(f"Client SAP créé avec succès : {card_code}")
                 return {
                     "success": True,
-                    "client": {"CardCode": card_code, "CardName": client_name},
-                    "created": True,
+                    "client": {
+                        "CardCode": card_code,
+                        "CardName": client_name.title(),
+                        **create_result.get("data", {}),
+                    },
                 }
 
-            err = (create_result or {}).get("error", "Erreur inconnue")
-            logger.error("❌ Échec création client SAP: %s", err)
-            return {"success": False, "error": err}
+            logger.error(f"Échec de la création du client SAP : {create_result.get('error', 'Erreur inconnue')}")
+            return {"success": False, "error": create_result.get("error", "Erreur inconnue")}
 
         except Exception as e:
-            logger.error("❌ Exception création client SAP: %s", e)
+            logger.exception(f"Exception lors de la création du client SAP : {e}")
             return {"success": False, "error": str(e)}
+            
+    
 
     
     async def _create_salesforce_quote(self, quote_data: Dict[str, Any], sap_quote: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -7788,8 +7753,26 @@ class DevisWorkflow:
                 logger.info(f"🚀 Début création automatique client: {client_name}")
 
 
-                # 1. Génération CardCode unique (éviter les doublons)
-                clean_name = re.sub(r'[^a-zA-Z0-9]', '', client_name)[:6].upper()
+                # Nettoyage du nom et création du CardCode initial
+                clean_name = re.sub(r'[^a-zA-Z0-9]', '', client_name)[:8].upper()
+                timestamp = str(int(time.time()))[-4:]
+                card_code = f"C{clean_name}{timestamp}"[:15]
+
+                # Vérification de l'unicité du CardCode
+                try:
+                    existing_check = await self.mcp_connector.call_mcp(
+                        "sap_mcp",
+                        "sap_search",
+                        {"query": {"CardCode": card_code}}
+                    )
+
+                    if existing_check.get("success") and existing_check.get("count", 0) > 0:
+                        # CardCode déjà existant, ajouter un suffixe aléatoire
+                        card_code = f"C{clean_name}{random.randint(1000, 9999)}"[:15]
+                        logger.info(f"CardCode modifié pour éviter un doublon : {card_code}")
+
+                except Exception as e:
+                    logger.warning(f"Impossible de vérifier l'unicité du CardCode : {e}")
                 timestamp = str(int(time.time()))[-4:]
                 card_code = f"C{clean_name}{timestamp}"
 
