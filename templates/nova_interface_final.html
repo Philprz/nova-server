@@ -3418,7 +3418,7 @@
             const rawProducts = result?.products ?? result?.quote_data?.products ?? result?.validated_data?.products ?? [];
             const products = Array.isArray(rawProducts) ? rawProducts.map(p => {
                 const qty = Number(p?.quantity ?? p?.Quantity ?? 0);
-                const unit = Number(p?.unit_price ?? p?.UnitPrice ?? p?.Price ?? 0);
+                const unit = Number(p?.unit_price ?? p?.UnitPrice ?? p?.Price ?? p?.display_price?.replace(/[^\d.]/g, '') ?? 0);
                 const line = (Number.isFinite(unit) ? unit : 0) * (Number.isFinite(qty) ? qty : 0);
                 return {
                     code: p?.code ?? p?.ItemCode ?? 'N/A',

@@ -418,6 +418,9 @@ async def handle_client_selection_task(task_id: str, response_data: dict):
                 })
                 
                 logger.info(f"✅ Client info sauvegardé: {selected_client.get('name', selected_client.get('Name', 'Inconnu'))}")
+                # CORRECTION CRITIQUE: Sauvegarder le contexte dans la tâche pour persistance
+                task.context = workflow.context.copy()
+                logger.info(f"✅ Contexte client sauvegardé dans la tâche : {list(task.context.keys())}")
             await workflow.continue_after_user_input(user_input, context)
 
         else:
@@ -466,13 +469,20 @@ async def handle_product_selection_task(task_id: str, response_data: Dict[str, A
         # CORRECTION: Restaurer le contexte de la tâche dans le workflow
         if hasattr(task, 'context') and task.context:
             workflow.context = task.context.copy()
-            # CORRECTION: S'assurer que client_info est bien dans le contexte
-            if hasattr(task, 'context') and task.context.get("client_info"):
-                workflow.context["client_info"] = task.context["client_info"]
-                logger.info(f"✅ Client info restauré dans le workflow: {workflow.context['client_info'].get('data', {}).get('Name', 'Unknown')}")
             logger.info(f"✅ Contexte restauré pour le workflow: {list(workflow.context.keys())}")
+                    # CORRECTION CRITIQUE: Vérifier spécifiquement client_info
+            if task.context.get("client_info"):
+                logger.info(f"✅ Client info présent : {task.context['client_info'].get('data', {}).get('Name', 'Inconnu')}")
+            else:
+                logger.error("❌ Client info manquant dans le contexte de la tâche")
         else:
-            logger.warning("⚠️ Aucun contexte trouvé dans la tâche")
+            logger.error("❌ Aucun contexte trouvé dans la tâche - erreur critique")
+            # CORRECTION: Envoyer erreur explicite à l'interface
+            await websocket_manager.send_task_update(task_id, {
+                "type": "validation_error", 
+                "error": "Contexte client perdu - veuillez recommencer le devis"
+            })
+            return
 
         # Construire l'entrée utilisateur pour le workflow
         selected_product = response_data.get("selected_product", {}) or {}
