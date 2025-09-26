@@ -13,8 +13,93 @@ import sys
 import functools
 import uuid
 import time
+from enum import Enum
+from dataclasses import dataclass
 from typing import Optional, Callable, Awaitable, Any, Dict, List
 from fastapi import APIRouter, HTTPException
+
+# Classes d'erreurs spécialisées
+class WorkflowError(Exception):
+    """Erreur de base pour le workflow"""
+    def __init__(self, message: str, error_code: str = None, context: Dict = None):
+        super().__init__(message)
+        self.error_code = error_code
+        self.context = context or {}
+
+class ClientNotFoundError(WorkflowError):
+    """Erreur quand un client n'est pas trouvé"""
+    def __init__(self, client_name: str, suggestions: List = None):
+        super().__init__(f"Client '{client_name}' non trouvé", "CLIENT_NOT_FOUND")
+        self.client_name = client_name
+        self.suggestions = suggestions or []
+
+class ProductNotFoundError(WorkflowError):
+    """Erreur quand un produit n'est pas trouvé"""
+    def __init__(self, product_code: str, product_name: str = None):
+        super().__init__(f"Produit '{product_code}' non trouvé", "PRODUCT_NOT_FOUND")
+        self.product_code = product_code
+        self.product_name = product_name
+
+class ValidationError(WorkflowError):
+    """Erreur de validation des données"""
+    def __init__(self, field: str, value: Any, reason: str):
+        super().__init__(f"Validation échouée pour {field}: {reason}", "VALIDATION_ERROR")
+        self.field = field
+        self.value = value
+        self.reason = reason
+
+class SystemConnectionError(WorkflowError):
+    """Erreur de connexion aux systèmes externes"""
+    def __init__(self, system: str, operation: str, details: str = None):
+        super().__init__(f"Erreur connexion {system} pour {operation}", "CONNECTION_ERROR")
+        self.system = system
+        self.operation = operation
+        self.details = details
+
+# Énumérations pour les statuts
+class WorkflowStatus(Enum):
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    WAITING_USER_INPUT = "waiting_user_input"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+class InteractionType(Enum):
+    CLIENT_SELECTION = "client_selection"
+    PRODUCT_SELECTION = "product_selection"
+    QUANTITY_ADJUSTMENT = "quantity_adjustment"
+    DUPLICATE_RESOLUTION = "duplicate_resolution"
+    CLIENT_CREATION = "client_creation"
+    QUOTE_VALIDATION = "quote_validation"
+
+# Dataclasses pour les structures de données
+@dataclass
+class ClientInfo:
+    name: str
+    id: Optional[str] = None
+    account_number: Optional[str] = None
+    source: Optional[str] = None
+    found: bool = False
+
+@dataclass
+class ProductInfo:
+    code: str
+    name: str
+    quantity: int = 1
+    unit_price: float = 0.0
+    total_price: float = 0.0
+    found: bool = False
+    stock: int = 0
+
+@dataclass
+class QuoteInfo:
+    quote_id: str
+    client: ClientInfo
+    products: List[ProductInfo]
+    total_amount: float
+    currency: str = "EUR"
+    status: str = "draft"
 
 from services.cache_manager import referential_cache
 from services.company_search_service import company_search_service
@@ -50,6 +135,53 @@ logging.basicConfig(
 )
 logger = logging.getLogger('workflow_devis')
 
+# === CLASSES D'ERREURS SPÉCIALISÉES ===
+class WorkflowError(Exception):
+    """Erreur de workflow avec contexte"""
+    def __init__(self, message: str, step: str = None, recoverable: bool = False):
+        super().__init__(message)
+        self.step = step
+        self.recoverable = recoverable
+
+class ClientValidationError(WorkflowError):
+    """Erreur spécifique à la validation client"""
+    pass
+
+class ProductValidationError(WorkflowError):
+    """Erreur spécifique à la validation produits"""
+    pass
+
+class MCPTimeoutError(WorkflowError):
+    """Erreur de timeout MCP"""
+    pass
+
+class DataAccessError(WorkflowError):
+    """Erreur d'accès aux données"""
+    pass
+
+# === ÉNUMÉRATIONS ET STRUCTURES ===
+class WorkflowState(Enum):
+    INITIAL = "initial"
+    CLIENT_VALIDATING = "client_validating"
+    PRODUCTS_VALIDATING = "products_validating"
+    QUOTE_GENERATING = "quote_generating"
+    COMPLETED = "completed"
+    ERROR = "error"
+
+@dataclass
+class WorkflowContext:
+    state: WorkflowState = WorkflowState.INITIAL
+    client_data: Optional[Dict] = None
+    products_data: List[Dict] = None
+    validation_pending: bool = False
+
+    def is_client_validated(self) -> bool:
+        return self.client_data is not None and self.state in [
+            WorkflowState.PRODUCTS_VALIDATING,
+            WorkflowState.QUOTE_GENERATING,
+            WorkflowState.COMPLETED
+        ]
+
 # Import conditionnel du validateur client
 try:
     from services.client_validator import ClientValidator
@@ -61,7 +193,7 @@ except ImportError as e:
 # Constante pour les statuts nécessitant une interaction utilisateur
 INTERACTION_STATUSES = {
     "user_interaction_required",
-    "client_validation_required", 
+    "client_validation_required",
     "product_selection_required",
     "user_validation_required",
     "requires_user_confirmation",
@@ -76,62 +208,116 @@ def trace_source(*, system: str, label: Optional[str] = None, marker_prefix: Opt
     - label: titre court pour 'details' (sinon le nom de la fonction sera utilisé)
     - marker_prefix: préfixe stable pour le marqueur (ex: "SAP_DEVIS", "SF_FIND_ACCOUNT")
     """
-    def _decorator(func: Callable[..., Awaitable[Any]]):
+    def decorator(func):
         @functools.wraps(func)
-        async def _wrapper(self, *args, **kwargs):
-            # 1) Avant l'appel, conserver quelques indices lisibles (selon convention des kwargs courants)
-            # Essaie d'extraire des informations utiles : action, query, endpoint, critères...
+        async def wrapper(self, *args, **kwargs):
+            start_time = time.time()
+            
+            # === (A) Pré-appel : collecte action/params + marker ===
             action = kwargs.get("action") or kwargs.get("mcp_action") or func.__name__
             params = kwargs.get("params") or kwargs.get("mcp_params") or {}
-            label_local = label or func.__name__
-            marker = self._gen_marker(system, marker_prefix or label_local)
-
-            # 2) Appel réel
+            label_local = (label or func.__name__)
+            marker = None
+            # Au début du wrapper, vérifier les prérequis
+            if not hasattr(self, 'task_id'):
+                logger.warning(f"Pas de task_id disponible pour {func.__name__}")
+            try:
+                if hasattr(self, '_gen_marker'):
+                    marker = self._gen_marker(system, (marker_prefix or label_local))
+            except Exception:
+                pass
+                
+            # === (B) Notification début opération ===
+            operation_msg = f"🔄 {label_local} en cours..."
+            try:
+                if hasattr(self, 'task_id') and self.task_id:
+                    await websocket_manager.send_task_update(self.task_id, {
+                        "type": "operation_status",
+                        "message": operation_msg,
+                        "system": system
+                    })
+            except Exception:
+                pass
+                
+            # === (C) Appel réel ===
             result = await func(self, *args, **kwargs)
-
-            # 3) Déterminer un détail résumé côté provenance
-            #    On tente de piocher des ID familiers: DocNum, Id, CardCode, ItemCode, etc.
+            
+            # === (D) Post-traitement : extraction détails provenance ===
             details_bits = []
-            # côté paramètres
+            
+            # Extraction depuis params
             for k in ("CardCode", "AccountId", "ItemCode", "query", "filter", "name", "endpoint"):
                 v = params.get(k)
                 if v:
                     details_bits.append(f"{k}={v}")
-            # côté résultat
-            # - Selon structure standard: dict ou liste de dicts
-            def _extract_from_obj(obj: Dict[str, Any]):
-                for k in ("DocNum", "DocEntry", "Id", "OpportunityId", "CardCode", "ItemCode", "DisplayName", "Name"):
+            
+            def extract_from_obj(obj):
+                """Fonction locale pour extraire les détails d'un objet"""
+                if not isinstance(obj, dict):
+                    return
+                for k in ("DocNum", "DocEntry", "Id", "OpportunityId", "CardCode", 
+                        "ItemCode", "DisplayName", "Name"):
                     if k in obj and obj[k]:
                         details_bits.append(f"{k}={obj[k]}")
-
-            if isinstance(result, dict):
-                _extract_from_obj(result)
-                # parfois payload dans 'data'/'result'
-                for subkey in ("data", "result"):
-                    sub = result.get(subkey)
-                    if isinstance(sub, dict):
-                        _extract_from_obj(sub)
-                    elif isinstance(sub, list) and sub and isinstance(sub[0], dict):
-                        _extract_from_obj(sub[0])
-            elif isinstance(result, list) and result and isinstance(result[0], dict):
-                _extract_from_obj(result[0])
-
+            
+            # Extraction depuis result
+            try:
+                if isinstance(result, dict):
+                    extract_from_obj(result)
+                    # Chercher dans les sous-objets
+                    for subkey in ("data", "result"):
+                        sub = result.get(subkey)
+                        if isinstance(sub, dict):
+                            extract_from_obj(sub)
+                        elif isinstance(sub, list) and sub and isinstance(sub[0], dict):
+                            extract_from_obj(sub[0])
+                elif isinstance(result, list) and result and isinstance(result[0], dict):
+                    extract_from_obj(result[0])
+            except Exception:
+                pass
+                
+            # Construction détails
             details_str = f"{label_local} | {action}"
             if details_bits:
-                details_str += " | " + ", ".join(details_bits[:6])
-
-            # 4) Enregistrement de la source
-            self._add_source(system=system, details=details_str, marker=marker)
-
-            # 5) Si la fonction a envie de réutiliser le marqueur (pour le message),
-            #    on l'injecte de manière non cassante: retour dict + _marker
+                # Limiter à 200 caractères max
+                joined = ", ".join(details_bits[:6])
+                if len(joined) > 150:
+                    joined = joined[:147] + "..."
+                details_str += " | " + joined
+            
+            # Enregistrement provenance
+            if marker and hasattr(self, '_add_source'):
+                try:
+                    self._add_source(system=system, details=details_str, marker=marker)
+                except Exception:
+                    pass
+            
+            # Injection trace dans le résultat
             if isinstance(result, dict):
-                result.setdefault("_trace", {})  # canal discret pour la suite
-                result["_trace"].setdefault("markers", {})
-                result["_trace"]["markers"][func.__name__] = marker
+                try:
+                    result.setdefault("_trace", {})
+                    result["_trace"].setdefault("markers", {})
+                    if marker:
+                        result["_trace"]["markers"][func.__name__] = marker
+                except Exception:
+                    pass
+            
+            # === (E) Notification fin opération ===
+            duration = time.time() - start_time
+            completion_msg = f"✅ {label_local} terminé ({duration:.1f}s)"
+            try:
+                if hasattr(self, 'task_id') and self.task_id:
+                    await websocket_manager.send_task_update(self.task_id, {
+                        "type": "operation_completed", 
+                        "message": completion_msg,
+                        "system": system,
+                        "duration": duration
+                    })
+            except Exception:
+                pass
+                
             return result
-        return _wrapper
-    return _decorator
+        return wrapper
 
 class DevisWorkflow:
     """Coordinateur du workflow de devis entre Claude, Salesforce et SAP - VERSION AVEC VALIDATEUR CLIENT"""
@@ -157,6 +343,21 @@ class DevisWorkflow:
         self.workflow_steps = []
         self.collected_sources: list[dict] = []
         self.collected_suggestions: list[str] = []
+
+        # === NOUVELLES STRUCTURES POUR ROBUSTESSE ===
+        # Contexte structuré pour suivre l'état fin/mi-parcours
+        self.workflow_context = WorkflowContext()
+        # Verrou pour protéger les recherches parallèles / accès concurrents
+        try:
+            self._search_lock = asyncio.Lock()
+        except Exception:
+            # En environnement sans boucle active, conserver un marqueur
+            self._search_lock = None
+        # Indicateur si la recherche parallèle a déjà été lancée pour éviter doublons
+        self._parallel_search_done = False
+        # Clés de contexte à nettoyer après finalisation (pour éviter fuite mémoire)
+        self._context_keys_to_cleanup = set()
+
         # Configuration mode production/démo
         self.demo_mode = not force_production
         if force_production:
@@ -206,6 +407,8 @@ class DevisWorkflow:
         # Initialiser WebSocket manager
         self.websocket_manager = websocket_manager
         logger.info("✅ Workflow initialisé avec cache et validation séquentielle")
+        self.mcp_connector = MCPConnector(self.cache_manager)
+        self.mcp_connector.set_current_task(self.task_id)  # Pour les notifications
 
     async def _initialize_cache(self):
         """Initialisation asynchrone du cache"""
@@ -233,18 +436,26 @@ class DevisWorkflow:
             
             # Notification WebSocket si disponible
             try:
-                asyncio.create_task(websocket_manager.broadcast_to_task(
-                    self.task_id,  # CORRECTION: Ajouter task_id explicite
-                    {
-                        "type": "progress_update",
-                        "task_id": self.task_id,  # CORRECTION: Inclure task_id dans le message
-                        "step_id": step_id,
-                        "progress": progress,
-                        "message": message
-                    }
-                ))
-            except Exception:
-                pass  # WebSocket optionnel
+                # Notification WebSocket granulaire pour les étapes longues
+                asyncio.create_task(
+                    websocket_manager.send_task_update(
+                        self.task_id,
+                        {
+                            "type": "step_progress",
+                            "task_id": self.task_id,
+                            "step_id": step_id,
+                            "progress": progress,
+                            "message": message,
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                            "detailed_status": f"Étape {step_id}: {progress}% - {message}"
+                        }
+                    )
+                )
+
+            except Exception as e:
+                # Ne pas faire échouer le workflow si le WebSocket est indisponible,
+                # mais logguer clairement l'incident pour faciliter le debugging.
+                logger.warning("⚠️ Envoi WebSocket step_progress échoué (non bloquant): %s", str(e), exc_info=True)
     
     def _track_step_complete(self, step_id: str, message: str = ""):
         """Termine une étape avec succès"""
@@ -338,6 +549,107 @@ class DevisWorkflow:
                 self.current_task.context = {}
             self.current_task.context.update(self.context)
             logger.info(f"💾 Contexte sauvegardé: {list(self.context.keys())}")
+
+    # === MÉTHODES UTILITAIRES POUR ROBUSTESSE ===
+
+    def _set_context_with_cleanup(self, key: str, value: Any, cleanup: bool = True):
+        """Ajoute au context avec marquage pour nettoyage"""
+        self.context[key] = value
+        if cleanup:
+            self._context_keys_to_cleanup.add(key)
+
+    def _cleanup_context(self):
+        """Nettoie le contexte des clés temporaires"""
+        for key in list(self._context_keys_to_cleanup):
+            try:
+                self.context.pop(key, None)
+            except Exception:
+                logger.debug(f"⚠️ Échec suppression clé contexte: {key}", exc_info=True)
+        self._context_keys_to_cleanup.clear()
+        logger.debug("🧹 Contexte nettoyé")
+
+    def _safe_get_client_data(self, client_data: Dict[str, Any], key: str, default: Any = None) -> Any:
+        """Accès sécurisé aux données client avec validation"""
+        if not isinstance(client_data, dict):
+            raise DataAccessError(f"client_data doit être un dict, reçu: {type(client_data)}")
+
+        value = client_data.get(key, default)
+        if value is None and key in ["company_name", "Name", "CardCode"]:
+            raise DataAccessError(f"Champ requis manquant: {key}")
+
+        return value
+
+    async def _safe_mcp_call(self, server: str, action: str, params: dict, timeout: int = 30) -> Dict[str, Any]:
+        """Appel MCP avec timeout et gestion d'erreurs"""
+        try:
+            return await asyncio.wait_for(
+                self.mcp_connector.call_mcp(server, action, params),
+                timeout=timeout
+            )
+        except asyncio.TimeoutError:
+            raise MCPTimeoutError(f"Timeout {timeout}s pour {server}:{action}", step=f"{server}_{action}")
+        except Exception as e:
+            # Normaliser les exceptions pour qu'elles soient gérées uniformément par le workflow
+            raise WorkflowError(f"Erreur MCP {server}:{action}: {e}", step=f"{server}_{action}", recoverable=False)
+
+    def _normalize_client_info(self, client_info: Any) -> Dict[str, Any]:
+        """Normalise et valide les informations client"""
+        if not client_info:
+            return {"data": {}, "found": False}
+
+        # Validation du type
+        if not isinstance(client_info, dict):
+            logger.error(f"client_info doit être un dict, reçu: {type(client_info)}")
+            return {"data": {}, "found": False}
+
+        # Validation des champs requis
+        normalized = {
+            "data": client_info.get("data", {}),
+            "found": bool(client_info.get("found", False))
+        }
+
+        # S'assurer que data est un dict
+        if not isinstance(normalized["data"], dict):
+            normalized["data"] = {}
+
+        return normalized
+
+    def _set_client_validated(self, client_data: Dict):
+        """Méthode centralisée pour valider un client"""
+        try:
+            self.workflow_context.client_data = client_data
+            self.workflow_context.state = WorkflowState.PRODUCTS_VALIDATING
+            logger.info(f"✅ Client validé: {client_data.get('Name', client_data.get('company_name', 'Unknown'))}")
+        except Exception as e:
+            logger.warning(f"⚠️ Échec mise à jour workflow_context client validé: {e}")
+
+    def _handle_workflow_error(self, error: Exception, step: str) -> Dict[str, Any]:
+        """Gestion centralisée des erreurs de workflow"""
+        try:
+            if isinstance(error, WorkflowError):
+                logger.error(f"❌ Erreur workflow dans {step}: {error}")
+                return self._build_error_response(
+                    error_title="Erreur Workflow",
+                    error_message=str(error),
+                    context={"step": getattr(error, "step", step), "recoverable": getattr(error, "recoverable", False)}
+                )
+            else:
+                logger.error(f"❌ Erreur inattendue dans {step}: {error}")
+                return self._build_error_response(
+                    error_title="Erreur Système",
+                    error_message=f"Erreur inattendue: {str(error)}",
+                    context={"step": step, "recoverable": False}
+                )
+        except Exception as e:
+            # En dernier recours, ne pas faire planter l'appelant
+            logger.exception(f"❌ Exception dans _handle_workflow_error: {e}")
+            return {
+                "success": False,
+                "status": "error",
+                "error": "Erreur interne gestion erreur",
+                "message": str(e),
+                "context": {"step": step}
+            }
         else:
             logger.warning("⚠️ Impossible de sauvegarder le contexte - pas de tâche courante")
     
@@ -2403,10 +2715,16 @@ class DevisWorkflow:
                 # Tenter la création automatique
                 if client_info and client_info.get("data"):
                     sap_creation_result = await self._create_sap_client_if_needed(client_info)
-                if sap_creation_result.get("success"):
-                    self.context["sap_client"] = {
-                        "data": sap_creation_result["client"],
-                        "created": True
+                # CORRECTION : Vérifier la structure avant l'accès
+                if sap_creation_result.get("success") and sap_creation_result.get("client"):
+                    sap_card_code = sap_creation_result["client"]["CardCode"]
+                    logger.info(f"✅ Client SAP créé/récupéré : {sap_card_code}")
+                else:
+                    logger.error(f"❌ Erreur création client SAP : {sap_creation_result.get('error', 'Structure invalide')}")
+                    return {
+                        "status": "error",
+                        "success": False,
+                        "error": f"Impossible de créer le client SAP : {sap_creation_result.get('error', 'Structure de retour invalide')}"
                     }
                 sap_card_code = sap_creation_result["client"]["CardCode"]
                 logger.info(f"✅ Client SAP créé automatiquement: {sap_card_code}")
@@ -5890,47 +6208,82 @@ class DevisWorkflow:
                         or selected_client_data.get("CardName")
                         or client_name
                     )
+                    
+                    # Tentative de mise en cache si possible
                     try:
-                        await self.cache_manager.cache_client(client_name, selected_client_data)
-                    except Exception as e:
-                        logger.warning(f"⚠️ Cache client échoué: {e}")
-                else:
-                    logger.warning("⚠️ selected_data manquant - utilisation nom par défaut")
+                        if getattr(self, "cache_manager", None) and selected_client_data:
+                            await self.cache_manager.cache_client(client_name, selected_client_data)
+                    except Exception:
+                        logger.exception("⚠️ Échec lors de la mise en cache du client")
 
-                # Mise à jour du contexte (unique source de vérité)
-                self.context["client_info"] = {"data": selected_client_data, "found": bool(selected_client_data)}
-                self.context["client_validated"] = True  # (dédupliqué)
+                    # Si pas de selected_client_data, loger et continuer avec le nom par défaut
+                    if not selected_client_data:
+                        logger.warning("⚠️ selected_data manquant - utilisation nom par défaut")
 
-                # Sauvegarder le contexte dans la tâche
-                self._save_context_to_task()
+                    # Mise à jour du contexte (unique source de vérité)
+                    safe_client_data = selected_client_data if isinstance(selected_client_data, dict) else {}
+                    self.context["client_info"] = {"data": safe_client_data, "found": bool(safe_client_data)}
+                    self.context["client_validated"] = True  # (dédupliqué)
 
-                # Persistance complémentaire
-                self.context["validated_client"] = selected_client_data
-                self.context["selected_client"] = selected_client_data
+                    # Sauvegarder le contexte dans la tâche
+                    try:
+                        self._save_context_to_task()
+                    except Exception:
+                        logger.exception("⚠️ Échec lors de la sauvegarde du contexte dans la tâche")
 
-                # Sauvegarder dans la tâche si disponible
-                if getattr(self, "current_task", None):
-                    if not hasattr(self.current_task, "context") or not isinstance(self.current_task.context, dict):
-                        self.current_task.context = {}
-                    self.current_task.context["client_info"] = {"data": selected_client_data, "found": bool(selected_client_data)}
-                    logger.info("✅ Client info sauvegardé dans la tâche")
+                    # Persistance complémentaire
+                    self.context["validated_client"] = safe_client_data
+                    self.context["selected_client"] = safe_client_data
 
-                # Affichage : protéger si selected_client_data est None
-                if isinstance(selected_client_data, dict):
-                    client_display_name = (
-                        selected_client_data.get("Name")
-                        or selected_client_data.get("CardName")
-                        or client_name
-                        or "Client sans nom"
-                    )
-                else:
-                    client_display_name = client_name or "Client sans nom"
-                # Récupérer original_extracted_info depuis le contexte ou interaction_data
-                original_extracted_info = context.get("workflow_context", {}).get("extracted_info", {})
-                if not original_extracted_info:
-                    original_extracted_info = context.get("original_context", {}).get("extracted_info", {})
-                if not original_extracted_info and hasattr(self, 'context'):
-                    original_extracted_info = self.context.get("extracted_info", {})
+                    # Sauvegarder dans la tâche si disponible
+                    if getattr(self, "current_task", None):
+                        if not hasattr(self.current_task, "context") or not isinstance(self.current_task.context, dict):
+                            self.current_task.context = {}
+                        self.current_task.context["client_info"] = {"data": safe_client_data, "found": bool(safe_client_data)}
+                        logger.info("✅ Client info sauvegardé dans la tâche")
+
+                    # Affichage : protéger si selected_client_data est None et normaliser clés possibles
+                    client_display_name = "Client sans nom"
+                    if isinstance(selected_client_data, dict):
+                        client_display_name = (
+                            selected_client_data.get("Name")
+                            or selected_client_data.get("name")
+                            or selected_client_data.get("CardName")
+                            or selected_client_data.get("cardName")
+                            or selected_client_data.get("displayName")
+                            or client_name
+                            or "Client sans nom"
+                        )
+                    else:
+                        client_display_name = client_name or "Client sans nom"
+
+                    # Récupérer original_extracted_info depuis plusieurs sources avec fallback
+                    original_extracted_info = {}
+                    try:
+                        # Priorité : context local (si défini)
+                        if isinstance(context, dict):
+                            original_extracted_info = context.get("workflow_context", {}).get("extracted_info", {}) or \
+                                                        context.get("original_context", {}).get("extracted_info", {}) or {}
+                        # Ensuite : self.context (workflow interne)
+                        if not original_extracted_info and hasattr(self, "context"):
+                            original_extracted_info = self.context.get("extracted_info", {}) or {}
+                        # Ensuite : current_task.context si disponible
+                        if not original_extracted_info and getattr(self, "current_task", None):
+                            task_ctx = getattr(self.current_task, "context", {}) or {}
+                            original_extracted_info = task_ctx.get("workflow_context", {}).get("extracted_info", {}) or \
+                                                        task_ctx.get("original_context", {}).get("extracted_info", {}) or {}
+                    except Exception:
+                        logger.exception("⚠️ Erreur lors de la récupération de original_extracted_info")
+                        original_extracted_info = {}
+
+                    # Fallback si toujours pas trouvé (log expliqué)
+                    if not original_extracted_info:
+                        original_extracted_info = {}
+                        logger.warning("⚠️ original_extracted_info vide - utilisation fallback")
+
+                    # Mettre à jour l'affichage et le contexte final
+                    self.context["selected_client_display"] = client_display_name
+                    logger.info(f"✅ Client sélectionné: {client_display_name}")
                     
                 # Fallback si toujours pas trouvé
                 if not original_extracted_info:
@@ -7921,8 +8274,19 @@ class DevisWorkflow:
                 selection_result = await self._propose_existing_clients_selection(client_name, comprehensive_search)
 
                 # Ajouter l'alerte variantes au résultat
+                # Notifier immédiatement les variantes détectées via WebSocket
                 if variants_warning:
-                    selection_result["variants_warning"] = variants_warning
+                    await websocket_manager.send_task_update(
+                        self.task_id,
+                        {
+                            "type": "client_variants_alert",
+                            "task_id": self.task_id,
+                            "alert": variants_warning,
+                            "requires_attention": True
+                        }
+                    )
+                    logger.warning(f"🚨 Alerte variantes envoyée : {variants_warning['title']}")
+
 
 
                 # Forcer l'interaction utilisateur si plusieurs options ou variantes possibles

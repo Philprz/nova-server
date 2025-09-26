@@ -168,61 +168,83 @@ Réponds UNIQUEMENT au format JSON suivant:
                     return client_name
         
         return ""
+    
+
     async def extract_quote_info(self, prompt: str) -> Dict[str, Any]:
         logger.debug(f"FONCTION extract_quote_info APPELÉE AVEC: {prompt}")
         logger.info(f"Extraction d'informations de devis à partir de: {prompt}")
 
-        try:
-            response_data = await self._call_claude(prompt)
-            claude_content = response_data.get("content", [{}])[0].get("text", "")
-            logger.info(f"CONTENU CLAUDE EXTRAIT: {claude_content}")
-            start_idx = claude_content.find("{")
-            end_idx = claude_content.rfind("}") + 1
-            if start_idx >= 0 and end_idx > start_idx:
-                json_str = claude_content[start_idx:end_idx]
-                logger.info(f"JSON EXTRAIT: {json_str}")
-                extracted_data = json.loads(json_str)
-                logger.info(f"EXTRACTION RÉUSSIE: {extracted_data}")
-                
-                # CORRECTION: Préserver le client détecté
-                action_type = extracted_data.get("action_type", "NON_DÉTECTÉ")
-                if action_type == "RECHERCHE_PRODUIT" and not extracted_data.get("client"):
-                    # Rechercher le client dans le prompt original
-                    client_match = self._extract_client_from_prompt(prompt)
-                    if client_match:
-                        extracted_data["client"] = client_match
-                        logger.info(f"CLIENT RÉCUPÉRÉ: {client_match}")
-                logger.info(f"TYPE D'ACTION DÉTECTÉ: {action_type}")
-                if action_type == "RECHERCHE_PRODUIT":
-                    search_criteria = extracted_data.get('search_criteria', {})
-                    logger.info(f"🔍 CRITÈRES DE RECHERCHE: {search_criteria}")
-                elif action_type == "DEVIS":
-                    client = extracted_data.get('client', 'Non spécifié')
-                    products = extracted_data.get('products', [])
-                    logger.info(f"CLIENT DEVIS: {client}")
-                    logger.info(f"PRODUITS DEVIS: {products}")
-                # CORRECTION: Détecter le client dans le prompt si manquant
-                if extracted_data.get("action_type") == "RECHERCHE_PRODUIT" and not extracted_data.get("client"):
-                    # Rechercher le client dans le prompt original
-                    client_match = self._extract_client_from_original_prompt(prompt)
-                    if client_match:
-                        extracted_data["client"] = client_match
-                        logger.info(f"🔧 CLIENT RÉCUPÉRÉ du prompt: {client_match}")
-                
-                return extracted_data
-            else:
-                logger.error("Impossible de trouver du JSON dans la réponse Claude")
-                return {"error": "Format de réponse invalide - pas de JSON trouvé"}
-        except Exception as e:
-            logger.error(f"❌ Claude failed after retries: {str(e)} – Falling back to OpenAI")
-            if not OPENAI_API_KEY:
-                raise ValueError("OPENAI_API_KEY not set – Cannot fallback")
-            openai_response = await self._call_openai(prompt)
+        def _strip_code_fences(txt: str) -> str:
+            t = txt.strip()
+            if t.startswith("```"):
+                # supprime ```lang\n ... \n```
+                t = t.split("```", 2)
+                if len(t) == 3:
+                    return t[1].split("\n", 1)[-1]
+            return txt
+
+        def _extract_json_from_text(txt: str) -> Dict[str, Any]:
+            """1) tente json direct ; 2) tente premier bloc { ... } ; sinon ValueError"""
+            raw = _strip_code_fences(txt)
+            # essai direct
             try:
-                return json.loads(openai_response)
-            except json.JSONDecodeError:
-                logger.error("❌ OpenAI response not valid JSON")
-                raise
+                return json.loads(raw)
+            except Exception:
+                pass
+            # essai bloc
+            start = raw.find("{")
+            end = raw.rfind("}") + 1
+            if start >= 0 and end > start:
+                return json.loads(raw[start:end])
+            raise ValueError("Aucun JSON détecté dans la réponse LLM")
+
+        try:
+            # 1) Appel principal (Claude)
+            response_data = await self._call_claude(prompt)
+            claude_text = (response_data.get("content") or [{}])[0].get("text", "") or ""
+            extracted: Dict[str, Any] = _extract_json_from_text(claude_text)
+            logger.info(f"EXTRACTION RÉUSSIE: {extracted}")
+
+        except Exception as e:
+            logger.error(f"❌ Claude échoué: {e} – fallback OpenAI")
+            if not OPENAI_API_KEY:
+                return {"error": f"Extraction impossible (fallback indisponible): {e}"}
+
+            # 2) Fallback OpenAI
+            try:
+                openai_payload = await self._call_openai(prompt)
+                openai_text = (
+                    (openai_payload.get("text") or "") or
+                    ((openai_payload.get("choices") or [{}])[0].get("message", {}) or {}).get("content", "") or
+                    ""
+                )
+                extracted = _extract_json_from_text(openai_text)
+                logger.info(f"EXTRACTION RÉUSSIE (fallback OpenAI): {extracted}")
+            except Exception as e2:
+                logger.error(f"❌ Fallback OpenAI échoué: {e2}")
+                return {"error": f"Format de réponse invalide – pas de JSON trouvé ({e2})"}
+
+        # 3) Normalisation & compléments
+        action = (extracted.get("action_type") or "").upper() or "AUTRE"
+        extracted["action_type"] = action
+
+        if action == "DEVIS":
+            if not extracted.get("client"):
+                inferred = (self._extract_client_from_prompt(prompt) or "").strip()
+                if inferred:
+                    extracted["client"] = inferred
+            extracted["products"] = extracted.get("products") or []
+
+        elif action == "RECHERCHE_PRODUIT":
+            if not extracted.get("client"):
+                inferred = (self._extract_client_from_prompt(prompt) or "").strip()
+                if inferred:
+                    extracted["client"] = inferred
+            extracted["search_criteria"] = extracted.get("search_criteria") or {}
+
+        # 4) Retour final
+        return extracted
+
     async def extract_product_search_criteria(self, product_name: str) -> Dict[str, Any]:
         """Extrait critères de recherche intelligents pour un produit"""
         

@@ -7,6 +7,7 @@ CORRECTION: Traitement approprié des réponses MCP
 import logging
 import asyncio
 from typing import List, Dict, Any
+from datetime import datetime
 from services.mcp_connector import MCPConnector
 
 logger = logging.getLogger(__name__)
@@ -41,9 +42,13 @@ class ClientLister:
             # CORRECTION: Vérifier d'abord si 'success' est False ou 'error' existe
             if result.get("success") is False or "error" in result:
                 error_msg = result.get("error", "Erreur inconnue")
+                # Gestion spécifique des erreurs d'authentification
+                if "INVALID_LOGIN" in str(error_msg) or "invalid_login" in str(error_msg).lower():
+                    logger.warning("⚠️ Authentification Salesforce échouée - Mode fallback SAP activé")
+                    return []
                 logger.error(f"❌ Erreur Salesforce explicite: {error_msg}")
                 return []
-            
+
             # CORRECTION: Vérifier 'records' au lieu de success
             if "records" in result:
                 clients = result["records"]
@@ -284,8 +289,11 @@ class ClientLister:
                 clients = result["value"]
                 # Filtrer les entrées vides ou invalides
                 clients = [c for c in clients if c and c.get('CardName') and c.get('CardName').strip()]
-                logger.info(f"✅ Recherche SAP: {len(clients)} résultats valides (après filtrage)")
-                return clients
+                if clients:
+                    logger.info(f"✅ Recherche SAP: {len(clients)} résultats valides (après filtrage)")
+                    return clients
+                else:
+                    logger.info(f"ℹ️ Recherche SAP: 0 résultats valides après filtrage pour {client_name}")
             # garde-fou si None ou type inattendu
             if result is None or not isinstance(result, (dict, list)):
                 logger.warning(f"⚠️ Résultat SAP invalide pour: {client_name}")
@@ -405,11 +413,18 @@ class ClientLister:
                         exact_results["salesforce"] + exact_results["sap"]
                     )
                     if variants_found:
+                        # Alerte plus visible et actionnable pour l'utilisateur
                         result["variants_warning"] = {
-                            "message": f"⚠️ D'autres clients similaires existent : {', '.join([v['Name'] or v.get('CardName', '') for v in variants_found])}",
+                            "type": "client_variants_detected",
+                            "priority": "high" if len(variants_found) > 2 else "medium",
+                            "title": f"⚠️ ATTENTION: {len(variants_found)} variantes détectées",
+                            "message": f"D'autres clients similaires à '{client_name}' existent. Vérifiez si vous cherchez :",
                             "variants": variants_found,
-                            "count": len(variants_found)
+                            "count": len(variants_found),
+                            "action_required": True,
+                            "suggestion": f"Précisez si vous cherchez '{client_name}' ou une de ses variantes (Groupe, filiale, etc.)"
                         }
+
                         logger.info(f"⚠️ {len(variants_found)} variantes détectées pour '{client_name}'")
                 except Exception as e:
                     logger.warning(f"⚠️ Erreur lors de la recherche de variantes : {e}")
@@ -421,10 +436,13 @@ class ClientLister:
             # On conserve les mêmes noms de variables et la même structure.
             TIMEOUT_S = 5
 
-            sf_task = asyncio.wait_for(self._search_salesforce_by_name(client_name), timeout=TIMEOUT_S)
-            sap_task = asyncio.wait_for(self._search_sap_by_name(client_name), timeout=TIMEOUT_S)
-
-            sf_clients, sap_clients = await asyncio.gather(sf_task, sap_task, return_exceptions=True)
+            try:
+                sf_task = asyncio.wait_for(self._search_salesforce_by_name(client_name), timeout=TIMEOUT_S)
+                sap_task = asyncio.wait_for(self._search_sap_by_name(client_name), timeout=TIMEOUT_S)
+                sf_clients, sap_clients = await asyncio.gather(sf_task, sap_task, return_exceptions=True)
+            except asyncio.TimeoutError:
+                logger.warning(f"⚠️ Timeout lors de la recherche de '{client_name}'")
+                sf_clients, sap_clients = [], []
 
             # Optionnel: borne douce pour éviter des payloads géants
             def _cap_list(lst, cap=500):
@@ -714,7 +732,7 @@ async def list_all_clients() -> Dict[str, Any]:
         "summary": summary,
         "salesforce_clients": salesforce_clients,
         "sap_clients": sap_clients,
-        "timestamp": logger.info("Liste générée")
+        "timestamp": datetime.now().isoformat()
     }
 
 async def find_client_everywhere(client_name: str) -> Dict[str, Any]:

@@ -29,8 +29,6 @@ try:
 except ImportError as e:
     logger.warning(f"Impossible d'importer get_llm_extractor: {e}")
     get_llm_extractor = None
-# Configuration du logging
-logger = logging.getLogger("mcp_connector")
 
 # === FONCTION UTILITAIRE POUR LES WORKFLOWS ===
 
@@ -54,24 +52,20 @@ async def call_mcp_with_progress(server_name: str, action: str, params: Dict[str
         from services.progress_tracker import progress_tracker
         current_task = getattr(progress_tracker, '_current_task', None)
 
+        connector = MCPConnector()
         if current_task and hasattr(current_task, 'update_step_progress'):
             # Démarrer la progression
             start_msg = message or f"Exécution {server_name}.{action}"
             current_task.update_step_progress(step_id, 10, start_msg)
-
-            result = await mcp_connector.call_mcp(server_name, action, params)
-
+            result = await connector.call_mcp(server_name, action, params)
             # Terminer la progression
             if "error" in result:
                 current_task.update_step_progress(step_id, 100, f"Erreur {action}")
             else:
                 success_msg = message.replace("🔄", "✅") if message else f"{action} terminé"
                 current_task.update_step_progress(step_id, 100, success_msg)
-
             return result
         else:
-            # Pas de tracking disponible, appel direct
-            connector = MCPConnector()
             return await connector.call_mcp(server_name, action, params)
 
     except Exception as e:
@@ -222,7 +216,9 @@ class MCPConnector:
     """
     
     def __init__(self):
-        """Initialisation du connecteur MCP"""
+        self._current_task_id = None  # Pour les notifications
+
+        
         # Cache manager
         self.cache_manager = RedisCacheManager() if RedisCacheManager else None
         
@@ -237,6 +233,7 @@ class MCPConnector:
         }
         
         logger.info("MCPConnector initialisé")
+    
     async def sap_login(self) -> Dict[str, Any]:
         """Méthode de connexion SAP publique - Correction pour l'erreur 'sap_login'"""
         try:
@@ -514,6 +511,8 @@ class MCPConnector:
 
         # --- Appel direct async avec possibilité de fallback ---
         use_fallback = False
+        # Note: Pas de notifications ici — méthode statique (pas d'accès à self/_current_task_id).
+
         try:
             direct_res = await asyncio.wait_for(
                 MCPConnector._execute_mcp_call(server_name, action, params),
