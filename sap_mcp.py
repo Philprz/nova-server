@@ -1210,6 +1210,46 @@ async def sap_search_quotes(client_name: str, date_from: str = None, limit: int 
     except Exception as e:
         log(f"❌ Erreur recherche devis: {str(e)}", "ERROR")
         return {"success": False, "error": str(e)}
+    
+@mcp.tool(name="sap_search_quotes_by_card_code")
+async def sap_search_quotes_by_card_code(card_code: str, date_from: str = None, limit: int = 10) -> dict:
+    """
+    Recherche les devis SAP par CardCode (plus précis que par nom)
+
+    Args:
+        card_code: CardCode exact du client
+        date_from: Date minimum (YYYY-MM-DD)
+        limit: Nombre maximum de résultats
+    """
+    try:
+        log(f"Recherche devis SAP par CardCode: {card_code}")
+
+        # Construire le filtre avec CardCode exact
+        filters = [f"CardCode eq '{card_code}'"]
+
+        if date_from:
+            filters.append(f"DocDate ge '{date_from}'")
+
+        filter_string = " and ".join(filters)
+
+        # Requête SAP
+        response = await call_sap(f"/Quotations?$filter={filter_string}&$top={limit}")
+
+        if "error" in response:
+            return {"success": False, "error": response["error"]}
+
+        quotes = response.get("value", [])
+
+        return {
+            "success": True,
+            "count": len(quotes),
+            "quotes": quotes,
+        }
+
+    except Exception as e:
+        log(f"❌ Erreur recherche devis par CardCode: {str(e)}", "ERROR")
+        return {"success": False, "error": str(e)}
+        
 @mcp.tool(name="sap_modify_quote")
 async def sap_modify_quote(doc_entry: int, modifications: dict) -> dict:
     """

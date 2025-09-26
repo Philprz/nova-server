@@ -138,6 +138,7 @@ class QuoteTask:
             ("sync_to_salesforce", "☁️ Synchronisation Salesforce"),
             ("save_to_sap", "💾 Enregistrement SAP"),
             ("sync_salesforce", "☁️ Synchronisation Salesforce"),
+            ("check_duplicates", "🔍 Vérification doublons"),  # ✅ AJOUT ICI
             ("quote_finalized", "✅ Devis finalisé")
         ]
     }

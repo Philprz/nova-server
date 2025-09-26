@@ -1704,7 +1704,7 @@
                 name: product.ItemName || product.label || product.name || 'Produit',
                 stock: product.OnHand || product.data?.OnHand || 0,
                 unit: product.SalesUnit || product.data?.SalesUnit || product.data?.UnitMsr || 'unité',
-                price: product.AvgPrice || product.data?.AvgPrice || product.data?.Price || 0
+                price: product.price || product.AvgPrice || product.data?.AvgPrice || product.data?.Price || 0
             };
             }
 
@@ -3926,68 +3926,6 @@
                     </div>
                     </div>
 
-                    <!-- Section Lignes de produits -->
-                    <div style="background: var(--bg-secondary); padding: 16px; border-radius: 8px; margin-bottom: 20px;">
-                        <h3 style="margin-bottom: 16px; color: #1f2937;">📦 Lignes de produits</h3>
-                        <div id="productLines">
-                            ${quote.lines.map((line, index) => `
-                                <div class="product-line" style="background: var(--bg-tertiary); padding: 12px; border-radius: 6px; margin-bottom: 12px;">
-                                    <input type="hidden" name="lines[${index}][line_num]" value="${line.line_num}">
-                                    <div style="display: grid; grid-template-columns: 2fr 3fr 1fr 1fr 1fr; gap: 12px; align-items: center;">
-                                        <input type="text" name="lines[${index}][item_code]" value="${line.item_code}" placeholder="Code produit" style="padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
-                                        <input type="text" name="lines[${index}][item_description]" value="${line.item_description}" placeholder="Description" style="padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
-                                        <input type="number" name="lines[${index}][quantity]" value="${line.quantity}" min="1" step="1" placeholder="Qté" style="padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
-                                        <input type="number" name="lines[${index}][unit_price]" value="${line.unit_price}" min="0" step="0.01" placeholder="Prix" style="padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
-                                        <input type="number" name="lines[${index}][discount_percent]" value="${line.discount_percent || 0}" min="0" max="100" step="0.1" placeholder="Remise %" style="padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
-                                    </div>
-                                </div>
-                            `).join('')}
-                        </div>
-                        <button type="button" onclick="addProductLine()" style="background: #059669; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-top: 12px;">
-                            ➕ Ajouter un produit
-                        </button>
-                    </div>
-
-                    <!-- Boutons d'action -->
-                    <div style="display: flex; justify-content: flex-end; gap: 12px;">
-                        <button type="button" onclick="closeQuoteEditor()" style="background: #6b7280; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer;">
-                            Annuler
-                        </button>
-                        <button type="button" onclick="saveQuoteChanges(this.form)" style="background: #10b981; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer;">
-                            💾 Enregistrer les modifications
-                        </button>
-                    </div>
-                </form>
-            `;
-        }
-
-        
-        function generateProductLineEditor(line, index) {
-            return `
-                <div class="product-line" data-line-index="${index}" style="display: grid; grid-template-columns: 2fr 1fr 1fr 1fr auto; gap: 12px; align-items: center; padding: 12px; border: 1px solid #e5e7eb; border-radius: 6px; margin-bottom: 8px;">
-                    <input type="text" name="lines[${index}][item_description]" value="${line.item_description}" placeholder="Description du produit" style="padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
-                    <input type="number" name="lines[${index}][quantity]" value="${line.quantity}" min="1" step="1" placeholder="Qté" style="padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
-                    <input type="number" name="lines[${index}][unit_price]" value="${line.unit_price}" min="0" step="0.01" placeholder="Prix" style="padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
-                    <input type="number" name="lines[${index}][discount_percent]" value="${line.discount_percent || 0}" min="0" max="100" step="0.01" placeholder="Remise%" style="padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
-                    <button type="button" onclick="removeProductLine(${index})" style="background: #dc2626; color: white; border: none; padding: 8px; border-radius: 4px; cursor: pointer;">🗑️</button>
-                    <input type="hidden" name="lines[${index}][line_num]" value="${line.line_num}">
-                    <input type="hidden" name="lines[${index}][item_code]" value="${line.item_code}">
-                </div>
-            `;
-        }
-        
-        function closeQuoteEditor() {
-            const modal = document.getElementById('quoteEditModal');
-            if (modal) {
-                modal.remove();
-            }
-        }
-
-        function addProductLine() {
-            const productLinesDiv = document.getElementById('productLines');
-            const lineCount = productLinesDiv.querySelectorAll('.product-line').length;
-
-            const newLine = document.createElement('div');
             newLine.className = 'product-line';
             newLine.style.cssText = 'background: var(--bg-tertiary); padding: 12px; border-radius: 6px; margin-bottom: 12px;';
 
@@ -4068,7 +4006,14 @@
                 const data = await response.json();
 
                 if (data.success && data.products && data.products.length > 0) {
-                    displayProductSearchResults(data.products, query);
+                    // Ensure each product has a unit_price field (default to 0) so downstream code using unit_price works as expected
+                    const productsWithPrice = data.products.map(p => {
+                        const unitPrice = (p.unit_price !== undefined && p.unit_price !== null)
+                            ? p.unit_price
+                            : (p.price !== undefined && p.price !== null ? p.price : 0);
+                        return Object.assign({}, p, { unit_price: unitPrice });
+                    });
+                    displayProductSearchResults(productsWithPrice, query);
                 } else {
                     displayNoProductResults(query);
                 }

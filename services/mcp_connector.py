@@ -233,6 +233,11 @@ class MCPConnector:
         }
         
         logger.info("MCPConnector initialisé")
+
+    def set_current_task(self, task_id: str) -> None:
+        """Définit l'ID de la tâche courante pour les notifications"""
+        self._current_task_id = task_id
+        logger.debug(f"Task ID défini: {task_id}")
     
     async def sap_login(self) -> Dict[str, Any]:
         """Méthode de connexion SAP publique - Correction pour l'erreur 'sap_login'"""
