@@ -3739,38 +3739,47 @@ class DevisWorkflow:
                 logger.warning("Aucun identifiant client pour vérification doublons")
                 return duplicate_check
 
+            # Normalise les identifiants prioritaires
+            client_code = sap_card_code or ""
+            primary_identifier = client_code or client_name
+            use_card_code = bool(client_code)
+
             logger.info(
                 f"🔍 Vérification doublons - Client: {client_name}, "
-                f"SF_ID: {salesforce_id}, SAP_Code: {sap_card_code}"
+                f"SF_ID: {salesforce_id}, SAP_Code: {client_code} | "
+                f"Priorité={'CardCode' if use_card_code else 'Nom'}={primary_identifier}"
             )
+
             # === 1) Devis SAP récents (60j ≈ 1440h) ===
             recent_quotes = await self._get_recent_sap_quotes(
-                client_identifier=client_code or client_name,
-                use_card_code=bool(client_code),
+                client_identifier=primary_identifier,
+                use_card_code=use_card_code,
                 hours=1440,
             )
 
             # === 2) Devis brouillons existants ===
             draft_quotes = await self._get_client_draft_quotes(
-                client_identifier=client_code or client_name,
-                use_card_code=bool(client_code),
+                client_identifier=primary_identifier,
+                use_card_code=use_card_code,
             )
 
             # === 3) Similarité produits ===
-            # ⚠️ Correction : _find_similar_product_quotes n'accepte pas use_card_code
             similar_quotes = await self._find_similar_product_quotes(
                 client_identifier=primary_identifier,
                 products=products
             )
-            
+            # Normalise pour éviter None
+            recent_quotes = recent_quotes or []
+            draft_quotes = draft_quotes or []
+            similar_quotes = similar_quotes or []
             # Populate results
             duplicate_check["recent_quotes"] = recent_quotes
-            duplicate_check["draft_quotes"] = draft_quotes  
+            duplicate_check["draft_quotes"] = draft_quotes
             duplicate_check["similar_quotes"] = similar_quotes
-            
+
             # Analyser les résultats
             total_findings = len(recent_quotes) + len(draft_quotes) + len(similar_quotes)
-            
+
             if total_findings > 0:
                 duplicate_check["duplicates_found"] = True
                 duplicate_check["has_duplicates"] = True   # ✅ Alignement avec workflow
@@ -3778,10 +3787,10 @@ class DevisWorkflow:
 
                 # Messages d'alerte
                 if recent_quotes:
-                    duplicate_check["warnings"].append(f"⚠️ {len(recent_quotes)} devis récent(s) trouvé(s) pour {client_name}")
+                    duplicate_check["warnings"].append(f"⚠️ {len(recent_quotes)} devis récent(s) trouvé(s) pour {client_name or client_code}")
 
                 if draft_quotes:
-                    duplicate_check["warnings"].append(f"📝 {len(draft_quotes)} devis en brouillon pour {client_name}")
+                    duplicate_check["warnings"].append(f"📝 {len(draft_quotes)} devis en brouillon pour {client_name or client_code}")
                     duplicate_check["suggestions"].append("💡 Considérez consolider avec les brouillons existants")
 
                 if similar_quotes:
@@ -3790,7 +3799,8 @@ class DevisWorkflow:
 
                 # Créer le message d'alerte personnalisé et demander décision utilisateur
                 if duplicate_check.get("duplicates_found"):
-                    alert_message = f"⚠️ ATTENTION: Devis existants détectés pour {client_name}"
+                    display_name = client_name or client_code or "client"
+                    alert_message = f"⚠️ ATTENTION: Devis existants détectés pour {display_name}"
 
                     if recent_quotes:
                         alert_message += f"\n📋 {len(recent_quotes)} devis récent(s) d'imprimantes"
@@ -3805,12 +3815,9 @@ class DevisWorkflow:
                     logger.warning(f"⚠️ {len(duplicate_check.get('warnings', []))} doublons détectés")
 
                     return duplicate_check
-            
             else:
                 duplicate_check["suggestions"].append("✅ Aucun doublon détecté - Création sécurisée")
-                
-            logger.info(f"Vérification doublons terminée: {total_findings} potentiel(s) doublon(s)")
-            return duplicate_check
+                duplicate_check["has_duplicates"] = False  # ✅ explicite
             
         except Exception as e:
             logger.exception(f"Erreur vérification doublons devis: {str(e)}")
@@ -3897,18 +3904,18 @@ class DevisWorkflow:
         except Exception as e:
             logger.warning(f"Erreur recherche brouillons client: {str(e)}")
             return []
-
-    async def _find_similar_product_quotes(self, client_name: str, requested_products: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        
+    # Aligner la signature sur l'appelant : client_identifier / products / use_card_code
+    async def _find_similar_product_quotes(self, client_identifier: str, products: List[Dict[str, Any]], use_card_code: bool = False) -> List[Dict[str, Any]]:
         """Trouve les devis avec des produits similaires"""
         try:
-            # Pour l'instant, implémentation simplifiée
-            # TODO: Logique avancée de comparaison produits
+            # Implémentation : recherche des devis récents du client (7 jours) puis comparaison des lignes
             
             # Extraire les codes et noms produits demandés pour comparaison
             requested_codes = set()
             requested_names = set()
 
-            for product in requested_products:
+            for product in products:
                 if product.get("code"):
                     requested_codes.add(product.get("code", "").upper())
                 if product.get("name"):
@@ -3916,10 +3923,14 @@ class DevisWorkflow:
                     name_keywords = product.get("name", "").lower().split()
                     requested_names.update(name_keywords)
 
-            logger.info(f"Recherche produits similaires pour {client_name}: codes={requested_codes}, mots-clés={requested_names}")
+            logger.info(f"Recherche produits similaires pour {client_identifier}: codes={requested_codes}, mots-clés={requested_names}")
 
-            # Rechercher dans les devis récents du client (ex: 7 jours)
-            recent_quotes = await self._get_recent_sap_quotes(client_name, hours=168)
+            # Rechercher dans les devis récents du client (ex: 7 jours) en respectant l'identifiant prioritaire
+            recent_quotes = await self._get_recent_sap_quotes(
+                client_identifier=client_identifier,
+                use_card_code=use_card_code,
+                hours=168
+            )
             similar_quotes = []
 
             for quote in recent_quotes:
