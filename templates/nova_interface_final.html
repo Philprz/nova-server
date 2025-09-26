@@ -3864,7 +3864,6 @@
         
         function generateQuoteEditForm(quoteData) {
             const quote = quoteData.quote;
-
             return `
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
                     <h2>Modification du devis ${quote.doc_num}</h2>
@@ -3872,10 +3871,8 @@
                         ✕ Fermer
                     </button>
                 </div>
-
                 <form id="quoteEditForm" onsubmit="return false;">
                     <input type="hidden" name="quote_id" value="${quote.doc_entry || quote.opportunity_id}">
-
                     <!-- Section Informations générales -->
                     <div style="background: var(--bg-secondary); padding: 16px; border-radius: 8px; margin-bottom: 20px;">
                         <h3 style="margin-bottom: 16px; color: #1f2937;">📝 Informations générales</h3>
@@ -3893,55 +3890,43 @@
                             <label style="display: block; margin-bottom: 4px; font-weight: 500;">Commentaires</label>
                             <textarea name="comments" rows="3" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">${quote.comments || ''}</textarea>
                         </div>
-                    <!-- Champ de recherche produit avec auto-complétion -->
-                    <div class="product-search-container" style="margin-top: 20px;">
-                        <label for="productSearch" style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">
-                            🔍 Recherche de produits
-                        </label>
-                        <div style="position: relative;">
-                            <input
-                                type="text"
-                                id="productSearch"
-                                placeholder="Tapez une référence ou description de produit"
-                                style="width: 100%; padding: 12px 16px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 16px;"
-                                autocomplete="off"
-                            >
-                            <div id="productSearchResults" class="search-results" style="
-                                display: none;
-                                position: absolute;
-                                top: 100%;
-                                left: 0;
-                                right: 0;
-                                background: var(--bg-tertiary);
-                                border: 1px solid #d1d5db;
-                                border-top: none;
-                                border-radius: 0 0 8px 8px;
-                                max-height: 300px;
-                                overflow-y: auto;
-                                z-index: 1000;
-                                box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-                            "></div>
+                        <!-- Champ de recherche produit avec auto-complétion -->
+                        <div class="product-search-container" style="margin-top: 20px;">
+                            <label for="productSearch" style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">
+                                🔍 Recherche de produits
+                            </label>
+                            <div style="position: relative;">
+                                <input
+                                    type="text"
+                                    id="productSearch"
+                                    placeholder="Tapez une référence ou description de produit"
+                                    style="width: 100%; padding: 12px 16px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 16px;"
+                                    autocomplete="off"
+                                >
+                                <div id="productSearchResults" class="search-results" style="
+                                    display: none;
+                                    position: absolute;
+                                    top: 100%;
+                                    left: 0;
+                                    right: 0;
+                                    background: var(--bg-tertiary);
+                                    border: 1px solid #d1d5db;
+                                    border-top: none;
+                                    border-radius: 0 0 8px 8px;
+                                    max-height: 300px;
+                                    overflow-y: auto;
+                                    z-index: 1000;
+                                    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+                                "></div>
+                            </div>
                         </div>
                     </div>
-                    </div>
-                    </div>
-
-            newLine.className = 'product-line';
-            newLine.style.cssText = 'background: var(--bg-tertiary); padding: 12px; border-radius: 6px; margin-bottom: 12px;';
-
-            newLine.innerHTML = `
-                <input type="hidden" name="lines[${lineCount}][line_num]" value="${lineCount}">
-                <div style="display: grid; grid-template-columns: 2fr 3fr 1fr 1fr 1fr; gap: 12px; align-items: center;">
-                    <input type="text" name="lines[${lineCount}][item_code]" placeholder="Code produit" style="padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
-                    <input type="text" name="lines[${lineCount}][item_description]" placeholder="Description" style="padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
-                    <input type="number" name="lines[${lineCount}][quantity]" value="1" min="1" step="1" placeholder="Qté" style="padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
-                    <input type="number" name="lines[${lineCount}][unit_price]" value="0" min="0" step="0.01" placeholder="Prix" style="padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
-                    <input type="number" name="lines[${lineCount}][discount_percent]" value="0" min="0" max="100" step="0.1" placeholder="Remise %" style="padding: 8px; border: 1px solid #d1d5db; border-radius: 4px;">
-                </div>
+                    <!-- Section pour les lignes de produits -->
+                    <div id="productLinesDiv" style="margin-top: 20px;"></div>
+                </form>
             `;
-
-            productLinesDiv.appendChild(newLine);
         }
+
 
         // Recherche produit en temps réel type Google
         let productSearchTimeout = null;
