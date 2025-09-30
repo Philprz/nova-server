@@ -1780,22 +1780,42 @@ class DevisWorkflow:
                     "step": "client_validation_failed"
                 }
             }
-        
+
         try:
             # === ÉTAPE 1: ENRICHISSEMENT ET VALIDATION DONNÉES ===
             logger.info(f"🔍 Étape 1: Enrichissement données pour {client_name}")
-            
+
             # Détecter le pays probable
             country = self._detect_country_from_name(client_name)
             logger.info(f"Pays détecté: {country}")
-            
+
+            # Préparer le flag d'avertissement sur variantes (sera passé ensuite si présent)
+            variants_warning = None
+
             # CONSERVÉ: Validation avec le validateur client
             validation_result = None
             if self.client_validator:
                 try:
                     logger.info("🔍 Validation via ClientValidator...")
                     validation_result = await self.client_validator.validate_and_enrich_client(client_name)
-                    logger.info(f"✅ Validation terminée: {validation_result.get('can_create', False)}")
+                    
+                    # Si le validateur renvoie un avertissement sur les variantes, le capturer
+                    # tout de suite afin qu'il puisse être transmis plus loin (ex: sélection de clients existants).
+                    if isinstance(validation_result, dict):
+                        warn = validation_result.get("variants_warning")
+                    if vwarn:
+                        variants_warning = vwarn
+                    # Si extracted_info est disponible, l'enregistrer pour qu'il soit inclus dans le contexte du workflow
+                    try:
+                        if isinstance(extracted_info, dict):
+                            extracted_info["variants_warning"] = variants_warning
+                    except Exception:
+                        # Ne pas faire échouer le flux pour une erreur d'enrichissement de contexte
+                        logger.debug("Impossible d'ajouter 'variants_warning' à extracted_info", exc_info=True)
+                        logger.info(f"✅ Validation terminée: {validation_result.get('can_create', False)}")
+                    # Récupérer un éventuel avertissement de variantes renvoyé par le validateur
+                    if isinstance(validation_result, dict):
+                        variants_warning = validation_result.get("variants_warning")
                 except Exception as e:
                     logger.warning(f"⚠️ Erreur validation client: {str(e)}")
                     validation_result = {"can_create": True, "warnings": [str(e)]}
@@ -1813,20 +1833,28 @@ class DevisWorkflow:
             
             # === ÉTAPE 2: VÉRIFICATION DOUBLONS ===
             logger.info("🔍 Étape 2: Vérification doublons avancée")
-            
+
             duplicate_check = {}
             try:
                 duplicate_check = await self._check_duplicates_enhanced(client_name, enrichment_data)
                 if duplicate_check.get("has_duplicates"):
                     logger.warning(f"⚠️ Doublons détectés: {duplicate_check.get('duplicate_count', 0)}")
-                    
+
                     # NOUVEAU: Gestion des doublons avec choix utilisateur
+                    # Proposer une sélection améliorée d'existants, en fournissant un éventuel
+                    # avertissement sur les variantes (variants_warning) si présent dans le résultat de vérif.
+                    proposed_selection = await self._propose_existing_clients_selection(
+                        client_name,
+                        duplicate_check,
+                        variants_warning=duplicate_check.get("variants_warning")
+                    )
                     return {
                         "client_created": False,
                         "status": "duplicates_found",
                         "duplicate_check": duplicate_check,
                         "enrichment_data": enrichment_data,
                         "validation_result": validation_result,
+                        "proposed_selection": proposed_selection,
                         "workflow_context": {
                             "task_id": self.task_id,
                             "extracted_info": extracted_info,
@@ -1837,21 +1865,22 @@ class DevisWorkflow:
                     }
             except Exception as e:
                 logger.warning(f"⚠️ Erreur vérification doublons: {str(e)}")
-            
+
             # === ÉTAPE 3: VALIDATION UTILISATEUR ===
             logger.info("🔍 Étape 3: Validation utilisateur")
-            
+
             # Demande validation utilisateur OBLIGATOIRE
             try:
                 validation_request = await self._request_user_validation_for_client_creation(
-                    client_name, 
+                    client_name,
                     {
                         "enrichment_data": enrichment_data,
                         "validation_result": validation_result,
-                        "duplicate_check": duplicate_check
+                        "duplicate_check": duplicate_check,
+                        "variants_warning": variants_warning
                     }
                 )
-                
+
                 # PLUS D'AUTO-APPROBATION - Toujours demander validation utilisateur
                 logger.warning("⚠️ BLOQUAGE: find_client_everywhere n'a trouvé AUCUN client existant")
                 validation_request["status"] = "requires_user_confirmation"
@@ -1873,7 +1902,7 @@ class DevisWorkflow:
                     "email": f"contact@{client_name.replace(' ', '').lower()}.com",
                     "phone": "+33 1 00 00 00 00" if country == "FR" else "+1 555 000 0000"
                 }
-                
+
                 # Fusionner avec les données enrichies
                 if enrichment_data:
                     client_data.update({
@@ -1884,14 +1913,19 @@ class DevisWorkflow:
                         "activity": enrichment_data.get("activity", {}),
                         "enriched": True
                     })
-                
+
+                # Inclure un éventuel avertissement de variantes dans les données client
+                # pour qu'il soit disponible pour les étapes suivantes (Salesforce / SAP)
+                if variants_warning is not None:
+                    client_data["variants_warning"] = variants_warning
+
                 # CONSERVÉ: Création dans Salesforce d'abord
                 logger.info("💾 Création Salesforce...")
                 sf_client = await self._create_salesforce_client_from_validation(client_data, validation_result or {})
-                
+
                 if sf_client.get("success"):
                     logger.info(f"✅ Client Salesforce créé: {sf_client.get('id')}")
-                    
+
                     # CONSERVÉ: Création dans SAP ensuite
                     logger.info("💾 Création SAP...")
                     sap_client = await self._create_sap_client_from_validation(client_data, sf_client)

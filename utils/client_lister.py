@@ -621,44 +621,53 @@ class ClientLister:
         
         return groups
     async def _check_client_variants(self, base_client_name: str, found_clients: List[Dict]) -> List[Dict]:
-        """Recherche des variantes du client (GROUP, filiales, etc.) pour alerte"""
+        """Recherche des variantes du client - VERSION OPTIMISÉE"""
         try:
             variants = []
-            base_name_lower = base_client_name.lower()
-            
-            # Définir les motifs de variantes à rechercher
-            variant_patterns = [
-                f"{base_client_name} GROUP", f"{base_client_name} GROUPE",
-                f"GROUP {base_client_name}", f"GROUPE {base_client_name}",
-                f"{base_client_name} SA", f"{base_client_name} SAS", f"{base_client_name} SARL",
-                f"{base_client_name} LTD", f"{base_client_name} CORP", f"{base_client_name} INC"
-            ]
-            
-            # Recherche dans Salesforce
-            for pattern in variant_patterns:
-                try:
-                    sf_variant_query = f"""
-                    SELECT Id, Name, AccountNumber 
-                    FROM Account 
-                    WHERE UPPER(Name) LIKE UPPER('%{pattern}%') AND UPPER(Name) != UPPER('{base_client_name}')
-                    LIMIT 3
-                    """
-                    sf_result = await self.mcp_connector.call_mcp("salesforce_mcp", "salesforce_query", {"query": sf_variant_query})
-                    if sf_result.get("records"):
-                        for record in sf_result["records"]:
-                            # Éviter les doublons avec les clients déjà trouvés
-                            if not any(found.get("Id") == record.get("Id") or found.get("Name") == record.get("Name") for found in found_clients):
-                                variants.append(record)
-                except Exception:
-                    continue
-                    
-            # Limiter à 5 variantes max pour l'alerte
-            return variants[:5]
-            
+            # UNE SEULE REQUÊTE INTELLIGENTE au lieu de 10 boucles
+            # Couvre: "Rondot Paris", "Societe Rondot", "Rondot-Lyon", etc.
+            sf_variant_query = f"""
+            SELECT Id, Name, AccountNumber
+            FROM Account
+            WHERE (
+                Name LIKE '{base_client_name} %'
+                OR Name LIKE '{base_client_name}-%'
+                OR Name LIKE '% {base_client_name}%'
+            ) AND Name != '{base_client_name}'
+            LIMIT 10
+            """
+
+            logger.info(f"🔍 Recherche variantes pour '{base_client_name}'")
+            sf_result = await self.mcp_connector.call_mcp(
+                "salesforce_mcp",
+                "salesforce_query",
+                {"query": sf_variant_query}
+            )
+
+            if sf_result.get("records"):
+                for record in sf_result["records"]:
+                    # Éviter doublons avec clients déjà trouvés
+                    if not any(
+                        found.get("Id") == record.get("Id") or
+                        found.get("Name") == record.get("Name")
+                        for found in found_clients
+                    ):
+                        variants.append(record)
+                        logger.info(f"✅ Variante détectée: {record.get('Name')}")
+
+            logger.info(f"📊 Total variantes trouvées: {len(variants)}")
+            return variants[:10]
+
         except Exception as e:
             logger.error(f"❌ Erreur recherche variantes: {e}")
             return []
+
     def _merge_similar_clients(self, clients: List[Dict]) -> List[Dict]:
+        """Fusionne les clients similaires après la déduplication par identifiant"""
+        if len(clients) <= 1:
+            return clients
+
+        similar_groups = self._find_similar_clients(clients)
         """Fusionne les clients similaires après la déduplication par identifiant"""
         if len(clients) <= 1:
             return clients
