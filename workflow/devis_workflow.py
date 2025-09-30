@@ -407,7 +407,7 @@ class DevisWorkflow:
         # Initialiser WebSocket manager
         self.websocket_manager = websocket_manager
         logger.info("✅ Workflow initialisé avec cache et validation séquentielle")
-        self.mcp_connector = MCPConnector(self.cache_manager)
+        # Configuration du connecteur MCP déjà initialisé
         self.mcp_connector.set_current_task(self.task_id)  # Pour les notifications
 
     async def _initialize_cache(self):
