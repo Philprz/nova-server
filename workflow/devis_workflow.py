@@ -6278,10 +6278,13 @@ class DevisWorkflow:
         """🔧 Gère la sélection de client par l'utilisateur avec continuation workflow"""
         try:
             action = user_input.get("action")
-
+            # ============================================================
+            # CAS : Sélection d’un client existant
+            # ============================================================
             if action == "select_existing":
                 # Initialisation des variables nécessaires
                 selected_client_data = user_input.get("selected_data")
+                
                 client_name = context.get("original_client_name", "")
 
                 # Récupérer le code SAP depuis selected_data
@@ -6426,13 +6429,33 @@ class DevisWorkflow:
                         original_context = client_validation.get("original_context", {}) or {}
                         original_products = (original_context.get("extracted_info", {}) or {}).get("products", []) or []
                         logger.info(f"🔍 Produits récupérés depuis validation_data de la tâche: {len(original_products)} produit(s)")
+                                # ------------------------------------------------------------
+                # CORRECTION CRITIQUE: préparer client_info_for_duplicates
+                # ------------------------------------------------------------
+                client_info_for_duplicates = self.context.get("client_info", {})
+                if not client_info_for_duplicates or not client_info_for_duplicates.get("data"):
+                    safe_client_data = selected_client_data if isinstance(selected_client_data, dict) else {}
+                    client_info_for_duplicates = {
+                        "data": safe_client_data,
+                        "found": bool(safe_client_data)
+                    }
+                    logger.info("🔄 client_info_for_duplicates construit depuis selected_client_data")
+                else:
+                    logger.info("✅ client_info_for_duplicates récupéré depuis contexte")
+
+                _cid = client_info_for_duplicates.get("data", {}) or {}
+                _cid["name"] = (_cid.get("name") or _cid.get("Name") or _cid.get("CardName") or "").strip()
+                _cid["sap_code"] = (_cid.get("sap_code") or "").strip()
+                _cid["sf_id"] = (_cid.get("sf_id") or _cid.get("Id") or "").strip()
+                client_info_for_duplicates["data"] = _cid
+                self.context["client_info"] = client_info_for_duplicates
 
                 # CORRECTION: Vérifier doublons APRÈS sélection client mais AVANT produits
                 logger.info("🔍 === DÉBUT VÉRIFICATION DOUBLONS APRÈS SÉLECTION CLIENT ===")
                 duplicate_check = await self._check_duplicate_quotes(
                     client_info=client_info_for_duplicates,
-                    products=products
-                    )
+                    products=original_products
+                )
                 self.context["duplicate_check"] = duplicate_check
                 self._track_step_complete("check_duplicates", "🔍 Vérification doublons terminée")
                 
