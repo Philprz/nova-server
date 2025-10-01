@@ -1456,6 +1456,8 @@
                 sap_code: raw?.CardCode || raw?.sap_code || raw?.code || '',
                 sf_id: raw?.Id || raw?.sf_id || '',
                 id: raw?.Id || raw?.CardCode || raw?.id || '',
+                source: raw?.source || raw?.display_detail || 'Unknown',
+                details: raw?.details || {},
                 index,
                 raw
             }));
@@ -1472,11 +1474,36 @@
                 const btn = document.createElement('button');
                 btn.className = 'client-selection-button';
                 btn.type = 'button';
-                btn.textContent = `${norm.name}${norm.sap_code ? ' • ' + norm.sap_code : ''}`;
+
+                // Construction des détails à afficher
+                const detailsLines = [];
+
+                if (norm.sf_id) detailsLines.push(`SF: ${norm.sf_id.substring(0, 8)}...`);
+                if (norm.sap_code) detailsLines.push(`SAP: ${norm.sap_code}`);
+                if (norm.details?.address && norm.details.address !== 'N/A' && norm.details.address !== '') {
+                    detailsLines.push(`📍 ${norm.details.address}`);
+                }
+                if (norm.details?.industry && norm.details.industry !== 'N/A') {
+                    detailsLines.push(`🏢 ${norm.details.industry}`);
+                }
+                if (norm.details?.phone) {
+                    detailsLines.push(`📞 ${norm.details.phone}`);
+                }
+
+                // Affichage avec structure HTML complète
+                btn.innerHTML = `
+                    <div class="client-header">
+                        <strong>${esc(norm.name)}</strong>
+                        <span class="client-source">${esc(norm.source)}</span>
+                    </div>
+                    ${detailsLines.length > 0 ? `<div class="client-details">${detailsLines.join(' • ')}</div>` : ''}
+                `;
+
                 btn.addEventListener('click', () => onSelect(norm, index, createdButtons));
                 createdButtons.push(btn);
                 selectionDiv.appendChild(btn);
             });
+
 
             // Option: créer un nouveau client
             const newBtn = document.createElement('button');
