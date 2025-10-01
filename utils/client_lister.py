@@ -426,6 +426,14 @@ class ClientLister:
                         }
 
                         logger.info(f"⚠️ {len(variants_found)} variantes détectées pour '{client_name}'")
+
+                        # CORRECTION: Ajouter les variantes aux clients dédupliqués
+                        if variants_found:
+                            for variant in variants_found:
+                                variant['source'] = variant.get('source', 'Salesforce')
+                                result["deduplicated_clients"].append(variant)
+                            result["total_found"] = len(result["deduplicated_clients"])
+                            logger.info(f"✅ {len(variants_found)} variante(s) ajoutée(s) aux options de sélection")
                 except Exception as e:
                     logger.warning(f"⚠️ Erreur lors de la recherche de variantes : {e}")
 
