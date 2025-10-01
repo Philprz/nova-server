@@ -573,6 +573,18 @@ class ClientLister:
                 unique_clients.append({**sap_client, 'source': 'SAP'})
         
         # Après la déduplication par identifiant, déduplication par nom similaire
+        for client in unique_clients:
+            if not client.get('source'):
+                if client.get('Id'):  # Champ Salesforce
+                    if client.get('CardCode'):
+                        client['source'] = 'SAP & Salesforce'
+                    else:
+                        client['source'] = 'Salesforce'
+                elif client.get('CardCode'):  # Seulement SAP
+                    client['source'] = 'SAP'
+                else:
+                    client['source'] = 'Unknown'
+
         unique_clients = self._merge_similar_clients(unique_clients)
         
         return unique_clients
@@ -708,7 +720,20 @@ class ClientLister:
                 if score > best_score:
                     best_score = score
                     best_client = client
-            
+
+                # Garantir que le champ source est toujours présent
+                if best_client and not best_client.get('source'):
+                    # Détecter la source en fonction des champs présents
+                    if best_client.get('Id'):  # Champ Salesforce
+                        if best_client.get('CardCode'):  # A aussi un CardCode
+                            best_client['source'] = 'SAP & Salesforce'
+                        else:
+                            best_client['source'] = 'Salesforce'
+                    elif best_client.get('CardCode'):  # Seulement SAP
+                        best_client['source'] = 'SAP'
+                    else:
+                        best_client['source'] = 'Unknown'
+
             if best_client:
                 result.append(best_client)
             

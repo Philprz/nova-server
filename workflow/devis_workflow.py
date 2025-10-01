@@ -15,7 +15,7 @@ import uuid
 import time
 from enum import Enum
 from dataclasses import dataclass
-from typing import Optional, Callable, Awaitable, Any, Dict, List
+from typing import Optional, Callable, Awaitable, Any, Dict, List, Set
 from fastapi import APIRouter, HTTPException
 
 # Classes d'erreurs spécialisées
@@ -7845,19 +7845,31 @@ class DevisWorkflow:
             all_sf_clients = search_results.get("salesforce", {}).get("clients", []) or []
             all_sap_clients = search_results.get("sap", {}).get("clients", []) or []
 
-            # [ADD] Mapping SAP par nom pour détection croisée
-            sap_by_name: Dict[str, Dict[str, Any]] = {}
-            for sap_c in all_sap_clients:
-                if sap_c and sap_c.get("CardName"):
-                    sap_by_name[(sap_c["CardName"] or "").lower().strip()] = sap_c
             # 1) Priorité aux clients dédupliqués si présents
             if deduplicated_clients:
                 logger.info("✅ Utilisation des clients dédupliqués")
+                
                 for client in deduplicated_clients:
                     if not client:
                         continue
-                    source = (client.get("source") or "Unknown").strip()
-                    source_raw = source.lower().replace(" & ", "_").replace(" ", "_")
+                    # Déterminer la source avec logique de fallback robuste
+                    source = client.get("source")
+                    if not source or source.strip() == "":
+                        # Reconstruction de la source à partir des champs disponibles
+                        if client.get("Id"):  # Salesforce ID présent
+                            if client.get("CardCode"):  #  SAP CardCode
+                                source = "SAP & Salesforce"
+                            else:
+                                source = "Salesforce"
+                        elif client.get("CardCode"):  # Seulement SAP
+                            source = "SAP"
+                        else:
+                            source = "Unknown"
+                            logger.warning(f"⚠️ Client sans source identifiable: {client.get('Name') or client.get('CardName')}")
+                    else:
+                        source = source.strip()
+                    # Normalisation demandée (sans underscores)
+                    source_raw = source.lower().replace(" & ", "").replace(" ", "")                    
                     client_options.append({
                         "id": option_id,
                         "name": client.get("Name") or client.get("CardName", "Client sans nom"),
