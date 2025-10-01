@@ -7810,11 +7810,23 @@ class DevisWorkflow:
             option_id = 1
             client_options: List[Dict[str, Any]] = []
 
+            # utilitaire local
+            def _norm_name(v: Optional[str]) -> str:
+                if not v:
+                    return ""
+                v = v.lower().strip()
+                return " ".join(v.split())
+
             # Sources
             deduplicated_clients = search_results.get("deduplicated_clients", []) or []
             all_sf_clients = search_results.get("salesforce", {}).get("clients", []) or []
             all_sap_clients = search_results.get("sap", {}).get("clients", []) or []
 
+            # [ADD] Mapping SAP par nom pour détection croisée
+            sap_by_name: Dict[str, Dict[str, Any]] = {}
+            for sap_c in all_sap_clients:
+                if sap_c and sap_c.get("CardName"):
+                    sap_by_name[(sap_c["CardName"] or "").lower().strip()] = sap_c
             # 1) Priorité aux clients dédupliqués si présents
             if deduplicated_clients:
                 logger.info("✅ Utilisation des clients dédupliqués")
@@ -7835,7 +7847,6 @@ class DevisWorkflow:
                     })
                     option_id += 1
                 logger.info(f"✅ {len(client_options)} options préparées (dédupliquées)")
-                # Si des clients dédupliqués existent, ne pas traiter séparément SF et SAP
                 return await self._finalize_client_selection(client_name, client_options)
             else:
                 logger.info("⚠️ Pas de déduplication disponible - traitement individuel")
@@ -7844,18 +7855,28 @@ class DevisWorkflow:
 
             # 2) Auto-sélection si un seul client au total
             total_clients = len(all_sf_clients) + len(all_sap_clients)
-            # Vérifier si c'est vraiment un client unique ou si la déduplication a masqué des différences
-            if len(all_sf_clients) + len(all_sap_clients) > 1:
-                logger.warning(f"⚠️ Déduplication suspecte : {len(all_sf_clients)} SF + {len(all_sap_clients)} SAP réduits à 1 client")
-                # Forcer l'affichage des options pour les cas ambigus
-                if any("group" in (client.get("Name") or client.get("CardName", "")).lower() 
-                       for client in all_sf_clients + all_sap_clients):
+            if total_clients > 1:
+                logger.warning(f"ℹ️ Plusieurs clients trouvés ({len(all_sf_clients)} SF + {len(all_sap_clients)} SAP) – pas d’auto-sélection")
+                if any("group" in _norm_name(c.get("Name") or c.get("CardName", "")) for c in (all_sf_clients + all_sap_clients)):
                     logger.info("🔍 Clients avec 'Group' détectés - Affichage forcé des options")
-                    # Continuer vers la sélection manuelle au lieu de l'auto-sélection
                 else:
-                    single_client = all_sf_clients[0] if all_sf_clients else all_sap_clients[0]
+                    single_client = all_sf_clients[0] if all_sf_clients else all_sap_clients[0]  # conservé pour cohérence
             else:
-                single_client = all_sf_clients[0] if all_sf_clients else all_sap_clients[0]
+                single_client = all_sf_clients[0] if all_sf_clients else (all_sap_clients[0] if all_sap_clients else None)
+                if single_client is None:
+                    logger.info("ℹ️ Aucun client trouvé dans SF/SAP")
+                    return {
+                        "status": "no_client_found",
+                        "requires_user_selection": False,
+                        "validation_pending": False,
+                        "task_id": self.task_id,
+                        "message": "Aucun client trouvé pour la requête",
+                        "client_options": [],
+                        "total_options": 0,
+                        "original_client_name": client_name,
+                        "allow_create_new": True
+                    }
+
                 client_display_name = single_client.get("Name") or single_client.get("CardName", "Client sans nom")
                 logger.info(f"✅ Auto-sélection client unique: {client_display_name}")
 
@@ -7868,7 +7889,6 @@ class DevisWorkflow:
                         "client_validated": True,
                         "selected_client_display": client_display_name
                     })
-                    # NOUVEAU: Sauvegarder le contexte dans la tâche
                     self._save_context_to_task()
 
                 # Produits pour continuation
@@ -7903,56 +7923,138 @@ class DevisWorkflow:
                 else:
                     return self._build_product_request_response(client_display_name)
 
-            # 3) Construire options SF
+            # ========= CORR #1 : mapping SAP par nom =========
+            sap_by_name: Dict[str, Dict[str, Any]] = {}
+            try:
+                for sap_c in all_sap_clients:
+                    if not sap_c:
+                        continue
+                    cn = _norm_name(sap_c.get("CardName"))
+                    if cn:
+                        sap_by_name[cn] = sap_c
+                logger.info(f"🔗 Mapping SAP par nom prêt ({len(sap_by_name)} entrées)")
+            except Exception as map_err:
+                logger.warning(f"⚠️ Échec construction mapping SAP par nom: {map_err}")
+
+            matched_cardcodes: Set[str] = set()  # pour éviter doublons SAP si fusion SF+SAP
+            # ================================================
+
+            # 3) Construire options SF (fusion SF & SAP si match)
             for sf_client in all_sf_clients:
                 if not sf_client:
                     continue
+
+                # Normalisation robuste (préserve l'intention d'origine)
+                sf_name_display = sf_client.get("Name", f"Client SF {option_id}")
+                sf_name_key = _norm_name(sf_client.get("Name"))
+
+                # Détection SAP croisée via mapping pré-construit (sap_by_name) sur clé normalisée
+                matching_sap = sap_by_name.get(sf_name_key)
+
+                if matching_sap:
+                    source = "SAP & Salesforce"
+                    sap_code = matching_sap.get("CardCode", "")
+                    matched_cardcodes.add(sap_code or "")
+                else:
+                    source = "Salesforce"
+                    sap_code = ""
+
+                # Détails via formatter centralisé, en lui donnant un contexte unifié
+                # (on injecte CardCode et un fallback phone si utile)
+                merged_ctx = dict(sf_client)
+                if sap_code:
+                    merged_ctx["CardCode"] = sap_code
+                    # Optionnel: fournir un fallback téléphone si le formatter ne le fait pas
+                    if not merged_ctx.get("Phone"):
+                        merged_ctx["Phone"] = (matching_sap.get("Phone1") or matching_sap.get("Phone2") or merged_ctx.get("Phone"))
+
+                details = self._format_client_details(merged_ctx, source) if hasattr(self, "_format_client_details") else {
+                    "sf_id": sf_client.get("Id", ""),
+                    "sap_code": sap_code,
+                    "phone": sf_client.get("Phone") or (matching_sap.get("Phone1") if matching_sap else None),
+                    "address": (f"{sf_client.get('BillingStreet', '')}, {sf_client.get('BillingCity', '')}".strip(", ").strip() or "N/A"),
+                    "city": sf_client.get("BillingCity"),
+                    "postal_code": sf_client.get("BillingPostalCode"),
+                    "country": sf_client.get("BillingCountry"),
+                    "siret": sf_client.get("Sic"),
+                    "industry": sf_client.get("Industry", "N/A"),
+                }
+
+                # Garantir les flags de traçabilité (au cas où le formatter ne les ajoute pas)
+                if isinstance(details, dict):
+                    details.setdefault("sap_detected", bool(matching_sap))
+                    details.setdefault("sap_match_name", matching_sap.get("CardName") if matching_sap else None)
+                    details.setdefault("sf_id", sf_client.get("Id", ""))
+                    details.setdefault("sap_code", sap_code)
+
                 client_options.append({
                     "id": option_id,
-                    "name": sf_client.get("Name", f"Client SF {option_id}"),
-                    "source": "Salesforce",
-                    "source_raw": "salesforce",
-                    "display_detail": "Client Salesforce",
+                    "name": sf_name_display,
+                    "source": source,
+                    "source_raw": source.lower().replace(" & ", "_").replace(" ", "_"),  # snake_case stable: "sap_salesforce"
+                    "display_detail": f"Client {source}",
                     "sf_id": sf_client.get("Id", ""),
-                    "sap_code": "",
-                    "details": {
-                        "sf_id": sf_client.get("Id", ""),
-                        "sap_code": "",
-                        "phone": sf_client.get("Phone"),
-                        "address": f"{sf_client.get('BillingStreet', '')}, {sf_client.get('BillingCity', '')}".strip(", "),
-                        "city": sf_client.get("BillingCity"),
-                        "postal_code": sf_client.get("BillingPostalCode"),
-                        "country": sf_client.get("BillingCountry"),
-                        "siret": sf_client.get("Sic"),
-                        "industry": sf_client.get("Industry", "N/A")
-                    }
+                    "sap_code": sap_code,
+                    "details": details,
                 })
                 option_id += 1
 
-            # 4) Construire options SAP
+
+            # 4) Construire options SAP (éviter doublons déjà ajoutés via SF et fusions)
+            # Prépare un set O(1) des noms déjà présents (normalisés) pour la perf
+            existing_norm_names = {
+                _norm_name((opt.get("name") or ""))
+                for opt in client_options
+            }
+
             for sap_client in all_sap_clients:
                 if not sap_client:
                     continue
+
+                sap_name_raw = sap_client.get("CardName") or ""
+                sap_name_norm = _norm_name(sap_name_raw)
+
+                # Skip si déjà représenté via SF / fusion (par nom normalisé)
+                if sap_name_norm and sap_name_norm in existing_norm_names:
+                    continue
+
+                sap_code = sap_client.get("CardCode", "") or ""
+
+                # Skip si déjà représenté par carte fusionnée SAP & Salesforce (guard code-based)
+                if sap_code and sap_code in matched_cardcodes:
+                    continue
+
+                # Détails : privilégier le formatter centralisé s’il existe, sinon fallback inline cohérent
+                try:
+                    details = self._format_client_details(sap_client, "SAP")
+                except Exception:
+                    details = {
+                        "sf_id": "",
+                        "sap_code": sap_code,
+                        "phone": sap_client.get("Phone1") or None,
+                        "address": sap_client.get("BillToStreet") or "N/A",
+                        "city": sap_client.get("City") or None,
+                        "postal_code": sap_client.get("ZipCode") if "ZipCode" in sap_client else None,
+                        "country": sap_client.get("Country") if "Country" in sap_client else None,
+                        "siret": sap_client.get("FederalTaxID") or None,
+                        "industry": sap_client.get("Industry") or "N/A",
+                    }
+
                 client_options.append({
                     "id": option_id,
-                    "name": sap_client.get("CardName", f"Client SAP {option_id}"),
+                    "name": sap_name_raw or f"Client SAP {option_id}",
                     "source": "SAP",
                     "source_raw": "sap",
                     "display_detail": "Client SAP",
                     "sf_id": "",
-                    "sap_code": sap_client.get("CardCode", ""),
-                    "details": {
-                        "sf_id": "",
-                        "sap_code": sap_client.get("CardCode", ""),
-                        "phone": sap_client.get("Phone1"),
-                        "address": sap_client.get("BillToStreet", "N/A"),
-                        "city": sap_client.get("City"),
-                        "postal_code": sap_client.get("ZipCode") if "ZipCode" in sap_client else None,
-                        "country": sap_client.get("Country") if "Country" in sap_client else None,
-                        "siret": sap_client.get("FederalTaxID"),
-                        "industry": "N/A"
-                    }
+                    "sap_code": sap_code,
+                    "details": details,
                 })
+
+                # Maintient les structures de contrôle de doublons à jour
+                if sap_name_norm:
+                    existing_norm_names.add(sap_name_norm)
+
                 option_id += 1
 
             # 5) Dé-duplication finale par (sf_id, sap_code, name, source_raw)
@@ -7970,9 +8072,9 @@ class DevisWorkflow:
 
             # 6) Debug contexte (sécurisé)
             try:
-                import json  # local import pour éviter dépendance globale
+                import json
                 logger.info(f"🔍 DEBUG: self.context = {json.dumps(self.context, indent=2, default=str)}")
-            except Exception as _:
+            except Exception:
                 logger.info("🔍 DEBUG: contexte non sérialisable")
 
             # 7) Produits du contexte
@@ -7988,7 +8090,7 @@ class DevisWorkflow:
                 logger.error(f"❌ Erreur lors de l'extraction des produits: {e}")
                 products_list = []
 
-            # 8) Validation utilisateur (garde si current_task absent)
+            # 8) Validation utilisateur
             validation_data = {
                 "options": client_options,
                 "clients": client_options,

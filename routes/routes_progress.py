@@ -4,7 +4,8 @@ Routes API pour le suivi de progression des générations de devis
 À intégrer dans main.py avec : app.include_router(progress_router, prefix="/progress", tags=["progress"])
 """
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from services.websocket_manager import websocket_manager
 from services.progress_tracker import progress_tracker, TaskStatus
@@ -442,7 +443,27 @@ async def handle_client_selection_task(task_id: str, response_data: dict):
             task.fail(f"Erreur sélection client: {str(e)}")
         except Exception:
             pass
-
+@router.post("/assistant/interaction/{task_id}/client_selection_fallback")
+async def handle_client_selection_fallback(task_id: str, request: Request):
+    """
+    Endpoint HTTP fallback pour recevoir la sélection client si WebSocket déconnecté
+    """
+    try:
+        data = await request.json()
+        logger.info(f"🔄 Fallback HTTP - Sélection client pour {task_id}: {data}")
+        # Utiliser la même logique que le WebSocket
+        from routes.routes_progress import handle_client_selection_task
+        await handle_client_selection_task(task_id, data)
+        
+        return JSONResponse({
+            "success": True,
+            "message": "Sélection traitée avec succès"
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ Erreur fallback sélection client: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    
 async def handle_product_selection_task(task_id: str, response_data: Dict[str, Any]):
     """Traite la sélection produit par l'utilisateur (amélioré, même structure)."""
     try:

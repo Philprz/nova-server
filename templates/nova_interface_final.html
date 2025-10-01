@@ -1535,30 +1535,49 @@
                 type: "user_response",
                 task_id: typeof currentTaskId !== 'undefined' ? currentTaskId : null,
                 data: {
-                response_type: "client_selection",
-                action: "select_existing",
-                selected_index: index,
-                selected_data: {
-                    name: normClient.name,
-                    sap_code: normClient.sap_code,
-                    sf_id: normClient.sf_id,
-                    id: normClient.id
-                }
+                    response_type: "client_selection",
+                    action: "select_existing",
+                    selected_index: index,
+                    selected_data: {
+                        name: normClient.name,
+                        sap_code: normClient.sap_code,
+                        sf_id: normClient.sf_id,
+                        id: normClient.id
+                    }
                 }
             };
 
+            // ✅ Essayer WebSocket d'abord, puis fallback HTTP ou local
             if (websocket && websocket.readyState === WebSocket.OPEN) {
                 sendWebSocketMessage(payload);
             } else {
-                console.error("❌ WebSocket non connecté, fallback local");
-                if (typeof continueWithSelectedClient === 'function') {
-                // Fallback gracieux avec les infos normalisées
-                continueWithSelectedClient(normClient);
-                } else {
-                addMessage("❌ Connexion perdue. Rechargez la page.", 'system');
-                }
+                console.warn("⚠️ WebSocket déconnecté, utilisation du fallback HTTP");
+
+                fetch(`/api/assistant/interaction/${currentTaskId}/client_selection_fallback`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload.data)
+                })
+                .then(response => response.json())
+                .then(data => {
+                    console.log("✅ Sélection envoyée via HTTP:", data);
+                    addMessage('Votre sélection a été enregistrée. Traitement en cours…', 'system');
+                    showProgress();
+                })
+                .catch(error => {
+                    console.error("❌ Erreur HTTP fallback:", error);
+
+                    // Fallback local si la requête échoue
+                    if (typeof continueWithSelectedClient === 'function') {
+                        console.warn("➡️ Fallback local via continueWithSelectedClient()");
+                        continueWithSelectedClient(normClient);
+                    } else {
+                        addMessage("❌ Erreur lors de l'envoi de la sélection. Rechargez la page.", 'system');
+                    }
+                });
             }
-            }
+        }
+
 
         // Fonction alternative si addClientSelection n'existe pas
         function handleClientSelection(clients, originalClientName) {
