@@ -6471,7 +6471,14 @@ class DevisWorkflow:
                         duplicate_interaction = {
                             "type": "duplicate_quotes_decision",
                             "interaction_type": "duplicate_quotes_decision", 
-                            "duplicates_found": duplicate_check.get("duplicates", []),
+                            "duplicates_found": [
+                                *duplicate_check.get("recent_quotes", []),
+                                *duplicate_check.get("draft_quotes", []),
+                                *duplicate_check.get("similar_quotes", [])
+                            ],
+                            "recent_quotes": duplicate_check.get("recent_quotes", []),
+                            "draft_quotes": duplicate_check.get("draft_quotes", []),
+                            "similar_quotes": duplicate_check.get("similar_quotes", []),
                             "message": f"Devis en cours trouvés pour ce client - Reprendre ou créer un nouveau ?",
                             "options": [
                                 {"id": "resume", "label": "Reprendre un devis existant"},
@@ -7446,7 +7453,14 @@ class DevisWorkflow:
                     duplicate_interaction = {
                         "type": "duplicate_quotes_decision",
                         "interaction_type": "duplicate_quotes_decision",
-                        "duplicates_found": duplicate_check.get("duplicates", []),
+                        "duplicates_found": [
+                            *duplicate_check.get("recent_quotes", []),
+                            *duplicate_check.get("draft_quotes", []),
+                            *duplicate_check.get("similar_quotes", [])
+                        ],
+                        "recent_quotes": duplicate_check.get("recent_quotes", []),
+                        "draft_quotes": duplicate_check.get("draft_quotes", []),
+                        "similar_quotes": duplicate_check.get("similar_quotes", []),
                         "client_name": client_name,
                         "message": "Devis en cours trouvés - Reprendre ou créer nouveau ?",
                         "options": [
@@ -8775,7 +8789,19 @@ class DevisWorkflow:
     async def _handle_potential_duplicates(self, duplicate_check: Dict, client_name: str) -> Dict[str, Any]:
         """Gère les doublons potentiels détectés"""
         
-        duplicates = duplicate_check.get("duplicates", [])
+        # Détection automatique du type de duplicate_check et construction robuste
+        duplicates = []
+
+        if duplicate_check.get("duplicates"):
+            # Type 1 : Doublons CLIENTS (_check_duplicates_enhanced)
+            duplicates = duplicate_check.get("duplicates", [])
+        elif duplicate_check.get("recent_quotes") or duplicate_check.get("draft_quotes") or duplicate_check.get("similar_quotes"):
+            # Type 2 : Doublons DEVIS (_check_duplicate_quotes)
+            duplicates = [
+                *duplicate_check.get("recent_quotes", []),
+                *duplicate_check.get("draft_quotes", []),
+                *duplicate_check.get("similar_quotes", [])
+            ]
         
         return {
             "status": "user_interaction_required",
