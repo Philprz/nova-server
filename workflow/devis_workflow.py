@@ -3856,6 +3856,7 @@ class DevisWorkflow:
         except Exception as e:
             logger.exception(f"Erreur vérification doublons devis: {str(e)}")
             duplicate_check["warnings"].append(f"❌ Erreur vérification doublons: {str(e)}")
+            duplicate_check["has_duplicates"] = False
             return duplicate_check
 
     async def _get_recent_sap_quotes(
@@ -3913,7 +3914,7 @@ class DevisWorkflow:
         try:
             
             # Récupérer tous les brouillons
-            draft_result = await sap_list_draft_quotes()
+            draft_result = await MCPConnector.call_sap_mcp("sap_list_draft_quotes", {})
             
             if not draft_result.get("success"):
                 return []
@@ -6458,7 +6459,9 @@ class DevisWorkflow:
                 )
                 self.context["duplicate_check"] = duplicate_check
                 self._track_step_complete("check_duplicates", "🔍 Vérification doublons terminée")
-                
+                # Protection contre None
+                if not duplicate_check:
+                    duplicate_check = {"has_duplicates": False, "requires_user_decision": False}
                 # CORRECTION: Vérifier les doublons AVANT la sélection produit
                 if duplicate_check.get("has_duplicates") and duplicate_check.get("requires_user_decision"):
                     logger.warning("⚠️ Devis en cours trouvés - interaction utilisateur requise")
@@ -6568,7 +6571,15 @@ class DevisWorkflow:
                         return await self._continue_workflow_after_client_selection(
                             selected_client_data, {"extracted_info": {"products": original_products}}
                         )
-
+                # CONTINUER LE WORKFLOW : Recherche et sélection de produits
+                if not duplicate_check or not duplicate_check.get("has_duplicates"):
+                    # Continuer vers l'étape suivante : sélection des produits
+                    if original_products:
+                        logger.info(f"➡️ Continuation vers la sélection de produits: {len(original_products)} produits")
+                        return await self._continue_workflow_after_client_selection(
+                            selected_client_data, 
+                            {"extracted_info": {"products": original_products}}
+                        )
                 return self._build_error_response("Workflow incomplet", "Produits manquants pour continuer")
 
             elif action == "create_new":
@@ -6586,7 +6597,16 @@ class DevisWorkflow:
         except Exception as e:
             logger.exception(f"Erreur _handle_client_selection: {e}")
             return self._build_error_response("Erreur sélection client", str(e))
-
+    async def _handle_not_implemented_action(self, action_type: str, context: Dict) -> Dict[str, Any]:
+        """Gère les actions non encore implémentées"""
+        logger.info(f"⚠️ Action non implémentée demandée: {action_type}")
+        return {
+            "success": False,
+            "status": "not_implemented",
+            "message": "Je n'ai pas encore cette fonction développée. Aussi je vous invite à solliciter nos équipes pour expliquer votre besoin.",
+            "action_requested": action_type,
+            "context": context
+        }
     async def _handle_new_client_creation(self, client_name: str, workflow_context: Dict) -> Dict:
         """
         🔧 CRÉATION CLIENT PUIS CONTINUATION WORKFLOW
