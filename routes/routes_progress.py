@@ -422,11 +422,42 @@ async def handle_client_selection_task(task_id: str, response_data: dict):
                 # CORRECTION CRITIQUE: Sauvegarder le contexte dans la tâche pour persistance
                 task.context = workflow.context.copy()
                 logger.info(f"✅ Contexte client sauvegardé dans la tâche : {list(task.context.keys())}")
-            await workflow.continue_after_user_input(user_input, context)
+            # === CONTINUATION ===
+            continuation_result = await workflow.continue_after_user_input(user_input, context) or {}
+            status = continuation_result.get("status", "success")
+            success = continuation_result.get("success", status in ("success", "completed"))
 
-        else:
-            logger.error(f"❌ Action non reconnue: {action}")
-            return
+            # Tous les statuts qui impliquent encore une interaction côté UI
+            INTERACTION_STATUSES = {
+                "user_interaction_required",
+                "client_creation_required",      # ← important: c'est celui réellement renvoyé par tes handlers
+                "client_validation_required",    # ← tu peux garder les deux si certains chemins renvoient ce libellé
+                "product_selection_required",
+                "user_validation_required",
+                "requires_user_confirmation",
+                "requires_user_selection",
+                "quantity_modification",
+                "quote_selection",
+                "consolidation_in_progress",
+                "redirect_to_management",
+                "cancelled",
+            }
+
+            # 1) Encore une interaction requise → NE PAS compléter la tâche
+            if status in INTERACTION_STATUSES:
+                logger.info(f"⏸️ Interaction en attente: {status} (type={continuation_result.get('interaction_type')})")
+                return continuation_result
+
+            # 2) Erreur → échouer proprement la tâche mais ne pas masquer l'erreur au front
+            if status == "error" or (success is False):
+                logger.error(f"❌ Erreur workflow: {continuation_result.get('error') or continuation_result.get('message')}")
+                try:
+                    task.fail(continuation_result.get('error', 'Erreur inconnue'))
+                except Exception:
+                    pass
+                return continuation_result
+
+            # 3) Sinon (succès), on laissera la suite du handler marquer comme complété
 
         # 6) Marquer l'interaction comme complétée (+ éventuel statut)
         task.complete_user_validation("client_selection", response_data)
