@@ -6494,6 +6494,7 @@ class DevisWorkflow:
                         "success": True,
                         "status": "user_interaction_required",
                         "type": "duplicate_quotes_decision",
+                        "interaction_type": "duplicate_quotes_decision",
                         "message": "Devis en cours trouvés - décision utilisateur requise",
                         "task_id": self.task_id,
                         "interaction_data": duplicate_interaction
@@ -6544,6 +6545,7 @@ class DevisWorkflow:
                             "success": True,
                             "status": "user_interaction_required", 
                             "type": "duplicate_resolution",
+                            "interaction_type": "duplicate_resolution",
                             "message": duplicate_check.get("alert_message"),
                             "task_id": self.task_id,
                             "interaction_data": duplicate_interaction_data
@@ -7475,6 +7477,7 @@ class DevisWorkflow:
                         "success": True,
                         "status": "user_interaction_required",
                         "type": "duplicate_quotes_decision",
+                        "interaction_type": "duplicate_quotes_decision",
                         "message": "Devis en cours - décision requise",
                         "task_id": self.task_id
                     }
@@ -7535,6 +7538,7 @@ class DevisWorkflow:
                     "success": True,
                     "status": "user_interaction_required",
                     "type": "duplicate_resolution",
+                    "interaction_type": "duplicate_resolution",
                     "message": duplicate_check.get("alert_message"),
                     "task_id": self.task_id,
                     "interaction_data": duplicate_interaction_data
