@@ -200,7 +200,7 @@ async def edit_quote_page(quote_id: str):
                 html_content = html_content + f"<script>window.EDIT_QUOTE_ID = '{quote_id}';</script>"
         else:
             html_content = replaced
-        return HTMLResponse(content=html_content, media_type="text/html")
+        return HTMLResponse(content=html_content, media_type="text/html; charset=utf-8")
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Interface non trouvée")
 
@@ -216,7 +216,7 @@ async def itspirit_interface():
     """Sert l'interface IT Spirit personnalisée"""
     try:
         with open('templates/nova_interface_final.html', 'r', encoding='utf-8') as f: 
-            return HTMLResponse(content=f.read())
+            return HTMLResponse(content=f.read(, media_type="text/html; charset=utf-8"))
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Interface IT Spirit non trouvée")
 
