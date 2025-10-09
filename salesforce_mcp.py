@@ -13,6 +13,10 @@ from typing import Optional, List, Dict, Any
 import traceback
 import argparse
 import logging
+from dotenv import load_dotenv
+
+# Charger les variables d'environnement DÈS LE DÉBUT
+load_dotenv(override=True)
 
 # Configuration sécurisée pour Windows
 if sys.platform == "win32":

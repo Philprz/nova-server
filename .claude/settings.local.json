@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python:*)",
+      "Bash(findstr:*)",
+      "Bash(psql:*)",
+      "Bash(redis-cli:*)",
+      "Bash(tasklist)",
+      "Bash(where redis-server)",
+      "Bash(sc query:*)",
+      "Bash(sc qc:*)",
+      "Bash(timeout:*)",
+      "Bash(pip install:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
