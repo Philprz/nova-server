@@ -9,11 +9,11 @@ import asyncio
 from datetime import datetime
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.responses import JSONResponse, HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from routes.routes_intelligent_assistant import router as assistant_router
-from routes.routes_clients import router as clients_router  
+from routes.routes_clients import router as clients_router
 from routes.routes_devis import router as devis_router
 from routes.routes_progress import router as progress_router
 from routes.routes_client_listing import router as client_listing_router
@@ -138,6 +138,71 @@ async def websocket_assistant_endpoint(websocket: WebSocket, task_id: str):
     from routes.routes_intelligent_assistant import websocket_endpoint
     await websocket_endpoint(websocket, task_id)
 app.include_router(routes_quote_details.router)
+
+@app.get("/api/assistant/prompt", response_class=PlainTextResponse)
+async def get_assistant_prompt():
+    """Renvoie le prompt système de l'assistant"""
+    try:
+        # Extraire le prompt de llm_extractor.py
+        from services.llm_extractor import LLMExtractor
+        # On prend une instance pour accéder au prompt, même si ce n'est pas idéal
+        # L'idéal serait de stocker le prompt dans un fichier de config
+        # ou de le définir comme une constante de module.
+        # Pour l'instant, on va extraire le system_prompt de la méthode `extract_quote_info`
+        import inspect
+        prompt_text = inspect.getsource(LLMExtractor.extract_quote_info)
+
+        # Simple parsing pour extraire le system_prompt. C'est fragile.
+        try:
+            start_str = 'system_prompt = """'
+            end_str = '"""'
+            start_index = prompt_text.find(start_str) + len(start_str)
+            end_index = prompt_text.find(end_str, start_index)
+            prompt = prompt_text[start_index:end_index].strip()
+            return PlainTextResponse(content=prompt)
+        except Exception:
+             # Fallback avec le texte fourni si l'extraction échoue
+            fallback_prompt = """Tu es NOVA, un assistant commercial intelligent qui comprend différents types de demandes.
+
+            Analyse la demande utilisateur et détermine le TYPE D'ACTION puis extrais les informations :
+
+            TYPES D'ACTIONS POSSIBLES :
+            1. "DEVIS" - Génération de devis/proposition commerciale
+            2. "RECHERCHE_PRODUIT" - Recherche de produits par caractéristiques
+            3. "INFO_CLIENT" - Consultation d'informations client
+            4. "CONSULTATION_STOCK" - Vérification de stock
+            5. "AUTRE" - Autre demande
+
+            Pour une demande de DEVIS, extrais :
+            - Nom du client
+            - Liste des produits avec codes/références, noms et quantités
+            Format JSON requis:
+            {
+            "products": [{"code": "CODE_PRODUIT", "name": "NOM_PRODUIT", "quantity": QUANTITÉ}]
+            }
+            Pour une RECHERCHE_PRODUIT, extrais :
+            - Caractéristiques recherchées (vitesse, type, fonctionnalités...)
+            - Catégorie de produit (imprimante, ordinateur, etc.)
+            - Critères spécifiques (recto-verso, réseau, laser, etc.)
+
+            Réponds UNIQUEMENT au format JSON suivant:
+            {
+            "action_type": "DEVIS|RECHERCHE_PRODUIT|INFO_CLIENT|CONSULTATION_STOCK|AUTRE",
+            "client": "NOM_DU_CLIENT (si pertinent)",
+            "products": [{"code": "CODE_PRODUIT", "quantity": QUANTITÉ}] (pour DEVIS),
+            "search_criteria": {
+            "category": "TYPE_PRODUIT",
+            "characteristics": ["caractéristique1", "caractéristique2"],
+            "specifications": {"vitesse": "50 ppm", "type": "laser", "fonctions": ["recto-verso", "réseau"]}
+            } (pour RECHERCHE_PRODUIT),
+            "query_details": "détails spécifiques de la demande"
+            }
+            """
+            return PlainTextResponse(content=fallback_prompt)
+
+    except Exception as e:
+        logger.error(f"Erreur lors de la récupération du prompt: {e}")
+        raise HTTPException(status_code=500, detail="Impossible de récupérer le prompt de l'assistant")
 
 # Route pour edit-quote manquante
 @app.get("/edit-quote/{quote_id}")

@@ -89,42 +89,42 @@ Réponds UNIQUEMENT au format JSON suivant:
         logger.info("🔄 Switch to OpenAI fallback – Claude unavailable")
         # Prompt adapté pour OpenAI (copié de ton system_prompt Claude, mais en format messages)
         system_prompt = """
-Tu es NOVA, un assistant commercial intelligent qui comprend différents types de demandes.
+            Tu es NOVA, un assistant commercial intelligent qui comprend différents types de demandes.
 
-Analyse la demande utilisateur et détermine le TYPE D'ACTION puis extrais les informations :
+            Analyse la demande utilisateur et détermine le TYPE D'ACTION puis extrais les informations :
 
-TYPES D'ACTIONS POSSIBLES :
-1. "DEVIS" - Génération de devis/proposition commerciale
-2. "RECHERCHE_PRODUIT" - Recherche de produits par caractéristiques
-3. "INFO_CLIENT" - Consultation d'informations client
-4. "CONSULTATION_STOCK" - Vérification de stock
-5. "AUTRE" - Autre demande
+            TYPES D'ACTIONS POSSIBLES :
+            1. "DEVIS" - Génération de devis/proposition commerciale
+            2. "RECHERCHE_PRODUIT" - Recherche de produits par caractéristiques
+            3. "INFO_CLIENT" - Consultation d'informations client
+            4. "CONSULTATION_STOCK" - Vérification de stock
+            5. "AUTRE" - Autre demande
 
-Pour une demande de DEVIS, extrais :
-- Nom du client
-- Liste des produits avec codes/références, noms et quantités
-Format JSON requis:
-{
-"products": [{"code": "CODE_PRODUIT", "name": "NOM_PRODUIT", "quantity": QUANTITÉ}]
-}
-Pour une RECHERCHE_PRODUIT, extrais :
-- Caractéristiques recherchées (vitesse, type, fonctionnalités...)
-- Catégorie de produit (imprimante, ordinateur, etc.)
-- Critères spécifiques (recto-verso, réseau, laser, etc.)
+            Pour une demande de DEVIS, extrais :
+            - Nom du client
+            - Liste des produits avec codes/références, noms et quantités
+            Format JSON requis:
+            {
+            "products": [{"code": "CODE_PRODUIT", "name": "NOM_PRODUIT", "quantity": QUANTITÉ}]
+            }
+            Pour une RECHERCHE_PRODUIT, extrais :
+            - Caractéristiques recherchées (vitesse, type, fonctionnalités...)
+            - Catégorie de produit (imprimante, ordinateur, etc.)
+            - Critères spécifiques (recto-verso, réseau, laser, etc.)
 
-Réponds UNIQUEMENT au format JSON suivant:
-{
-"action_type": "DEVIS|RECHERCHE_PRODUIT|INFO_CLIENT|CONSULTATION_STOCK|AUTRE",
-"client": "NOM_DU_CLIENT (si pertinent)",
-"products": [{"code": "CODE_PRODUIT", "quantity": QUANTITÉ}] (pour DEVIS),
-"search_criteria": {
-"category": "TYPE_PRODUIT",
-"characteristics": ["caractéristique1", "caractéristique2"],
-"specifications": {"vitesse": "50 ppm", "type": "laser", "fonctions": ["recto-verso", "réseau"]}
-} (pour RECHERCHE_PRODUIT),
-"query_details": "détails spécifiques de la demande"
-}
-"""
+            Réponds UNIQUEMENT au format JSON suivant:
+            {
+            "action_type": "DEVIS|RECHERCHE_PRODUIT|INFO_CLIENT|CONSULTATION_STOCK|AUTRE",
+            "client": "NOM_DU_CLIENT (si pertinent)",
+            "products": [{"code": "CODE_PRODUIT", "quantity": QUANTITÉ}] (pour DEVIS),
+            "search_criteria": {
+            "category": "TYPE_PRODUIT",
+            "characteristics": ["caractéristique1", "caractéristique2"],
+            "specifications": {"vitesse": "50 ppm", "type": "laser", "fonctions": ["recto-verso", "réseau"]}
+            } (pour RECHERCHE_PRODUIT),
+            "query_details": "détails spécifiques de la demande"
+            }
+            """
 
         user_message = f"Voici la demande de devis à analyser: {message}"
 
@@ -343,7 +343,55 @@ Réponds UNIQUEMENT au format JSON suivant:
             logger.error(f"Erreur extraction client: {e}")
             return {"success": False, "error": str(e)}
 
-
+    async def extract_with_claude(self, text: str) -> Dict[str, Any]:
+        """
+        Méthode de compatibilité pour LocalProductSearchService
+        Utilise extract_quote_info en interne et adapte le format
+        """
+        try:
+            logger.info(f"extract_with_claude appelée avec: {text}")
+            
+            # Réutiliser la logique existante
+            result = await self.extract_quote_info(text)
+            
+            # Adapter le format pour LocalProductSearchService
+            if result.get("action_type") == "RECHERCHE_PRODUIT":
+                search_criteria = result.get("search_criteria", {})
+                return {
+                    "found": True,
+                    "products": [],  # Sera rempli par la recherche PostgreSQL
+                    "search_criteria": search_criteria,
+                    "category": search_criteria.get("category", ""),
+                    "characteristics": search_criteria.get("characteristics", []),
+                    "client": result.get("client", ""),
+                    "confidence": 85.0
+                }
+            elif result.get("action_type") == "DEVIS":
+                products = result.get("products", [])
+                return {
+                    "found": len(products) > 0,
+                    "products": products,
+                    "client": result.get("client", ""),
+                    "action_type": "DEVIS",
+                    "confidence": 90.0
+                }
+            else:
+                # Fallback pour autres types
+                return {
+                    "found": False,
+                    "products": [],
+                    "reason": f"Action type '{result.get('action_type')}' non supportée pour recherche produit",
+                    "confidence": 0.0
+                }
+                
+        except Exception as e:
+            logger.error(f"Erreur extract_with_claude: {str(e)}")
+            return {
+                "found": False,
+                "products": [],
+                "error": str(e),
+                "confidence": 0.0
+            }    
     async def extract_quote_request(self, text_input: str) -> Dict[str, Any]:
         """
         Méthode de compatibilité - utilise extract_quote_info en interne
