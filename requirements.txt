@@ -23,3 +23,15 @@ starlette>=0.37.2
 anyio>=4.5.0
 mcp>=1.13.0
 fastmcp>=0.1.2
+
+# MFA/2FA Dependencies
+pyotp==2.9.0
+qrcode[pil]==7.4.2
+bcrypt==4.1.2
+phonenumbers==9.0.16
+passlib[bcrypt]==1.7.4
+python-jose[cryptography]==3.3.0
+ovh==1.1.0
+twilio==8.11.0
+redis==5.0.1
+Pillow==10.1.0

@@ -165,6 +165,10 @@ app.include_router(progress_router, prefix="/progress", tags=["Suivi tâches"])
 app.include_router(client_listing_router, prefix="/api/clients", tags=["Client Listing"])
 app.include_router(websocket_router, tags=["WebSocket"])
 
+# Routes MFA/2FA
+from routes.mfa import router as mfa_router
+app.include_router(mfa_router, prefix="/api", tags=["MFA/2FA"])
+
 # Route WebSocket pour l'assistant intelligent manquante
 @app.websocket("/ws/assistant/{task_id}")
 async def websocket_assistant_endpoint(websocket: WebSocket, task_id: str):

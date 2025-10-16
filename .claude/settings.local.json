@@ -10,7 +10,9 @@
       "Bash(sc query:*)",
       "Bash(sc qc:*)",
       "Bash(timeout:*)",
-      "Bash(pip install:*)"
+      "Bash(pip install:*)",
+      "Bash(dir:*)",
+      "Bash(.venv/Scripts/python.exe:*)"
     ],
     "deny": [],
     "ask": []
