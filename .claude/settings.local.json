@@ -12,7 +12,12 @@
       "Bash(timeout:*)",
       "Bash(pip install:*)",
       "Bash(dir:*)",
-      "Bash(.venv/Scripts/python.exe:*)"
+      "Bash(.venv/Scripts/python.exe:*)",
+      "Bash(find:*)",
+      "Bash(curl:*)",
+      "Bash(del .\\nul)",
+      "Bash(Remove-Item .\\nul -Force)",
+      "Bash(rm:*)"
     ],
     "deny": [],
     "ask": []

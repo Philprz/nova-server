@@ -1923,23 +1923,30 @@
                 }
                 break;
                 }
-                case "duplicate_resolution": {
-                    // Afficher d'abord les devis existants s'il y en a
-                    try {
-                        if ((data.recent_quotes?.length > 0) || (data.draft_quotes?.length > 0)) {
-                            if (typeof displayExistingQuotesInChat === "function") {
-                                displayExistingQuotesInChat(data);
+                case "duplicate_resolution":
+                case "duplicate_quotes_decision": {
+                    // 🆕 NOUVEAU FLUX : Afficher d'abord la confirmation
+                    if (typeof addDuplicateConfirmation === "function") {
+                        addDuplicateConfirmation(data);
+                    } else {
+                        // Fallback: ancien comportement
+                        try {
+                            const quotesToShow = data.duplicates_found || data.recent_quotes || data.draft_quotes || [];
+                            if (quotesToShow.length > 0 || (data.recent_quotes?.length > 0) || (data.draft_quotes?.length > 0)) {
+                                if (typeof displayExistingQuotesInChat === "function") {
+                                    displayExistingQuotesInChat(data);
+                                }
                             }
+                        } catch (error) {
+                            console.error("Erreur lors de l'affichage des devis existants :", error);
                         }
-                    } catch (error) {
-                        console.error("Erreur lors de l'affichage des devis existants :", error);
-                    }
 
-                    // Puis les options de résolution
-                    if (typeof addDuplicateResolutionOptions === "function") {
-                        addDuplicateResolutionOptions(data);
-                    } else if (typeof addMessage === "function") {
-                        addMessage("Sélectionnez une option : créer un nouveau devis, examiner, consolider ou annuler.", "system");
+                        // Puis les options de résolution
+                        if (typeof addDuplicateResolutionOptions === "function") {
+                            addDuplicateResolutionOptions(data);
+                        } else if (typeof addMessage === "function") {
+                            addMessage("Sélectionnez une option : créer un nouveau devis, examiner, consolider ou annuler.", "system");
+                        }
                     }
                     break;
                 }
@@ -2809,29 +2816,30 @@
                 if (
                     (data.type === 'user_interaction_required' || data.type === 'interaction_required') &&
                     data.interaction_data &&
-                    data.interaction_data.interaction_type === 'duplicate_resolution'
+                    (data.interaction_data.interaction_type === 'duplicate_resolution' ||
+                     data.interaction_data.interaction_type === 'duplicate_quotes_decision')
                 ) {
                     try { hideProgress?.(); } catch(e){}
                     const ia = data.interaction_data;
 
-                    // Afficher les devis existants si présents
+                    // 🆕 NOUVEAU FLUX : Afficher d'abord la confirmation
                     try {
-                    if ((ia?.recent_quotes?.length > 0 || ia?.draft_quotes?.length > 0) && typeof displayExistingQuotesInChat === 'function') {
-                        displayExistingQuotesInChat(ia);
-                    }
+                        if (typeof addDuplicateConfirmation === 'function') {
+                            addDuplicateConfirmation(ia);
+                        } else {
+                            // Fallback: ancien comportement si la fonction n'existe pas
+                            if ((ia?.recent_quotes?.length > 0 || ia?.draft_quotes?.length > 0) && typeof displayExistingQuotesInChat === 'function') {
+                                displayExistingQuotesInChat(ia);
+                            }
+                            if (typeof addDuplicateResolutionOptions === 'function') {
+                                addDuplicateResolutionOptions(ia);
+                            }
+                        }
                     } catch (e) {
-                    console.warn('⚠️ displayExistingQuotesInChat failed:', e);
+                        console.warn('⚠️ addDuplicateConfirmation failed:', e);
                     }
-
-                    // Afficher les options de résolution
-                    try {
-                    if (typeof addDuplicateResolutionOptions === 'function') {
-                        addDuplicateResolutionOptions(ia);
-                    }
-                    } catch (e) {
-                    console.warn('⚠️ addDuplicateResolutionOptions failed:', e);
-                    }
-                    // ❗On NE return PAS : on laisse la suite traiter l'interaction de façon standard
+                    // ✅ RETURN pour éviter le double traitement
+                    return;
                 }
 
                 // Progress (early return)
@@ -4362,8 +4370,14 @@
         // ----- Affichage des devis existants (récents & brouillons) dans le chat -----
         function displayExistingQuotesInChat(duplicateData) {
             try {
-                const recent = Array.isArray(duplicateData?.recent_quotes) ? duplicateData.recent_quotes : [];
-                const drafts = Array.isArray(duplicateData?.draft_quotes) ? duplicateData.draft_quotes : [];
+                // Support both old format (recent_quotes + draft_quotes) and new format (duplicates_found)
+                let recent = Array.isArray(duplicateData?.recent_quotes) ? duplicateData.recent_quotes : [];
+                let drafts = Array.isArray(duplicateData?.draft_quotes) ? duplicateData.draft_quotes : [];
+
+                // If duplicates_found is provided, use it as recent quotes
+                if (Array.isArray(duplicateData?.duplicates_found) && duplicateData.duplicates_found.length > 0) {
+                    recent = duplicateData.duplicates_found;
+                }
 
                 const makeCard = (q, color) => {
                     const id = q.DocNum ?? q.doc_num ?? q.id ?? "N/A";
@@ -4406,6 +4420,92 @@
         } catch (e) {
             console.error("Erreur displayExistingQuotesInChat:", e);
             if (typeof addMessage === 'function') addMessage("❌ Erreur lors de l'affichage des devis existants.", 'system');
+            }
+        }
+
+        // ----- NOUVELLE FONCTION : Confirmation initiale avant affichage des doublons -----
+        function addDuplicateConfirmation(duplicateData) {
+            try {
+                // Compter le nombre total de devis
+                const recentCount = Array.isArray(duplicateData?.recent_quotes) ? duplicateData.recent_quotes.length : 0;
+                const draftCount = Array.isArray(duplicateData?.draft_quotes) ? duplicateData.draft_quotes.length : 0;
+                const duplicatesCount = Array.isArray(duplicateData?.duplicates_found) ? duplicateData.duplicates_found.length : 0;
+                const totalCount = duplicatesCount || (recentCount + draftCount);
+
+                const clientName = duplicateData.client_name || "ce client";
+                const message = duplicateData.alert_message ||
+                    `J'ai trouvé ${totalCount} devis similaire${totalCount > 1 ? 's' : ''} pour ${clientName}.`;
+
+                const html = `
+                    <div style="background:rgba(253, 164, 2, 0.15);border:1px solid rgba(253, 164, 2, 0.4);border-radius:12px;padding:20px;margin:12px 0;backdrop-filter:blur(10px);">
+                        <div style="text-align:center;margin-bottom:16px;">
+                            <div style="font-size:48px;margin-bottom:8px;">⚠️</div>
+                            <h3 style="margin:0 0 8px 0;color:#FD5202;">Devis similaires détectés</h3>
+                            <p style="margin:0;opacity:0.9;">${message}</p>
+                        </div>
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px;">
+                            <button onclick="handleDuplicateConfirmation('review')"
+                                style="border:0;border-radius:12px;padding:16px 24px;cursor:pointer;
+                                background:linear-gradient(135deg, #02B9FD 0%, #832DFE 100%);
+                                color:#fff;font-weight:600;font-size:15px;
+                                transition:all 0.3s ease;box-shadow:0 4px 15px rgba(2, 185, 253, 0.4);
+                                display:flex;flex-direction:column;align-items:center;gap:8px;">
+                                <span style="font-size:24px;">📋</span>
+                                <span>Voir les devis existants</span>
+                                <small style="opacity:0.8;font-weight:400;font-size:12px;">Reprendre ou consolider</small>
+                            </button>
+                            <button onclick="handleDuplicateConfirmation('proceed')"
+                                style="border:0;border-radius:12px;padding:16px 24px;cursor:pointer;
+                                background:linear-gradient(135deg, #2DFE83 0%, #22C767 100%);
+                                color:#000;font-weight:600;font-size:15px;
+                                transition:all 0.3s ease;box-shadow:0 4px 15px rgba(45, 254, 131, 0.4);
+                                display:flex;flex-direction:column;align-items:center;gap:8px;">
+                                <span style="font-size:24px;">✨</span>
+                                <span>Créer un nouveau devis</span>
+                                <small style="opacity:0.7;font-weight:400;font-size:12px;">Partir de zéro</small>
+                            </button>
+                        </div>
+                    </div>`;
+
+                if (typeof addMessage === 'function') {
+                    addMessage(html, 'system');
+                }
+
+                // Stocker les données de doublons pour usage ultérieur
+                window.currentDuplicateData = duplicateData;
+            } catch (e) {
+                console.error("Erreur addDuplicateConfirmation:", e);
+            }
+        }
+
+        // ----- Gestionnaire de la confirmation initiale -----
+        function handleDuplicateConfirmation(decision) {
+            try {
+                if (decision === 'review') {
+                    // L'utilisateur veut voir les devis existants
+                    if (window.currentDuplicateData) {
+                        // Afficher les devis existants
+                        if (typeof displayExistingQuotesInChat === 'function') {
+                            displayExistingQuotesInChat(window.currentDuplicateData);
+                        }
+                        // Afficher les options de résolution
+                        if (typeof addDuplicateResolutionOptions === 'function') {
+                            addDuplicateResolutionOptions(window.currentDuplicateData);
+                        }
+                    }
+                } else if (decision === 'proceed') {
+                    // L'utilisateur veut créer un nouveau devis sans voir les existants
+                    if (typeof addMessage === 'function') {
+                        addMessage('✅ Création d\'un nouveau devis en cours...', 'system');
+                    }
+                    if (typeof showProgress === 'function') {
+                        try { showProgress(); } catch(e){}
+                    }
+                    // Envoyer la décision au backend
+                    resolveDuplicateDecision('proceed', null);
+                }
+            } catch (e) {
+                console.error("Erreur handleDuplicateConfirmation:", e);
             }
         }
 

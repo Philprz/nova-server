@@ -6469,8 +6469,8 @@ class DevisWorkflow:
                     try:
                         from services.websocket_manager import websocket_manager
                         duplicate_interaction = {
-                            "type": "duplicate_quotes_decision",
-                            "interaction_type": "duplicate_quotes_decision", 
+                            "type": "duplicate_resolution",
+                            "interaction_type": "duplicate_resolution", 
                             "duplicates_found": [
                                 *duplicate_check.get("recent_quotes", []),
                                 *duplicate_check.get("draft_quotes", []),
@@ -6493,8 +6493,8 @@ class DevisWorkflow:
                     return {
                         "success": True,
                         "status": "user_interaction_required",
-                        "type": "duplicate_quotes_decision",
-                        "interaction_type": "duplicate_quotes_decision",
+                        "type": "duplicate_resolution",
+                        "interaction_type": "duplicate_resolution",
                         "message": "Devis en cours trouvés - décision utilisateur requise",
                         "task_id": self.task_id,
                         "interaction_data": duplicate_interaction
@@ -7453,8 +7453,8 @@ class DevisWorkflow:
                 try:
                     from services.websocket_manager import websocket_manager
                     duplicate_interaction = {
-                        "type": "duplicate_quotes_decision",
-                        "interaction_type": "duplicate_quotes_decision",
+                        "type": "duplicate_resolution",
+                        "interaction_type": "duplicate_resolution",
                         "duplicates_found": [
                             *duplicate_check.get("recent_quotes", []),
                             *duplicate_check.get("draft_quotes", []),
@@ -7476,8 +7476,8 @@ class DevisWorkflow:
                     return {
                         "success": True,
                         "status": "user_interaction_required",
-                        "type": "duplicate_quotes_decision",
-                        "interaction_type": "duplicate_quotes_decision",
+                        "type": "duplicate_resolution",
+                        "interaction_type": "duplicate_resolution",
                         "message": "Devis en cours - décision requise",
                         "task_id": self.task_id
                     }

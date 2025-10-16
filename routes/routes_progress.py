@@ -222,7 +222,7 @@ async def handle_user_response_task(task_id: str, response_data: dict):
     """Traite réponses utilisateur pour les tâches"""
     try:
         logger.info(f"🎯 Traitement réponse utilisateur task {task_id}: {response_data}")
-        
+
         response_type = response_data.get("response_type")
         if response_type == "client_selection":
             await handle_client_selection_task(task_id, response_data)
@@ -231,9 +231,78 @@ async def handle_user_response_task(task_id: str, response_data: dict):
         elif response_type == "product_selection":
             # Traiter la sélection produit
             await handle_product_selection_task(task_id, response_data)
-            
+        elif response_type == "duplicate_resolution":
+            # Traiter la décision sur les doublons
+            await handle_duplicate_resolution_task(task_id, response_data)
+
     except Exception as e:
         logger.error(f"❌ Erreur traitement réponse task {task_id}: {e}")
+
+async def handle_duplicate_resolution_task(task_id: str, response_data: dict):
+    """Traite la décision utilisateur sur les doublons de devis"""
+    try:
+        logger.info(f"🎯 Traitement résolution doublons task {task_id}: {response_data}")
+
+        # Récupérer la tâche
+        task = progress_tracker.get_task(task_id)
+        if not task:
+            logger.error(f"❌ Tâche {task_id} introuvable")
+            return
+
+        # Extraire la décision et l'ID du devis sélectionné
+        decision = response_data.get("decision")
+        selected_quote_id = response_data.get("selected_quote_id")
+
+        if not decision:
+            logger.error(f"❌ Aucune décision fournie pour {task_id}")
+            return
+
+        logger.info(f"✅ Décision doublons: {decision}, quote_id: {selected_quote_id}")
+
+        # Créer instance workflow
+        workflow = DevisWorkflow(task_id=task_id, force_production=True)
+
+        # Restaurer le contexte
+        if hasattr(task, 'context') and task.context:
+            workflow.context = task.context.copy()
+            logger.info(f"✅ Contexte restauré pour résolution doublons: {list(workflow.context.keys())}")
+
+        # Construire l'entrée utilisateur avec mapping decision → action
+        user_input = {
+            "action": decision,  # proceed, consolidate, review, cancel
+            "selected_quote_id": selected_quote_id
+        }
+
+        # Contexte avec type d'interaction
+        context = {
+            "interaction_type": "duplicate_resolution"
+        }
+
+        # Continuer le workflow
+        logger.info(f"➡️ Continuation workflow avec décision: {decision}")
+        continuation_result = await workflow.continue_after_user_input(user_input, context)
+
+        # Vérifier si une autre interaction est requise
+        status = continuation_result.get("status", "success")
+        if status == "user_interaction_required":
+            logger.info(f"⏸️ Nouvelle interaction requise après résolution doublons")
+            return continuation_result
+
+        # Marquer l'interaction comme complétée
+        task.complete_user_validation("duplicate_resolution", response_data)
+        logger.info(f"✅ Résolution doublons complétée pour {task_id}")
+
+        return continuation_result
+
+    except Exception as e:
+        logger.exception(f"❌ Erreur traitement résolution doublons {task_id}: {e}")
+        try:
+            await websocket_manager.send_task_update(task_id, {
+                "type": "validation_error",
+                "error": f"Erreur résolution doublons: {str(e)}"
+            })
+        except Exception as ws_err:
+            logger.exception(f"⚠️ Échec notification WebSocket en erreur: {ws_err}")
 
 async def handle_client_selection_task(task_id: str, response_data: dict):
     """Traite la sélection client (création ou sélection existante) pour une tâche donnée."""
