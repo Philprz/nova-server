@@ -500,20 +500,40 @@ async def continue_quote_endpoint(request: dict):
     """Continue le workflow après interaction utilisateur"""
     try:
         task_id = request.get("task_id")
+        action = request.get("action")
+        data = request.get("data", {})
         user_input = request.get("user_input", {})
         context = request.get("context", {})
-        
+
         if not task_id:
             raise HTTPException(status_code=400, detail="task_id requis")
-        
+
         # Récupérer l'instance workflow
         workflow = DevisWorkflow(task_id=task_id, force_production=True)
-        
-        # Continuer avec l'input utilisateur
+
+        # Traitement spécial pour l'action "client_name_provided"
+        if action == "client_name_provided":
+            client_name = data.get("client_name", "")
+            if not client_name:
+                return {"success": False, "error": "Nom de client requis"}
+
+            logger.info(f"📝 Nom de client fourni: {client_name}")
+
+            # Mettre à jour le contexte avec le nom du client
+            if hasattr(workflow, 'context'):
+                if 'extracted_info' not in workflow.context:
+                    workflow.context['extracted_info'] = {}
+                workflow.context['extracted_info']['client'] = client_name
+
+            # Reprendre le workflow avec le nom du client
+            result = await workflow.process_prompt(f"Créer un devis pour {client_name}", task_id=task_id)
+            return {"success": True, "data": result}
+
+        # Continuer avec l'input utilisateur (comportement par défaut)
         result = await workflow.continue_after_user_input(user_input, context)
-        
+
         return {"success": True, "data": result}
-        
+
     except Exception as e:
         logger.error(f"Erreur continue_quote: {e}")
         return {"success": False, "error": str(e)}

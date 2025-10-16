@@ -7368,10 +7368,23 @@ class DevisWorkflow:
                     "message": "Erreur lors de la validation du client",
                     "error": "client_validation_failed"
                 }
-            # ⏸️ Cas d'interaction utilisateur requise (sélection client)
+            # ⏸️ Cas d'interaction utilisateur requise (sélection client ou demande de nom)
             if client_result.get("status") in ["user_interaction_required", "client_selection_required"]:
                 # Récupérer des options client de manière robuste
                 interaction_data = client_result.get("interaction_data") or client_result
+
+                # Cas spécial: demande de nom de client
+                if client_result.get("requires_client_name"):
+                    logger.info("📝 Demande de nom de client à l'utilisateur")
+                    return {
+                        "success": True,
+                        "status": "user_interaction_required",
+                        "type": "client_name_request",
+                        "message": "Veuillez fournir le nom du client",
+                        "task_id": self.task_id,
+                        "interaction_data": interaction_data
+                    }
+
                 client_options = (
                     interaction_data.get("client_options")
                     or interaction_data.get("options")
@@ -8539,10 +8552,32 @@ class DevisWorkflow:
         🔧 CORRIGÉ: Détection et arrêt pour interaction utilisateur
         """
         if not client_name or not client_name.strip():
+            # Au lieu de retourner une erreur, demander à l'utilisateur de fournir le nom du client
+            logger.info("📝 Nom de client manquant - demande d'interaction utilisateur")
+
+            validation_data = {
+                "interaction_type": "client_name_request",
+                "message": "Veuillez fournir le nom du client pour créer le devis",
+                "field": "client_name",
+                "required": True
+            }
+
+            if self.current_task:
+                self.current_task.require_user_validation("client_name_request", "client_name_request", validation_data)
+
+            # Envoyer via WebSocket
+            try:
+                from services.websocket_manager import websocket_manager
+                await websocket_manager.send_user_interaction_required(self.task_id, validation_data)
+                logger.info("✅ Demande de nom client envoyée via WebSocket")
+            except Exception as ws_error:
+                logger.warning(f"⚠️ Erreur envoi WebSocket (non bloquant): {ws_error}")
+
             return {
-                "status": "error",
-                "data": None,
-                "message": "Nom de client vide"
+                "status": "user_interaction_required",
+                "interaction_data": validation_data,
+                "message": "Nom de client requis",
+                "requires_client_name": True
             }
 
         try:
