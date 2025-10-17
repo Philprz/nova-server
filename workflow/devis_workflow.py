@@ -5,6 +5,7 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
 import io
+import random
 import json
 import logging
 import os
@@ -747,7 +748,7 @@ class DevisWorkflow:
                     {
                         "type": "quote_generation_completed",
                         "task_id": self.task_id,
-                        "result": result,
+                        "result": result_data,
                         "status": "completed",
                         "timestamp": datetime.now().isoformat(),
                     }
@@ -995,7 +996,7 @@ class DevisWorkflow:
             server_name="salesforce_mcp",
             action="salesforce_query",
             params={"query": query},
-            label=f"Salesforce Client Search (NAME split: {name})",
+            label=f"Salesforce Client Search (NAME split: {client_name})",
             marker_prefix="SF_DUP_NAME",
         )
 
@@ -1802,9 +1803,9 @@ class DevisWorkflow:
                     # Si le validateur renvoie un avertissement sur les variantes, le capturer
                     # tout de suite afin qu'il puisse être transmis plus loin (ex: sélection de clients existants).
                     if isinstance(validation_result, dict):
-                        warn = validation_result.get("variants_warning")
-                    if vwarn:
-                        variants_warning = vwarn
+                        vwarn = validation_result.get("variants_warning")
+                        if vwarn:
+                            variants_warning = vwarn
                     # Si extracted_info est disponible, l'enregistrer pour qu'il soit inclus dans le contexte du workflow
                     try:
                         if isinstance(extracted_info, dict):
@@ -2047,7 +2048,8 @@ class DevisWorkflow:
             }
     async def _continue_workflow_after_client_selection(self, client_data, original_context):
         # CORRECTION: Utiliser _process_products_retrieval qui gère les sélections
-        products_result = await self._process_products_retrieval(products)
+        products_list = (original_context or {}).get("extracted_info", {}).get("products", [])
+        products_result = await self._process_products_retrieval(products_list)
         if products_result.get("status") == "product_selection_required":
              # Envoyer l'interaction WebSocket avant de s'arrêter
             try:
@@ -2077,6 +2079,18 @@ class DevisWorkflow:
         
         for i, product in enumerate(products):
             
+            # Normaliser les champs requis
+            product_code = str(
+                (product.get("code")
+                 or product.get("ItemCode")
+                 or product.get("item_code")
+                 or "")
+            ).strip()
+            try:
+                quantity = int(product.get("Quantity", product.get("quantity", 1)) or 1)
+            except Exception:
+                quantity = 1
+
             logger.info(f"🔍 Validation produit {i+1}: {product_code}")
             
             try:
@@ -5043,42 +5057,9 @@ class DevisWorkflow:
             if not db_url:
                 logger.warning("DATABASE_URL manquant pour recherche locale par code")
                 return None
-            # Recherche simple et directe d'abord
-            simple_results = session.execute(
-                text("""
-                SELECT item_code, item_name, u_description, avg_price, on_hand,
-                    items_group_code, manufacturer, sales_unit
-                FROM produits_sap 
-                WHERE valid = true 
-                AND on_hand > 0
-                AND (
-                    LOWER(item_name) LIKE '%' || LOWER(:search_term) || '%' OR
-                    LOWER(u_description) LIKE '%' || LOWER(:search_term) || '%'
-                )
-                ORDER BY on_hand DESC
-                LIMIT 10
-                """),
-                {"search_term": product_name}
-            ).fetchall()
-
-            if simple_results:
-                logger.info(f"✅ Recherche simple trouvée: {len(simple_results)} résultats")
-                formatted_results: List[Dict[str, Any]] = []
-                for row in simple_results:
-                    formatted_results.append({
-                        "ItemCode": row.item_code,
-                        "ItemName": row.item_name,
-                        "U_Description": row.u_description or "",
-                        "AvgPrice": float(row.avg_price or 0),
-                        "OnHand": int(row.on_hand or 0),
-                        "QuantityOnStock": int(row.on_hand or 0),
-                        "ItemsGroupCode": row.items_group_code or "",
-                        "Manufacturer": row.manufacturer or "",
-                        "SalesUnit": row.sales_unit or "UN",
-                        "source": "local_db_simple",
-                        "relevance_score": 1.0
-                    })
-                return formatted_results
+            # Initialiser SQLAlchemy (engine + session)
+            engine = create_engine(db_url)
+            SessionLocal = sessionmaker(bind=engine)
             with SessionLocal() as session:
                 result = session.execute(
                     text("""
@@ -5753,6 +5734,7 @@ class DevisWorkflow:
                 }
                 )
             
+            keywords = self._extract_product_keywords(product_name) if product_name else []
             for keyword in keywords[:2]:  # Tester 2 mots-clés max
                 keyword_result = await self.mcp_connector.call_mcp(
                     "sap_mcp",
@@ -6592,9 +6574,39 @@ class DevisWorkflow:
                 return self._build_error_response("Workflow incomplet", "Produits manquants pour continuer")
 
             elif action == "create_new":
+                # Récupérer le nom du client depuis plusieurs sources
                 client_name = user_input.get("client_name", context.get("original_client_name", ""))
-                # CORRECTION: Appeler directement _handle_new_client_creation avec le contexte workflow
+
+                # CORRECTION CRITIQUE: Récupérer workflow_context depuis la tâche si vide
                 workflow_context = context.get("workflow_context", {})
+
+                # Si workflow_context est vide, essayer de le récupérer depuis la tâche
+                if not workflow_context or not workflow_context.get("extracted_info"):
+                    if self.current_task and hasattr(self.current_task, "validation_data"):
+                        validation_data = self.current_task.validation_data or {}
+                        client_selection_data = validation_data.get("client_selection", {})
+                        original_context = client_selection_data.get("original_context", {})
+
+                        if original_context and original_context.get("extracted_info"):
+                            workflow_context = original_context
+                            logger.info(f"✅ workflow_context récupéré depuis validation_data de la tâche")
+
+                            # Récupérer aussi le client_name depuis extracted_info si vide
+                            if not client_name:
+                                client_name = original_context.get("extracted_info", {}).get("client", "")
+                                logger.info(f"✅ client_name récupéré depuis extracted_info: {client_name}")
+
+                # Si toujours vide, essayer depuis self.context
+                if not workflow_context or not workflow_context.get("extracted_info"):
+                    if hasattr(self, "context") and self.context.get("extracted_info"):
+                        workflow_context = {"extracted_info": self.context["extracted_info"]}
+                        logger.info(f"✅ workflow_context récupéré depuis self.context")
+
+                        # Récupérer aussi le client_name si vide
+                        if not client_name:
+                            client_name = self.context.get("extracted_info", {}).get("client", "")
+                            logger.info(f"✅ client_name récupéré depuis self.context: {client_name}")
+
                 return await self._handle_new_client_creation(client_name, workflow_context)
 
             elif action == "cancel":
@@ -7270,6 +7282,8 @@ class DevisWorkflow:
                 raise HTTPException(status_code=400, detail="task_id requis")
 
             # Récupérer l'instance workflow depuis le cache
+            from services.cache_manager import RedisCacheManager
+            cache_manager = RedisCacheManager()
             workflow_data = await cache_manager.get_workflow_state(task_id)
             if not workflow_data:
                 raise HTTPException(status_code=404, detail="Workflow expiré")
@@ -7368,23 +7382,10 @@ class DevisWorkflow:
                     "message": "Erreur lors de la validation du client",
                     "error": "client_validation_failed"
                 }
-            # ⏸️ Cas d'interaction utilisateur requise (sélection client ou demande de nom)
+            # ⏸️ Cas d'interaction utilisateur requise (sélection client)
             if client_result.get("status") in ["user_interaction_required", "client_selection_required"]:
                 # Récupérer des options client de manière robuste
                 interaction_data = client_result.get("interaction_data") or client_result
-
-                # Cas spécial: demande de nom de client
-                if client_result.get("requires_client_name"):
-                    logger.info("📝 Demande de nom de client à l'utilisateur")
-                    return {
-                        "success": True,
-                        "status": "user_interaction_required",
-                        "type": "client_name_request",
-                        "message": "Veuillez fournir le nom du client",
-                        "task_id": self.task_id,
-                        "interaction_data": interaction_data
-                    }
-
                 client_options = (
                     interaction_data.get("client_options")
                     or interaction_data.get("options")
@@ -7613,7 +7614,7 @@ class DevisWorkflow:
                     "type": "quote_validation",
                     "interaction_type": "quote_validation",
                     "quote_preview": quote_preview,
-                    "client_info": client_info,
+                    "client_info": client_result,
                     "products": valid_products,  # ✅ uniquement valides
                     "message": "Veuillez valider le devis avant création",
                     "total_amount": quote_preview.get("total_amount", 0),
@@ -8552,32 +8553,11 @@ class DevisWorkflow:
         🔧 CORRIGÉ: Détection et arrêt pour interaction utilisateur
         """
         if not client_name or not client_name.strip():
-            # Au lieu de retourner une erreur, demander à l'utilisateur de fournir le nom du client
-            logger.info("📝 Nom de client manquant - demande d'interaction utilisateur")
-
-            validation_data = {
-                "interaction_type": "client_name_request",
-                "message": "Veuillez fournir le nom du client pour créer le devis",
-                "field": "client_name",
-                "required": True
-            }
-
-            if self.current_task:
-                self.current_task.require_user_validation("client_name_request", "client_name_request", validation_data)
-
-            # Envoyer via WebSocket
-            try:
-                from services.websocket_manager import websocket_manager
-                await websocket_manager.send_user_interaction_required(self.task_id, validation_data)
-                logger.info("✅ Demande de nom client envoyée via WebSocket")
-            except Exception as ws_error:
-                logger.warning(f"⚠️ Erreur envoi WebSocket (non bloquant): {ws_error}")
-
+            logger.error("❌ Nom de client vide - le contexte a été perdu")
             return {
-                "status": "user_interaction_required",
-                "interaction_data": validation_data,
-                "message": "Nom de client requis",
-                "requires_client_name": True
+                "status": "error",
+                "data": None,
+                "message": "Nom de client vide - contexte perdu"
             }
 
         try:
@@ -10193,14 +10173,14 @@ class EnhancedDevisWorkflow(DevisWorkflow):
             # Création dans SAP
             result = await self.mcp_connector.call_sap_mcp(
                 "sap_create_customer_complete",
-                {"customer_data": sap_data}
+                {"customer_data": sap_client_data}
             )
             
-            if not sap_results.get("success", False):
-                logger.error(f"❌ Échec création SAP: {sap_results.get('error')}")
+            if not result.get("success", False):
+                logger.error(f"❌ Échec création SAP: {result.get('error')}")
                 return {
                     "created": False,
-                    "error": f"Erreur SAP: {sap_results.get('error', 'Erreur inconnue')}"
+                    "error": f"Erreur SAP: {result.get('error', 'Erreur inconnue')}"
                 }
             
             logger.info(f"✅ Client SAP créé: {card_code}")

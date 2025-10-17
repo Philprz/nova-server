@@ -1877,48 +1877,6 @@
             console.log("🤝 Interaction utilisateur reçue :", type, data);
 
             switch (type) {
-                case "client_name_request": {
-                    // Demander le nom du client à l'utilisateur
-                    console.log("📝 Demande de nom de client à l'utilisateur");
-                    if (typeof addMessage === "function") {
-                        addMessage(data.message || "Veuillez fournir le nom du client pour créer le devis", "system");
-                    }
-
-                    // Créer un formulaire de saisie pour le nom du client
-                    const chatContainer = document.getElementById('chatContainer');
-                    if (chatContainer) {
-                        const inputDiv = document.createElement('div');
-                        inputDiv.className = 'client-name-input-container';
-                        inputDiv.innerHTML = `
-                            <div style="background: white; padding: 15px; border-radius: 8px; margin: 10px 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                                <label style="display: block; margin-bottom: 8px; font-weight: 600;">Nom du client :</label>
-                                <input type="text" id="clientNameInput" placeholder="Entrez le nom du client"
-                                    style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 10px;">
-                                <button onclick="submitClientName()" class="btn btn-primary"
-                                    style="background: #007bff; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;">
-                                    Continuer
-                                </button>
-                            </div>
-                        `;
-                        chatContainer.appendChild(inputDiv);
-                        chatContainer.scrollTop = chatContainer.scrollHeight;
-
-                        // Focus sur l'input
-                        setTimeout(() => {
-                            const input = document.getElementById('clientNameInput');
-                            if (input) {
-                                input.focus();
-                                // Permettre la soumission avec Enter
-                                input.addEventListener('keypress', (e) => {
-                                    if (e.key === 'Enter') {
-                                        submitClientName();
-                                    }
-                                });
-                            }
-                        }, 100);
-                    }
-                    break;
-                }
                 case "client_selection": {
                     const clients = data.client_options || data.options || data.clients || [];
                     const originalName = data.original_client_name || data.client_name || "";
@@ -2278,68 +2236,6 @@
 
         function hideTyping() {
             document.getElementById('typingIndicator').classList.remove('active');
-        }
-
-        // Fonction pour soumettre le nom du client
-        async function submitClientName() {
-            const input = document.getElementById('clientNameInput');
-            if (!input) {
-                console.error("❌ Input clientNameInput introuvable");
-                return;
-            }
-
-            const clientName = input.value.trim();
-            if (!clientName) {
-                alert("Veuillez entrer un nom de client");
-                return;
-            }
-
-            console.log("📝 Soumission du nom de client:", clientName);
-
-            // Supprimer le formulaire de saisie
-            const inputContainer = document.querySelector('.client-name-input-container');
-            if (inputContainer) {
-                inputContainer.remove();
-            }
-
-            // Afficher le message de l'utilisateur
-            if (typeof addMessage === "function") {
-                addMessage(`Créer un devis pour ${clientName}`, "user");
-            }
-
-            // Continuer le workflow avec le nom du client
-            try {
-                if (!currentTaskId) {
-                    console.error("❌ Pas de task_id actif");
-                    return;
-                }
-
-                const response = await fetch('/api/assistant/continue_quote', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        task_id: currentTaskId,
-                        action: 'client_name_provided',
-                        data: {
-                            client_name: clientName
-                        }
-                    })
-                });
-
-                if (!response.ok) {
-                    throw new Error(`Erreur HTTP: ${response.status}`);
-                }
-
-                const result = await response.json();
-                console.log("✅ Nom de client soumis avec succès", result);
-
-                // Le workflow va continuer automatiquement via WebSocket
-            } catch (error) {
-                console.error("❌ Erreur lors de la soumission du nom de client:", error);
-                if (typeof addMessage === "function") {
-                    addMessage("Erreur lors de la soumission. Veuillez réessayer.", "system");
-                }
-            }
         }
 
         async function sendMessage() {
