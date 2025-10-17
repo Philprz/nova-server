@@ -22,7 +22,7 @@
         }
 
         .container {
-            max-width: 600px;
+            max-width: 650px;
             width: 100%;
         }
 
@@ -171,6 +171,14 @@
             background: #5a6268;
         }
 
+        .btn-success {
+            background: #28a745;
+        }
+
+        .btn-success:hover {
+            background: #218838;
+        }
+
         .alert {
             padding: 12px 16px;
             border-radius: 8px;
@@ -201,17 +209,52 @@
             border: 1px solid #bee5eb;
         }
 
+        .alert-warning {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+
         .qr-code-container {
             text-align: center;
             margin: 20px 0;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
         }
 
         .qr-code-container img {
-            max-width: 300px;
-            border: 2px solid #e0e0e0;
-            border-radius: 8px;
-            padding: 10px;
+            max-width: 280px;
+            border: 3px solid #667eea;
+            border-radius: 12px;
+            padding: 15px;
             background: white;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+        }
+
+        .qr-code-container h4 {
+            color: #667eea;
+            margin-bottom: 15px;
+            font-size: 18px;
+        }
+
+        .qr-code-container p {
+            color: #666;
+            font-size: 14px;
+            margin-top: 10px;
+        }
+
+        .secret-display {
+            background: #fff;
+            padding: 10px;
+            border-radius: 6px;
+            margin-top: 15px;
+            border: 2px dashed #667eea;
+            word-break: break-all;
+            font-family: monospace;
+            font-size: 14px;
+            color: #667eea;
+            font-weight: bold;
         }
 
         .token-display {
@@ -284,10 +327,16 @@
 
         .recovery-codes {
             background: #fff3cd;
-            padding: 15px;
+            padding: 20px;
             border-radius: 8px;
-            margin-top: 15px;
+            margin-top: 20px;
             border: 2px solid #ffc107;
+        }
+
+        .recovery-codes h4 {
+            color: #856404;
+            margin-bottom: 15px;
+            font-size: 16px;
         }
 
         .recovery-codes-list {
@@ -299,12 +348,13 @@
 
         .recovery-code {
             background: white;
-            padding: 8px;
+            padding: 10px;
             border-radius: 4px;
             text-align: center;
             font-family: monospace;
             font-weight: bold;
             border: 1px solid #ffc107;
+            font-size: 14px;
         }
 
         .method-buttons {
@@ -339,6 +389,20 @@
         .icon {
             font-size: 24px;
             margin-bottom: 5px;
+        }
+
+        .info-box {
+            background: #e7f3ff;
+            border-left: 4px solid #2196f3;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 4px;
+        }
+
+        .info-box p {
+            color: #0c5460;
+            margin: 5px 0;
+            font-size: 14px;
         }
     </style>
 </head>
@@ -382,9 +446,55 @@
                 <button class="btn" onclick="login()">Se connecter</button>
             </div>
 
+            <!-- ÉTAPE 1.5: Enrollment TOTP (si pas encore configuré) -->
+            <div id="step-enrollment" class="hidden">
+                <h3 style="margin-bottom: 20px; color: #333;">⚙️ Configuration TOTP</h3>
+                <div class="info-box">
+                    <p><strong>Première connexion :</strong> Vous devez configurer l'authentification à deux facteurs.</p>
+                    <p>Scannez le QR code avec Google Authenticator ou Microsoft Authenticator.</p>
+                </div>
+
+                <!-- QR Code -->
+                <div id="qr-section" class="hidden">
+                    <div class="qr-code-container">
+                        <h4>📱 Scannez ce QR code</h4>
+                        <img id="qr-image" src="" alt="QR Code TOTP">
+                        <p style="color: #666; margin-top: 15px;">Ouvrez votre application d'authentification et scannez ce code</p>
+
+                        <div class="secret-display">
+                            <div style="font-size: 12px; color: #666; margin-bottom: 5px;">Secret (saisie manuelle) :</div>
+                            <span id="secret-text"></span>
+                        </div>
+                    </div>
+
+                    <!-- Vérification du code -->
+                    <div class="form-group" style="margin-top: 25px;">
+                        <label for="enrollment-code">🔢 Entrez le code à 6 chiffres</label>
+                        <input type="text" id="enrollment-code" placeholder="123456" maxlength="6" inputmode="numeric">
+                        <small style="color: #666;">Le code change toutes les 30 secondes</small>
+                    </div>
+                    <button class="btn btn-success" onclick="completeEnrollment()">✅ Activer le 2FA</button>
+                </div>
+
+                <button class="btn" onclick="startEnrollment()" id="btn-start-enrollment">📱 Générer le QR Code</button>
+                <button class="btn btn-secondary" onclick="logout()">Annuler</button>
+
+                <!-- Codes de récupération (après enrollment) -->
+                <div id="recovery-codes-display" class="hidden recovery-codes">
+                    <h4>🎫 Codes de récupération</h4>
+                    <p style="color: #856404; font-size: 13px; margin-bottom: 10px;">
+                        <strong>Important :</strong> Conservez ces codes en lieu sûr. Chaque code ne peut être utilisé qu'une seule fois.
+                    </p>
+                    <div id="recovery-codes-list" class="recovery-codes-list">
+                        <!-- Rempli dynamiquement -->
+                    </div>
+                    <button class="btn btn-success" onclick="finishEnrollment()" style="margin-top: 15px;">Continuer vers la connexion</button>
+                </div>
+            </div>
+
             <!-- ÉTAPE 2: Vérification 2FA -->
             <div id="step-mfa" class="hidden">
-                <h3 style="margin-bottom: 20px; color: #333;">Vérification 2FA requise</h3>
+                <h3 style="margin-bottom: 20px; color: #333;">🔒 Vérification 2FA requise</h3>
 
                 <!-- Choix de la méthode -->
                 <div class="method-buttons">
@@ -472,6 +582,8 @@
         let mfaPendingToken = null;
         let accessToken = null;
         let currentMethod = 'totp';
+        let totpSecret = null;
+        let recoveryCodesList = [];
 
         function showAlert(message, type = 'info') {
             const alert = document.getElementById('alert');
@@ -517,9 +629,27 @@
                 if (response.ok) {
                     if (data.mfa_required) {
                         mfaPendingToken = data.access_token;
-                        showAlert('✅ Connexion réussie ! Vérification 2FA requise', 'success');
-                        setStage(2);
-                        showStep('mfa');
+
+                        // Vérifier le statut MFA pour savoir si l'enrollment est nécessaire
+                        const statusResponse = await fetch(`${BASE_URL}/api/mfa/status`, {
+                            headers: { 'Authorization': `Bearer ${mfaPendingToken}` }
+                        });
+
+                        if (statusResponse.ok) {
+                            const statusData = await statusResponse.json();
+
+                            if (!statusData.totp_enabled) {
+                                // Enrollment nécessaire
+                                showAlert('⚙️ Configuration 2FA requise', 'warning');
+                                setStage(2);
+                                showStep('enrollment');
+                            } else {
+                                // Vérification 2FA classique
+                                showAlert('✅ Connexion réussie ! Vérification 2FA requise', 'success');
+                                setStage(2);
+                                showStep('mfa');
+                            }
+                        }
                     } else {
                         accessToken = data.access_token;
                         showAlert('✅ Connexion réussie !', 'success');
@@ -533,6 +663,94 @@
                 showAlert('❌ Erreur de connexion au serveur', 'error');
                 console.error(error);
             }
+        }
+
+        async function startEnrollment() {
+            const btn = document.getElementById('btn-start-enrollment');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="loading"></span> Génération...';
+
+            try {
+                const response = await fetch(`${BASE_URL}/api/mfa/totp/enroll/start`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${mfaPendingToken}` }
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    totpSecret = data.secret;
+
+                    // Afficher le QR code
+                    document.getElementById('qr-image').src = data.qr_code;
+                    document.getElementById('secret-text').textContent = data.secret;
+                    document.getElementById('qr-section').classList.remove('hidden');
+                    btn.classList.add('hidden');
+
+                    showAlert('✅ QR Code généré ! Scannez-le avec votre application', 'success');
+                } else {
+                    showAlert('❌ ' + (data.detail || 'Erreur génération QR code'), 'error');
+                    btn.disabled = false;
+                    btn.innerHTML = '📱 Générer le QR Code';
+                }
+            } catch (error) {
+                showAlert('❌ Erreur lors de la génération du QR code', 'error');
+                btn.disabled = false;
+                btn.innerHTML = '📱 Générer le QR Code';
+                console.error(error);
+            }
+        }
+
+        async function completeEnrollment() {
+            const code = document.getElementById('enrollment-code').value;
+
+            if (code.length !== 6) {
+                showAlert('Le code doit contenir 6 chiffres', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${BASE_URL}/api/mfa/totp/enroll/verify`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${mfaPendingToken}`
+                    },
+                    body: JSON.stringify({ code })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    recoveryCodesList = data.recovery_codes || [];
+
+                    // Afficher les codes de récupération
+                    const list = document.getElementById('recovery-codes-list');
+                    list.innerHTML = '';
+                    recoveryCodesList.forEach(code => {
+                        const div = document.createElement('div');
+                        div.className = 'recovery-code';
+                        div.textContent = code;
+                        list.appendChild(div);
+                    });
+
+                    // Masquer le QR et afficher les codes
+                    document.getElementById('qr-section').classList.add('hidden');
+                    document.getElementById('recovery-codes-display').classList.remove('hidden');
+
+                    showAlert('🎉 2FA activé avec succès !', 'success');
+                } else {
+                    showAlert('❌ Code invalide. Réessayez.', 'error');
+                }
+            } catch (error) {
+                showAlert('❌ Erreur lors de la vérification', 'error');
+                console.error(error);
+            }
+        }
+
+        function finishEnrollment() {
+            showAlert('✅ Configuration terminée ! Connectez-vous maintenant avec le 2FA', 'success');
+            resetDemo();
         }
 
         function selectMethod(method) {
@@ -588,9 +806,7 @@
             try {
                 const response = await fetch(`${BASE_URL}/api/mfa/sms/send`, {
                     method: 'POST',
-                    headers: {
-                        'Authorization': `Bearer ${mfaPendingToken}`
-                    }
+                    headers: { 'Authorization': `Bearer ${mfaPendingToken}` }
                 });
 
                 const data = await response.json();
@@ -689,9 +905,7 @@
 
             try {
                 const response = await fetch(`${BASE_URL}/api/mfa/status`, {
-                    headers: {
-                        'Authorization': `Bearer ${accessToken}`
-                    }
+                    headers: { 'Authorization': `Bearer ${accessToken}` }
                 });
 
                 const data = await response.json();
@@ -719,12 +933,20 @@
         function resetDemo() {
             mfaPendingToken = null;
             accessToken = null;
+            totpSecret = null;
+            recoveryCodesList = [];
             setStage(1);
             showStep('login');
             document.getElementById('totp-code').value = '';
+            document.getElementById('enrollment-code').value = '';
             document.getElementById('sms-code').value = '';
             document.getElementById('recovery-code').value = '';
             document.getElementById('sms-input').classList.add('hidden');
+            document.getElementById('qr-section').classList.add('hidden');
+            document.getElementById('recovery-codes-display').classList.add('hidden');
+            document.getElementById('btn-start-enrollment').classList.remove('hidden');
+            document.getElementById('btn-start-enrollment').disabled = false;
+            document.getElementById('btn-start-enrollment').innerHTML = '📱 Générer le QR Code';
             document.getElementById('btn-send-sms').disabled = false;
             document.getElementById('btn-send-sms').innerHTML = '📱 Envoyer un code SMS';
             showAlert('Démonstration réinitialisée', 'info');
