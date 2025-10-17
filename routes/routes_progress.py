@@ -273,9 +273,26 @@ async def handle_duplicate_resolution_task(task_id: str, response_data: dict):
             "selected_quote_id": selected_quote_id
         }
 
-        # Contexte avec type d'interaction
+        # CORRECTION CRITIQUE: Passer l'extracted_info depuis le contexte de la tâche
+        # pour garantir que le client et les produits sont disponibles lors du proceed
+        extracted_info = {}
+        recent_quotes = []
+        draft_quotes = []
+
+        if hasattr(task, 'context') and task.context:
+            extracted_info = task.context.get("extracted_info", {})
+            # Récupérer aussi les devis existants pour les actions "consolidate" et "review"
+            recent_quotes = task.context.get("recent_quotes", [])
+            draft_quotes = task.context.get("draft_quotes", [])
+            logger.info(f"✅ extracted_info récupéré depuis task.context: client={extracted_info.get('client', 'N/A')}, produits={len(extracted_info.get('products', []))}")
+            logger.info(f"✅ Devis trouvés - récents: {len(recent_quotes)}, brouillons: {len(draft_quotes)}")
+
+        # Contexte avec type d'interaction ET extracted_info restauré
         context = {
-            "interaction_type": "duplicate_resolution"
+            "interaction_type": "duplicate_resolution",
+            "extracted_info": extracted_info,
+            "recent_quotes": recent_quotes,
+            "draft_quotes": draft_quotes
         }
 
         # Continuer le workflow
