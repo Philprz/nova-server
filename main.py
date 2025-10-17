@@ -169,6 +169,10 @@ app.include_router(websocket_router, tags=["WebSocket"])
 from routes.mfa import router as mfa_router
 app.include_router(mfa_router, prefix="/api", tags=["MFA/2FA"])
 
+# Routes d'authentification
+from routes.auth import router as auth_router
+app.include_router(auth_router, prefix="/auth", tags=["Authentification"])
+
 # Route WebSocket pour l'assistant intelligent manquante
 @app.websocket("/ws/assistant/{task_id}")
 async def websocket_assistant_endpoint(websocket: WebSocket, task_id: str):
@@ -221,6 +225,16 @@ async def itspirit_interface():
             return HTMLResponse(content=f.read())
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Interface IT Spirit non trouvée")
+
+# Route pour la démonstration 2FA
+@app.get('/demo/2fa', response_class=HTMLResponse)
+async def demo_2fa_interface():
+    """Sert l'interface de démonstration 2FA"""
+    try:
+        with open('templates/demo_2fa.html', 'r', encoding='utf-8') as f:
+            return HTMLResponse(content=f.read())
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Interface de démo 2FA non trouvée")
 
 # NOUVELLE ROUTE AJOUTÉE: sert nova_interface_rebuilt.html
 @app.get('/interface/rebuilt', response_class=HTMLResponse)

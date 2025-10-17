@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Démonstration 2FA - NOVA SERVER</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 600px;
+            width: 100%;
+        }
+
+        .card {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            padding: 40px;
+            margin-bottom: 20px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            color: #667eea;
+            font-size: 32px;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            color: #666;
+            font-size: 16px;
+        }
+
+        .stage-indicator {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 40px;
+            position: relative;
+        }
+
+        .stage-indicator::before {
+            content: '';
+            position: absolute;
+            top: 20px;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: #e0e0e0;
+            z-index: 0;
+        }
+
+        .stage {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            z-index: 1;
+            background: white;
+            padding: 0 10px;
+        }
+
+        .stage-circle {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: #e0e0e0;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            margin-bottom: 8px;
+            transition: all 0.3s ease;
+        }
+
+        .stage.active .stage-circle {
+            background: #667eea;
+            box-shadow: 0 0 20px rgba(102, 126, 234, 0.5);
+        }
+
+        .stage.completed .stage-circle {
+            background: #4caf50;
+        }
+
+        .stage-label {
+            font-size: 12px;
+            color: #999;
+            text-align: center;
+        }
+
+        .stage.active .stage-label {
+            color: #667eea;
+            font-weight: bold;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #333;
+            font-weight: 500;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: all 0.3s ease;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .btn {
+            width: 100%;
+            padding: 14px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .btn:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+            margin-top: 10px;
+        }
+
+        .btn-secondary:hover {
+            background: #5a6268;
+        }
+
+        .alert {
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .alert.show {
+            display: block;
+            animation: slideIn 0.3s ease;
+        }
+
+        .alert-success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .alert-error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .alert-info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+
+        .qr-code-container {
+            text-align: center;
+            margin: 20px 0;
+        }
+
+        .qr-code-container img {
+            max-width: 300px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 10px;
+            background: white;
+        }
+
+        .token-display {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            word-break: break-all;
+            font-family: monospace;
+            font-size: 12px;
+            margin-top: 10px;
+        }
+
+        .status-table {
+            width: 100%;
+            margin-top: 20px;
+            border-collapse: collapse;
+        }
+
+        .status-table th,
+        .status-table td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .status-table th {
+            background: #f8f9fa;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .status-enabled {
+            color: #4caf50;
+            font-weight: bold;
+        }
+
+        .status-disabled {
+            color: #f44336;
+            font-weight: bold;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .recovery-codes {
+            background: #fff3cd;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 15px;
+            border: 2px solid #ffc107;
+        }
+
+        .recovery-codes-list {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .recovery-code {
+            background: white;
+            padding: 8px;
+            border-radius: 4px;
+            text-align: center;
+            font-family: monospace;
+            font-weight: bold;
+            border: 1px solid #ffc107;
+        }
+
+        .method-buttons {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .method-btn {
+            padding: 12px;
+            background: white;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            cursor: pointer;
+            text-align: center;
+            transition: all 0.3s ease;
+            font-size: 14px;
+        }
+
+        .method-btn:hover {
+            border-color: #667eea;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+        }
+
+        .method-btn.active {
+            border-color: #667eea;
+            background: #f0f4ff;
+        }
+
+        .icon {
+            font-size: 24px;
+            margin-bottom: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="card">
+            <div class="header">
+                <h1>🔐 Démonstration 2FA</h1>
+                <p>Authentification à Deux Facteurs - NOVA SERVER</p>
+            </div>
+
+            <!-- Indicateur d'étapes -->
+            <div class="stage-indicator">
+                <div class="stage active" id="stage-1">
+                    <div class="stage-circle">1</div>
+                    <div class="stage-label">Connexion</div>
+                </div>
+                <div class="stage" id="stage-2">
+                    <div class="stage-circle">2</div>
+                    <div class="stage-label">Vérification</div>
+                </div>
+                <div class="stage" id="stage-3">
+                    <div class="stage-circle">3</div>
+                    <div class="stage-label">Accès</div>
+                </div>
+            </div>
+
+            <!-- Alertes -->
+            <div id="alert" class="alert"></div>
+
+            <!-- ÉTAPE 1: Connexion -->
+            <div id="step-login">
+                <div class="form-group">
+                    <label for="email">📧 Adresse Email</label>
+                    <input type="email" id="email" placeholder="votre.email@example.com" value="p.perez@it-spirit.com">
+                </div>
+                <div class="form-group">
+                    <label for="password">🔐 Mot de passe</label>
+                    <input type="password" id="password" placeholder="Votre mot de passe" value="31021225">
+                </div>
+                <button class="btn" onclick="login()">Se connecter</button>
+            </div>
+
+            <!-- ÉTAPE 2: Vérification 2FA -->
+            <div id="step-mfa" class="hidden">
+                <h3 style="margin-bottom: 20px; color: #333;">Vérification 2FA requise</h3>
+
+                <!-- Choix de la méthode -->
+                <div class="method-buttons">
+                    <div class="method-btn active" onclick="selectMethod('totp')">
+                        <div class="icon">📱</div>
+                        <div>TOTP</div>
+                    </div>
+                    <div class="method-btn" onclick="selectMethod('sms')">
+                        <div class="icon">💬</div>
+                        <div>SMS</div>
+                    </div>
+                    <div class="method-btn" onclick="selectMethod('recovery')">
+                        <div class="icon">🎫</div>
+                        <div>Code</div>
+                    </div>
+                </div>
+
+                <!-- Vérification TOTP -->
+                <div id="method-totp">
+                    <div class="form-group">
+                        <label for="totp-code">🔢 Code TOTP (6 chiffres)</label>
+                        <input type="text" id="totp-code" placeholder="123456" maxlength="6" inputmode="numeric">
+                        <small style="color: #666;">Ouvrez Google Authenticator ou Microsoft Authenticator</small>
+                    </div>
+                    <button class="btn" onclick="verifyTOTP()">Vérifier le code</button>
+                </div>
+
+                <!-- Vérification SMS -->
+                <div id="method-sms" class="hidden">
+                    <button class="btn" onclick="sendSMS()" id="btn-send-sms">📱 Envoyer un code SMS</button>
+                    <div id="sms-input" class="hidden" style="margin-top: 20px;">
+                        <div class="form-group">
+                            <label for="sms-code">💬 Code SMS (6 chiffres)</label>
+                            <input type="text" id="sms-code" placeholder="123456" maxlength="6" inputmode="numeric">
+                        </div>
+                        <button class="btn" onclick="verifySMS()">Vérifier le code SMS</button>
+                    </div>
+                </div>
+
+                <!-- Code de récupération -->
+                <div id="method-recovery" class="hidden">
+                    <div class="form-group">
+                        <label for="recovery-code">🎫 Code de récupération</label>
+                        <input type="text" id="recovery-code" placeholder="XXXX-XXXX">
+                        <small style="color: #666;">Format: XXXX-XXXX (ex: ABCD-1234)</small>
+                    </div>
+                    <button class="btn" onclick="verifyRecovery()">Utiliser le code</button>
+                </div>
+
+                <button class="btn btn-secondary" onclick="logout()">Annuler</button>
+            </div>
+
+            <!-- ÉTAPE 3: Succès -->
+            <div id="step-success" class="hidden">
+                <div style="text-align: center; padding: 40px 0;">
+                    <div style="font-size: 80px; margin-bottom: 20px;">🎉</div>
+                    <h2 style="color: #4caf50; margin-bottom: 10px;">Authentification réussie !</h2>
+                    <p style="color: #666; margin-bottom: 30px;">Vous êtes maintenant connecté à NOVA SERVER</p>
+
+                    <div class="token-display">
+                        <strong>Token d'accès:</strong><br>
+                        <span id="access-token-display"></span>
+                    </div>
+
+                    <div style="margin-top: 30px;">
+                        <button class="btn" onclick="showStatus()">📊 Voir le statut MFA</button>
+                        <button class="btn btn-secondary" onclick="resetDemo()">🔄 Recommencer la démo</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Statut MFA -->
+            <div id="step-status" class="hidden">
+                <h3 style="margin-bottom: 20px; color: #333;">📊 Statut MFA</h3>
+                <table class="status-table" id="status-table">
+                    <!-- Rempli dynamiquement -->
+                </table>
+                <button class="btn" onclick="resetDemo()" style="margin-top: 20px;">🔄 Recommencer</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const BASE_URL = 'http://localhost:8200';
+        let mfaPendingToken = null;
+        let accessToken = null;
+        let currentMethod = 'totp';
+
+        function showAlert(message, type = 'info') {
+            const alert = document.getElementById('alert');
+            alert.className = `alert alert-${type} show`;
+            alert.textContent = message;
+            setTimeout(() => alert.classList.remove('show'), 5000);
+        }
+
+        function setStage(stage) {
+            document.querySelectorAll('.stage').forEach(s => {
+                s.classList.remove('active', 'completed');
+            });
+
+            for (let i = 1; i < stage; i++) {
+                document.getElementById(`stage-${i}`).classList.add('completed');
+            }
+            document.getElementById(`stage-${stage}`).classList.add('active');
+        }
+
+        function showStep(step) {
+            document.querySelectorAll('[id^="step-"]').forEach(el => el.classList.add('hidden'));
+            document.getElementById(`step-${step}`).classList.remove('hidden');
+        }
+
+        async function login() {
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+
+            if (!email || !password) {
+                showAlert('Veuillez remplir tous les champs', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${BASE_URL}/auth/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    if (data.mfa_required) {
+                        mfaPendingToken = data.access_token;
+                        showAlert('✅ Connexion réussie ! Vérification 2FA requise', 'success');
+                        setStage(2);
+                        showStep('mfa');
+                    } else {
+                        accessToken = data.access_token;
+                        showAlert('✅ Connexion réussie !', 'success');
+                        setStage(3);
+                        showSuccess();
+                    }
+                } else {
+                    showAlert('❌ ' + (data.detail || 'Erreur de connexion'), 'error');
+                }
+            } catch (error) {
+                showAlert('❌ Erreur de connexion au serveur', 'error');
+                console.error(error);
+            }
+        }
+
+        function selectMethod(method) {
+            currentMethod = method;
+            document.querySelectorAll('.method-btn').forEach(btn => btn.classList.remove('active'));
+            event.target.closest('.method-btn').classList.add('active');
+
+            document.querySelectorAll('[id^="method-"]').forEach(el => el.classList.add('hidden'));
+            document.getElementById(`method-${method}`).classList.remove('hidden');
+        }
+
+        async function verifyTOTP() {
+            const code = document.getElementById('totp-code').value;
+
+            if (code.length !== 6) {
+                showAlert('Le code TOTP doit contenir 6 chiffres', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${BASE_URL}/api/mfa/verify/totp`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${mfaPendingToken}`
+                    },
+                    body: JSON.stringify({ code })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    accessToken = data.access_token;
+                    showAlert('🎉 Code TOTP valide !', 'success');
+                    setStage(3);
+                    showSuccess();
+                } else if (response.status === 423) {
+                    showAlert('🔒 Compte verrouillé après trop de tentatives', 'error');
+                } else {
+                    showAlert('❌ Code TOTP invalide', 'error');
+                }
+            } catch (error) {
+                showAlert('❌ Erreur lors de la vérification', 'error');
+                console.error(error);
+            }
+        }
+
+        async function sendSMS() {
+            const btn = document.getElementById('btn-send-sms');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="loading"></span> Envoi en cours...';
+
+            try {
+                const response = await fetch(`${BASE_URL}/api/mfa/sms/send`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${mfaPendingToken}`
+                    }
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    showAlert('📱 SMS envoyé ! Vérifiez votre téléphone', 'success');
+                    document.getElementById('sms-input').classList.remove('hidden');
+                } else {
+                    showAlert('❌ ' + (data.detail || 'Erreur d\'envoi du SMS'), 'error');
+                    btn.disabled = false;
+                    btn.innerHTML = '📱 Envoyer un code SMS';
+                }
+            } catch (error) {
+                showAlert('❌ Erreur lors de l\'envoi du SMS', 'error');
+                btn.disabled = false;
+                btn.innerHTML = '📱 Envoyer un code SMS';
+                console.error(error);
+            }
+        }
+
+        async function verifySMS() {
+            const code = document.getElementById('sms-code').value;
+
+            if (code.length !== 6) {
+                showAlert('Le code SMS doit contenir 6 chiffres', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${BASE_URL}/api/mfa/verify/sms`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${mfaPendingToken}`
+                    },
+                    body: JSON.stringify({ code })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    accessToken = data.access_token;
+                    showAlert('🎉 Code SMS valide !', 'success');
+                    setStage(3);
+                    showSuccess();
+                } else {
+                    showAlert('❌ Code SMS invalide ou expiré', 'error');
+                }
+            } catch (error) {
+                showAlert('❌ Erreur lors de la vérification', 'error');
+                console.error(error);
+            }
+        }
+
+        async function verifyRecovery() {
+            const code = document.getElementById('recovery-code').value;
+
+            if (!code) {
+                showAlert('Veuillez entrer un code de récupération', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${BASE_URL}/api/mfa/verify/recovery`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${mfaPendingToken}`
+                    },
+                    body: JSON.stringify({ code })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    accessToken = data.access_token;
+                    showAlert(`🎉 Code valide ! ${data.remaining_codes} codes restants`, 'success');
+                    setStage(3);
+                    showSuccess();
+                } else {
+                    showAlert('❌ Code de récupération invalide', 'error');
+                }
+            } catch (error) {
+                showAlert('❌ Erreur lors de la vérification', 'error');
+                console.error(error);
+            }
+        }
+
+        function showSuccess() {
+            showStep('success');
+            document.getElementById('access-token-display').textContent = accessToken;
+        }
+
+        async function showStatus() {
+            showStep('status');
+
+            try {
+                const response = await fetch(`${BASE_URL}/api/mfa/status`, {
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`
+                    }
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    const table = document.getElementById('status-table');
+                    table.innerHTML = `
+                        <tr><th>Paramètre</th><th>État</th></tr>
+                        <tr><td>TOTP Activé</td><td class="${data.totp_enabled ? 'status-enabled' : 'status-disabled'}">${data.totp_enabled ? '✅ OUI' : '❌ NON'}</td></tr>
+                        <tr><td>Téléphone Vérifié</td><td class="${data.phone_verified ? 'status-enabled' : 'status-disabled'}">${data.phone_verified ? '✅ OUI' : '❌ NON'}</td></tr>
+                        <tr><td>Numéro</td><td>${data.phone_number || 'Non configuré'}</td></tr>
+                        <tr><td>Méthode Secours</td><td>${data.backup_method || 'none'}</td></tr>
+                        <tr><td>Codes Récupération</td><td>${data.recovery_codes_count || 0}</td></tr>
+                        <tr><td>MFA Obligatoire</td><td class="${data.mfa_enforced ? 'status-enabled' : 'status-disabled'}">${data.mfa_enforced ? '✅ OUI' : '❌ NON'}</td></tr>
+                    `;
+                } else {
+                    showAlert('❌ Erreur lors de la récupération du statut', 'error');
+                }
+            } catch (error) {
+                showAlert('❌ Erreur de connexion', 'error');
+                console.error(error);
+            }
+        }
+
+        function resetDemo() {
+            mfaPendingToken = null;
+            accessToken = null;
+            setStage(1);
+            showStep('login');
+            document.getElementById('totp-code').value = '';
+            document.getElementById('sms-code').value = '';
+            document.getElementById('recovery-code').value = '';
+            document.getElementById('sms-input').classList.add('hidden');
+            document.getElementById('btn-send-sms').disabled = false;
+            document.getElementById('btn-send-sms').innerHTML = '📱 Envoyer un code SMS';
+            showAlert('Démonstration réinitialisée', 'info');
+        }
+
+        function logout() {
+            resetDemo();
+        }
+    </script>
+</body>
+</html>
