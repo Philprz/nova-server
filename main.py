@@ -19,6 +19,9 @@ from routes.routes_progress import router as progress_router
 from routes.routes_client_listing import router as client_listing_router
 from routes.routes_websocket import router as websocket_router
 from routes import routes_quote_details
+from routes.routes_sap_rondot import router as sap_rondot_router
+from routes.routes_supplier_tariffs import router as supplier_tariffs_router
+from routes.routes_graph import router as graph_router
 if sys.platform == "win32":
     os.environ["PYTHONIOENCODING"] = "utf-8"
 
@@ -124,6 +127,9 @@ app = FastAPI(
 # Configuration des routes statiques pour l'interface
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+# Frontend mail-to-biz (React SPA)
+app.mount("/mail-to-biz/assets", StaticFiles(directory="frontend/assets"), name="mail-to-biz-assets")
+
 # CORRECTION: Configuration directe des routes
 app.include_router(assistant_router, prefix="/api/assistant", tags=["IA Assistant"])
 app.include_router(clients_router, prefix="/api/clients", tags=["Clients"])
@@ -131,6 +137,9 @@ app.include_router(devis_router, prefix="/api/devis", tags=["Devis"])
 app.include_router(progress_router, prefix="/progress", tags=["Suivi tâches"])
 app.include_router(client_listing_router, prefix="/api/clients", tags=["Client Listing"])
 app.include_router(websocket_router, tags=["WebSocket"])
+app.include_router(sap_rondot_router)  # API SAP Rondot pour mail-to-biz
+app.include_router(supplier_tariffs_router)  # API Tarifs fournisseurs
+app.include_router(graph_router, prefix="/api/graph", tags=["Microsoft Graph"])
 # Route WebSocket pour l'assistant intelligent manquante
 @app.websocket("/ws/assistant/{task_id}")
 async def websocket_assistant_endpoint(websocket: WebSocket, task_id: str):
@@ -243,10 +252,21 @@ async def get_assistant_interface():
 async def itspirit_interface():
     """Sert l'interface IT Spirit personnalisée"""
     try:
-        with open('templates/nova_interface_final.html', 'r', encoding='utf-8') as f: 
+        with open('templates/nova_interface_final.html', 'r', encoding='utf-8') as f:
             return HTMLResponse(content=f.read(), media_type="text/html; charset=utf-8")
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Interface IT Spirit non trouvée")
+
+# Route pour servir l'interface mail-to-biz (React SPA)
+@app.get('/mail-to-biz', response_class=HTMLResponse)
+@app.get('/mail-to-biz/{path:path}', response_class=HTMLResponse)
+async def mail_to_biz_interface(path: str = ""):
+    """Sert l'interface mail-to-biz (React SPA avec fallback)"""
+    try:
+        with open('frontend/index.html', 'r', encoding='utf-8') as f:
+            return HTMLResponse(content=f.read(), media_type="text/html; charset=utf-8")
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Interface mail-to-biz non trouvée")
 
 @app.get("/health")
 async def health_check():
@@ -360,12 +380,45 @@ async def root():
         }
     }
 
+def kill_process_on_port(port: int):
+    """Tue le processus qui occupe le port spécifié (Windows uniquement)"""
+    if sys.platform != "win32":
+        return
+
+    import subprocess
+    try:
+        # Trouver le PID du processus sur le port
+        result = subprocess.run(
+            f'netstat -ano | findstr :{port} | findstr LISTENING',
+            shell=True, capture_output=True, text=True
+        )
+
+        if result.stdout:
+            # Extraire le PID (dernière colonne)
+            lines = result.stdout.strip().split('\n')
+            pids = set()
+            for line in lines:
+                parts = line.split()
+                if parts:
+                    pids.add(parts[-1])
+
+            for pid in pids:
+                if pid.isdigit():
+                    logger.info(f"Arret du processus {pid} sur le port {port}...")
+                    subprocess.run(f'taskkill /F /PID {pid}', shell=True, capture_output=True)
+                    logger.info(f"Processus {pid} termine")
+    except Exception as e:
+        logger.warning(f"Impossible de liberer le port {port}: {e}")
+
+
 # Point d'entrée de l'application
 if __name__ == "__main__":
     # Configuration spécifique pour Windows
     if sys.platform == "win32":
         # Configuration pour éviter les problèmes d'encodage
         os.environ["PYTHONIOENCODING"] = "utf-8"
-    
+        # Libérer le port 8000 si occupé
+        kill_process_on_port(8000)
+
     # Démarrage du serveur
     uvicorn.run(app, host="0.0.0.0", port=8000, log_config=None, loop="asyncio")

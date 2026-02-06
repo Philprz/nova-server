@@ -1,0 +1,76 @@
+# Configuration Caddy pour NOVA - mail-to-biz
+# Usage: caddy run --config Caddyfile
+
+# Configuration locale (port 80)
+:80 {
+    # API endpoints (sans rewrite)
+    handle /api/* {
+        reverse_proxy localhost:8000
+    }
+
+    # Endpoints système
+    handle /docs* {
+        reverse_proxy localhost:8000
+    }
+
+    handle /health {
+        reverse_proxy localhost:8000
+    }
+
+    handle /redoc* {
+        reverse_proxy localhost:8000
+    }
+
+    handle /openapi.json {
+        reverse_proxy localhost:8000
+    }
+
+    # Route principale -> /mail-to-biz
+    handle / {
+        rewrite * /mail-to-biz{path}
+        reverse_proxy localhost:8000
+    }
+
+    # Assets
+    handle /assets/* {
+        rewrite * /mail-to-biz{path}
+        reverse_proxy localhost:8000
+    }
+}
+
+# Configuration production avec SSL automatique
+nova.itspirit.ovh {
+    # API endpoints (sans rewrite)
+    handle /api/* {
+        reverse_proxy localhost:8000
+    }
+
+    # Endpoints système
+    handle /docs* {
+        reverse_proxy localhost:8000
+    }
+
+    handle /health {
+        reverse_proxy localhost:8000
+    }
+
+    handle /redoc* {
+        reverse_proxy localhost:8000
+    }
+
+    handle /openapi.json {
+        reverse_proxy localhost:8000
+    }
+
+    # Route principale -> /mail-to-biz
+    handle / {
+        rewrite * /mail-to-biz{path}
+        reverse_proxy localhost:8000
+    }
+
+    # Assets
+    handle /assets/* {
+        rewrite * /mail-to-biz{path}
+        reverse_proxy localhost:8000
+    }
+}
