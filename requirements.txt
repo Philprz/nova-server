@@ -23,3 +23,10 @@ starlette>=0.37.2
 anyio>=4.5.0
 mcp>=1.13.0
 fastmcp>=0.1.2
+
+# Parsers pour tarifs fournisseurs
+pymupdf>=1.23.0
+pdfplumber>=0.10.0
+openpyxl>=3.1.0
+pytesseract>=0.3.10
+pillow>=10.0.0
