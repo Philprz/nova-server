@@ -1,0 +1,189 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Design System - Enterprise ERP Application
+   Palette: Professional blues, neutral grays, status colors
+   Inspired by: SAP, Microsoft Dynamics, Salesforce
+*/
+
+@layer base {
+  :root {
+    /* Core backgrounds */
+    --background: 210 20% 98%;
+    --foreground: 220 25% 10%;
+
+    /* Cards and surfaces */
+    --card: 0 0% 100%;
+    --card-foreground: 220 25% 10%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 25% 10%;
+
+    /* Primary - Professional Blue */
+    --primary: 215 90% 42%;
+    --primary-foreground: 0 0% 100%;
+
+    /* Secondary - Slate */
+    --secondary: 214 20% 92%;
+    --secondary-foreground: 220 25% 20%;
+
+    /* Muted surfaces */
+    --muted: 214 20% 96%;
+    --muted-foreground: 215 16% 47%;
+
+    /* Accent - Teal for emphasis */
+    --accent: 195 80% 40%;
+    --accent-foreground: 0 0% 100%;
+
+    /* Status colors */
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 142 71% 45%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+
+    --info: 199 89% 48%;
+    --info-foreground: 0 0% 100%;
+
+    /* Borders and inputs */
+    --border: 214 25% 88%;
+    --input: 214 25% 88%;
+    --ring: 215 90% 42%;
+
+    --radius: 0.5rem;
+
+    /* Sidebar - slightly darker */
+    --sidebar-background: 220 20% 14%;
+    --sidebar-foreground: 210 20% 90%;
+    --sidebar-primary: 215 90% 55%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 20% 22%;
+    --sidebar-accent-foreground: 210 20% 95%;
+    --sidebar-border: 220 15% 25%;
+    --sidebar-ring: 215 90% 55%;
+
+    /* Custom tokens for ERP */
+    --header-bg: 220 20% 14%;
+    --header-foreground: 210 20% 95%;
+    --table-row-hover: 214 40% 96%;
+    --badge-quote: 215 90% 42%;
+    --badge-pending: 38 92% 50%;
+    --badge-validated: 142 71% 45%;
+    --badge-rejected: 0 72% 51%;
+  }
+
+  .dark {
+    --background: 220 20% 8%;
+    --foreground: 210 20% 95%;
+
+    --card: 220 20% 12%;
+    --card-foreground: 210 20% 95%;
+
+    --popover: 220 20% 12%;
+    --popover-foreground: 210 20% 95%;
+
+    --primary: 215 80% 55%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 220 15% 22%;
+    --secondary-foreground: 210 20% 90%;
+
+    --muted: 220 15% 18%;
+    --muted-foreground: 215 15% 60%;
+
+    --accent: 195 70% 50%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 62% 55%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 142 60% 50%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 38 85% 55%;
+    --warning-foreground: 0 0% 100%;
+
+    --info: 199 80% 55%;
+    --info-foreground: 0 0% 100%;
+
+    --border: 220 15% 22%;
+    --input: 220 15% 22%;
+    --ring: 215 80% 55%;
+
+    --sidebar-background: 220 20% 6%;
+    --sidebar-foreground: 210 20% 90%;
+    --sidebar-primary: 215 80% 55%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 15% 15%;
+    --sidebar-accent-foreground: 210 20% 95%;
+    --sidebar-border: 220 15% 18%;
+    --sidebar-ring: 215 80% 55%;
+
+    --header-bg: 220 20% 6%;
+    --header-foreground: 210 20% 95%;
+    --table-row-hover: 220 15% 15%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+
+  code, pre {
+    font-family: 'JetBrains Mono', monospace;
+  }
+}
+
+@layer components {
+  .card-elevated {
+    @apply bg-card border shadow-sm hover:shadow-md transition-shadow duration-200;
+  }
+
+  .status-badge {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+  }
+
+  .status-badge-quote {
+    @apply status-badge bg-primary/10 text-primary;
+  }
+
+  .status-badge-pending {
+    @apply status-badge bg-warning/10 text-warning;
+  }
+
+  .status-badge-validated {
+    @apply status-badge bg-success/10 text-success;
+  }
+
+  .status-badge-rejected {
+    @apply status-badge bg-destructive/10 text-destructive;
+  }
+
+  .data-table-row {
+    @apply border-b transition-colors hover:bg-muted/50;
+  }
+
+  .section-title {
+    @apply text-lg font-semibold text-foreground tracking-tight;
+  }
+
+  .form-label {
+    @apply text-sm font-medium text-foreground;
+  }
+
+  .input-erp {
+    @apply h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2;
+  }
+}
