@@ -69,20 +69,35 @@ class EmailMatcher:
             await self._load_reference_data()
 
     async def _load_reference_data(self):
-        """Charge les clients et produits depuis SAP."""
+        """Charge les clients et produits depuis SAP (avec pagination)."""
         sap = self._get_sap_service()
 
         try:
-            # --- Charger les clients ---
+            # --- Charger les clients (avec pagination, limite SAP = 20/requête) ---
             logger.info("Chargement des clients SAP...")
-            clients_data = await sap._call_sap("/BusinessPartners", params={
-                "$filter": "CardType eq 'cCustomer'",
-                "$select": "CardCode,CardName,EmailAddress,Phone1",
-                "$top": 5000,
-                "$orderby": "CardName"
-            })
+            self._clients_cache = []
+            batch_size = 20  # Limite SAP
+            skip = 0
+            max_clients = 1000  # Limite pour éviter trop de requêtes
 
-            self._clients_cache = clients_data.get("value", [])
+            while len(self._clients_cache) < max_clients:
+                clients_batch = await sap._call_sap("/BusinessPartners", params={
+                    "$filter": "CardType eq 'cCustomer'",
+                    "$select": "CardCode,CardName,EmailAddress,Phone1",
+                    "$top": batch_size,
+                    "$skip": skip,
+                    "$orderby": "CardName"
+                })
+
+                batch = clients_batch.get("value", [])
+                if not batch:
+                    break  # Plus de résultats
+
+                self._clients_cache.extend(batch)
+                skip += batch_size
+
+                if len(batch) < batch_size:
+                    break  # Dernière page
 
             # Construire l'index par domaine email
             self._client_domains = {}
@@ -98,19 +113,33 @@ class EmailMatcher:
             logger.info(f"Clients SAP charges: {len(self._clients_cache)} "
                         f"({len(self._client_domains)} domaines indexes)")
 
-            # --- Charger les produits ---
+            # --- Charger les produits (avec pagination, limite SAP = 20/requête) ---
             logger.info("Chargement des produits SAP...")
-            items_data = await sap._call_sap("/Items", params={
-                "$select": "ItemCode,ItemName",
-                "$top": 10000,
-                "$orderby": "ItemCode"
-            })
-
             self._items_cache = {}
-            for item in items_data.get("value", []):
-                code = item.get("ItemCode", "")
-                if code:
-                    self._items_cache[code] = item
+            skip = 0
+            max_items = 2000  # Limite pour éviter trop de requêtes
+
+            while len(self._items_cache) < max_items:
+                items_batch = await sap._call_sap("/Items", params={
+                    "$select": "ItemCode,ItemName",
+                    "$top": batch_size,
+                    "$skip": skip,
+                    "$orderby": "ItemCode"
+                })
+
+                batch = items_batch.get("value", [])
+                if not batch:
+                    break
+
+                for item in batch:
+                    code = item.get("ItemCode", "")
+                    if code:
+                        self._items_cache[code] = item
+
+                skip += batch_size
+
+                if len(batch) < batch_size:
+                    break
 
             logger.info(f"Produits SAP charges: {len(self._items_cache)}")
 
