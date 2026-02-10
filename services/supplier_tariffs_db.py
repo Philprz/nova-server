@@ -64,9 +64,35 @@ def init_database():
             min_quantity INTEGER,
             additional_data TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+            -- Nouveaux champs pour métadonnées enrichies
+            delivery_days INTEGER,
+            transport_cost REAL,
+            transport_days INTEGER,
+            weight REAL,
+            dimensions TEXT,
+            technical_specs TEXT,
+            stock_availability TEXT,
+            supplier_code TEXT,
+
             FOREIGN KEY (file_id) REFERENCES indexed_files(id) ON DELETE CASCADE
         )
     """)
+
+    # Migration : Ajouter les nouvelles colonnes si elles n'existent pas déjà
+    try:
+        cursor.execute("SELECT delivery_days FROM supplier_products LIMIT 1")
+    except sqlite3.OperationalError:
+        # Les colonnes n'existent pas, les ajouter
+        logger.info("Migration: Ajout des nouvelles colonnes métadonnées")
+        cursor.execute("ALTER TABLE supplier_products ADD COLUMN delivery_days INTEGER")
+        cursor.execute("ALTER TABLE supplier_products ADD COLUMN transport_cost REAL")
+        cursor.execute("ALTER TABLE supplier_products ADD COLUMN transport_days INTEGER")
+        cursor.execute("ALTER TABLE supplier_products ADD COLUMN weight REAL")
+        cursor.execute("ALTER TABLE supplier_products ADD COLUMN dimensions TEXT")
+        cursor.execute("ALTER TABLE supplier_products ADD COLUMN technical_specs TEXT")
+        cursor.execute("ALTER TABLE supplier_products ADD COLUMN stock_availability TEXT")
+        cursor.execute("ALTER TABLE supplier_products ADD COLUMN supplier_code TEXT")
 
     # Table de configuration de l'indexation
     cursor.execute("""
@@ -157,7 +183,7 @@ def update_file_status(file_id: int, status: str, error_message: str = None, ite
 
 
 def add_supplier_product(file_id: int, product_data: Dict[str, Any]) -> int:
-    """Ajoute un produit fournisseur extrait."""
+    """Ajoute un produit fournisseur extrait avec métadonnées enrichies."""
     conn = get_connection()
     cursor = conn.cursor()
 
@@ -166,8 +192,10 @@ def add_supplier_product(file_id: int, product_data: Dict[str, Any]) -> int:
     cursor.execute("""
         INSERT INTO supplier_products
         (file_id, supplier_reference, designation, unit_price, currency,
-         delivery_time, supplier_name, category, brand, min_quantity, additional_data)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         delivery_time, supplier_name, category, brand, min_quantity, additional_data,
+         delivery_days, transport_cost, transport_days, weight, dimensions,
+         technical_specs, stock_availability, supplier_code)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         file_id,
         product_data.get('supplier_reference'),
@@ -179,7 +207,16 @@ def add_supplier_product(file_id: int, product_data: Dict[str, Any]) -> int:
         product_data.get('category'),
         product_data.get('brand'),
         product_data.get('min_quantity'),
-        additional_data
+        additional_data,
+        # Nouveaux champs métadonnées
+        product_data.get('delivery_days'),
+        product_data.get('transport_cost'),
+        product_data.get('transport_days'),
+        product_data.get('weight'),
+        product_data.get('dimensions'),
+        product_data.get('technical_specs'),
+        product_data.get('stock_availability'),
+        product_data.get('supplier_code')
     ))
 
     product_id = cursor.lastrowid
@@ -189,7 +226,7 @@ def add_supplier_product(file_id: int, product_data: Dict[str, Any]) -> int:
 
 
 def add_supplier_products_batch(file_id: int, products: List[Dict[str, Any]]) -> int:
-    """Ajoute plusieurs produits en une seule transaction."""
+    """Ajoute plusieurs produits en une seule transaction avec métadonnées enrichies."""
     conn = get_connection()
     cursor = conn.cursor()
 
@@ -202,8 +239,10 @@ def add_supplier_products_batch(file_id: int, products: List[Dict[str, Any]]) ->
         cursor.execute("""
             INSERT INTO supplier_products
             (file_id, supplier_reference, designation, unit_price, currency,
-             delivery_time, supplier_name, category, brand, min_quantity, additional_data)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             delivery_time, supplier_name, category, brand, min_quantity, additional_data,
+             delivery_days, transport_cost, transport_days, weight, dimensions,
+             technical_specs, stock_availability, supplier_code)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             file_id,
             product.get('supplier_reference'),
@@ -215,7 +254,16 @@ def add_supplier_products_batch(file_id: int, products: List[Dict[str, Any]]) ->
             product.get('category'),
             product.get('brand'),
             product.get('min_quantity'),
-            additional_data
+            additional_data,
+            # Nouveaux champs métadonnées
+            product.get('delivery_days'),
+            product.get('transport_cost'),
+            product.get('transport_days'),
+            product.get('weight'),
+            product.get('dimensions'),
+            product.get('technical_specs'),
+            product.get('stock_availability'),
+            product.get('supplier_code')
         ))
 
     conn.commit()

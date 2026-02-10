@@ -22,6 +22,8 @@ from routes import routes_quote_details
 from routes.routes_sap_rondot import router as sap_rondot_router
 from routes.routes_supplier_tariffs import router as supplier_tariffs_router
 from routes.routes_graph import router as graph_router
+from routes.routes_sap_business import router as sap_business_router
+from routes.routes_pricing_validation import router as pricing_validation_router
 if sys.platform == "win32":
     os.environ["PYTHONIOENCODING"] = "utf-8"
 
@@ -140,6 +142,8 @@ app.include_router(websocket_router, tags=["WebSocket"])
 app.include_router(sap_rondot_router)  # API SAP Rondot pour mail-to-biz
 app.include_router(supplier_tariffs_router)  # API Tarifs fournisseurs
 app.include_router(graph_router, prefix="/api/graph", tags=["Microsoft Graph"])
+app.include_router(sap_business_router)  # API SAP Business pour mail-to-biz
+app.include_router(pricing_validation_router, prefix="/api/validations", tags=["Pricing Validation"])
 # Route WebSocket pour l'assistant intelligent manquante
 @app.websocket("/ws/assistant/{task_id}")
 async def websocket_assistant_endpoint(websocket: WebSocket, task_id: str):
