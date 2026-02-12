@@ -7,6 +7,7 @@ import os
 import logging
 import base64
 import httpx
+from datetime import datetime
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional, List
@@ -15,6 +16,7 @@ from dotenv import load_dotenv
 from services.graph_service import get_graph_service, GraphEmail, GraphAttachment, GraphEmailsResponse
 from services.email_analyzer import get_email_analyzer, extract_pdf_text, EmailAnalysisResult, ExtractedQuoteData, ExtractedProduct
 from services.email_matcher import get_email_matcher
+from services.duplicate_detector import get_duplicate_detector, DuplicateType, QuoteStatus
 
 load_dotenv()
 
@@ -23,6 +25,7 @@ router = APIRouter()
 
 # Cache simple pour les résultats d'analyse (en production, utiliser Redis)
 _analysis_cache: dict = {}
+_backend_start_time = datetime.now()  # Pour invalider le cache au redémarrage
 
 
 class ConnectionTestDetails(BaseModel):
@@ -342,24 +345,37 @@ async def get_attachment_content(message_id: str, attachment_id: str):
 
 
 @router.post("/emails/{message_id}/analyze", response_model=EmailAnalysisResult)
-async def analyze_email(message_id: str, force: bool = False):
+async def analyze_email(message_id: str, force: bool = True):
     """
     Analyse un email avec l'IA pour déterminer s'il s'agit d'une demande de devis.
     Le résultat est mis en cache.
 
     Args:
         message_id: ID de l'email
-        force: Si True, force la ré-analyse même si le résultat est en cache
+        force: Si True, force la ré-analyse même si le résultat est en cache (défaut: True pour garantir des résultats à jour)
     """
-    global _analysis_cache
+    global _analysis_cache, _backend_start_time
 
     # Vérifier le cache (sauf si force=True)
+    # Invalider le cache s'il date d'avant le démarrage du backend
     if not force and message_id in _analysis_cache:
-        logger.info(f"Returning cached analysis for {message_id}")
-        return _analysis_cache[message_id]
+        cached_entry = _analysis_cache[message_id]
+        # Vérifier si l'entrée a un timestamp et si elle est toujours valide
+        if isinstance(cached_entry, dict) and 'timestamp' in cached_entry:
+            cache_time = cached_entry['timestamp']
+            if cache_time < _backend_start_time:
+                logger.info(f"Cache invalidé (plus ancien que le démarrage) pour {message_id}")
+                del _analysis_cache[message_id]
+            else:
+                logger.info(f"Returning cached analysis for {message_id}")
+                return cached_entry['data']
+        else:
+            # Ancien format de cache sans timestamp - invalider
+            logger.info(f"Cache invalide (format ancien) pour {message_id}")
+            del _analysis_cache[message_id]
 
     if force:
-        logger.info(f"Forcing re-analysis for {message_id}")
+        logger.info(f"Forcing new analysis for {message_id}")
 
     graph_service = get_graph_service()
     email_analyzer = get_email_analyzer()
@@ -442,8 +458,113 @@ async def analyze_email(message_id: str, force: bool = False):
                     result.is_quote_request = True
                     result.classification = "QUOTE_REQUEST"
 
+            # === GESTION MATCHES MULTIPLES & AUTO-VALIDATION ===
+
+            # Stocker tous les matches (pour choix utilisateur si nécessaire)
+            result.client_matches = [c.dict() for c in match_result.clients]  # Convertir en dict pour JSON
+            result.product_matches = [p.dict() for p in match_result.products]
+
+            # --- AUTO-VALIDATION CLIENT ---
+            if match_result.clients:
+                # Si 1 seul client ET score ≥ 95 → AUTO-VALIDÉ
+                if len(match_result.clients) == 1 and match_result.clients[0].score >= 95:
+                    result.client_auto_validated = True
+                    logger.info(f"✅ Client AUTO-VALIDÉ: {match_result.clients[0].card_name} (score={match_result.clients[0].score})")
+
+                # Si plusieurs clients OU score < 95 → CHOIX REQUIS
+                elif len(match_result.clients) > 1:
+                    result.requires_user_choice = True
+                    result.user_choice_reason = f"{len(match_result.clients)} clients possibles - Choix requis"
+                    logger.info(f"⚠️ CHOIX UTILISATEUR requis: {len(match_result.clients)} clients matchés")
+
+                elif match_result.clients[0].score < 95:
+                    result.requires_user_choice = True
+                    result.user_choice_reason = f"Client score < 95 ({match_result.clients[0].score}) - Confirmation requise"
+                    logger.info(f"⚠️ CONFIRMATION requise: Client score={match_result.clients[0].score} < 95")
+
+            # --- AUTO-VALIDATION PRODUITS ---
+            if match_result.products:
+                # Si TOUS les produits ont score = 100 (match exact code) → AUTO-VALIDÉ
+                all_exact_match = all(p.score == 100 for p in match_result.products)
+
+                if all_exact_match:
+                    result.products_auto_validated = True
+                    logger.info(f"✅ Produits AUTO-VALIDÉS: {len(match_result.products)} produit(s) match exact")
+
+                # Si au moins 1 produit score < 100 → CHOIX REQUIS
+                else:
+                    result.requires_user_choice = True
+                    ambiguous_products = [p for p in match_result.products if p.score < 100]
+                    result.user_choice_reason = (
+                        result.user_choice_reason or ""
+                    ) + f" | {len(ambiguous_products)} produit(s) ambigus (score < 100)"
+                    logger.info(f"⚠️ CHOIX UTILISATEUR requis: {len(ambiguous_products)} produits avec score < 100")
+
+            # Si aucun client trouvé → CRÉATION REQUISE
+            if not match_result.clients and result.extracted_data and result.extracted_data.client_name:
+                result.requires_user_choice = True
+                result.user_choice_reason = "Client non trouvé - Création nécessaire"
+                logger.info("⚠️ CRÉATION CLIENT requise: aucun match SAP")
+
+            # Si aucun produit trouvé → CRÉATION REQUISE
+            if not match_result.products and result.extracted_data and result.extracted_data.products:
+                result.requires_user_choice = True
+                result.user_choice_reason = (
+                    result.user_choice_reason or ""
+                ) + " | Produit(s) non trouvé(s) - Vérification fichiers fournisseurs requise"
+                logger.info("⚠️ VÉRIFICATION PRODUITS requise: aucun match SAP")
+
         except Exception as e:
             logger.warning(f"SAP matching failed (non-blocking): {e}")
+
+        # === DÉTECTION DES DOUBLONS ===
+        try:
+            detector = get_duplicate_detector()
+
+            # Extraire les codes produits identifiés
+            product_codes = []
+            if result.extracted_data and result.extracted_data.products:
+                product_codes = [p.reference for p in result.extracted_data.products if p.reference]
+
+            # Vérifier les doublons
+            duplicate_check = detector.check_duplicate(
+                email_id=message_id,
+                sender_email=email.from_address,
+                subject=email.subject,
+                client_card_code=result.extracted_data.client_card_code if result.extracted_data else None,
+                product_codes=product_codes if product_codes else None
+            )
+
+            # Enrichir le résultat avec les infos de doublon
+            result.is_duplicate = duplicate_check.is_duplicate
+            result.duplicate_type = duplicate_check.duplicate_type.value
+            result.duplicate_confidence = duplicate_check.confidence
+
+            if duplicate_check.existing_quote:
+                result.existing_quote_id = duplicate_check.existing_quote.quote_id
+                result.existing_quote_status = duplicate_check.existing_quote.status
+
+                logger.warning(
+                    f"Doublon détecté ({duplicate_check.duplicate_type.value}) "
+                    f"pour email {message_id} - Devis existant: {duplicate_check.existing_quote.quote_id}"
+                )
+
+            # Si pas de doublon, enregistrer cet email comme traité
+            if not duplicate_check.is_duplicate and result.is_quote_request:
+                detector.register_email(
+                    email_id=message_id,
+                    sender_email=email.from_address,
+                    subject=email.subject,
+                    client_card_code=result.extracted_data.client_card_code if result.extracted_data else None,
+                    client_name=result.extracted_data.client_name if result.extracted_data else None,
+                    product_codes=product_codes,
+                    status=QuoteStatus.PENDING,
+                    notes=f"Auto-enregistré lors de l'analyse"
+                )
+
+        except Exception as e:
+            logger.error(f"Erreur détection doublon (non-bloquant): {e}")
+            # Ne pas bloquer le traitement en cas d'erreur de détection
 
         # Mettre en cache (limiter à 100 entrées)
         if len(_analysis_cache) > 100:
@@ -451,7 +572,11 @@ async def analyze_email(message_id: str, force: bool = False):
             for key in oldest_keys:
                 del _analysis_cache[key]
 
-        _analysis_cache[message_id] = result
+        # Stocker avec timestamp pour invalidation au redémarrage
+        _analysis_cache[message_id] = {
+            'timestamp': datetime.now(),
+            'data': result
+        }
 
         return result
 
@@ -469,7 +594,12 @@ async def get_email_analysis(message_id: str):
     global _analysis_cache
 
     if message_id in _analysis_cache:
-        return _analysis_cache[message_id]
+        cached_entry = _analysis_cache[message_id]
+        # Gérer le nouveau format avec timestamp
+        if isinstance(cached_entry, dict) and 'data' in cached_entry:
+            return cached_entry['data']
+        # Ancien format (rétrocompatibilité)
+        return cached_entry
 
     return None
 
@@ -490,4 +620,211 @@ async def mark_email_as_read(message_id: str):
 
     except Exception as e:
         logger.error(f"Error marking email as read: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==========================================
+# ENDPOINTS PHASE B - VALIDATION CHOIX MULTIPLES
+# ==========================================
+
+
+class ClientChoiceRequest(BaseModel):
+    """Requête de confirmation du choix client."""
+    card_code: str  # Code client SAP choisi
+    card_name: str
+    create_new: bool = False  # True si création d'un nouveau client
+
+
+class ProductChoiceRequest(BaseModel):
+    """Requête de confirmation des choix produits."""
+    selected_products: List[dict]  # Liste des produits choisis avec item_code, quantity
+    create_new_products: List[dict] = []  # Produits à créer (si non trouvés dans SAP)
+
+
+@router.post("/emails/{message_id}/confirm-client")
+async def confirm_client_choice(message_id: str, choice: ClientChoiceRequest):
+    """
+    L'utilisateur confirme son choix de client parmi les matches.
+
+    Args:
+        message_id: ID de l'email
+        choice: Client choisi ou demande de création
+
+    Returns:
+        Confirmation du choix avec mise à jour du cache
+    """
+    global _analysis_cache
+
+    try:
+        # Récupérer l'analyse en cache
+        if message_id not in _analysis_cache:
+            raise HTTPException(status_code=404, detail="Email analysis not found in cache")
+
+        cached_entry = _analysis_cache[message_id]
+        # Gérer le nouveau format avec timestamp
+        if isinstance(cached_entry, dict) and 'data' in cached_entry:
+            result = cached_entry['data']
+        else:
+            result = cached_entry
+
+        # Mettre à jour les données extraites avec le choix utilisateur
+        if result.extracted_data is None:
+            result.extracted_data = ExtractedQuoteData()
+
+        if choice.create_new:
+            # Création d'un nouveau client demandée
+            result.extracted_data.client_name = choice.card_name
+            result.extracted_data.client_card_code = None  # Sera créé dans SAP
+            logger.info(f"Création nouveau client demandée: {choice.card_name}")
+
+            return {
+                "success": True,
+                "action": "create_client",
+                "client_name": choice.card_name,
+                "message": f"Nouveau client '{choice.card_name}' sera créé dans SAP"
+            }
+
+        else:
+            # Client existant choisi
+            result.extracted_data.client_name = choice.card_name
+            result.extracted_data.client_card_code = choice.card_code
+
+            # Trouver le match complet pour récupérer l'email
+            selected_match = next(
+                (c for c in result.client_matches if c['card_code'] == choice.card_code),
+                None
+            )
+            if selected_match and selected_match.get('email_address'):
+                result.extracted_data.client_email = selected_match['email_address']
+
+            # Marquer comme validé
+            result.client_auto_validated = True
+            result.requires_user_choice = False  # Choix effectué
+
+            logger.info(f"Client choisi par utilisateur: {choice.card_name} ({choice.card_code})")
+
+            return {
+                "success": True,
+                "action": "client_confirmed",
+                "card_code": choice.card_code,
+                "card_name": choice.card_name,
+                "message": f"Client {choice.card_name} ({choice.card_code}) confirmé"
+            }
+
+    except Exception as e:
+        logger.error(f"Error confirming client choice: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/emails/{message_id}/confirm-products")
+async def confirm_products_choice(message_id: str, choice: ProductChoiceRequest):
+    """
+    L'utilisateur confirme son choix de produits parmi les matches.
+
+    Args:
+        message_id: ID de l'email
+        choice: Produits choisis et produits à créer
+
+    Returns:
+        Confirmation des choix avec mise à jour du cache
+    """
+    global _analysis_cache
+
+    try:
+        # Récupérer l'analyse en cache
+        if message_id not in _analysis_cache:
+            raise HTTPException(status_code=404, detail="Email analysis not found in cache")
+
+        cached_entry = _analysis_cache[message_id]
+        # Gérer le nouveau format avec timestamp
+        if isinstance(cached_entry, dict) and 'data' in cached_entry:
+            result = cached_entry['data']
+        else:
+            result = cached_entry
+
+        # Mettre à jour les données extraites avec les choix utilisateur
+        if result.extracted_data is None:
+            result.extracted_data = ExtractedQuoteData()
+
+        # Produits existants choisis
+        confirmed_products = []
+        for selected in choice.selected_products:
+            confirmed_products.append(ExtractedProduct(
+                description=selected.get('description', f"Article {selected['item_code']}"),
+                quantity=selected.get('quantity', 1),
+                reference=selected['item_code'],
+                unit="pcs"
+            ))
+
+        # Produits à créer
+        new_products = []
+        for new_prod in choice.create_new_products:
+            new_products.append(ExtractedProduct(
+                description=new_prod.get('description', 'Nouveau produit'),
+                quantity=new_prod.get('quantity', 1),
+                reference=new_prod.get('reference', ''),
+                unit="pcs"
+            ))
+
+        # Combiner les produits
+        result.extracted_data.products = confirmed_products + new_products
+
+        # Marquer comme validé
+        result.products_auto_validated = True
+        if not result.requires_user_choice or result.client_auto_validated:
+            result.requires_user_choice = False  # Tout est validé
+
+        logger.info(
+            f"Produits confirmés par utilisateur: "
+            f"{len(confirmed_products)} existants, {len(new_products)} à créer"
+        )
+
+        return {
+            "success": True,
+            "action": "products_confirmed",
+            "confirmed_count": len(confirmed_products),
+            "new_count": len(new_products),
+            "message": f"{len(confirmed_products)} produit(s) confirmé(s), {len(new_products)} à créer"
+        }
+
+    except Exception as e:
+        logger.error(f"Error confirming products choice: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/emails/{message_id}/validation-status")
+async def get_validation_status(message_id: str):
+    """
+    Récupère le statut de validation de l'email (pour UI).
+
+    Returns:
+        Statut détaillé des validations requises
+    """
+    global _analysis_cache
+
+    try:
+        if message_id not in _analysis_cache:
+            raise HTTPException(status_code=404, detail="Email analysis not found in cache")
+
+        result = _analysis_cache[message_id]
+
+        return {
+            "requires_user_choice": result.requires_user_choice,
+            "client_auto_validated": result.client_auto_validated,
+            "products_auto_validated": result.products_auto_validated,
+            "user_choice_reason": result.user_choice_reason,
+            "client_matches_count": len(result.client_matches),
+            "product_matches_count": len(result.product_matches),
+            "is_duplicate": result.is_duplicate,
+            "duplicate_type": result.duplicate_type,
+            "ready_for_quote_generation": (
+                result.client_auto_validated and
+                result.products_auto_validated and
+                not result.requires_user_choice and
+                not result.is_duplicate
+            )
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting validation status: {e}")
         raise HTTPException(status_code=500, detail=str(e))

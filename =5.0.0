@@ -1,0 +1,8 @@
+Collecting pyodbc
+  Downloading pyodbc-5.3.0-cp310-cp310-win_amd64.whl.metadata (2.8 kB)
+Downloading pyodbc-5.3.0-cp310-cp310-win_amd64.whl (69 kB)
+Installing collected packages: pyodbc
+Successfully installed pyodbc-5.3.0
+
+[notice] A new release of pip is available: 25.2 -> 26.0.1
+[notice] To update, run: python.exe -m pip install --upgrade pip

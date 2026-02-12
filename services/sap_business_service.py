@@ -341,6 +341,96 @@ class SAPBusinessService:
             logger.error(f"Erreur création article {item_code}: {e}")
             return None
 
+    async def create_item_simple(
+        self,
+        item_code: str,
+        item_name: str,
+        item_group_code: Optional[int] = None,
+        default_price: Optional[float] = None,
+        purchase_item: bool = True,
+        sales_item: bool = True,
+        inventory_item: bool = True,
+        manufacturer: Optional[str] = None,
+        bar_code: Optional[str] = None,
+        remarks: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Crée un article dans SAP avec une interface simplifiée pour le frontend
+
+        Args:
+            item_code: Code de l'article (obligatoire)
+            item_name: Nom de l'article (obligatoire)
+            item_group_code: Groupe d'articles (catégorie)
+            default_price: Prix par défaut
+            purchase_item: Article achetable
+            sales_item: Article vendable
+            inventory_item: Article de stock
+            manufacturer: Fabricant
+            bar_code: Code-barres
+            remarks: Remarques
+
+        Returns:
+            Dict avec ItemCode et ItemName créés
+
+        Raises:
+            HTTPException si la création échoue
+        """
+        try:
+            # Construire le payload SAP
+            item_data = {
+                "ItemCode": item_code,
+                "ItemName": item_name[:100],  # Limite SAP
+                "ItemsGroupCode": item_group_code or 100,  # Groupe par défaut
+                "ItemType": "itItems",
+                "PurchaseItem": "tYES" if purchase_item else "tNO",
+                "SalesItem": "tYES" if sales_item else "tNO",
+                "InventoryItem": "tYES" if inventory_item else "tNO",
+                "Manufacturer": manufacturer if manufacturer else "",
+                "BarCode": bar_code if bar_code else "",
+                "User_Text": remarks if remarks else "",
+            }
+
+            # Ajouter le prix si fourni
+            if default_price and default_price > 0:
+                item_data["ItemPrices"] = [
+                    {
+                        "PriceList": 1,  # Liste de prix par défaut
+                        "Price": default_price
+                    }
+                ]
+
+            # Appeler SAP pour créer l'article
+            await self._call_sap("/Items", method="POST", payload=item_data)
+
+            logger.info(f"✓ Article créé dans SAP: {item_code} - {item_name}")
+            if default_price:
+                logger.info(f"  Prix: {default_price} EUR")
+
+            return {
+                "ItemCode": item_code,
+                "ItemName": item_name
+            }
+
+        except Exception as e:
+            error_msg = str(e)
+
+            # Si l'article existe déjà
+            if "already exists" in error_msg.lower() or "duplicate" in error_msg.lower():
+                logger.warning(f"Article {item_code} existe déjà dans SAP")
+                from fastapi import HTTPException
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"L'article {item_code} existe déjà dans SAP"
+                )
+
+            # Autre erreur
+            logger.error(f"❌ Erreur création article {item_code}: {error_msg}")
+            from fastapi import HTTPException
+            raise HTTPException(
+                status_code=500,
+                detail=f"Erreur création article: {error_msg}"
+            )
+
     # ===== GESTION DES BUSINESS PARTNERS =====
 
     async def search_business_partner(
