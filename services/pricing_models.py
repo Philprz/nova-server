@@ -11,6 +11,7 @@ from enum import Enum
 
 class PricingCaseType(str, Enum):
     """Type de CAS de pricing selon organigramme RONDOT-SAS"""
+    SAP_FUNCTION = "SAP_FUNCTION"  # Prix calculé par fonction SAP (prioritaire)
     CAS_1_HC = "CAS_1_HC"      # Historique Client - Prix stable
     CAS_2_HCM = "CAS_2_HCM"    # Historique Client - Prix Modifié
     CAS_3_HA = "CAS_3_HA"      # Historique Autres clients

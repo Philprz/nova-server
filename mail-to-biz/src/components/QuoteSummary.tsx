@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { ArrowLeft, CheckCircle, Calculator, FileText, TrendingUp, Building2, Package, Search, Loader2, UserCheck, UserPlus } from 'lucide-react';
+import { ArrowLeft, CheckCircle, Calculator, FileText, TrendingUp, Building2, Package, Search, Loader2, UserCheck, UserPlus, AlertCircle, Plus } from 'lucide-react';
 import { ProcessedEmail } from '@/types/email';
+import { CreateItemDialog } from './CreateItemDialog';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -48,6 +49,14 @@ export function QuoteSummary({ quote, onValidate, onBack }: QuoteSummaryProps) {
   const [createNewClient, setCreateNewClient] = useState(false);
   const [searchPerformed, setSearchPerformed] = useState(false);
 
+  // État pour la recherche d'articles SAP
+  const [searchingArticle, setSearchingArticle] = useState<{[key: number]: boolean}>({});
+  const [articleStatus, setArticleStatus] = useState<{[key: number]: {found: boolean, message: string, itemCode?: string}}>({});
+
+  // État pour le dialog de création d'article
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [articleToCreate, setArticleToCreate] = useState<{lineNum: number, itemCode: string, itemDescription: string} | null>(null);
+
   // Données client extraites
   const clientName = doc?.businessPartner.CardName || 'Client inconnu';
   const clientEmail = doc?.businessPartner.ContactEmail || quote.email.from.emailAddress.address;
@@ -81,13 +90,21 @@ export function QuoteSummary({ quote, onValidate, onBack }: QuoteSummaryProps) {
     setSearchPerformed(true);
 
     try {
-      const response = await fetch(`/api/clients/search_client/${encodeURIComponent(query)}`);
+      const response = await fetch(`/api/clients/search_clients?q=${encodeURIComponent(query)}&source=sap&limit=10`);
 
       if (response.ok) {
-        const data: { success: boolean; search_results: ClientSearchResult } = await response.json();
+        const data = await response.json();
 
-        if (data.success && data.search_results.sap.found) {
-          setSapClients(data.search_results.sap.clients);
+        if (data.success && data.results && data.results.length > 0) {
+          // Adapter le format de réponse
+          const sapClients = data.results.map((client: any) => ({
+            CardCode: client.CardCode,
+            CardName: client.CardName,
+            EmailAddress: client.EmailAddress || client.Email,
+            Phone1: client.Phone1,
+            similarity: client.similarity
+          }));
+          setSapClients(sapClients);
         } else {
           setSapClients([]);
         }
@@ -112,6 +129,83 @@ export function QuoteSummary({ quote, onValidate, onBack }: QuoteSummaryProps) {
   const handleCreateNew = () => {
     setSelectedClient(null);
     setCreateNewClient(true);
+  };
+
+  // Rechercher un article dans SAP
+  const searchArticle = async (lineNum: number, itemCode: string, itemDescription: string) => {
+    if (!itemCode || itemCode === 'À définir') {
+      setArticleStatus({
+        ...articleStatus,
+        [lineNum]: { found: false, message: 'Référence manquante' }
+      });
+      return;
+    }
+
+    setSearchingArticle({ ...searchingArticle, [lineNum]: true });
+
+    try {
+      // Rechercher l'article dans SAP par ItemCode
+      const response = await fetch(`/api/sap/items?search=${encodeURIComponent(itemCode)}&limit=1`);
+
+      if (response.ok) {
+        const data = await response.json();
+
+        if (data.items && data.items.length > 0) {
+          const item = data.items[0];
+          setArticleStatus({
+            ...articleStatus,
+            [lineNum]: {
+              found: true,
+              message: `Trouvé: ${item.ItemName}`,
+              itemCode: item.ItemCode
+            }
+          });
+        } else {
+          setArticleStatus({
+            ...articleStatus,
+            [lineNum]: {
+              found: false,
+              message: 'Article non trouvé dans SAP'
+            }
+          });
+        }
+      } else {
+        setArticleStatus({
+          ...articleStatus,
+          [lineNum]: { found: false, message: 'Erreur de recherche' }
+        });
+      }
+    } catch (error) {
+      console.error('Erreur recherche article:', error);
+      setArticleStatus({
+        ...articleStatus,
+        [lineNum]: { found: false, message: 'Erreur de connexion' }
+      });
+    } finally {
+      setSearchingArticle({ ...searchingArticle, [lineNum]: false });
+    }
+  };
+
+  // Ouvrir le dialog de création d'article
+  const createArticle = (lineNum: number, itemCode: string, itemDescription: string) => {
+    setArticleToCreate({ lineNum, itemCode, itemDescription });
+    setCreateDialogOpen(true);
+  };
+
+  // Gérer le succès de la création d'article
+  const handleArticleCreated = (createdItemCode: string) => {
+    if (articleToCreate) {
+      // Marquer l'article comme trouvé après création
+      setArticleStatus({
+        ...articleStatus,
+        [articleToCreate.lineNum]: {
+          found: true,
+          message: `Article créé: ${createdItemCode}`,
+          itemCode: createdItemCode
+        }
+      });
+      setArticleToCreate(null);
+    }
   };
 
   // Déterminer le type de client à afficher
@@ -279,27 +373,77 @@ export function QuoteSummary({ quote, onValidate, onBack }: QuoteSummaryProps) {
                 <TableHead>Désignation</TableHead>
                 <TableHead className="text-right">Quantité</TableHead>
                 <TableHead className="text-right">Prix estimé</TableHead>
+                <TableHead className="text-center">Statut SAP</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {articles.length > 0 ? (
-                articles.map((line) => (
-                  <TableRow key={line.LineNum}>
-                    <TableCell className="font-mono text-sm">
-                      {line.ItemCode || 'À définir'}
-                    </TableCell>
-                    <TableCell>{line.ItemDescription}</TableCell>
-                    <TableCell className="text-right">
-                      {line.Quantity} {line.UnitOfMeasure}
-                    </TableCell>
-                    <TableCell className="text-right font-medium text-muted-foreground">
-                      À calculer
-                    </TableCell>
-                  </TableRow>
-                ))
+                articles.map((line) => {
+                  const status = articleStatus[line.LineNum];
+                  const isSearching = searchingArticle[line.LineNum];
+
+                  return (
+                    <TableRow key={line.LineNum}>
+                      <TableCell className="font-mono text-sm">
+                        {line.ItemCode || 'À définir'}
+                      </TableCell>
+                      <TableCell>{line.ItemDescription}</TableCell>
+                      <TableCell className="text-right">
+                        {line.Quantity} {line.UnitOfMeasure}
+                      </TableCell>
+                      <TableCell className="text-right font-medium text-muted-foreground">
+                        À calculer
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <div className="flex items-center justify-center gap-2">
+                          {!status ? (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => searchArticle(line.LineNum, line.ItemCode || '', line.ItemDescription)}
+                              disabled={isSearching || !line.ItemCode || line.ItemCode === 'À définir'}
+                            >
+                              {isSearching ? (
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                              ) : (
+                                <>
+                                  <Search className="w-3 h-3 mr-1" />
+                                  Vérifier
+                                </>
+                              )}
+                            </Button>
+                          ) : status.found ? (
+                            <Badge className="bg-success/10 text-success border-success/20">
+                              <CheckCircle className="w-3 h-3 mr-1" />
+                              Trouvé
+                            </Badge>
+                          ) : (
+                            <div className="flex items-center gap-2">
+                              <Badge variant="outline" className="text-warning border-warning">
+                                <AlertCircle className="w-3 h-3 mr-1" />
+                                Non trouvé
+                              </Badge>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => createArticle(line.LineNum, line.ItemCode || '', line.ItemDescription)}
+                              >
+                                <Plus className="w-3 h-3 mr-1" />
+                                Créer
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+                        {status && (
+                          <p className="text-xs text-muted-foreground mt-1">{status.message}</p>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
               ) : (
                 <TableRow>
-                  <TableCell colSpan={4} className="text-center text-muted-foreground">
+                  <TableCell colSpan={5} className="text-center text-muted-foreground">
                     Aucun article détecté. Analyse manuelle requise.
                   </TableCell>
                 </TableRow>
@@ -416,6 +560,18 @@ export function QuoteSummary({ quote, onValidate, onBack }: QuoteSummaryProps) {
               : 'Extraction incomplète'}
         </Button>
       </div>
+
+      {/* Dialog de création d'article */}
+      <CreateItemDialog
+        open={createDialogOpen}
+        onClose={() => {
+          setCreateDialogOpen(false);
+          setArticleToCreate(null);
+        }}
+        onSuccess={handleArticleCreated}
+        initialItemCode={articleToCreate?.itemCode || ''}
+        initialDescription={articleToCreate?.itemDescription || ''}
+      />
     </div>
   );
 }

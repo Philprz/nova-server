@@ -330,18 +330,38 @@ async def search_clients(q: str, source: str = "both", limit: int = 10):
                 results["salesforce"] = sf_result.get("records", [])
         
         if source in ["both", "sap"]:
-            # Recherche SAP
-            sap_result = await MCPConnector.call_sap_mcp("sap_search", {
-                "query": q,
-                "entity_type": "BusinessPartners",
-                "limit": limit
-            })
-            
-            if "error" not in sap_result:
-                results["sap"] = sap_result.get("results", [])
+            # Recherche SAP depuis cache SQLite local (ultra-rapide)
+            from services.sap_cache_db import get_sap_cache_db
+            cache_db = get_sap_cache_db()
+            sap_clients = cache_db.search_clients(q, limit=limit)
+
+            # Formater les résultats pour correspondre au format attendu
+            results["sap"] = [
+                {
+                    "CardCode": client["CardCode"],
+                    "CardName": client["CardName"],
+                    "EmailAddress": client.get("EmailAddress"),
+                    "Phone1": client.get("Phone1"),
+                    "City": client.get("City"),
+                    "Country": client.get("Country"),
+                    "similarity": 100  # Score par défaut (TODO: implémenter scoring fuzzy)
+                }
+                for client in sap_clients
+            ]
         
         results["total"] = len(results["salesforce"]) + len(results["sap"])
-        return results
+
+        # Format compatible avec le frontend (QuoteSummary.tsx attend {success, results})
+        return {
+            "success": True,
+            "query": q,
+            "results": results["sap"] + results["salesforce"],  # SAP en priorité
+            "total": results["total"],
+            "breakdown": {
+                "sap": len(results["sap"]),
+                "salesforce": len(results["salesforce"])
+            }
+        }
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erreur lors de la recherche: {str(e)}")

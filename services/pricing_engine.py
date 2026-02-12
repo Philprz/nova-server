@@ -6,7 +6,7 @@ Implémentation des 4 CAS déterministes selon organigramme
 import logging
 import uuid
 import os
-from typing import Optional
+from typing import Optional, Dict, Any
 from datetime import datetime
 from services.pricing_models import (
     PricingContext,
@@ -18,6 +18,7 @@ from services.pricing_models import (
 from services.sap_history_service import get_sap_history_service
 from services.supplier_tariffs_db import search_products
 import services.pricing_audit_db as pricing_audit_db
+from services.sap_sql_service import get_sap_sql_service
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +45,9 @@ class PricingEngine:
 
     def __init__(self):
         self.history_service = get_sap_history_service()
+        self.sql_service = get_sap_sql_service()
         self.default_margin = 45.0  # Marge RONDOT-SAS : 45%
+        self.use_sap_pricing_function = os.getenv("USE_SAP_PRICING_FUNCTION", "true").lower() == "true"
 
     async def calculate_price(self, context: PricingContext) -> PricingResult:
         """
@@ -67,6 +70,39 @@ class PricingEngine:
                         success=False,
                         error=f"Prix fournisseur introuvable pour {context.item_code}"
                     )
+
+            # ÉTAPE 0 : Tenter d'utiliser la fonction SAP fn_ITS_GetPriceAnalysis (prioritaire)
+            if self.use_sap_pricing_function:
+                sap_price_analysis = self.sql_service.get_price_analysis(
+                    context.item_code,
+                    context.card_code
+                )
+                if sap_price_analysis:
+                    # La fonction SAP a retourné un prix recommandé
+                    decision = self._create_decision_from_sap_function(context, sap_price_analysis)
+                    processing_time = (datetime.now() - start_time).total_seconds() * 1000
+
+                    # Sauvegarder la décision dans la base d'audit
+                    pricing_audit_db.save_pricing_decision(decision)
+
+                    # Créer demande de validation si nécessaire
+                    validation_id = None
+                    if decision.requires_validation and os.getenv("PRICING_CREATE_VALIDATIONS", "true").lower() == "true":
+                        validation_id = await self._create_validation_request(decision, context)
+
+                    logger.info(
+                        f"✓ Pricing SAP FUNCTION : {context.item_code} → {decision.calculated_price:.2f} EUR "
+                        f"(temps: {processing_time:.1f}ms)"
+                        + (f" → Validation créée: {validation_id}" if validation_id else "")
+                    )
+
+                    return PricingResult(
+                        success=True,
+                        decision=decision,
+                        processing_time_ms=round(processing_time, 2)
+                    )
+                else:
+                    logger.debug(f"ℹ️ Fonction SAP pricing non disponible pour {context.item_code}/{context.card_code} - Fallback sur logique classique")
 
             # ÉTAPE 1 : Recherche historique vente à CE client
             last_sale = await self.history_service.get_last_sale_to_client(
@@ -316,6 +352,94 @@ class PricingEngine:
         except Exception as e:
             logger.error(f"✗ Erreur création demande de validation : {e}")
             return None
+
+    def _create_decision_from_sap_function(
+        self,
+        context: PricingContext,
+        sap_analysis: Dict[str, Any]
+    ) -> PricingDecision:
+        """
+        Crée une décision de pricing basée sur le résultat de fn_ITS_GetPriceAnalysis
+
+        Args:
+            context: Contexte de pricing
+            sap_analysis: Résultat de la fonction SAP (dictionnaire de colonnes)
+
+        Returns:
+            PricingDecision avec le prix recommandé par SAP
+        """
+        # Extraire les champs du résultat SAP (les noms de colonnes peuvent varier)
+        # Adapter selon la structure réelle retournée par fn_ITS_GetPriceAnalysis
+        recommended_price = (
+            sap_analysis.get('RecommendedPrice') or
+            sap_analysis.get('UnitPrice') or
+            sap_analysis.get('Price') or
+            sap_analysis.get('SuggestedPrice')
+        )
+
+        # Déterminer le type de CAS basé sur les informations SAP
+        case_type = PricingCaseType.SAP_FUNCTION  # Nouveau type à ajouter aux modèles
+        last_sale_price = sap_analysis.get('LastSalePrice')
+        avg_price = sap_analysis.get('AveragePrice')
+
+        # Construire la justification
+        justification_parts = [
+            f"Prix calculé par fonction SAP fn_ITS_GetPriceAnalysis",
+            f"Article: {context.item_code}",
+            f"Client: {context.card_code}",
+        ]
+
+        if last_sale_price:
+            justification_parts.append(f"Dernière vente: {last_sale_price:.2f} EUR")
+
+        if avg_price:
+            justification_parts.append(f"Prix moyen: {avg_price:.2f} EUR")
+
+        # Ajouter tous les autres champs retournés pour traçabilité
+        sap_details = []
+        for key, value in sap_analysis.items():
+            if key not in ['RecommendedPrice', 'LastSalePrice', 'AveragePrice', 'ItemCode', 'CardCode']:
+                sap_details.append(f"{key}: {value}")
+
+        if sap_details:
+            justification_parts.append("Détails SAP: " + ", ".join(sap_details))
+
+        # Déterminer si validation requise
+        # Par exemple, si le prix diffère significativement du dernier prix
+        requires_validation = False
+        validation_reason = None
+
+        if last_sale_price and recommended_price:
+            price_diff_pct = abs((recommended_price - last_sale_price) / last_sale_price * 100)
+            if price_diff_pct > 10:
+                requires_validation = True
+                validation_reason = f"Variation {price_diff_pct:.1f}% par rapport au dernier prix"
+
+        # Calculer la marge si le prix fournisseur est disponible
+        margin_pct = None
+        if context.supplier_price and recommended_price:
+            margin_pct = self._calculate_margin(context.supplier_price, recommended_price)
+
+        return PricingDecision(
+            decision_id=str(uuid.uuid4()),
+            item_code=context.item_code,
+            card_code=context.card_code,
+            quantity=context.quantity,
+            case_type=case_type,
+            calculated_price=recommended_price,
+            justification="\n".join(justification_parts),
+            requires_validation=requires_validation,
+            validation_reason=validation_reason,
+            confidence_score=1.0,  # Confiance maximale car vient de SAP
+            supplier_price=context.supplier_price,
+            margin_percent=margin_pct,
+            alerts=[],
+            history_used={
+                "sap_function": sap_analysis,
+                "source": "fn_ITS_GetPriceAnalysis"
+            },
+            created_at=datetime.now().isoformat()
+        )
 
     async def _get_supplier_price(self, item_code: str) -> Optional[float]:
         """Récupère le prix fournisseur depuis supplier_tariffs_db"""

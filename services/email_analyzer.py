@@ -54,7 +54,7 @@ QUANTITY_PATTERNS = [
 
 # Modèles de données
 class ExtractedProduct(BaseModel):
-    description: str
+    description: Optional[str] = ""
     quantity: Optional[int] = None
     unit: Optional[str] = None
     reference: Optional[str] = None
@@ -80,6 +80,21 @@ class EmailAnalysisResult(BaseModel):
     reasoning: str
     extracted_data: Optional[ExtractedQuoteData] = None
     quick_filter_passed: bool = False  # True si pré-filtrage règles a détecté un devis
+
+    # Détection de doublons
+    is_duplicate: bool = False
+    duplicate_type: Optional[str] = None  # strict, probable, possible
+    duplicate_confidence: float = 0.0
+    existing_quote_id: Optional[str] = None
+    existing_quote_status: Optional[str] = None
+
+    # Matches multiples et validation
+    client_matches: List = []  # List[MatchedClient] from email_matcher
+    product_matches: List = []  # List[MatchedProduct] from email_matcher
+    client_auto_validated: bool = False  # True si client score ≥ 95
+    products_auto_validated: bool = False  # True si tous produits score = 100
+    requires_user_choice: bool = False  # True si choix utilisateur nécessaire
+    user_choice_reason: Optional[str] = None  # Raison du choix manuel
 
 
 # Prompt LLM pour l'analyse des emails
@@ -339,7 +354,7 @@ CONTENU:
             products = []
             for p in ed.get("products", []):
                 products.append(ExtractedProduct(
-                    description=p.get("description", ""),
+                    description=p.get("description") or "",
                     quantity=p.get("quantity"),
                     unit=p.get("unit"),
                     reference=p.get("reference")
@@ -425,6 +440,31 @@ CONTENU:
 
         return None
 
+    def _is_phone_number(self, code: str) -> bool:
+        """Détecte si un code ressemble à un numéro de téléphone."""
+        # Numéros français : 10 chiffres commençant par 0, ou 9 chiffres
+        if len(code) == 10 and code[0] == '0':
+            return True
+        if len(code) == 9 and code[0] in '123456789':
+            return True
+
+        # Numéros internationaux : 11-15 chiffres avec préfixe pays
+        if 11 <= len(code) <= 15:
+            if code.startswith('33') and len(code) == 11:  # France international
+                return True
+            if code.startswith(('44', '41', '49', '39', '34', '351', '352', '1')):
+                return True
+
+        # Patterns téléphone : détection de structure répétitive
+        if len(code) >= 10 and code.isdigit():
+            pairs = [code[i:i+2] for i in range(0, min(len(code), 10), 2)]
+            unique_pairs = set(pairs)
+            # Si beaucoup de répétitions, probablement un téléphone
+            if len(pairs) >= 4 and len(unique_pairs) <= len(pairs) * 0.6:
+                return True
+
+        return False
+
     def _extract_products_from_text(self, body: str) -> List[ExtractedProduct]:
         """Extrait les références produits et quantités du texte."""
         products = []
@@ -451,7 +491,8 @@ CONTENU:
             matches = re.findall(pattern, body, re.IGNORECASE)
             for match in matches:
                 ref = match.strip().upper()
-                if ref and len(ref) >= 6 and ref not in found_refs:
+                # Filtrer les numéros de téléphone
+                if ref and len(ref) >= 6 and ref not in found_refs and not self._is_phone_number(ref):
                     found_refs.add(ref)
 
         # Trouver la quantité globale ou utiliser 1 par défaut

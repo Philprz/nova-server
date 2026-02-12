@@ -30,3 +30,6 @@ pdfplumber>=0.10.0
 openpyxl>=3.1.0
 pytesseract>=0.3.10
 pillow>=10.0.0
+
+# SQL Server connection pour fonctions SAP personnalisées
+pyodbc>=5.0.0

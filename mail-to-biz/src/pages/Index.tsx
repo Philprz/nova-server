@@ -58,6 +58,14 @@ const Index = () => {
     // Si en mode live et pas encore analysé, lancer l'analyse IA
     if (!isDemoMode && !quote.analysisResult) {
       await analyzeEmail(quote.email.id);
+
+      // Récupérer l'email mis à jour après l'analyse
+      const updatedEmail = liveEmails.find(e => e.email.id === quote.email.id);
+      if (updatedEmail) {
+        setSelectedQuote(updatedEmail);
+        setCurrentView('summary');
+        return;
+      }
     }
     setSelectedQuote(quote);
     setCurrentView('summary');

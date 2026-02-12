@@ -24,6 +24,8 @@ from routes.routes_supplier_tariffs import router as supplier_tariffs_router
 from routes.routes_graph import router as graph_router
 from routes.routes_sap_business import router as sap_business_router
 from routes.routes_pricing_validation import router as pricing_validation_router
+from routes.routes_sap_creation import router as sap_creation_router
+from routes.routes_product_validation import router as product_validation_router
 if sys.platform == "win32":
     os.environ["PYTHONIOENCODING"] = "utf-8"
 
@@ -82,6 +84,15 @@ async def lifespan(app: FastAPI):
             clean_rec = rec.replace("🔧", "[FIX]").replace("🛠️", "[TOOL]")
             logger.info(f"   {clean_rec}")
 
+        # 2. SYNCHRONISATION CACHE SAP (en arrière-plan, ne bloque pas le démarrage)
+        try:
+            from services.sap_sync_startup import sync_sap_data_if_needed
+            # Lancer la synchronisation en arrière-plan
+            asyncio.create_task(sync_sap_data_if_needed())
+            logger.info("🔄 Synchronisation cache SAP lancée en arrière-plan")
+        except Exception as e:
+            logger.error(f"❌ Erreur lancement synchronisation cache SAP: {e}")
+
         logger.info("=" * 50)
 
         # CORRECTION: Démarrage normal si success_rate >= 50%
@@ -103,11 +114,12 @@ async def lifespan(app: FastAPI):
         logger.info("Routes principales configurées")
 
         # 3. SUCCÈS DU DÉMARRAGE
+        backend_port = os.getenv("APP_PORT", "8001")
         logger.info("=" * 60)
         logger.info("NOVA DEMARRE AVEC SUCCES")
-        logger.info("   Interface: http://localhost:8000/interface/itspirit")
-        logger.info("   Sante: http://localhost:8000/health")
-        logger.info("   Documentation: http://localhost:8000/docs")
+        logger.info(f"   Interface: http://localhost:{backend_port}/interface/itspirit")
+        logger.info(f"   Sante: http://localhost:{backend_port}/health")
+        logger.info(f"   Documentation: http://localhost:{backend_port}/docs")
         logger.info("=" * 60)
 
         yield
@@ -144,6 +156,8 @@ app.include_router(supplier_tariffs_router)  # API Tarifs fournisseurs
 app.include_router(graph_router, prefix="/api/graph", tags=["Microsoft Graph"])
 app.include_router(sap_business_router)  # API SAP Business pour mail-to-biz
 app.include_router(pricing_validation_router, prefix="/api/validations", tags=["Pricing Validation"])
+app.include_router(sap_creation_router, prefix="/api/sap", tags=["SAP Creation"])
+app.include_router(product_validation_router)  # API validation produits externes
 # Route WebSocket pour l'assistant intelligent manquante
 @app.websocket("/ws/assistant/{task_id}")
 async def websocket_assistant_endpoint(websocket: WebSocket, task_id: str):
@@ -421,8 +435,10 @@ if __name__ == "__main__":
     if sys.platform == "win32":
         # Configuration pour éviter les problèmes d'encodage
         os.environ["PYTHONIOENCODING"] = "utf-8"
-        # Libérer le port 8000 si occupé
-        kill_process_on_port(8000)
+        # Libérer le port si occupé
+        backend_port = int(os.getenv("APP_PORT", 8001))
+        kill_process_on_port(backend_port)
 
     # Démarrage du serveur
-    uvicorn.run(app, host="0.0.0.0", port=8000, log_config=None, loop="asyncio")
+    backend_port = int(os.getenv("APP_PORT", 8001))
+    uvicorn.run(app, host="0.0.0.0", port=backend_port, log_config=None, loop="asyncio")

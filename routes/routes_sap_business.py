@@ -57,6 +57,28 @@ class BusinessPartnerCreateRequest(BaseModel):
     phone: Optional[str] = None
 
 
+class ItemCreateRequest(BaseModel):
+    """Requête de création d'article dans SAP"""
+    item_code: str
+    item_name: str
+    item_group_code: Optional[int] = None  # Catégorie/Groupe d'articles
+    default_price: Optional[float] = None  # Prix par défaut
+    purchase_item: bool = True  # Article achetable
+    sales_item: bool = True  # Article vendable
+    inventory_item: bool = True  # Article de stock
+    manufacturer: Optional[str] = None
+    bar_code: Optional[str] = None
+    remarks: Optional[str] = None
+
+
+class ItemCreateResponse(BaseModel):
+    """Réponse de création d'article"""
+    success: bool
+    item_code: Optional[str] = None
+    item_name: Optional[str] = None
+    error: Optional[str] = None
+
+
 class QuotationLineRequest(BaseModel):
     item_code: Optional[str] = None
     item_description: str
@@ -94,6 +116,31 @@ async def sap_health():
         }
     except Exception as e:
         logger.error(f"Health check failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/items", response_model=ItemSearchResponse)
+async def get_items(search: str = "", limit: int = 10):
+    """
+    Recherche simple d'articles dans SAP via GET
+
+    Example:
+        GET /api/sap/items?search=MOT&limit=10
+    """
+    try:
+        sap_service = get_sap_business_service()
+        items = await sap_service.search_items(search, limit)
+
+        items_dict = [item.model_dump() for item in items]
+
+        return ItemSearchResponse(
+            success=True,
+            items=items_dict,
+            count=len(items_dict)
+        )
+
+    except Exception as e:
+        logger.error(f"Item search failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -150,6 +197,58 @@ async def get_item_price(request: ItemPriceRequest):
     except Exception as e:
         logger.error(f"Get item price failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/items/create", response_model=ItemCreateResponse)
+async def create_item(request: ItemCreateRequest):
+    """
+    Crée un nouvel article dans SAP B1
+
+    Example:
+        POST /api/sap/items/create
+        {
+            "item_code": "ART-001",
+            "item_name": "Nouvel article",
+            "item_group_code": 100,
+            "default_price": 150.00,
+            "purchase_item": true,
+            "sales_item": true,
+            "inventory_item": true,
+            "manufacturer": "Fabricant",
+            "remarks": "Article créé depuis Mail-to-Biz"
+        }
+    """
+    try:
+        sap_service = get_sap_business_service()
+
+        # Créer l'article dans SAP
+        result = await sap_service.create_item_simple(
+            item_code=request.item_code,
+            item_name=request.item_name,
+            item_group_code=request.item_group_code,
+            default_price=request.default_price,
+            purchase_item=request.purchase_item,
+            sales_item=request.sales_item,
+            inventory_item=request.inventory_item,
+            manufacturer=request.manufacturer,
+            bar_code=request.bar_code,
+            remarks=request.remarks
+        )
+
+        return ItemCreateResponse(
+            success=True,
+            item_code=result.get("ItemCode"),
+            item_name=result.get("ItemName")
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Create item failed: {e}")
+        return ItemCreateResponse(
+            success=False,
+            error=str(e)
+        )
 
 
 @router.post("/partners/search", response_model=BusinessPartnerResponse)
