@@ -3,7 +3,7 @@
 ## 🎯 Architecture
 
 ```
-Internet → Cloudflare (CDN/Proxy) → Windows Server 2019 → NOVA Backend (localhost:8000)
+Internet → Cloudflare (CDN/Proxy) → Windows Server 2019 → NOVA Backend (localhost:8001)
 ```
 
 **Cloudflare gère :**
@@ -125,7 +125,7 @@ Then :
 
 ```powershell
 # Test local
-curl http://localhost:8000/health
+curl http://localhost:8001/health
 
 # Test via Cloudflare
 curl https://nova-rondot.itspirit.ovh/health
@@ -192,7 +192,7 @@ credentials-file: C:\Users\<USER>\.cloudflared\<UUID>.json
 ingress:
   # Rediriger nova-rondot.itspirit.ovh vers le backend local
   - hostname: nova-rondot.itspirit.ovh
-    service: http://localhost:8000
+    service: http://localhost:8001
 
   # Catch-all (obligatoire)
   - service: http_status:404
@@ -427,7 +427,7 @@ Stocker les secrets dans des variables d'environnement Windows :
 
 ### Test Backend Local
 ```powershell
-Invoke-WebRequest -Uri http://localhost:8000/health
+Invoke-WebRequest -Uri http://localhost:8001/health
 ```
 
 ### Test via Cloudflare
@@ -464,7 +464,7 @@ Invoke-WebRequest -Uri https://nova-rondot.itspirit.ovh/ -MaximumRedirection 0
 **Cause :** Cloudflare ne peut pas joindre le backend
 
 **Solution :**
-1. Vérifier que NOVA est démarré : `curl http://localhost:8000/health`
+1. Vérifier que NOVA est démarré : `curl http://localhost:8001/health`
 2. Vérifier le pare-feu Windows
 3. Vérifier que `APP_HOST=0.0.0.0` dans `.env`
 4. Vérifier les logs : `C:\Users\PPZ\NOVA-SERVER\nova.log`

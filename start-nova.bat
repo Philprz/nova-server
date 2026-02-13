@@ -34,7 +34,7 @@ echo ========================================
 echo   1/2 - Demarrage Backend FastAPI
 echo ========================================
 echo.
-echo Demarrage serveur FastAPI sur http://localhost:8000...
+echo Demarrage serveur FastAPI sur http://localhost:8001...
 start "NOVA Backend" cmd /k "python main.py"
 
 REM Attendre que le backend demarre
@@ -45,7 +45,7 @@ where node >nul 2>&1
 if errorlevel 1 (
     echo.
     echo [INFO] Node.js non trouve - Frontend deja compile
-    echo Le frontend sera servi par FastAPI sur http://localhost:8000/mail-to-biz
+    echo Le frontend sera servi par FastAPI sur http://localhost:8001/mail-to-biz
     echo.
     goto :backend_only
 )
@@ -54,7 +54,7 @@ REM Verifier si le frontend source existe
 if not exist "mail-to-biz\src\" (
     echo.
     echo [INFO] Frontend source non trouve - Utilisation du build
-    echo Le frontend sera servi par FastAPI sur http://localhost:8000/mail-to-biz
+    echo Le frontend sera servi par FastAPI sur http://localhost:8001/mail-to-biz
     echo.
     goto :backend_only
 )
@@ -75,11 +75,11 @@ echo ========================================
 echo   NOVA DEMARRE AVEC SUCCES!
 echo ========================================
 echo.
-echo Backend FastAPI : http://localhost:8000
+echo Backend FastAPI : http://localhost:8001
 echo Frontend React Dev : http://localhost:5173 (si disponible)
-echo Mail-to-Biz : http://localhost:8000/mail-to-biz
-echo NOVA Assistant : http://localhost:8000/interface/itspirit
-echo API Docs : http://localhost:8000/docs
+echo Mail-to-Biz : http://localhost:8001/mail-to-biz
+echo NOVA Assistant : http://localhost:8001/interface/itspirit
+echo API Docs : http://localhost:8001/docs
 echo.
 echo Appuyez sur une touche pour arreter tous les services...
 pause >nul
@@ -91,10 +91,10 @@ echo ========================================
 echo   NOVA DEMARRE (Backend uniquement)
 echo ========================================
 echo.
-echo Backend FastAPI : http://localhost:8000
-echo Mail-to-Biz : http://localhost:8000/mail-to-biz
-echo NOVA Assistant : http://localhost:8000/interface/itspirit
-echo API Docs : http://localhost:8000/docs
+echo Backend FastAPI : http://localhost:8001
+echo Mail-to-Biz : http://localhost:8001/mail-to-biz
+echo NOVA Assistant : http://localhost:8001/interface/itspirit
+echo API Docs : http://localhost:8001/docs
 echo.
 echo Le frontend compile est servi par FastAPI.
 echo.

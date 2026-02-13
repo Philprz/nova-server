@@ -11,7 +11,7 @@ def test_api_chiffrage():
 
     Instructions:
     1. Trouver l'ID de l'email "Demande chiffrage MarmaraCam" via:
-       GET http://localhost:8000/api/graph/emails
+       GET http://localhost:8001/api/graph/emails
 
     2. Remplacer EMAIL_ID ci-dessus avec l'ID réel
 
@@ -24,7 +24,7 @@ def test_api_chiffrage():
         print("=" * 70)
         print()
         print("Etape 1: Recuperer la liste des emails")
-        print("  GET http://localhost:8000/api/graph/emails")
+        print("  GET http://localhost:8001/api/graph/emails")
         print()
         print("Etape 2: Trouver l'email 'Demande chiffrage MarmaraCam' et copier son 'id'")
         print()
@@ -42,7 +42,7 @@ def test_api_chiffrage():
     # 1. Récupérer les détails de l'email d'abord
     print("--- Etape 1: Recuperer les details de l'email ---")
     try:
-        r = requests.get(f"http://localhost:8000/api/graph/emails/{EMAIL_ID}")
+        r = requests.get(f"http://localhost:8001/api/graph/emails/{EMAIL_ID}")
         r.raise_for_status()
         email = r.json()
 
@@ -53,7 +53,7 @@ def test_api_chiffrage():
     except Exception as e:
         print(f"ERREUR lors de la recuperation de l'email: {e}")
         print("Verifiez que:")
-        print("  1. Le backend est lance (http://localhost:8000)")
+        print("  1. Le backend est lance (http://localhost:8001)")
         print("  2. L'EMAIL_ID est correct")
         return
 
@@ -61,7 +61,7 @@ def test_api_chiffrage():
     print("--- Etape 2: Analyser l'email avec force=true ---")
     try:
         r = requests.post(
-            f"http://localhost:8000/api/graph/emails/{EMAIL_ID}/analyze?force=true"
+            f"http://localhost:8001/api/graph/emails/{EMAIL_ID}/analyze?force=true"
         )
         r.raise_for_status()
         analysis = r.json()

@@ -12,7 +12,7 @@ async def test():
     print("TEST MATCHER AVEC BODY RÉEL")
     print("="*60)
 
-    r = requests.get(f"http://localhost:8000/api/graph/emails/{email_id}")
+    r = requests.get(f"http://localhost:8001/api/graph/emails/{email_id}")
     email = r.json()
 
     print(f"Subject: {email['subject']}")
@@ -22,7 +22,7 @@ async def test():
     # 2. Si pas de body_content, récupérer le body complet
     if not email['body_content']:
         print("\nRécupération du body complet...")
-        r2 = requests.get(f"http://localhost:8000/api/graph/emails/{email_id}/body")
+        r2 = requests.get(f"http://localhost:8001/api/graph/emails/{email_id}/body")
         body_data = r2.json()
         body_text = body_data['body']
         body_type = body_data['type']

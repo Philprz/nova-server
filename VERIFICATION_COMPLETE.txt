@@ -92,6 +92,6 @@
    sqlite3 data/supplier_tariffs.db ".tables"
 
    # Voir les routes disponibles
-   curl http://localhost:8000/docs
+   curl http://localhost:8001/docs
 
 ═══════════════════════════════════════════════════════════════

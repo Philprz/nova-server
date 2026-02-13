@@ -270,7 +270,7 @@ def main():
     logger.info("Prochaines étapes:")
     logger.info("1. Configurez le fichier .env")
     logger.info("2. Lancez: python main.py")
-    logger.info("3. Accédez à: http://localhost:8000/docs")
+    logger.info("3. Accédez à: http://localhost:8001/docs")
     
     return True
 

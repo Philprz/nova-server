@@ -72,7 +72,7 @@ Le sujet ou le corps de l'email réel est peut-être différent de ce que vous v
 **Test avec API directe:**
 ```bash
 # 1. Trouver l'ID de l'email
-curl http://localhost:8000/api/graph/emails | jq '.[] | select(.subject | contains("MarmaraCam"))'
+curl http://localhost:8001/api/graph/emails | jq '.[] | select(.subject | contains("MarmaraCam"))'
 
 # 2. Copier l'ID
 
@@ -96,7 +96,7 @@ L'interface pourrait afficher une ancienne analyse même si le backend a reclass
 **Test:**
 ```bash
 # Appeler directement l'API avec force=true
-curl -X POST "http://localhost:8000/api/graph/emails/{EMAIL_ID}/analyze?force=true"
+curl -X POST "http://localhost:8001/api/graph/emails/{EMAIL_ID}/analyze?force=true"
 
 # Comparer avec ce que l'interface affiche
 ```
@@ -187,7 +187,7 @@ Ce script dira EXACTEMENT pourquoi l'email n'est pas détecté.
 
 ```bash
 # Remplacer {EMAIL_ID} par l'ID réel
-curl -X POST "http://localhost:8000/api/graph/emails/{EMAIL_ID}/analyze?force=true"
+curl -X POST "http://localhost:8001/api/graph/emails/{EMAIL_ID}/analyze?force=true"
 ```
 
 Vérifiez la réponse JSON:

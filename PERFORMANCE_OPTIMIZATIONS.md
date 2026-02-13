@@ -344,7 +344,7 @@ for item_code, item in self._items_cache.items():
 ### Test 1 : Cache Backend
 ```bash
 # 1er clic
-curl -X POST http://localhost:8000/api/graph/emails/{id}/analyze
+curl -X POST http://localhost:8001/api/graph/emails/{id}/analyze
 # Logs attendus :
 # ⚡ Phase 1 - Email fetch + cache warm: 1200ms
 # ⚡ Phase 2 - PDF extraction: 350ms
@@ -352,7 +352,7 @@ curl -X POST http://localhost:8000/api/graph/emails/{id}/analyze
 # ✅ Analyse complète en 6050ms
 
 # 2ème clic (< 1ms, cache hit)
-curl -X POST http://localhost:8000/api/graph/emails/{id}/analyze
+curl -X POST http://localhost:8001/api/graph/emails/{id}/analyze
 # Log attendu :
 # ⚡ Cache hit for {message_id} (0ms)
 ```

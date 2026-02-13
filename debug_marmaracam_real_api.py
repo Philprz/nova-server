@@ -29,7 +29,7 @@ async def debug_real_email():
         print("6. Copier l'{id} de l'URL")
         print()
         print("OU via curl:")
-        print('  curl http://localhost:8000/api/graph/emails | jq \'.[] | select(.subject | contains("MarmaraCam")) | .id\'')
+        print('  curl http://localhost:8001/api/graph/emails | jq \'.[] | select(.subject | contains("MarmaraCam")) | .id\'')
         return
 
     print("=" * 80)
@@ -41,7 +41,7 @@ async def debug_real_email():
     # === ÉTAPE 1: Récupérer les métadonnées de l'email ===
     print("--- ETAPE 1: Recuperer les metadonnees de l'email ---")
     try:
-        r = requests.get(f"http://localhost:8000/api/graph/emails/{EMAIL_ID}")
+        r = requests.get(f"http://localhost:8001/api/graph/emails/{EMAIL_ID}")
         r.raise_for_status()
         email_meta = r.json()
 
@@ -63,7 +63,7 @@ async def debug_real_email():
     # === ÉTAPE 2: Récupérer le BODY complet ===
     print("--- ETAPE 2: Recuperer le BODY COMPLET ---")
     try:
-        r = requests.get(f"http://localhost:8000/api/graph/emails/{EMAIL_ID}/body")
+        r = requests.get(f"http://localhost:8001/api/graph/emails/{EMAIL_ID}/body")
         r.raise_for_status()
         body_data = r.json()
 
@@ -143,7 +143,7 @@ async def debug_real_email():
     print("--- ETAPE 6: Appel API /analyze avec force=true ---")
     try:
         r = requests.post(
-            f"http://localhost:8000/api/graph/emails/{EMAIL_ID}/analyze?force=true"
+            f"http://localhost:8001/api/graph/emails/{EMAIL_ID}/analyze?force=true"
         )
         r.raise_for_status()
         analysis = r.json()

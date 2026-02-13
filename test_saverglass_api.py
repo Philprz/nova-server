@@ -11,7 +11,7 @@ print(f"Email ID: {email_id[:50]}...")
 
 # 1. Récupérer les détails de l'email
 print("\n1. Récupération email...")
-r = requests.get(f"http://localhost:8000/api/graph/emails/{email_id}")
+r = requests.get(f"http://localhost:8001/api/graph/emails/{email_id}")
 if r.status_code == 200:
     email = r.json()
     print(f"  Subject: {email['subject']}")
@@ -23,7 +23,7 @@ else:
 
 # 2. Analyser l'email
 print("\n2. Analyse de l'email (force=true)...")
-r = requests.post(f"http://localhost:8000/api/graph/emails/{email_id}/analyze?force=true")
+r = requests.post(f"http://localhost:8001/api/graph/emails/{email_id}/analyze?force=true")
 
 if r.status_code != 200:
     print(f"  ERREUR HTTP {r.status_code}: {r.text}")

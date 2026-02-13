@@ -50,7 +50,7 @@ python3 start-nova.py
 
 ### 1. Démarrage Backend (FastAPI)
 
-Le script démarre automatiquement le serveur FastAPI sur **http://localhost:8000**
+Le script démarre automatiquement le serveur FastAPI sur **http://localhost:8001**
 
 ### 2. Démarrage Frontend (Optionnel)
 
@@ -68,11 +68,11 @@ Une fois NOVA démarré, vous pouvez accéder à :
 
 | Service | URL | Description |
 |---------|-----|-------------|
-| **Backend API** | http://localhost:8000 | API REST FastAPI |
-| **Mail-to-Biz** | http://localhost:8000/mail-to-biz | Interface mail-to-biz (React) |
-| **NOVA Assistant** | http://localhost:8000/interface/itspirit | Assistant IA conversationnel |
-| **Documentation API** | http://localhost:8000/docs | Swagger UI interactive |
-| **Health Check** | http://localhost:8000/health | Statut système |
+| **Backend API** | http://localhost:8001 | API REST FastAPI |
+| **Mail-to-Biz** | http://localhost:8001/mail-to-biz | Interface mail-to-biz (React) |
+| **NOVA Assistant** | http://localhost:8001/interface/itspirit | Assistant IA conversationnel |
+| **Documentation API** | http://localhost:8001/docs | Swagger UI interactive |
+| **Health Check** | http://localhost:8001/health | Statut système |
 | **Frontend Dev** | http://localhost:5173 | React Dev Server (si actif) |
 
 ---
@@ -283,5 +283,5 @@ python main.py
 
 Pour toute question ou problème :
 1. Vérifier les logs : `nova.log`
-2. Vérifier le health check : http://localhost:8000/health
-3. Consulter la documentation : http://localhost:8000/docs
+2. Vérifier le health check : http://localhost:8001/health
+3. Consulter la documentation : http://localhost:8001/docs

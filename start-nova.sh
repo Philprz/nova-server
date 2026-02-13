@@ -36,7 +36,7 @@ echo "========================================"
 echo "  1/2 - Demarrage Backend FastAPI"
 echo "========================================"
 echo ""
-echo "Demarrage serveur FastAPI sur http://localhost:8000..."
+echo "Demarrage serveur FastAPI sur http://localhost:8001..."
 python3 main.py &
 BACKEND_PID=$!
 
@@ -47,7 +47,7 @@ sleep 5
 if ! command -v node &> /dev/null; then
     echo ""
     echo "[INFO] Node.js non trouve - Frontend deja compile"
-    echo "Le frontend sera servi par FastAPI sur http://localhost:8000/mail-to-biz"
+    echo "Le frontend sera servi par FastAPI sur http://localhost:8001/mail-to-biz"
     echo ""
 
     echo ""
@@ -55,10 +55,10 @@ if ! command -v node &> /dev/null; then
     echo "  NOVA DEMARRE (Backend uniquement)"
     echo "========================================"
     echo ""
-    echo "Backend FastAPI : http://localhost:8000"
-    echo "Mail-to-Biz : http://localhost:8000/mail-to-biz"
-    echo "NOVA Assistant : http://localhost:8000/interface/itspirit"
-    echo "API Docs : http://localhost:8000/docs"
+    echo "Backend FastAPI : http://localhost:8001"
+    echo "Mail-to-Biz : http://localhost:8001/mail-to-biz"
+    echo "NOVA Assistant : http://localhost:8001/interface/itspirit"
+    echo "API Docs : http://localhost:8001/docs"
     echo ""
     echo "Appuyez sur CTRL+C pour arreter..."
 
@@ -70,7 +70,7 @@ fi
 if [ ! -d "mail-to-biz/src" ]; then
     echo ""
     echo "[INFO] Frontend source non trouve - Utilisation du build"
-    echo "Le frontend sera servi par FastAPI sur http://localhost:8000/mail-to-biz"
+    echo "Le frontend sera servi par FastAPI sur http://localhost:8001/mail-to-biz"
     echo ""
 
     echo ""
@@ -78,10 +78,10 @@ if [ ! -d "mail-to-biz/src" ]; then
     echo "  NOVA DEMARRE (Backend uniquement)"
     echo "========================================"
     echo ""
-    echo "Backend FastAPI : http://localhost:8000"
-    echo "Mail-to-Biz : http://localhost:8000/mail-to-biz"
-    echo "NOVA Assistant : http://localhost:8000/interface/itspirit"
-    echo "API Docs : http://localhost:8000/docs"
+    echo "Backend FastAPI : http://localhost:8001"
+    echo "Mail-to-Biz : http://localhost:8001/mail-to-biz"
+    echo "NOVA Assistant : http://localhost:8001/interface/itspirit"
+    echo "API Docs : http://localhost:8001/docs"
     echo ""
     echo "Appuyez sur CTRL+C pour arreter..."
 
@@ -106,11 +106,11 @@ echo "========================================"
 echo "  NOVA DEMARRE AVEC SUCCES!"
 echo "========================================"
 echo ""
-echo "Backend FastAPI : http://localhost:8000"
+echo "Backend FastAPI : http://localhost:8001"
 echo "Frontend React Dev : http://localhost:5173"
-echo "Mail-to-Biz : http://localhost:8000/mail-to-biz"
-echo "NOVA Assistant : http://localhost:8000/interface/itspirit"
-echo "API Docs : http://localhost:8000/docs"
+echo "Mail-to-Biz : http://localhost:8001/mail-to-biz"
+echo "NOVA Assistant : http://localhost:8001/interface/itspirit"
+echo "API Docs : http://localhost:8001/docs"
 echo ""
 echo "Appuyez sur CTRL+C pour arreter tous les services..."
 

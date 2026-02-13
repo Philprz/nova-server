@@ -5,36 +5,36 @@
 :80 {
     # API endpoints (sans rewrite)
     handle /api/* {
-        reverse_proxy localhost:8000
+        reverse_proxy localhost:8001
     }
 
     # Endpoints système
     handle /docs* {
-        reverse_proxy localhost:8000
+        reverse_proxy localhost:8001
     }
 
     handle /health {
-        reverse_proxy localhost:8000
+        reverse_proxy localhost:8001
     }
 
     handle /redoc* {
-        reverse_proxy localhost:8000
+        reverse_proxy localhost:8001
     }
 
     handle /openapi.json {
-        reverse_proxy localhost:8000
+        reverse_proxy localhost:8001
     }
 
     # Route principale -> /mail-to-biz
     handle / {
         rewrite * /mail-to-biz{path}
-        reverse_proxy localhost:8000
+        reverse_proxy localhost:8001
     }
 
     # Assets
     handle /assets/* {
         rewrite * /mail-to-biz{path}
-        reverse_proxy localhost:8000
+        reverse_proxy localhost:8001
     }
 }
 
@@ -42,35 +42,35 @@
 nova.itspirit.ovh {
     # API endpoints (sans rewrite)
     handle /api/* {
-        reverse_proxy localhost:8000
+        reverse_proxy localhost:8001
     }
 
     # Endpoints système
     handle /docs* {
-        reverse_proxy localhost:8000
+        reverse_proxy localhost:8001
     }
 
     handle /health {
-        reverse_proxy localhost:8000
+        reverse_proxy localhost:8001
     }
 
     handle /redoc* {
-        reverse_proxy localhost:8000
+        reverse_proxy localhost:8001
     }
 
     handle /openapi.json {
-        reverse_proxy localhost:8000
+        reverse_proxy localhost:8001
     }
 
     # Route principale -> /mail-to-biz
     handle / {
         rewrite * /mail-to-biz{path}
-        reverse_proxy localhost:8000
+        reverse_proxy localhost:8001
     }
 
     # Assets
     handle /assets/* {
         rewrite * /mail-to-biz{path}
-        reverse_proxy localhost:8000
+        reverse_proxy localhost:8001
     }
 }

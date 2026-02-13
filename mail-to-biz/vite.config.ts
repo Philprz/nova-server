@@ -8,7 +8,7 @@ export default defineConfig(({ mode }) => ({
   base: "/mail-to-biz/",
   server: {
     host: "::",
-    port: 8080,
+    port: 8082,
     hmr: {
       overlay: false,
     },

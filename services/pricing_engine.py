@@ -165,7 +165,6 @@ class PricingEngine:
             )
 
             # Stocker dans le cache
-            global _pricing_cache
             _pricing_cache[cache_key] = (datetime.now(), decision)
 
             # Cleanup cache si trop d'entrées (FIFO)
