@@ -26,6 +26,8 @@ from routes.routes_sap_business import router as sap_business_router
 from routes.routes_pricing_validation import router as pricing_validation_router
 from routes.routes_sap_creation import router as sap_creation_router
 from routes.routes_product_validation import router as product_validation_router
+from routes.routes_export_json import router as export_json_router
+from routes.routes_export_json_v2 import router as export_json_v2_router
 if sys.platform == "win32":
     os.environ["PYTHONIOENCODING"] = "utf-8"
 
@@ -158,6 +160,8 @@ app.include_router(sap_business_router)  # API SAP Business pour mail-to-biz
 app.include_router(pricing_validation_router, prefix="/api/validations", tags=["Pricing Validation"])
 app.include_router(sap_creation_router, prefix="/api/sap", tags=["SAP Creation"])
 app.include_router(product_validation_router)  # API validation produits externes
+app.include_router(export_json_router)  # API export JSON pre-sap-quote avec matching backend
+app.include_router(export_json_v2_router)  # API export JSON v2 (réutilise analyse existante)
 # Route WebSocket pour l'assistant intelligent manquante
 @app.websocket("/ws/assistant/{task_id}")
 async def websocket_assistant_endpoint(websocket: WebSocket, task_id: str):

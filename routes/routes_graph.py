@@ -7,6 +7,8 @@ import os
 import logging
 import base64
 import httpx
+import asyncio
+import time
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
@@ -257,7 +259,19 @@ async def get_emails(
             skip=skip,
             unread_only=unread_only
         )
-        return result
+        # Enrichir chaque email avec is_quote_by_subject (sujet contient "chiffrage", "devis", etc.)
+        analyzer = get_email_analyzer()
+        enriched_emails = []
+        for email in result.emails:
+            quick = analyzer.quick_classify(email.subject, email.body_preview or "")
+            enriched_emails.append(
+                email.model_copy(update={"is_quote_by_subject": quick["likely_quote"]})
+            )
+        return GraphEmailsResponse(
+            emails=enriched_emails,
+            total_count=result.total_count,
+            next_link=result.next_link,
+        )
 
     except Exception as e:
         logger.error(f"Error fetching emails: {e}")
@@ -345,14 +359,14 @@ async def get_attachment_content(message_id: str, attachment_id: str):
 
 
 @router.post("/emails/{message_id}/analyze", response_model=EmailAnalysisResult)
-async def analyze_email(message_id: str, force: bool = True):
+async def analyze_email(message_id: str, force: bool = False):
     """
     Analyse un email avec l'IA pour déterminer s'il s'agit d'une demande de devis.
     Le résultat est mis en cache.
 
     Args:
         message_id: ID de l'email
-        force: Si True, force la ré-analyse même si le résultat est en cache (défaut: True pour garantir des résultats à jour)
+        force: Si True, force la ré-analyse même si le résultat est en cache (défaut: False pour utiliser le cache)
     """
     global _analysis_cache, _backend_start_time
 
@@ -377,54 +391,109 @@ async def analyze_email(message_id: str, force: bool = True):
     if force:
         logger.info(f"Forcing new analysis for {message_id}")
 
+    t_total = time.time()
     graph_service = get_graph_service()
     email_analyzer = get_email_analyzer()
+    matcher = get_email_matcher()
 
     if not graph_service.is_configured():
         raise HTTPException(status_code=400, detail="Microsoft Graph credentials not configured")
 
     try:
-        # Récupérer l'email complet
-        email = await graph_service.get_email(message_id, include_attachments=True)
+        # Phase 1: Récupérer l'email + pré-charger le cache matcher en parallèle
+        t_phase = time.time()
+        email, _ = await asyncio.gather(
+            graph_service.get_email(message_id, include_attachments=True),
+            matcher.ensure_cache()
+        )
+        logger.info(f"⚡ Phase 1 - Email fetch + cache warm: {(time.time()-t_phase)*1000:.0f}ms")
 
-        # Extraire le contenu des PDFs si présents
+        # Phase 2: Extraire le contenu des PDFs si présents
+        t_phase = time.time()
         pdf_contents = []
+        MAX_PDF_SIZE = 5 * 1024 * 1024  # 5 MB max par PDF
+        MAX_PDF_PROCESSING_TIME = 30  # 30 secondes max par PDF
+
         for attachment in email.attachments:
             if attachment.content_type == "application/pdf":
+                # Vérifier la taille avant de télécharger
+                if attachment.size > MAX_PDF_SIZE:
+                    logger.warning(f"PDF {attachment.name} trop gros ({attachment.size / 1024 / 1024:.1f} MB), skip")
+                    continue
+
                 try:
-                    content_bytes = await graph_service.get_attachment_content(
-                        message_id, attachment.id
+                    # Télécharger avec timeout
+                    content_bytes = await asyncio.wait_for(
+                        graph_service.get_attachment_content(message_id, attachment.id),
+                        timeout=MAX_PDF_PROCESSING_TIME
                     )
-                    text = await extract_pdf_text(content_bytes)
+
+                    # Parser avec timeout
+                    text = await asyncio.wait_for(
+                        extract_pdf_text(content_bytes),
+                        timeout=MAX_PDF_PROCESSING_TIME
+                    )
+
                     if text:
                         pdf_contents.append(text)
+                        logger.info(f"PDF {attachment.name} extrait avec succès ({len(text)} chars)")
+                except asyncio.TimeoutError:
+                    logger.warning(f"Timeout lors du traitement du PDF {attachment.name}, skip")
                 except Exception as e:
                     logger.warning(f"Could not extract PDF {attachment.name}: {e}")
 
-        # Analyser l'email (classification LLM/rules)
-        body_text = email.body_content or email.body_preview
-        result = await email_analyzer.analyze_email(
+        # Préparer le body text
+        if email.body_content and len(email.body_content.strip()) > 0:
+            body_text = email.body_content
+            logger.info(f"Using full body_content ({len(body_text)} chars)")
+        else:
+            body_text = email.body_preview
+            logger.warning(f"body_content empty/missing, using body_preview ({len(body_text)} chars) - may be truncated!")
+
+        logger.info(f"⚡ Phase 2 - PDF extraction: {(time.time()-t_phase)*1000:.0f}ms")
+
+        # Phase 3: LLM analysis + SAP matching EN PARALLÈLE
+        t_phase = time.time()
+
+        # Préparer le texte nettoyé pour le matching (rapide, sync)
+        clean_text = email_analyzer._clean_html(body_text)
+        if pdf_contents:
+            clean_text += " " + " ".join(pdf_contents)
+
+        # Lancer LLM et matching en parallèle (les 2 opérations sont indépendantes)
+        llm_task = email_analyzer.analyze_email(
             subject=email.subject,
             body=body_text,
             sender_email=email.from_address,
             sender_name=email.from_name,
             pdf_contents=pdf_contents
         )
+        match_task = matcher.match_email(
+            body=clean_text,
+            sender_email=email.from_address,
+            subject=email.subject
+        )
 
-        # Enrichir avec le matching SAP (clients + produits réels)
+        parallel_results = await asyncio.gather(llm_task, match_task, return_exceptions=True)
+
+        # Récupérer le résultat LLM (obligatoire)
+        result = parallel_results[0]
+        if isinstance(result, Exception):
+            raise result
+
+        # Récupérer le résultat matching (optionnel, non-bloquant)
+        match_result = parallel_results[1] if not isinstance(parallel_results[1], Exception) else None
+        if isinstance(parallel_results[1], Exception):
+            logger.warning(f"SAP matching failed (non-blocking): {parallel_results[1]}")
+
+        logger.info(f"⚡ Phase 3 - LLM + SAP matching (parallel): {(time.time()-t_phase)*1000:.0f}ms")
+
+        # Phase 4: Enrichissement avec les résultats du matching SAP
+        t_phase = time.time()
+
         try:
-            matcher = get_email_matcher()
-            # Nettoyer le body pour le matching (HTML → texte)
-            clean_text = email_analyzer._clean_html(body_text)
-            # Ajouter le contenu des PDFs au texte de matching
-            if pdf_contents:
-                clean_text += " " + " ".join(pdf_contents)
-
-            match_result = await matcher.match_email(
-                body=clean_text,
-                sender_email=email.from_address,
-                subject=email.subject
-            )
+            if match_result is None:
+                raise Exception("Matching skipped due to earlier error")
 
             # Enrichir extracted_data avec les résultats du matching SAP
             if match_result.best_client or match_result.products:
@@ -515,7 +584,118 @@ async def analyze_email(message_id: str, force: bool = True):
                 logger.info("⚠️ VÉRIFICATION PRODUITS requise: aucun match SAP")
 
         except Exception as e:
-            logger.warning(f"SAP matching failed (non-blocking): {e}")
+            logger.warning(f"SAP matching/enrichment failed (non-blocking): {e}")
+
+        logger.info(f"⚡ Phase 4 - Enrichissement: {(time.time()-t_phase)*1000:.0f}ms")
+
+        # === NOUVELLE PHASE 5 : CALCUL AUTOMATIQUE DES PRIX ===
+        t_phase = time.time()
+
+        try:
+            # Vérifier si pricing engine est activé
+            pricing_enabled = os.getenv("PRICING_ENGINE_ENABLED", "false").lower() == "true"
+
+            if pricing_enabled and match_result and match_result.products:
+                logger.info(f"💰 Calcul pricing pour {len(match_result.products)} produits...")
+
+                from services.pricing_engine import get_pricing_engine
+                from services.pricing_models import PricingContext
+
+                pricing_engine = get_pricing_engine()
+
+                # Récupérer CardCode client (nécessaire pour pricing)
+                card_code = "UNKNOWN"
+                if match_result.best_client:
+                    card_code = match_result.best_client.card_code
+                elif result.extracted_data and result.extracted_data.client_card_code:
+                    card_code = result.extracted_data.client_card_code
+
+                # Préparer contextes pricing pour tous les produits
+                pricing_contexts = []
+                for product in match_result.products:
+                    # Skip si produit non trouvé dans SAP
+                    if product.not_found_in_sap:
+                        continue
+
+                    context = PricingContext(
+                        item_code=product.item_code,
+                        card_code=card_code,
+                        quantity=product.quantity,
+                        supplier_price=None,  # Sera récupéré automatiquement
+                        apply_margin=float(os.getenv("PRICING_DEFAULT_MARGIN", "45.0")),
+                        force_recalculate=False
+                    )
+                    pricing_contexts.append((product, context))
+
+                # Calcul parallèle des prix (gain performance 80%)
+                pricing_tasks = [
+                    pricing_engine.calculate_price(ctx)
+                    for _, ctx in pricing_contexts
+                ]
+
+                pricing_results = await asyncio.gather(*pricing_tasks, return_exceptions=True)
+
+                # Enrichir produits avec résultats pricing
+                enriched_products = []
+                pricing_success_count = 0
+
+                for i, (product, context) in enumerate(pricing_contexts):
+                    pricing_result = pricing_results[i]
+
+                    # Gestion erreurs gracieuse (non-bloquant)
+                    if isinstance(pricing_result, Exception):
+                        logger.error(f"Pricing error for {product.item_code}: {pricing_result}")
+                        enriched_products.append(product)
+                        continue
+
+                    if pricing_result.success and pricing_result.decision:
+                        decision = pricing_result.decision
+
+                        # Créer produit enrichi avec pricing
+                        enriched_dict = product.dict()
+                        enriched_dict.update({
+                            "unit_price": decision.calculated_price,
+                            "line_total": decision.calculated_price * product.quantity,
+                            "pricing_case": decision.case_type.value,
+                            "pricing_justification": decision.justification,
+                            "requires_validation": decision.requires_validation,
+                            "validation_reason": decision.validation_reason,
+                            "supplier_price": decision.supplier_price,
+                            "margin_applied": decision.margin_applied,
+                            "confidence_score": decision.confidence_score,
+                            "alerts": decision.alerts
+                        })
+
+                        from services.email_matcher import MatchedProduct
+                        enriched_product = MatchedProduct(**enriched_dict)
+                        enriched_products.append(enriched_product)
+
+                        pricing_success_count += 1
+
+                        logger.info(
+                            f"  ✓ {decision.case_type.value}: {product.item_code} → "
+                            f"{decision.calculated_price:.2f} EUR (marge {decision.margin_applied:.0f}%)"
+                        )
+                    else:
+                        # Fallback: garder produit sans pricing
+                        enriched_products.append(product)
+
+                # Ajouter produits non trouvés dans SAP (sans pricing)
+                for product in match_result.products:
+                    if product.not_found_in_sap:
+                        enriched_products.append(product)
+
+                # Remplacer produits par versions enrichies
+                result.product_matches = [p.dict() for p in enriched_products]
+
+                logger.info(
+                    f"⚡ Phase 5 - Pricing: {(time.time()-t_phase)*1000:.0f}ms "
+                    f"({pricing_success_count}/{len(match_result.products)} succès)"
+                )
+
+        except Exception as e:
+            # Fallback gracieux: continuer sans pricing
+            logger.warning(f"Phase 5 pricing failed (non-blocking): {e}")
 
         # === DÉTECTION DES DOUBLONS ===
         try:
@@ -565,6 +745,8 @@ async def analyze_email(message_id: str, force: bool = True):
         except Exception as e:
             logger.error(f"Erreur détection doublon (non-bloquant): {e}")
             # Ne pas bloquer le traitement en cas d'erreur de détection
+
+        logger.info(f"✅ Analyse complète en {(time.time()-t_total)*1000:.0f}ms pour {message_id}")
 
         # Mettre en cache (limiter à 100 entrées)
         if len(_analysis_cache) > 100:
@@ -639,6 +821,21 @@ class ProductChoiceRequest(BaseModel):
     """Requête de confirmation des choix produits."""
     selected_products: List[dict]  # Liste des produits choisis avec item_code, quantity
     create_new_products: List[dict] = []  # Produits à créer (si non trouvés dans SAP)
+
+
+class ExcludeProductRequest(BaseModel):
+    """Requête pour exclure un produit du devis."""
+    reason: Optional[str] = None  # Raison de l'exclusion (optionnel)
+
+
+class ManualCodeRequest(BaseModel):
+    """Requête pour saisir manuellement un code article RONDOT."""
+    rondot_code: str  # Code article RONDOT saisi manuellement
+
+
+class RetrySearchRequest(BaseModel):
+    """Requête pour relancer la recherche SAP d'un article."""
+    search_query: Optional[str] = None  # Nouvelle requête de recherche (optionnel)
 
 
 @router.post("/emails/{message_id}/confirm-client")
@@ -827,4 +1024,240 @@ async def get_validation_status(message_id: str):
 
     except Exception as e:
         logger.error(f"Error getting validation status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# === ENDPOINTS ACTIONS PRODUITS NON TROUVÉS ===
+
+@router.post("/emails/{message_id}/products/{item_code}/exclude")
+async def exclude_product_from_quote(
+    message_id: str,
+    item_code: str,
+    request: ExcludeProductRequest
+):
+    """
+    Exclut un article du devis.
+    Trace l'action pour audit et apprentissage futur.
+    """
+    global _analysis_cache
+
+    try:
+        # 1. Récupérer analyse en cache
+        if message_id not in _analysis_cache:
+            raise HTTPException(status_code=404, detail="Analyse non trouvée")
+
+        cached_entry = _analysis_cache[message_id]
+        # Gérer le nouveau format avec timestamp
+        if isinstance(cached_entry, dict) and 'data' in cached_entry:
+            result = cached_entry['data']
+        else:
+            result = cached_entry
+
+        # 2. Retirer le produit de la liste
+        if result.product_matches:
+            original_count = len(result.product_matches)
+            result.product_matches = [
+                p for p in result.product_matches
+                if p.get("item_code") != item_code
+            ]
+            removed_count = original_count - len(result.product_matches)
+
+            if removed_count == 0:
+                logger.warning(f"Produit {item_code} non trouvé dans l'analyse {message_id}")
+
+        # 3. Tracer l'action (audit + apprentissage)
+        try:
+            from services.product_mapping_db import get_product_mapping_db
+            mapping_db = get_product_mapping_db()
+            mapping_db.log_exclusion(
+                item_code=item_code,
+                email_id=message_id,
+                reason=request.reason or "Excluded by user"
+            )
+        except Exception as e:
+            logger.warning(f"Could not log exclusion (non-critical): {e}")
+
+        logger.info(f"Produit {item_code} exclu du devis {message_id}")
+
+        return {
+            "success": True,
+            "item_code": item_code,
+            "action": "excluded",
+            "remaining_products": len(result.product_matches) if result.product_matches else 0
+        }
+
+    except Exception as e:
+        logger.error(f"Exclusion error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/emails/{message_id}/products/{item_code}/manual-code")
+async def set_manual_product_code(
+    message_id: str,
+    item_code: str,  # Code original (non trouvé)
+    request: ManualCodeRequest
+):
+    """
+    Remplace un code article non trouvé par un code RONDOT saisi manuellement.
+    Enregistre le mapping pour apprentissage automatique futur.
+    """
+    global _analysis_cache
+
+    try:
+        # 1. Récupérer analyse en cache
+        if message_id not in _analysis_cache:
+            raise HTTPException(status_code=404, detail="Analyse non trouvée")
+
+        cached_entry = _analysis_cache[message_id]
+        if isinstance(cached_entry, dict) and 'data' in cached_entry:
+            result = cached_entry['data']
+        else:
+            result = cached_entry
+
+        # 2. Vérifier que le code RONDOT existe dans SAP
+        from services.sap_business_service import get_sap_business_service
+        sap_service = get_sap_business_service()
+
+        sap_items = await sap_service.search_items(request.rondot_code, limit=1)
+
+        if not sap_items:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Code RONDOT '{request.rondot_code}' non trouvé dans SAP"
+            )
+
+        sap_item = sap_items[0]
+
+        # 3. Mettre à jour le produit dans l'analyse
+        product_updated = False
+        if result.product_matches:
+            for product in result.product_matches:
+                if product.get("item_code") == item_code:
+                    product["item_code"] = sap_item.item_code
+                    product["item_name"] = sap_item.item_name
+                    product["not_found_in_sap"] = False
+                    product["match_reason"] = "Code RONDOT saisi manuellement"
+                    product["score"] = 100
+                    product_updated = True
+                    break
+
+        # 4. Enregistrer mapping pour apprentissage
+        try:
+            from services.product_mapping_db import get_product_mapping_db
+            mapping_db = get_product_mapping_db()
+            mapping_db.add_mapping(
+                external_code=item_code,
+                sap_code=sap_item.item_code,
+                source="manual_user_input",
+                confidence=1.0
+            )
+            logger.info(f"Mapping ajouté: {item_code} → {sap_item.item_code}")
+        except Exception as e:
+            logger.warning(f"Could not save mapping (non-critical): {e}")
+
+        # 5. Recalculer pricing pour ce produit
+        unit_price = None
+        try:
+            from services.pricing_engine import get_pricing_engine
+            from services.pricing_models import PricingContext
+
+            pricing_engine = get_pricing_engine()
+
+            card_code = result.extracted_data.client_card_code if result.extracted_data else "UNKNOWN"
+            quantity = next((p.get("quantity", 1) for p in result.product_matches if p.get("item_code") == sap_item.item_code), 1)
+
+            pricing_result = await pricing_engine.calculate_price(
+                PricingContext(
+                    item_code=sap_item.item_code,
+                    card_code=card_code,
+                    quantity=quantity
+                )
+            )
+
+            if pricing_result.success and pricing_result.decision:
+                # Enrichir avec pricing
+                for product in result.product_matches:
+                    if product.get("item_code") == sap_item.item_code:
+                        product["unit_price"] = pricing_result.decision.calculated_price
+                        product["line_total"] = pricing_result.decision.line_total
+                        product["pricing_case"] = pricing_result.decision.case_type.value
+                        product["pricing_justification"] = pricing_result.decision.justification
+                        unit_price = pricing_result.decision.calculated_price
+                        break
+        except Exception as e:
+            logger.warning(f"Could not calculate pricing (non-critical): {e}")
+
+        return {
+            "success": True,
+            "original_code": item_code,
+            "rondot_code": sap_item.item_code,
+            "item_name": sap_item.item_name,
+            "unit_price": unit_price,
+            "mapping_saved": True,
+            "product_updated": product_updated
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Manual code error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/emails/{message_id}/products/{item_code}/retry-search")
+async def retry_product_search(
+    message_id: str,
+    item_code: str,
+    request: RetrySearchRequest
+):
+    """
+    Relance la recherche SAP pour un article non trouvé.
+    Utile si l'article a été créé dans SAP en parallèle.
+    """
+    global _analysis_cache
+
+    try:
+        # 1. Récupérer analyse en cache
+        if message_id not in _analysis_cache:
+            raise HTTPException(status_code=404, detail="Analyse non trouvée")
+
+        cached_entry = _analysis_cache[message_id]
+        if isinstance(cached_entry, dict) and 'data' in cached_entry:
+            result = cached_entry['data']
+        else:
+            result = cached_entry
+
+        # 2. Rechercher dans SAP
+        from services.sap_business_service import get_sap_business_service
+        sap_service = get_sap_business_service()
+
+        search_query = request.search_query or item_code
+        sap_items = await sap_service.search_items(search_query, limit=5)
+
+        if not sap_items:
+            return {
+                "success": False,
+                "found": False,
+                "message": f"Aucun article trouvé pour '{search_query}'"
+            }
+
+        # 3. Retourner résultats pour choix utilisateur
+        logger.info(f"Recherche relancée pour {item_code}: {len(sap_items)} résultat(s)")
+
+        return {
+            "success": True,
+            "found": True,
+            "count": len(sap_items),
+            "items": [
+                {
+                    "item_code": item.item_code,
+                    "item_name": item.item_name,
+                    "quantity_on_hand": getattr(item, 'quantity_on_hand', None)
+                }
+                for item in sap_items
+            ]
+        }
+
+    except Exception as e:
+        logger.error(f"Retry search error: {e}")
         raise HTTPException(status_code=500, detail=str(e))

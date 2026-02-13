@@ -1,5 +1,5 @@
 // Hook pour récupérer et gérer les emails réels depuis Microsoft Graph
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { ProcessedEmail, EmailMessage } from '@/types/email';
 import {
   fetchGraphEmails,
@@ -20,9 +20,11 @@ interface UseEmailsReturn {
   emails: ProcessedEmail[];
   loading: boolean;
   error: string | null;
+  analyzingEmailId: string | null;
   refreshEmails: () => Promise<void>;
   analyzeEmail: (emailId: string) => Promise<EmailAnalysisResult | null>;
   getEmailAnalysis: (emailId: string) => EmailAnalysisResult | undefined;
+  getLatestEmail: (emailId: string) => ProcessedEmail | null;
 }
 
 export function useEmails(options: UseEmailsOptions = {}): UseEmailsReturn {
@@ -31,21 +33,27 @@ export function useEmails(options: UseEmailsOptions = {}): UseEmailsReturn {
   const [emails, setEmails] = useState<ProcessedEmail[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [analyzingEmailId, setAnalyzingEmailId] = useState<string | null>(null);
   const [analysisCache, setAnalysisCache] = useState<Map<string, EmailAnalysisResult>>(new Map());
+
+  // Ref pour accès synchrone aux emails (résout la race condition)
+  const emailsRef = useRef<ProcessedEmail[]>([]);
 
   // Convertir un GraphEmail + analyse en ProcessedEmail
   const toProcessedEmail = useCallback(
     (graphEmail: GraphEmail, analysis?: EmailAnalysisResult): ProcessedEmail => {
       const emailMessage = graphEmailToEmailMessage(graphEmail);
+      const bodyContent = emailMessage.body?.content ?? '';
 
-      // Si pas d'analyse IA, utiliser le détecteur par règles
+      // Toujours exécuter la détection par règles (sujet : chiffrage, devis, etc.)
+      const detection = detectQuoteRequest(
+        emailMessage.subject,
+        bodyContent,
+        []
+      );
+
+      // Si pas d'analyse IA, utiliser uniquement le détecteur par règles
       if (!analysis) {
-        const detection = detectQuoteRequest(
-          emailMessage.subject,
-          emailMessage.body.content,
-          []
-        );
-
         return {
           email: emailMessage,
           isQuote: detection.isQuote,
@@ -58,10 +66,14 @@ export function useEmails(options: UseEmailsOptions = {}): UseEmailsReturn {
         };
       }
 
-      // Utiliser les résultats de l'analyse IA
+      // Avec analyse IA : le sujet l'emporte (chiffrage/devis dans l'intitulé = toujours devis détecté)
+      const isQuoteBySubject = graphEmail.is_quote_by_subject === true || detection.isQuote;
+      const isQuote = isQuoteBySubject || analysis.is_quote_request;
+
+      // Utiliser les résultats de l'analyse IA (en forçant devis si règles sujet)
       return {
         email: emailMessage,
-        isQuote: analysis.is_quote_request,
+        isQuote,
         detection: {
           confidence: analysis.confidence,
           matchedRules: [analysis.reasoning],
@@ -133,6 +145,7 @@ export function useEmails(options: UseEmailsOptions = {}): UseEmailsReturn {
       });
 
       setEmails(processedEmails);
+      emailsRef.current = processedEmails; // Sync ref
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Erreur inconnue';
       setError(errorMessage);
@@ -150,6 +163,9 @@ export function useEmails(options: UseEmailsOptions = {}): UseEmailsReturn {
         if (analysisCache.has(emailId)) {
           return analysisCache.get(emailId)!;
         }
+
+        // Indiquer quel email est en cours d'analyse
+        setAnalyzingEmailId(emailId);
 
         // Appeler l'API d'analyse
         const result = await analyzeGraphEmail(emailId);
@@ -169,8 +185,8 @@ export function useEmails(options: UseEmailsOptions = {}): UseEmailsReturn {
         });
 
         // Mettre à jour l'email dans la liste
-        setEmails((prevEmails) =>
-          prevEmails.map((processedEmail) => {
+        setEmails((prevEmails) => {
+          const newEmails = prevEmails.map((processedEmail) => {
             if (processedEmail.email.id === emailId) {
               // Récupérer l'email complet pour la conversion
               const graphEmail: GraphEmail = {
@@ -194,13 +210,20 @@ export function useEmails(options: UseEmailsOptions = {}): UseEmailsReturn {
               return toProcessedEmail(graphEmail, analysis);
             }
             return processedEmail;
-          })
-        );
+          });
+
+          // Mettre à jour le ref SYNCHRONIQUEMENT (résout race condition)
+          emailsRef.current = newEmails;
+
+          return newEmails;
+        });
 
         return analysis;
       } catch (err) {
         console.error('Error analyzing email:', err);
         return null;
+      } finally {
+        setAnalyzingEmailId(null);
       }
     },
     [analysisCache, toProcessedEmail]
@@ -214,6 +237,80 @@ export function useEmails(options: UseEmailsOptions = {}): UseEmailsReturn {
     [analysisCache]
   );
 
+  // Récupérer le ProcessedEmail le plus récent (depuis le ref, évite stale closures)
+  const getLatestEmail = useCallback(
+    (emailId: string): ProcessedEmail | null => {
+      return emailsRef.current.find(e => e.email.id === emailId) ?? null;
+    },
+    []
+  );
+
+  // Pré-analyse en arrière-plan des emails détectés comme devis
+  const preAnalyzeQuotes = useCallback(
+    async (emailList: ProcessedEmail[]) => {
+      const quotesToAnalyze = emailList.filter(
+        (e) => e.isQuote && !e.analysisResult && !analysisCache.has(e.email.id)
+      );
+
+      if (quotesToAnalyze.length === 0) return;
+
+      console.log(`[Pre-analysis] ${quotesToAnalyze.length} email(s) à pré-analyser en arrière-plan`);
+
+      // Analyser séquentiellement en background (pas de surcharge serveur)
+      for (const quote of quotesToAnalyze) {
+        try {
+          // Appeler le backend (résultat mis en cache côté serveur)
+          const result = await analyzeGraphEmail(quote.email.id);
+          if (result.success && result.data) {
+            setAnalysisCache((prev) => {
+              const newCache = new Map(prev);
+              newCache.set(quote.email.id, result.data!);
+              return newCache;
+            });
+
+            // Mettre à jour l'email dans la liste
+            setEmails((prevEmails) => {
+              const newEmails = prevEmails.map((pe) => {
+                if (pe.email.id === quote.email.id) {
+                  const graphEmail: GraphEmail = {
+                    id: pe.email.id,
+                    subject: pe.email.subject,
+                    from_name: pe.email.from.emailAddress.name,
+                    from_address: pe.email.from.emailAddress.address,
+                    received_datetime: pe.email.receivedDateTime,
+                    body_preview: pe.email.bodyPreview,
+                    body_content: pe.email.body.content,
+                    body_content_type: pe.email.body.contentType,
+                    has_attachments: pe.email.hasAttachments,
+                    is_read: pe.email.isRead,
+                    attachments: pe.email.attachments.map((a) => ({
+                      id: a.id,
+                      name: a.name,
+                      content_type: a.contentType,
+                      size: a.size,
+                    })),
+                  };
+                  return toProcessedEmail(graphEmail, result.data!);
+                }
+                return pe;
+              });
+
+              // Sync ref
+              emailsRef.current = newEmails;
+
+              return newEmails;
+            });
+
+            console.log(`[Pre-analysis] ✅ ${quote.email.subject} pré-analysé`);
+          }
+        } catch (err) {
+          console.warn(`[Pre-analysis] Échec pour ${quote.email.id}:`, err);
+        }
+      }
+    },
+    [analysisCache, toProcessedEmail]
+  );
+
   // Fetch automatique au montage
   useEffect(() => {
     if (enabled && autoFetch) {
@@ -221,13 +318,22 @@ export function useEmails(options: UseEmailsOptions = {}): UseEmailsReturn {
     }
   }, [enabled, autoFetch]); // Ne pas inclure refreshEmails pour éviter les boucles
 
+  // Pré-analyse automatique après chargement des emails
+  useEffect(() => {
+    if (enabled && emails.length > 0) {
+      preAnalyzeQuotes(emails);
+    }
+  }, [enabled, emails.length]); // Déclenché quand les emails sont chargés
+
   return {
     emails,
     loading,
     error,
+    analyzingEmailId,
     refreshEmails,
     analyzeEmail,
     getEmailAnalysis,
+    getLatestEmail,
   };
 }
 

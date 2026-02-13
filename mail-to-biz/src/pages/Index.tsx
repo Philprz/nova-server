@@ -29,8 +29,10 @@ const Index = () => {
     emails: liveEmails,
     loading: liveLoading,
     error: liveError,
+    analyzingEmailId,
     refreshEmails,
     analyzeEmail,
+    getLatestEmail,
   } = useEmails({ enabled: !isDemoMode, autoFetch: !isDemoMode });
 
   // Emails de démonstration (mock)
@@ -54,13 +56,24 @@ const Index = () => {
     }
   }, [isDemoMode, currentView]);
 
+  // Filet de sécurité: sync selectedQuote si liveEmails est mis à jour (ex: pré-analyse)
+  useEffect(() => {
+    if (selectedQuote && currentView === 'summary' && !isDemoMode) {
+      const latestEmail = getLatestEmail(selectedQuote.email.id);
+      // Mettre à jour si l'email a maintenant une analysisResult et selectedQuote n'en a pas
+      if (latestEmail?.analysisResult && !selectedQuote.analysisResult) {
+        setSelectedQuote(latestEmail);
+      }
+    }
+  }, [liveEmails, selectedQuote?.email.id, currentView, isDemoMode, getLatestEmail]);
+
   const handleSelectQuote = async (quote: ProcessedEmail) => {
     // Si en mode live et pas encore analysé, lancer l'analyse IA
     if (!isDemoMode && !quote.analysisResult) {
       await analyzeEmail(quote.email.id);
 
-      // Récupérer l'email mis à jour après l'analyse
-      const updatedEmail = liveEmails.find(e => e.email.id === quote.email.id);
+      // FIX: Utiliser getLatestEmail au lieu de liveEmails (évite stale closure)
+      const updatedEmail = getLatestEmail(quote.email.id);
       if (updatedEmail) {
         setSelectedQuote(updatedEmail);
         setCurrentView('summary');
@@ -175,7 +188,7 @@ const Index = () => {
                   <p>Chargement des emails...</p>
                 </div>
               ) : (
-                <EmailList emails={displayEmails} onSelectQuote={handleSelectQuote} />
+                <EmailList emails={displayEmails} onSelectQuote={handleSelectQuote} analyzingEmailId={analyzingEmailId} />
               )}
             </>
           )}

@@ -12,10 +12,10 @@ export default defineConfig(({ mode }) => ({
     hmr: {
       overlay: false,
     },
-    // Proxy pour les appels API vers le backend FastAPI
+    // Proxy pour les appels API vers le backend FastAPI (port 8001)
     proxy: {
       '/api': {
-        target: 'http://localhost:8000',
+        target: 'http://localhost:8001',
         changeOrigin: true,
         secure: false,
       },

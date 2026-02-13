@@ -48,6 +48,8 @@ class GraphEmail(BaseModel):
     has_attachments: bool
     is_read: bool
     attachments: List[GraphAttachment] = []
+    # Détection côté serveur : True si sujet contient "chiffrage", "devis", etc.
+    is_quote_by_subject: Optional[bool] = None
 
 
 class GraphEmailsResponse(BaseModel):

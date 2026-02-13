@@ -11,8 +11,15 @@ import unicodedata
 from difflib import SequenceMatcher
 from typing import Optional, List, Dict, Any, Tuple
 from pydantic import BaseModel
+from functools import lru_cache
 
 logger = logging.getLogger(__name__)
+
+# --- Regex pré-compilés pour performance ---
+WORD_PATTERN_4PLUS = re.compile(r'\b\w{4,}\b')  # Mots 4+ caractères
+WORD_PATTERN_6PLUS = re.compile(r'\b\w{6,}\b')  # Mots 6+ caractères
+EMAIL_PATTERN = re.compile(r'[\w._%+-]+@([\w.-]+\.\w{2,})', re.IGNORECASE)
+MAILTO_PATTERN = re.compile(r'mailto:([\w._%+-]+@([\w.-]+\.\w{2,}))', re.IGNORECASE)
 
 
 # --- Modèles de résultat ---
@@ -26,12 +33,25 @@ class MatchedClient(BaseModel):
 
 
 class MatchedProduct(BaseModel):
+    # Champs existants
     item_code: str
     item_name: str
     quantity: int = 1
     score: int  # 0-100
     match_reason: str
     not_found_in_sap: bool = False  # True si le produit n'existe pas dans SAP
+
+    # ✨ NOUVEAUX CHAMPS PRICING (Phase 5 - Automatisation complète)
+    unit_price: Optional[float] = None  # Prix unitaire calculé
+    line_total: Optional[float] = None  # Prix total ligne (unit_price × quantity)
+    pricing_case: Optional[str] = None  # CAS_1_HC | CAS_2_HCM | CAS_3_HA | CAS_4_NP
+    pricing_justification: Optional[str] = None  # Explication détaillée
+    requires_validation: bool = False  # True si CAS 2 ou 4
+    validation_reason: Optional[str] = None  # Raison validation
+    supplier_price: Optional[float] = None  # Prix fournisseur (coût)
+    margin_applied: Optional[float] = None  # Marge appliquée (%)
+    confidence_score: float = 1.0  # 0.0 à 1.0
+    alerts: List[str] = []  # Liste d'alertes (ex: variation prix)
 
 
 class MatchResult(BaseModel):
@@ -80,30 +100,58 @@ class EmailMatcher:
             logger.info("Chargement des clients depuis cache SQLite...")
             self._clients_cache = cache_db.get_all_clients()
 
-            # Construire l'index par domaine email
+            # Construire les index pour fuzzy matching optimisé
             self._client_domains = {}
+            self._client_normalized = {}  # Cache normalized names
+            self._client_first_letter = {}  # Index by first letter
+
             for client in self._clients_cache:
+                card_code = client.get("CardCode", "")
+                card_name = client.get("CardName", "")
                 email = client.get("EmailAddress", "") or ""
-                if "@" in email:
+
+                # Index par domaine email
+                if email and "@" in email:
                     domain = email.split("@")[-1].lower().strip()
                     if domain:
                         if domain not in self._client_domains:
                             self._client_domains[domain] = []
                         self._client_domains[domain].append(client)
 
+                # Pré-normaliser le nom (cache)
+                if card_name:
+                    normalized = self._normalize(card_name)
+                    self._client_normalized[card_code] = normalized
+
+                    # Index par première lettre (accélère fuzzy search)
+                    first_letter = normalized[0] if normalized else ''
+                    if first_letter:
+                        if first_letter not in self._client_first_letter:
+                            self._client_first_letter[first_letter] = []
+                        self._client_first_letter[first_letter].append(client)
+
             logger.info(f"✅ Clients chargés: {len(self._clients_cache)} "
-                        f"({len(self._client_domains)} domaines indexés)")
+                        f"({len(self._client_domains)} domaines, "
+                        f"{len(self._client_normalized)} noms normalisés, "
+                        f"{len(self._client_first_letter)} index lettres)")
 
             # Charger les produits
             logger.info("Chargement des produits depuis cache SQLite...")
             items_list = cache_db.get_all_items()
             self._items_cache = {}
+            self._items_normalized = {}  # Cache normalized item names
+
             for item in items_list:
                 code = item.get("ItemCode", "")
                 if code:
                     self._items_cache[code] = item
+                    # Pré-normaliser le nom du produit
+                    item_name = item.get("ItemName", "")
+                    if item_name:
+                        self._items_normalized[code] = self._normalize(item_name)
 
-            logger.info(f"✅ Produits chargés: {len(self._items_cache)}")
+            logger.info(f"✅ Produits chargés: {len(self._items_cache)} "
+                        f"({len(self._items_normalized)} noms normalisés)")
 
         except Exception as e:
             logger.error(f"Erreur chargement cache SQLite: {e}")
@@ -287,9 +335,13 @@ class EmailMatcher:
         text: str,
         extracted_domains: List[str]
     ) -> List[MatchedClient]:
-        """Trouve les clients SAP qui matchent le texte de l'email."""
+        """Trouve les clients SAP qui matchent le texte de l'email (optimisé avec caches)."""
         matches: List[MatchedClient] = []
         text_normalized = self._normalize(text)
+
+        # Pré-extraire les mots du texte UNE SEULE FOIS (performance)
+        text_words_6plus = WORD_PATTERN_6PLUS.findall(text_normalized)
+        text_words_4plus = WORD_PATTERN_4PLUS.findall(text_normalized)
 
         for client in self._clients_cache:
             card_code = client.get("CardCode", "")
@@ -298,6 +350,9 @@ class EmailMatcher:
 
             if not card_name:
                 continue
+
+            # Récupérer le nom normalisé depuis le cache (au lieu de re-normaliser)
+            name_normalized = self._client_normalized.get(card_code, "")
 
             best_score = 0
             best_reason = ""
@@ -312,8 +367,47 @@ class EmailMatcher:
                     best_score = 95
                     best_reason = f"Domaine email: {client_domain}"
 
+            # --- Stratégie 1b : Match domaine extrait vs nom client (score 97) ---
+            # Si un domaine dans le texte ressemble au nom du client (ex: marmaracam.com.tr vs MARMARA CAM)
+            if not has_domain_match and extracted_domains:
+                logger.debug(f"[Stratégie 1b] Test pour {card_code} avec domaines: {extracted_domains}")
+                name_parts = name_normalized.split()  # Utilise cache au lieu de re-normaliser
+
+                for domain in extracted_domains:
+                    # Extraire le nom de l'entreprise du domaine (avant le .com, .fr, etc.)
+                    domain_base = domain.split('.')[0]  # marmaracam.com.tr → marmaracam
+
+                    if len(domain_base) < 6:
+                        continue
+
+                    # Tester toutes les combinaisons de 1 à 3 mots du nom
+                    # Ex: "MARMARA CAM SANAYI" → teste "marmara", "marmaracam", "marmaracamsanayi"
+                    for num_words in range(1, min(4, len(name_parts) + 1)):
+                        compact_name = ''.join(name_parts[:num_words])
+
+                        # Match exact compact
+                        if compact_name == domain_base:
+                            logger.info(f"[Stratégie 1b] MATCH! {card_code}: '{compact_name}' = '{domain_base}' → score 97")
+                            has_domain_match = True
+                            best_score = 97
+                            best_reason = f"Domaine match nom exact: {domain} = {' '.join(name_parts[:num_words])}"
+                            break
+
+                        # Fuzzy match domaine vs nom compact
+                        if len(compact_name) >= 6:
+                            ratio = SequenceMatcher(None, domain_base, compact_name).ratio()
+                            if ratio > 0.90:  # Seuil plus strict pour éviter faux positifs
+                                score = int(92 + (ratio - 0.90) * 50)  # 92-97
+                                if score > best_score:
+                                    has_domain_match = True
+                                    best_score = min(score, 97)
+                                    best_reason = f"Domaine match nom fuzzy: {domain} ~ {' '.join(name_parts[:num_words])} ({ratio:.0%})"
+
+                    if has_domain_match and best_score >= 97:
+                        break
+
             # --- Stratégie 2 : CardName exact dans le texte (score 90) ---
-            name_normalized = self._normalize(card_name)
+            # name_normalized déjà récupéré depuis le cache ci-dessus
             if len(name_normalized) >= 3 and name_normalized in text_normalized:
                 has_name_match = True
                 if best_score < 90:
@@ -323,7 +417,7 @@ class EmailMatcher:
             # --- Stratégie 2b : Match version compacte (sans espaces) pour gérer "MarmaraCam" vs "MARMARA CAM" ---
             if best_score < 90:
                 name_parts = name_normalized.split()
-                words = re.findall(r'\b\w{6,}\b', text_normalized)
+                words = text_words_6plus  # Utilise mots pré-extraits
 
                 # Créer toutes les combinaisons de 2-4 mots consécutifs du nom client
                 # Ex: "MARMARA CAM SANAYI VE" → ["marmaracam", "marmaracamsanayi", "marmaracamsanayive"]
@@ -360,10 +454,9 @@ class EmailMatcher:
 
             # --- Stratégie 3 : Fuzzy match CardName (score 70-85) ---
             if best_score < 70:
-                # Extraire les mots significatifs du texte (>= 4 chars) ET filtrer la blacklist
-                all_words = set(re.findall(r'\b\w{4,}\b', text_normalized))
-                words = {w for w in all_words if w not in self._BLACKLIST_WORDS}
-                name_normalized = self._normalize(card_name)
+                # Utiliser mots pré-extraits et filtrer la blacklist
+                words = {w for w in text_words_4plus if w not in self._BLACKLIST_WORDS}
+                # name_normalized déjà récupéré depuis le cache ci-dessus
 
                 # Comparer chaque mot du texte avec le nom du client
                 for word in words:
@@ -486,18 +579,20 @@ class EmailMatcher:
                         match_reason=f"Mapping appris ({mapping.get('match_method')})"
                     )
 
-        # --- ÉTAPE 3: Fuzzy match sur ItemName avec description ---
+        # --- ÉTAPE 3: Fuzzy match sur ItemName avec description (optimisé) ---
         if description and len(description) >= 4:
             desc_normalized = self._normalize(description)
+            # Pré-extraire les mots UNE SEULE FOIS (performance)
+            desc_words = set(WORD_PATTERN_4PLUS.findall(desc_normalized))
+
             best_match = None
             best_score = 0
 
             for item_code, item in self._items_cache.items():
-                item_name = item.get("ItemName", "")
-                if not item_name:
+                # Utiliser le nom normalisé depuis le cache (au lieu de re-normaliser)
+                name_normalized = self._items_normalized.get(item_code, "")
+                if not name_normalized:
                     continue
-
-                name_normalized = self._normalize(item_name)
 
                 # Match exact substring
                 if desc_normalized in name_normalized or name_normalized in desc_normalized:
@@ -514,9 +609,8 @@ class EmailMatcher:
                         best_score = score
                         best_match = (item_code, item, f"Fuzzy nom ({ratio:.0%})")
 
-                # Match par mots communs
-                desc_words = set(re.findall(r'\b\w{4,}\b', desc_normalized))
-                name_words = set(re.findall(r'\b\w{4,}\b', name_normalized))
+                # Match par mots communs (utilise pré-extraction des mots)
+                name_words = set(WORD_PATTERN_4PLUS.findall(name_normalized))
                 common_words = desc_words & name_words
 
                 if len(common_words) >= 2:
@@ -628,20 +722,20 @@ class EmailMatcher:
         return descriptions
 
     def _is_phone_number(self, code: str) -> bool:
-        """Détecte si un code ressemble à un numéro de téléphone."""
+        """Détecte si un code ressemble à un numéro de téléphone ou fax."""
         # Numéros français : 10 chiffres commençant par 0, ou 9 chiffres commençant par 1-9
         if len(code) == 10 and code[0] == '0':
             return True
         if len(code) == 9 and code[0] in '123456789':
             return True
 
-        # Numéros internationaux : 11-15 chiffres avec préfixe pays (33, 44, 1, etc.)
+        # Numéros internationaux : 11-15 chiffres avec préfixe pays (33, 44, 1, 90, etc.)
         if 11 <= len(code) <= 15:
             # Format français international : 33 suivi de 9 chiffres
             if code.startswith('33') and len(code) == 11:
                 return True
-            # Autres préfixes courants
-            if code.startswith(('44', '41', '49', '39', '34', '351', '352')):
+            # Autres préfixes courants (ajout Turquie 90, USA/Canada 1)
+            if code.startswith(('44', '41', '49', '39', '34', '351', '352', '1', '90')):
                 return True
 
         # Patterns téléphone : répétitions de paires (ex: 334446...)
@@ -653,6 +747,11 @@ class EmailMatcher:
                 unique_pairs = set(pairs)
                 if len(unique_pairs) <= len(pairs) * 0.6:  # 60% de répétition
                     return True
+
+        # NOUVEAU: Numéros très longs (>= 11 chiffres purement numériques) sont probablement des téléphones/fax
+        # Les vrais codes produits ont rarement plus de 10 chiffres purement numériques
+        if code.isdigit() and len(code) >= 11:
+            return True
 
         return False
 
@@ -689,7 +788,23 @@ class EmailMatcher:
         potential_codes |= set(re.findall(r'(?:SHEPPEE\s+)?CODE:\s*([A-Z0-9-]+)', text, re.IGNORECASE))
 
         # Filtrer les numéros de téléphone et mots génériques
-        excluded_words = {'SHEPPEE', 'CODE', 'DRAWING', 'PUSHER', 'BEARING', 'ROLLER', 'CARBON', 'BLADE'}
+        excluded_words = {
+            # Mots génériques existants
+            'SHEPPEE', 'CODE', 'DRAWING', 'PUSHER', 'BEARING', 'ROLLER', 'CARBON', 'BLADE',
+            # Termes machines (anglais)
+            'X-AXIS', 'Y-AXIS', 'Z-AXIS', 'XAXIS', 'YAXIS', 'ZAXIS',
+            'A-AXIS', 'B-AXIS', 'C-AXIS', 'AAXIS', 'BAXIS', 'CAXIS',
+            # Termes machines (turc) - IMPORTANT: Inclure les 2 variantes du caractère İ (I avec point)
+            'X-EKSENI', 'Y-EKSENI', 'Z-EKSENI', 'XEKSENI', 'YEKSENI', 'ZEKSENI', 'EKSENI',
+            'X-EKSENİ', 'Y-EKSENİ', 'Z-EKSENİ', 'XEKSENİ', 'YEKSENİ', 'ZEKSENİ', 'EKSENİ',  # Variante avec İ turc
+            # Mots courants français
+            'CI-JOINT', 'CIJOINT', 'CI-JOINTS', 'CIJOINTS',
+            'EN-PIECE', 'ENPIECE', 'EN-PIECES', 'ENPIECES',
+            # Mots courants anglais
+            'ATTACHED', 'ATTACHMENT', 'SKETCH', 'SKETCHES',
+            # Termes génériques
+            'PIECE', 'PIECES', 'PART', 'PARTS', 'ITEM', 'ITEMS', 'REF', 'REFERENCE'
+        }
         potential_codes = {
             code for code in potential_codes
             if not self._is_phone_number(code) and code.upper() not in excluded_words
@@ -943,8 +1058,9 @@ class EmailMatcher:
     # --- Utilitaires ---
 
     @staticmethod
+    @lru_cache(maxsize=2048)  # Cache 2048 chaînes normalisées
     def _normalize(text: str) -> str:
-        """Normalise un texte pour la comparaison fuzzy."""
+        """Normalise un texte pour la comparaison fuzzy (avec cache LRU)."""
         if not text:
             return ""
         # Supprimer les accents

@@ -61,6 +61,27 @@ class ProductMappingDB:
             ON product_code_mapping(status)
         """)
 
+        # Table pour tracer les exclusions de produits
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS product_exclusions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                item_code TEXT NOT NULL,
+                email_id TEXT,
+                reason TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_exclusion_item_code
+            ON product_exclusions(item_code)
+        """)
+
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_exclusion_email_id
+            ON product_exclusions(email_id)
+        """)
+
         conn.commit()
         conn.close()
 
@@ -248,6 +269,28 @@ class ProductMappingDB:
             "fuzzy_matches": row[4] or 0,
             "manual_matches": row[5] or 0
         }
+
+    def log_exclusion(self, item_code: str, email_id: str, reason: str):
+        """
+        Enregistre une exclusion de produit pour analyse future.
+
+        Args:
+            item_code: Code article exclu
+            email_id: ID de l'email source
+            reason: Raison de l'exclusion
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            INSERT INTO product_exclusions (item_code, email_id, reason, created_at)
+            VALUES (?, ?, ?, ?)
+        """, (item_code, email_id, reason, datetime.now().isoformat()))
+
+        conn.commit()
+        conn.close()
+
+        logger.info(f"Exclusion logged: {item_code} (email: {email_id})")
 
 
 # Singleton
