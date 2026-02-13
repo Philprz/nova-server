@@ -83,6 +83,7 @@ export function EmailList({ emails, onSelectQuote, analyzingEmailId }: EmailList
                     </Badge>
                     <Button
                       size="sm"
+                      variant={item.analysisResult ? "default" : "outline"}
                       disabled={analyzingEmailId === item.email.id}
                       onClick={(e) => {
                         e.stopPropagation();
@@ -95,9 +96,12 @@ export function EmailList({ emails, onSelectQuote, analyzingEmailId }: EmailList
                           Analyse...
                         </>
                       ) : item.analysisResult ? (
-                        'Traiter'
+                        <>
+                          <FileText className="w-3 h-3 mr-1" />
+                          Synthèse
+                        </>
                       ) : (
-                        'Traiter'
+                        'Analyser'
                       )}
                     </Button>
                   </>

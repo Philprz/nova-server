@@ -5,6 +5,7 @@ import {
   fetchGraphEmails,
   fetchGraphEmail,
   analyzeGraphEmail,
+  getGraphEmailAnalysis,
   graphEmailToEmailMessage,
   EmailAnalysisResult,
   GraphEmail,
@@ -167,7 +168,57 @@ export function useEmails(options: UseEmailsOptions = {}): UseEmailsReturn {
         // Indiquer quel email est en cours d'analyse
         setAnalyzingEmailId(emailId);
 
-        // Appeler l'API d'analyse
+        // ✅ NOUVEAU : D'abord consulter si une analyse existe déjà (GET /analysis)
+        const existingResult = await getGraphEmailAnalysis(emailId);
+
+        if (existingResult.success && existingResult.data) {
+          console.log('📦 Analysis loaded from backend DB for', emailId);
+          const analysis = existingResult.data;
+
+          // Mettre en cache
+          setAnalysisCache((prev) => {
+            const newCache = new Map(prev);
+            newCache.set(emailId, analysis);
+            return newCache;
+          });
+
+          // Mettre à jour l'email dans la liste
+          setEmails((prevEmails) => {
+            const newEmails = prevEmails.map((processedEmail) => {
+              if (processedEmail.email.id === emailId) {
+                const graphEmail: GraphEmail = {
+                  id: processedEmail.email.id,
+                  subject: processedEmail.email.subject,
+                  from_name: processedEmail.email.from.emailAddress.name,
+                  from_address: processedEmail.email.from.emailAddress.address,
+                  received_datetime: processedEmail.email.receivedDateTime,
+                  body_preview: processedEmail.email.bodyPreview,
+                  body_content: processedEmail.email.body.content,
+                  body_content_type: processedEmail.email.body.contentType,
+                  has_attachments: processedEmail.email.hasAttachments,
+                  is_read: processedEmail.email.isRead,
+                  attachments: processedEmail.email.attachments.map((a) => ({
+                    id: a.id,
+                    name: a.name,
+                    content_type: a.contentType,
+                    size: a.size,
+                  })),
+                };
+                return toProcessedEmail(graphEmail, analysis);
+              }
+              return processedEmail;
+            });
+
+            emailsRef.current = newEmails;
+            return newEmails;
+          });
+
+          setAnalyzingEmailId(null);
+          return analysis;
+        }
+
+        // Si pas d'analyse existante, lancer le traitement complet (POST /analyze)
+        console.log('💰 Starting new analysis for', emailId);
         const result = await analyzeGraphEmail(emailId);
 
         if (!result.success || !result.data) {
@@ -259,7 +310,54 @@ export function useEmails(options: UseEmailsOptions = {}): UseEmailsReturn {
       // Analyser séquentiellement en background (pas de surcharge serveur)
       for (const quote of quotesToAnalyze) {
         try {
-          // Appeler le backend (résultat mis en cache côté serveur)
+          // ✅ NOUVEAU : D'abord vérifier si déjà analysé en DB (GET /analysis)
+          const existingResult = await getGraphEmailAnalysis(quote.email.id);
+
+          if (existingResult.success && existingResult.data) {
+            console.log(`[Pre-analysis] ✅ ${quote.email.subject} déjà analysé (DB)`);
+
+            // Mettre en cache et update UI
+            setAnalysisCache((prev) => {
+              const newCache = new Map(prev);
+              newCache.set(quote.email.id, existingResult.data!);
+              return newCache;
+            });
+
+            setEmails((prevEmails) => {
+              const newEmails = prevEmails.map((pe) => {
+                if (pe.email.id === quote.email.id) {
+                  const graphEmail: GraphEmail = {
+                    id: pe.email.id,
+                    subject: pe.email.subject,
+                    from_name: pe.email.from.emailAddress.name,
+                    from_address: pe.email.from.emailAddress.address,
+                    received_datetime: pe.email.receivedDateTime,
+                    body_preview: pe.email.bodyPreview,
+                    body_content: pe.email.body.content,
+                    body_content_type: pe.email.body.contentType,
+                    has_attachments: pe.email.hasAttachments,
+                    is_read: pe.email.isRead,
+                    attachments: pe.email.attachments.map((a) => ({
+                      id: a.id,
+                      name: a.name,
+                      content_type: a.contentType,
+                      size: a.size,
+                    })),
+                  };
+                  return toProcessedEmail(graphEmail, existingResult.data!);
+                }
+                return pe;
+              });
+
+              emailsRef.current = newEmails;
+              return newEmails;
+            });
+
+            continue; // Passer au suivant (déjà traité)
+          }
+
+          // Si pas en DB, lancer l'analyse complète (POST /analyze)
+          console.log(`[Pre-analysis] 💰 Analyse ${quote.email.subject}...`);
           const result = await analyzeGraphEmail(quote.email.id);
           if (result.success && result.data) {
             setAnalysisCache((prev) => {
@@ -318,12 +416,13 @@ export function useEmails(options: UseEmailsOptions = {}): UseEmailsReturn {
     }
   }, [enabled, autoFetch]); // Ne pas inclure refreshEmails pour éviter les boucles
 
-  // Pré-analyse automatique après chargement des emails
+  // ✅ RÉACTIVÉ : Pré-analyse INTELLIGENTE (consulte DB d'abord, rapide)
+  // Charge les analyses déjà faites (GET /analysis) ou lance analyse en background
   useEffect(() => {
     if (enabled && emails.length > 0) {
       preAnalyzeQuotes(emails);
     }
-  }, [enabled, emails.length]); // Déclenché quand les emails sont chargés
+  }, [enabled, emails.length, preAnalyzeQuotes]);
 
   return {
     emails,

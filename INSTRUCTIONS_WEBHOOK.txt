@@ -1,0 +1,149 @@
+================================================================================
+CONFIGURATION WEBHOOK MICROSOFT GRAPH - INSTRUCTIONS
+================================================================================
+
+Étape 1 : DÉMARRER LE SERVEUR (Terminal 1)
+-------------------------------------------
+
+cd C:\Users\PPZ\NOVA-SERVER
+python main.py
+
+Attendez ces logs :
+  [INFO] Webhooks routes registered at /api/webhooks
+  [INFO] EmailAnalysisDB initialized
+  [INFO] Application startup complete
+  [INFO] Uvicorn running on http://0.0.0.0:8001
+
+⚠️ LAISSEZ CE TERMINAL OUVERT
+
+
+Étape 2 : ENREGISTRER LE WEBHOOK (Terminal 2 - NOUVEAU)
+--------------------------------------------------------
+
+Ouvrir un NOUVEAU terminal PowerShell/CMD et exécuter :
+
+cd C:\Users\PPZ\NOVA-SERVER
+python register_webhook.py
+
+
+Ce qui va se passer :
+---------------------
+
+1. Le script appelle Microsoft Graph API
+2. Microsoft valide l'URL du webhook (envoie une requête de test)
+3. Votre serveur répond (logs dans Terminal 1)
+4. Microsoft confirme et retourne Subscription ID
+5. Script sauvegarde dans webhooks.db
+
+
+Logs attendus dans Terminal 1 (serveur) :
+------------------------------------------
+
+[INFO] 📞 Webhook validation request received
+[INFO] Webhook subscription created: 12345678-abcd-...
+
+
+Output attendu dans Terminal 2 (script) :
+------------------------------------------
+
+================================================================================
+REGISTRATION WEBHOOK MICROSOFT GRAPH
+================================================================================
+
+Resource: me/mailFolders('Inbox')/messages
+Change Type: created
+Notification URL: https://nova-rondot.itspirit.ovh/api/webhooks/notification
+
+[INFO] Creating subscription...
+
+[OK] Webhook registered successfully!
+
+Subscription ID: 12345678-abcd-1234-5678-123456789abc
+Resource: me/mailFolders('Inbox')/messages
+Change Type: created
+Expiration: 2026-02-16T13:00:00Z
+
+
+Étape 3 : TESTER LE WEBHOOK
+----------------------------
+
+1. Envoyer un email TEST à votre boîte mail configurée
+   (depuis un autre compte, pas depuis le même compte)
+
+2. Observer Terminal 1 (serveur) - Logs attendus :
+
+   [INFO] 📬 Webhook notification received
+   [INFO] 🔄 Processing notification: created on ...
+   [INFO] 📧 New email detected: AAMk...abc123
+   [INFO] 🤖 Auto-processing email: AAMk...abc123
+   [INFO] 📧 Email: Test devis from client@example.com
+   [INFO] ✅ Quote request detected
+   [INFO] 💰 Calcul pricing pour X produits...
+   [INFO] ✅ Auto-processing completed
+   [INFO] 💾 Analysis persisted to DB
+
+3. Accéder à l'interface web :
+   https://nova-rondot.itspirit.ovh/
+
+4. Charger boîte de réception
+
+5. L'email doit avoir le bouton "Synthèse" (déjà traité)
+
+6. Clic "Synthèse" → Affichage instantané !
+
+
+ERREURS POSSIBLES
+------------------
+
+Erreur : "Failed to validate notificationUrl"
+  → Le serveur (Terminal 1) n'est pas accessible depuis Internet
+  → Vérifier firewall/reverse proxy Caddy
+  → Vérifier que https://nova-rondot.itspirit.ovh/ fonctionne
+
+Erreur : "Insufficient privileges"
+  → Permissions Microsoft Graph manquantes
+  → Ajouter Mail.Read dans Azure AD
+
+Erreur : "Access token has expired"
+  → Vérifier GRAPH_CLIENT_ID, GRAPH_CLIENT_SECRET dans .env
+
+
+RENOUVELLEMENT AUTOMATIQUE (Après succès)
+------------------------------------------
+
+Le webhook expire après 3 jours. Pour le renouveler automatiquement :
+
+Windows Task Scheduler :
+  1. Ouvrir "Planificateur de tâches"
+  2. Créer une tâche de base
+  3. Nom : NOVA Webhook Renewal
+  4. Déclencheur : Quotidien à 09:00
+  5. Action : Démarrer un programme
+     - Programme : python
+     - Arguments : renew_webhook.py
+     - Dossier : C:\Users\PPZ\NOVA-SERVER
+
+
+VÉRIFICATIONS
+-------------
+
+Lister webhooks actifs :
+  curl http://localhost:8001/api/webhooks/subscriptions
+
+Vérifier DB :
+  sqlite3 webhooks.db "SELECT * FROM subscriptions"
+
+Consulter analyses auto :
+  sqlite3 email_analysis.db "SELECT email_id, subject, analyzed_at FROM email_analysis ORDER BY analyzed_at DESC LIMIT 10"
+
+
+================================================================================
+AIDE
+================================================================================
+
+Documentation complète : WEBHOOK_CONFIGURATION_GUIDE.md
+
+En cas de problème, fournir :
+  - Logs Terminal 1 (serveur)
+  - Output Terminal 2 (script register_webhook.py)
+  - Contenu .env (masquer secrets)
