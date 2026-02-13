@@ -202,13 +202,13 @@ pip install -r requirements.txt
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Le backend sera accessible sur `http://localhost:8000`
+Le backend sera accessible sur `http://localhost:8001`
 
 ### Indexation des Tarifs Fournisseurs
 
 ```bash
 # Lancer l'indexation via API
-curl -X POST http://localhost:8000/api/supplier-tariffs/index
+curl -X POST http://localhost:8001/api/supplier-tariffs/index
 ```
 
 Ou depuis l'interface web (bouton d'administration).

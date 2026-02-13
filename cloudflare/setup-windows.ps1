@@ -203,7 +203,7 @@ Write-Info "Test du backend..."
 Start-Sleep -Seconds 2
 
 try {
-    $response = Invoke-WebRequest -Uri "http://localhost:8000/health" -UseBasicParsing
+    $response = Invoke-WebRequest -Uri "http://localhost:8001/health" -UseBasicParsing
     Write-Success "Backend accessible : $($response.StatusCode)"
 } catch {
     Write-Warning "Backend non accessible : $_"
@@ -231,7 +231,7 @@ Write-Host "  - Redémarrer : nssm restart $ServiceName"
 Write-Host "  - Statut     : nssm status $ServiceName"
 Write-Host "  - Logs       : Get-Content '$stdoutLog' -Tail 50 -Wait"
 Write-Host ""
-Write-Host "Backend accessible sur : http://localhost:8000"
+Write-Host "Backend accessible sur : http://localhost:8001"
 Write-Host ""
 
 Write-Success "Configuration réussie !"

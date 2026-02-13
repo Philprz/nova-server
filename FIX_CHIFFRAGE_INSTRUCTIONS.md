@@ -64,7 +64,7 @@ python main.py
 
 ```bash
 # 1. Récupérer l'ID de l'email
-curl http://localhost:8000/api/graph/emails | jq '.[] | select(.subject | contains("chiffrage")) | .id'
+curl http://localhost:8001/api/graph/emails | jq '.[] | select(.subject | contains("chiffrage")) | .id'
 
 # 2. Copier l'ID trouvé
 
@@ -165,7 +165,7 @@ Vous devriez voir les nouveaux mots-clés dans la liste.
 
 ```bash
 # Récupérer le sujet et corps exact
-curl http://localhost:8000/api/graph/emails/{EMAIL_ID} | jq '.subject, .body_preview'
+curl http://localhost:8001/api/graph/emails/{EMAIL_ID} | jq '.subject, .body_preview'
 ```
 
 Vérifiez que:

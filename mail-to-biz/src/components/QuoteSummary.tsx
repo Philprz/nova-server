@@ -67,6 +67,55 @@ export function QuoteSummary({ quote, onValidate, onBack }: QuoteSummaryProps) {
   // Marge par défaut
   const margin = 18;
 
+  // ✨ Helpers pricing automatique (Phase 5)
+  const calculateTotals = () => {
+    if (!articles || articles.length === 0) {
+      return { subtotal: 0, avgMargin: margin, total: 0 };
+    }
+
+    let subtotal = 0;
+    let totalMargin = 0;
+    let count = 0;
+
+    articles.forEach((line: any) => {
+      if (line.unit_price && line.Quantity) {
+        const lineTotal = line.unit_price * line.Quantity;
+        subtotal += lineTotal;
+
+        if (line.margin_applied) {
+          totalMargin += line.margin_applied;
+          count++;
+        }
+      }
+    });
+
+    const avgMargin = count > 0 ? totalMargin / count : margin;
+    return { subtotal, avgMargin, total: subtotal };
+  };
+
+  const getCasVariant = (casType?: string): "default" | "secondary" | "outline" | "destructive" => {
+    switch (casType) {
+      case 'CAS_1_HC': return 'default';      // Vert - historique stable
+      case 'CAS_2_HCM': return 'outline';     // Orange - variation prix
+      case 'CAS_3_HA': return 'secondary';    // Bleu - prix moyen
+      case 'CAS_4_NP': return 'destructive';  // Rouge - nouveau produit
+      default: return 'default';
+    }
+  };
+
+  const formatCasLabel = (casType?: string): string => {
+    switch (casType) {
+      case 'CAS_1_HC': return 'Historique Client';
+      case 'CAS_2_HCM': return 'Prix Modifié';
+      case 'CAS_3_HA': return 'Prix Moyen';
+      case 'CAS_4_NP': return 'Nouveau Produit';
+      case 'SAP_FUNCTION': return 'SAP Direct';
+      default: return 'Prix calculé';
+    }
+  };
+
+  const totals = calculateTotals();
+
   // Auto-sélection si le client SAP est déjà identifié par le matching backend
   useEffect(() => {
     if (doc?.businessPartner.CardCode) {
@@ -391,8 +440,35 @@ export function QuoteSummary({ quote, onValidate, onBack }: QuoteSummaryProps) {
                       <TableCell className="text-right">
                         {line.Quantity} {line.UnitOfMeasure}
                       </TableCell>
-                      <TableCell className="text-right font-medium text-muted-foreground">
-                        À calculer
+                      <TableCell className="text-right">
+                        {line.unit_price != null ? (
+                          <div className="flex flex-col items-end gap-1">
+                            <span className="font-semibold text-lg">
+                              {line.unit_price.toFixed(2)} €
+                            </span>
+                            {line.pricing_case && (
+                              <Badge
+                                variant={getCasVariant(line.pricing_case)}
+                                className="text-xs"
+                              >
+                                {formatCasLabel(line.pricing_case)}
+                              </Badge>
+                            )}
+                            {line.line_total && (
+                              <span className="text-sm text-muted-foreground">
+                                Total: {line.line_total.toFixed(2)} €
+                              </span>
+                            )}
+                            {line.requires_validation && (
+                              <Badge variant="outline" className="text-xs text-orange-600 border-orange-600">
+                                <AlertCircle className="w-3 h-3 mr-1" />
+                                Validation requise
+                              </Badge>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground">À calculer</span>
+                        )}
                       </TableCell>
                       <TableCell className="text-center">
                         <div className="flex items-center justify-center gap-2">
@@ -471,21 +547,37 @@ export function QuoteSummary({ quote, onValidate, onBack }: QuoteSummaryProps) {
           <div className="grid grid-cols-3 gap-6">
             <div className="text-center p-4 bg-muted/50 rounded-lg">
               <p className="text-sm text-muted-foreground mb-1">Sous-total HT</p>
-              <p className="text-xl font-semibold text-muted-foreground">
-                À calculer
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">Nécessite tarif SAP</p>
+              {totals.subtotal > 0 ? (
+                <p className="text-xl font-semibold text-foreground">
+                  {totals.subtotal.toFixed(2)} €
+                </p>
+              ) : (
+                <p className="text-xl font-semibold text-muted-foreground">
+                  À calculer
+                </p>
+              )}
+              {totals.subtotal === 0 && (
+                <p className="text-xs text-muted-foreground mt-1">En attente pricing</p>
+              )}
             </div>
             <div className="text-center p-4 bg-muted/50 rounded-lg">
-              <p className="text-sm text-muted-foreground mb-1">Marge appliquée</p>
-              <p className="text-xl font-semibold text-success">{margin}%</p>
+              <p className="text-sm text-muted-foreground mb-1">Marge moyenne</p>
+              <p className="text-xl font-semibold text-success">{totals.avgMargin.toFixed(0)}%</p>
             </div>
             <div className="text-center p-4 bg-primary/10 rounded-lg border border-primary/20">
-              <p className="text-sm text-muted-foreground mb-1">Prix total estimé</p>
-              <p className="text-2xl font-bold text-muted-foreground">
-                À calculer
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">Après récupération des prix</p>
+              <p className="text-sm text-muted-foreground mb-1">Total HT</p>
+              {totals.total > 0 ? (
+                <p className="text-2xl font-bold text-foreground">
+                  {totals.total.toFixed(2)} €
+                </p>
+              ) : (
+                <p className="text-2xl font-bold text-muted-foreground">
+                  À calculer
+                </p>
+              )}
+              {totals.total > 0 && (
+                <p className="text-xs text-success mt-1">Calculé automatiquement</p>
+              )}
             </div>
           </div>
         </CardContent>

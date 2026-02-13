@@ -27,7 +27,7 @@ sudo apt install caddy
 ```bash
 python main.py
 ```
-Le serveur écoute sur `http://localhost:8000`
+Le serveur écoute sur `http://localhost:8001`
 
 ### 2. Démarrer Caddy (reverse proxy)
 
@@ -44,7 +44,7 @@ caddy run --config Caddyfile
 ### 3. Accéder à l'application
 
 - **Interface mail-to-biz** : http://localhost/ (routé vers `/mail-to-biz`)
-- **API directe** : http://localhost:8000/
+- **API directe** : http://localhost:8001/
 - **Documentation** : http://localhost/docs
 - **Health check** : http://localhost/health
 

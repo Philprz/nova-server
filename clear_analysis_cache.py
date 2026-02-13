@@ -43,9 +43,9 @@ def clear_cache():
 
     # Tester si le backend est accessible
     try:
-        r = requests.get("http://localhost:8000/health")
+        r = requests.get("http://localhost:8001/health")
         if r.status_code == 200:
-            print("[OK] Backend accessible sur http://localhost:8000")
+            print("[OK] Backend accessible sur http://localhost:8001")
             data = r.json()
             if 'uptime' in data:
                 print(f"     Uptime: {data['uptime']}")

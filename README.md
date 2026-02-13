@@ -1387,16 +1387,16 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4
 
 ```bash
 # Health check
-curl http://localhost:8000/health
+curl http://localhost:8001/health
 
 # Interface NOVA
-http://localhost:8000/interface/itspirit
+http://localhost:8001/interface/itspirit
 
 # Interface Mail-to-Biz
-http://localhost:8000/mail-to-biz
+http://localhost:8001/mail-to-biz
 
 # Documentation API
-http://localhost:8000/docs
+http://localhost:8001/docs
 ```
 
 ---
@@ -1432,17 +1432,17 @@ python scripts/test_client_listing.py
 
 ```bash
 # Chat NOVA
-curl -X POST http://localhost:8000/api/assistant/chat \
+curl -X POST http://localhost:8001/api/assistant/chat \
   -H "Content-Type: application/json" \
   -d '{"message": "Créer un devis pour 10 réf A00025 pour Edge Communications"}'
 
 # Recherche produit
-curl -X POST http://localhost:8000/api/products/search \
+curl -X POST http://localhost:8001/api/products/search \
   -H "Content-Type: application/json" \
   -d '{"query": "imprimante", "limit": 5}'
 
 # Validation client
-curl -X POST http://localhost:8000/api/clients/validate \
+curl -X POST http://localhost:8001/api/clients/validate \
   -H "Content-Type: application/json" \
   -d '{"siret": "12345678901234", "nom": "Test SA"}'
 ```
@@ -1522,16 +1522,16 @@ logs/
 
 ```bash
 # Santé globale
-curl http://localhost:8000/health
+curl http://localhost:8001/health
 
 # Connexions détaillées
-curl http://localhost:8000/diagnostic/connections
+curl http://localhost:8001/diagnostic/connections
 
 # Récupération données
-curl http://localhost:8000/diagnostic/data-retrieval
+curl http://localhost:8001/diagnostic/data-retrieval
 
 # Forcer nouvelle vérification
-curl -X POST http://localhost:8000/diagnostic/recheck
+curl -X POST http://localhost:8001/diagnostic/recheck
 ```
 
 ---
@@ -1675,7 +1675,7 @@ curl -X POST http://localhost:8000/diagnostic/recheck
 
 ```bash
 # Vérifier health
-curl http://localhost:8000/health
+curl http://localhost:8001/health
 
 # Vérifier logs
 tail -f logs/nova.log
@@ -1711,7 +1711,7 @@ python install_pg_trgm.py
 
 ```bash
 # Test connexion Graph
-curl http://localhost:8000/api/graph/test-connection
+curl http://localhost:8001/api/graph/test-connection
 
 # Vérifier token
 # Les tokens expirent après 1h - redémarrer le serveur
@@ -1797,7 +1797,7 @@ GET  /api/products/search               # Recherche produits SAP
 
 **Dashboard React :**
 
-- URL : `http://localhost:8000/mail-to-biz/products/validation`
+- URL : `http://localhost:8001/mail-to-biz/products/validation`
 - Statistiques temps réel (En attente / Validés / Total)
 - Actions : [Associer] [Créer] [Rejeter]
 - Recherche live dans 23,571 produits SAP
@@ -1827,7 +1827,7 @@ cd mail-to-biz && npm run build
 python main.py
 
 # 3. Accéder dashboard
-http://localhost:8000/mail-to-biz/products/validation
+http://localhost:8001/mail-to-biz/products/validation
 ```
 
 ---

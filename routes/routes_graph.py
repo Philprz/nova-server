@@ -362,7 +362,7 @@ async def get_attachment_content(message_id: str, attachment_id: str):
 async def analyze_email(message_id: str, force: bool = False):
     """
     Analyse un email avec l'IA pour déterminer s'il s'agit d'une demande de devis.
-    Le résultat est mis en cache.
+    Le résultat est mis en cache ET persisté en base de données.
 
     Args:
         message_id: ID de l'email
@@ -370,7 +370,24 @@ async def analyze_email(message_id: str, force: bool = False):
     """
     global _analysis_cache, _backend_start_time
 
-    # Vérifier le cache (sauf si force=True)
+    # ✨ NOUVEAU : Vérifier la base de données persistante EN PREMIER (sauf si force=True)
+    if not force:
+        from services.email_analysis_db import get_email_analysis_db
+        analysis_db = get_email_analysis_db()
+
+        existing_analysis = analysis_db.get_analysis(message_id)
+        if existing_analysis:
+            logger.info(f"📦 Analysis loaded from DB for {message_id} (NO RECOMPUTE)")
+
+            # Mettre en cache mémoire pour accès rapide
+            _analysis_cache[message_id] = {
+                'data': EmailAnalysisResult(**existing_analysis),
+                'timestamp': datetime.now()
+            }
+
+            return EmailAnalysisResult(**existing_analysis)
+
+    # Vérifier le cache mémoire (sauf si force=True)
     # Invalider le cache s'il date d'avant le démarrage du backend
     if not force and message_id in _analysis_cache:
         cached_entry = _analysis_cache[message_id]
@@ -760,6 +777,22 @@ async def analyze_email(message_id: str, force: bool = False):
             'data': result
         }
 
+        # ✨ NOUVEAU : Persister en base de données pour consultation ultérieure
+        try:
+            from services.email_analysis_db import get_email_analysis_db
+            analysis_db = get_email_analysis_db()
+
+            analysis_db.save_analysis(
+                email_id=message_id,
+                subject=email.subject,
+                from_address=email.from_address,
+                analysis_result=result.dict()
+            )
+
+            logger.info(f"💾 Analysis persisted to DB for {message_id}")
+        except Exception as e:
+            logger.warning(f"Could not persist analysis to DB (non-critical): {e}")
+
         return result
 
     except Exception as e:
@@ -775,6 +808,7 @@ async def get_email_analysis(message_id: str):
     """
     global _analysis_cache
 
+    # Vérifier cache mémoire
     if message_id in _analysis_cache:
         cached_entry = _analysis_cache[message_id]
         # Gérer le nouveau format avec timestamp
@@ -782,6 +816,22 @@ async def get_email_analysis(message_id: str):
             return cached_entry['data']
         # Ancien format (rétrocompatibilité)
         return cached_entry
+
+    # Si pas en cache mémoire, vérifier la base de données persistante
+    from services.email_analysis_db import get_email_analysis_db
+    analysis_db = get_email_analysis_db()
+
+    existing_analysis = analysis_db.get_analysis(message_id)
+    if existing_analysis:
+        logger.info(f"📦 Analysis loaded from DB for GET endpoint: {message_id}")
+
+        # Mettre en cache mémoire pour accès rapide futur
+        _analysis_cache[message_id] = {
+            'data': EmailAnalysisResult(**existing_analysis),
+            'timestamp': datetime.now()
+        }
+
+        return EmailAnalysisResult(**existing_analysis)
 
     return None
 

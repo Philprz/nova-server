@@ -531,7 +531,7 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
 ### Tester un endpoint
 ```bash
-curl -X POST http://localhost:8000/api/sap-business/process-email-to-quote \
+curl -X POST http://localhost:8001/api/sap-business/process-email-to-quote \
   -H "Content-Type: application/json" \
   -d @test_data/scenario_cas1.json
 ```

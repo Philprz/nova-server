@@ -1105,7 +1105,7 @@ def handle_product_search_intent(message: str, entities: Dict[str, Any]) -> Dict
         async def search_real_products():
             async with httpx.AsyncClient() as client:
                 response = await client.get(
-                    f"http://localhost:8000/products/search_products_advanced",
+                    f"http://localhost:8001/products/search_products_advanced",
                     params={"q": search_term, "limit": 10}
                 )
                 return response.json()
