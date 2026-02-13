@@ -137,6 +137,12 @@ async def auto_process_email(message_id: str):
     """
     Traite automatiquement un nouvel email.
 
+    NOUVEAU WORKFLOW (Phase Mail-to-Biz stricte):
+    1. Récupérer email depuis Microsoft Graph
+    2. Extraire PDFs
+    3. Appeler mail_processor centralisé (toutes requêtes SAP)
+    4. Dual-write: quote_draft + email_analysis (backward compat)
+
     Args:
         message_id: ID du message à traiter
     """
@@ -144,14 +150,11 @@ async def auto_process_email(message_id: str):
         logger.info(f"🤖 Auto-processing email: {message_id}")
 
         # Importer ici pour éviter circular imports
-        from services.email_analyzer import get_email_analyzer, extract_pdf_text
-        from services.email_matcher import get_email_matcher
-        from services.pricing_engine import get_pricing_engine
+        from services.email_analyzer import extract_pdf_text
+        from services.mail_processor import get_mail_processor
         from services.email_analysis_db import get_email_analysis_db
 
         graph_service = get_graph_service()
-        email_analyzer = get_email_analyzer()
-        matcher = get_email_matcher()
 
         # 1. Récupérer l'email depuis Microsoft Graph
         email = await graph_service.get_email(message_id, include_attachments=True)
@@ -183,128 +186,42 @@ async def auto_process_email(message_id: str):
         # Préparer body text
         body_text = email.body_content if email.body_content and len(email.body_content.strip()) > 0 else email.body_preview
 
-        # Nettoyage pour matching
-        clean_text = email_analyzer._clean_html(body_text)
-        if pdf_contents:
-            clean_text += " " + " ".join(pdf_contents)
+        # 3. NOUVEAU: Appeler mail_processor centralisé
+        mail_processor = get_mail_processor()
 
-        # 3. LLM analysis + SAP matching EN PARALLÈLE
-        llm_task = email_analyzer.analyze_email(
-            subject=email.subject,
-            body=body_text,
-            sender_email=email.from_address,
-            sender_name=email.from_name,
-            pdf_contents=pdf_contents
+        # Préparer payload
+        email_payload = {
+            "subject": email.subject,
+            "body": body_text,
+            "from_address": email.from_address,
+            "from_name": email.from_name,
+            "pdf_contents": pdf_contents,
+            "received_at": email.received_datetime.isoformat() if email.received_datetime else None
+        }
+
+        # Traiter avec nouveau workflow (LLM + SAP + Pricing + Persist)
+        quote_draft = await mail_processor.process_incoming_email(
+            mail_id=message_id,
+            email_payload=email_payload
         )
-        match_task = matcher.match_email(
-            body=clean_text,
-            sender_email=email.from_address,
-            subject=email.subject
-        )
 
-        parallel_results = await asyncio.gather(llm_task, match_task, return_exceptions=True)
+        logger.info(f"✅ Quote draft créé: {quote_draft.id} pour mail {message_id}")
+        logger.info(f"   Client: {quote_draft.client_status} ({quote_draft.client_code or 'None'})")
+        logger.info(f"   Lignes: {len(quote_draft.lines)}")
 
-        # Récupérer résultats
-        llm_result = parallel_results[0]
-        match_result = parallel_results[1]
-
-        if isinstance(llm_result, Exception):
-            logger.error(f"LLM analysis failed: {llm_result}")
-            return
-
-        if isinstance(match_result, Exception):
-            logger.error(f"SAP matching failed: {match_result}")
-            return
-
-        # Vérifier si c'est une demande de devis
-        if not llm_result.is_quote_request:
-            logger.info(f"⏭️ Not a quote request, skipping auto-processing")
-            return
-
-        logger.info(f"✅ Quote request detected")
-
-        # Calcul pricing automatique
-        pricing_enabled = os.getenv("PRICING_ENGINE_ENABLED", "false").lower() == "true"
-
-        if pricing_enabled and match_result and match_result.products:
-            logger.info(f"💰 Calcul pricing pour {len(match_result.products)} produits...")
-
-            from services.pricing_engine import get_pricing_engine
-            from services.pricing_models import PricingContext
-
-            pricing_engine = get_pricing_engine()
-
-            card_code = "UNKNOWN"
-            if match_result.best_client:
-                card_code = match_result.best_client.card_code
-
-            # Calcul parallèle
-            pricing_contexts = []
-            for product in match_result.products:
-                if product.not_found_in_sap:
-                    continue
-
-                context = PricingContext(
-                    item_code=product.item_code,
-                    card_code=card_code,
-                    quantity=product.quantity,
-                    supplier_price=None,
-                    apply_margin=float(os.getenv("PRICING_DEFAULT_MARGIN", "45.0")),
-                    force_recalculate=False
-                )
-                pricing_contexts.append((product, context))
-
-            pricing_tasks = [
-                pricing_engine.calculate_price(ctx)
-                for _, ctx in pricing_contexts
-            ]
-
-            pricing_results = await asyncio.gather(*pricing_tasks, return_exceptions=True)
-
-            # Enrichir produits avec pricing
-            enriched_products = []
-            for i, (product, context) in enumerate(pricing_contexts):
-                pricing_result = pricing_results[i]
-
-                if isinstance(pricing_result, Exception):
-                    logger.error(f"Pricing error for {product.item_code}: {pricing_result}")
-                    enriched_products.append(product)
-                    continue
-
-                if pricing_result.success and pricing_result.decision:
-                    decision = pricing_result.decision
-                    enriched_dict = product.dict()
-                    enriched_dict.update({
-                        "unit_price": decision.calculated_price,
-                        "line_total": decision.calculated_price * product.quantity,
-                        "pricing_case": decision.case_type.value,
-                        "pricing_justification": decision.justification,
-                        "requires_validation": decision.requires_validation,
-                        "validation_reason": decision.validation_reason,
-                        "supplier_price": decision.supplier_price,
-                        "margin_applied": decision.margin_applied,
-                        "confidence_score": decision.confidence_score,
-                        "alerts": decision.alerts
-                    })
-                    enriched_product = type(product)(**enriched_dict)
-                    enriched_products.append(enriched_product)
-                else:
-                    enriched_products.append(product)
-
-            # Remplacer produits
-            match_result.products = enriched_products
-
-        # 4. Sauvegarder en base de données
+        # 4. DUAL-WRITE: Sauvegarder aussi dans email_analysis (backward compat)
+        # Permet au frontend existant de continuer à fonctionner
         analysis_db = get_email_analysis_db()
 
+        # Build analysis_result compatible avec structure existante
         analysis_result = {
+            "quote_draft_id": quote_draft.id,
             "is_quote_request": True,
-            "confidence": llm_result.confidence,
-            "reasoning": llm_result.reasoning,
-            "extracted_data": llm_result.extracted_data.dict() if llm_result.extracted_data else None,
-            "product_matches": [p.dict() for p in match_result.products] if match_result and match_result.products else [],
-            "best_client": match_result.best_client.dict() if match_result and match_result.best_client else None,
-            "other_clients": [c.dict() for c in match_result.clients] if match_result and match_result.clients else []
+            "client_status": quote_draft.client_status,
+            "client_card_code": quote_draft.client_code,
+            "lines_count": len(quote_draft.lines),
+            "product_matches": quote_draft.lines,  # Lignes avec métadonnées SAP complètes
+            "raw_email_payload": quote_draft.raw_email_payload
         }
 
         analysis_db.save_analysis(
@@ -315,7 +232,7 @@ async def auto_process_email(message_id: str):
         )
 
         logger.info(f"✅ Auto-processing completed for {message_id}")
-        logger.info(f"💾 Analysis persisted to DB")
+        logger.info(f"💾 Dual-write: quote_draft + email_analysis (backward compat)")
 
     except Exception as e:
         logger.error(f"❌ Error in auto_process_email: {e}")

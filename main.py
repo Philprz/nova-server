@@ -29,6 +29,7 @@ from routes.routes_product_validation import router as product_validation_router
 from routes.routes_export_json import router as export_json_router
 from routes.routes_export_json_v2 import router as export_json_v2_router
 from routes.routes_webhooks import router as webhooks_router
+from routes.routes_mail import router as mail_router
 if sys.platform == "win32":
     os.environ["PYTHONIOENCODING"] = "utf-8"
 
@@ -158,6 +159,7 @@ app.include_router(sap_rondot_router)  # API SAP Rondot pour mail-to-biz
 app.include_router(supplier_tariffs_router)  # API Tarifs fournisseurs
 app.include_router(graph_router, prefix="/api/graph", tags=["Microsoft Graph"])
 app.include_router(webhooks_router)  # API Webhooks Microsoft Graph (traitement auto)
+app.include_router(mail_router, prefix="/api", tags=["Mail-to-Biz"])  # API Mail-to-Biz stricte (quote_draft)
 app.include_router(sap_business_router)  # API SAP Business pour mail-to-biz
 app.include_router(pricing_validation_router, prefix="/api/validations", tags=["Pricing Validation"])
 app.include_router(sap_creation_router, prefix="/api/sap", tags=["SAP Creation"])
