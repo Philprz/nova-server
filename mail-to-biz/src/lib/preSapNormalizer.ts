@@ -3,6 +3,7 @@
 
 import { ExtractionResult } from './dataExtractor';
 import { DetectionResult } from './quoteDetector';
+import { EmailAnalysisResult } from './graphApi';
 
 export interface SapBusinessPartner {
   CardCode: string | null;
@@ -161,4 +162,59 @@ export function exportToJson(document: PreSapDocument): string {
   };
   
   return JSON.stringify(sapFormat, null, 2);
+}
+
+/**
+ * Nouvelle fonction utilisant les données du backend (avec matching SAP amélioré)
+ * Utilise client_matches et product_matches au lieu de l'extraction locale
+ */
+export function normalizeFromBackendAnalysis(
+  emailId: string,
+  receivedDate: string,
+  analysis: EmailAnalysisResult
+): PreSapDocument {
+  // Utiliser le meilleur client matché par le backend
+  const bestClient = analysis.client_matches?.[0]; // Le premier est le meilleur (score le plus élevé)
+
+  const businessPartner: SapBusinessPartner = {
+    CardCode: bestClient?.card_code || analysis.extracted_data?.client_card_code || null,
+    CardName: bestClient?.card_name || analysis.extracted_data?.client_name || 'Unknown',
+    ContactEmail: bestClient?.email_address || analysis.extracted_data?.client_email || '',
+    ToBeCreated: !bestClient?.card_code, // Créer seulement si pas de CardCode
+  };
+
+  // Utiliser les produits matchés par le backend (déjà filtrés, sans faux positifs)
+  const documentLines: SapDocumentLine[] = (analysis.product_matches || []).map((product, index) => ({
+    LineNum: index + 1,
+    ItemCode: product.item_code,
+    ItemDescription: product.item_name || product.item_code,
+    Quantity: product.quantity || 1,
+    UnitOfMeasure: 'pcs',
+    RequestedDeliveryDate: null,
+    ToBeCreated: product.score < 100, // Créer si pas de match exact
+    SourceType: 'email',
+  }));
+
+  // Build meta information
+  const meta: SapDocumentMeta = {
+    source: 'office365',
+    emailId,
+    receivedDate,
+    confidenceLevel: analysis.confidence,
+    manualValidationRequired: analysis.requires_user_choice || !analysis.client_auto_validated || !analysis.products_auto_validated || false,
+    detectionRules: [analysis.reasoning],
+    sourceConflicts: analysis.user_choice_reason ? [analysis.user_choice_reason] : [],
+    validationStatus: 'pending',
+    validatedAt: null,
+    validatedBy: null,
+  };
+
+  return {
+    sapDocumentType: 'SalesQuotation',
+    businessPartner,
+    documentLines,
+    requestedDeliveryDate: null,
+    deliveryLeadTimeDays: null,
+    meta,
+  };
 }

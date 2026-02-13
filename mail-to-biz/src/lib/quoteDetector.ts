@@ -19,6 +19,10 @@ const SUBJECT_KEYWORDS = [
   'prix',
   'offre de prix',
   'devis',
+  // Ajouts pour le cas MarmaraCam / chiffrage
+  'chiffrage',
+  'demande de chiffrage',
+  'demande chiffrage',
 ];
 
 // Phrases for body detection

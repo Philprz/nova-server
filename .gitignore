@@ -43,6 +43,9 @@ __pycache__/
 Thumbs.db
 ehthumbs.db
 Desktop.ini
+# Nom réservé Windows (périphérique) - évite "error: invalid path 'nul'"
+/nul
+nul
 
 # Fichiers spécifiques à JetBrains (PyCharm, IntelliJ, etc.)
 .idea/

@@ -28,6 +28,8 @@ export interface GraphEmail {
   has_attachments: boolean;
   is_read: boolean;
   attachments: GraphAttachment[];
+  /** Détection côté serveur : true si le sujet contient "chiffrage", "devis", etc. */
+  is_quote_by_subject?: boolean;
 }
 
 export interface GraphEmailsResponse {
@@ -54,6 +56,37 @@ export interface ExtractedQuoteData {
   notes?: string;
 }
 
+// Types pour le matching SAP (backend)
+export interface ClientMatch {
+  card_code: string;
+  card_name: string;
+  email_address?: string;
+  score: number;
+  match_reason: string;
+}
+
+export interface ProductMatch {
+  // Champs existants
+  item_code: string;
+  item_name?: string;
+  quantity: number;
+  score: number;
+  match_reason: string;
+  not_found_in_sap?: boolean;
+
+  // ✨ Nouveaux champs pricing (Phase 5 - Automatisation complète)
+  unit_price?: number;
+  line_total?: number;
+  pricing_case?: 'CAS_1_HC' | 'CAS_2_HCM' | 'CAS_3_HA' | 'CAS_4_NP' | 'SAP_FUNCTION';
+  pricing_justification?: string;
+  requires_validation?: boolean;
+  validation_reason?: string;
+  supplier_price?: number;
+  margin_applied?: number;
+  confidence_score?: number;
+  alerts?: string[];
+}
+
 export interface EmailAnalysisResult {
   classification: 'QUOTE_REQUEST' | 'INFORMATION' | 'OTHER';
   confidence: 'high' | 'medium' | 'low';
@@ -61,6 +94,13 @@ export interface EmailAnalysisResult {
   reasoning: string;
   extracted_data?: ExtractedQuoteData;
   quick_filter_passed: boolean;
+  // Nouveaux champs du backend (matching SAP amélioré)
+  client_matches?: ClientMatch[];
+  product_matches?: ProductMatch[];
+  client_auto_validated?: boolean;
+  products_auto_validated?: boolean;
+  requires_user_choice?: boolean;
+  user_choice_reason?: string;
 }
 
 export interface ApiResponse<T> {

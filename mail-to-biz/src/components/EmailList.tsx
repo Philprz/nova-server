@@ -1,4 +1,4 @@
-import { Mail, Paperclip, FileText, Clock } from 'lucide-react';
+import { Mail, Paperclip, FileText, Clock, Loader2 } from 'lucide-react';
 import { ProcessedEmail } from '@/types/email';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -9,9 +9,10 @@ import { fr } from 'date-fns/locale';
 interface EmailListProps {
   emails: ProcessedEmail[];
   onSelectQuote: (quote: ProcessedEmail) => void;
+  analyzingEmailId?: string | null;
 }
 
-export function EmailList({ emails, onSelectQuote }: EmailListProps) {
+export function EmailList({ emails, onSelectQuote, analyzingEmailId }: EmailListProps) {
   return (
     <div className="space-y-4 animate-fade-in">
       <div className="flex items-center justify-between">
@@ -80,14 +81,24 @@ export function EmailList({ emails, onSelectQuote }: EmailListProps) {
                     >
                       Confiance: {item.detection.confidence}
                     </Badge>
-                    <Button 
-                      size="sm" 
+                    <Button
+                      size="sm"
+                      disabled={analyzingEmailId === item.email.id}
                       onClick={(e) => {
                         e.stopPropagation();
                         onSelectQuote(item);
                       }}
                     >
-                      Traiter
+                      {analyzingEmailId === item.email.id ? (
+                        <>
+                          <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                          Analyse...
+                        </>
+                      ) : item.analysisResult ? (
+                        'Traiter'
+                      ) : (
+                        'Traiter'
+                      )}
                     </Button>
                   </>
                 ) : (

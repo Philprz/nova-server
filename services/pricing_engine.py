@@ -22,6 +22,12 @@ from services.sap_sql_service import get_sap_sql_service
 
 logger = logging.getLogger(__name__)
 
+# Cache en mémoire pour éviter recalculs (TTL 5 minutes)
+from typing import Tuple
+_pricing_cache: Dict[str, Tuple[datetime, PricingDecision]] = {}
+_cache_ttl_seconds = 300  # 5 minutes
+_max_cache_entries = 100  # Limite taille cache
+
 
 class PricingEngine:
     """
@@ -60,6 +66,20 @@ class PricingEngine:
             Résultat avec décision de pricing
         """
         start_time = datetime.now()
+
+        # Vérifier cache (clé unique basée sur contexte)
+        cache_key = f"{context.item_code}:{context.card_code}:{context.quantity}:{context.apply_margin}"
+
+        if not context.force_recalculate and cache_key in _pricing_cache:
+            cached_time, cached_decision = _pricing_cache[cache_key]
+
+            if (datetime.now() - cached_time).total_seconds() < _cache_ttl_seconds:
+                logger.debug(f"Cache hit for {cache_key}")
+                return PricingResult(
+                    success=True,
+                    decision=cached_decision,
+                    processing_time_ms=0
+                )
 
         try:
             # Récupérer prix fournisseur si non fourni
@@ -143,6 +163,16 @@ class PricingEngine:
                 f"(temps: {processing_time:.1f}ms)"
                 + (f" → Validation créée: {validation_id}" if validation_id else "")
             )
+
+            # Stocker dans le cache
+            global _pricing_cache
+            _pricing_cache[cache_key] = (datetime.now(), decision)
+
+            # Cleanup cache si trop d'entrées (FIFO)
+            if len(_pricing_cache) > _max_cache_entries:
+                oldest_key = min(_pricing_cache.keys(), key=lambda k: _pricing_cache[k][0])
+                del _pricing_cache[oldest_key]
+                logger.debug(f"Cache cleanup: removed oldest entry")
 
             return PricingResult(
                 success=True,

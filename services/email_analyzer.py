@@ -36,12 +36,17 @@ QUOTE_KEYWORDS_BODY = [
     'merci de nous faire un devis',
     'please quote', 'please provide a quote',
     'we would like a quotation',
+    'please send the offer', 'send the offer to',
     'demande de prix', 'demande de devis',
+    'demande de chiffrage', 'demande chiffrage',
     'pouvez-vous nous faire une offre',
     'nous souhaitons recevoir une offre',
     'could you quote', 'request for price',
     'veuillez nous communiquer vos prix',
-    'souhaitons obtenir un devis'
+    'souhaitons obtenir un devis',
+    'veuillez nous faire un chiffrage',
+    'pouvez-vous chiffrer', 'merci de chiffrer',
+    'veuillez trouver ci-joint', 'find attached', 'ci-joint la demande'
 ]
 
 QUANTITY_PATTERNS = [
@@ -254,6 +259,26 @@ CONTENU:
             analysis = self._parse_llm_response(llm_result)
             analysis.quick_filter_passed = quick_result["likely_quote"]
 
+            # Correctif faux négatifs : si le pré-filtrage détecte clairement une demande de devis
+            # (sujet/corps avec "chiffrage", "devis", etc.) avec confiance medium ou high,
+            # on priorise le pré-filtrage sur le LLM (qui peut se tromper sur transferts, bilingue, etc.)
+            if (
+                quick_result["likely_quote"]
+                and quick_result["confidence"] in ("high", "medium")
+                and not analysis.is_quote_request
+            ):
+                logger.info(
+                    f"Override LLM: pre-filter detected quote (score={quick_result['score']}, "
+                    f"rules={quick_result['matched_rules'][:3]}) -> forcing QUOTE_REQUEST"
+                )
+                analysis.classification = "QUOTE_REQUEST"
+                analysis.is_quote_request = True
+                analysis.confidence = "high"  # afficher confiance élevée pour le bouton Traiter
+                analysis.reasoning = (
+                    f"Règle métier: {', '.join(quick_result['matched_rules'][:3])}. "
+                    f"{analysis.reasoning or ''}"
+                )[:500]
+
             return analysis
 
         except Exception as e:
@@ -441,7 +466,7 @@ CONTENU:
         return None
 
     def _is_phone_number(self, code: str) -> bool:
-        """Détecte si un code ressemble à un numéro de téléphone."""
+        """Détecte si un code ressemble à un numéro de téléphone ou fax."""
         # Numéros français : 10 chiffres commençant par 0, ou 9 chiffres
         if len(code) == 10 and code[0] == '0':
             return True
@@ -452,7 +477,7 @@ CONTENU:
         if 11 <= len(code) <= 15:
             if code.startswith('33') and len(code) == 11:  # France international
                 return True
-            if code.startswith(('44', '41', '49', '39', '34', '351', '352', '1')):
+            if code.startswith(('44', '41', '49', '39', '34', '351', '352', '1', '90')):  # Ajout Turquie (90)
                 return True
 
         # Patterns téléphone : détection de structure répétitive
@@ -461,6 +486,50 @@ CONTENU:
             unique_pairs = set(pairs)
             # Si beaucoup de répétitions, probablement un téléphone
             if len(pairs) >= 4 and len(unique_pairs) <= len(pairs) * 0.6:
+                return True
+
+        # NOUVEAU: Numéros très longs (>= 11 chiffres) sont probablement des téléphones/fax
+        # Les vrais codes produits ont rarement plus de 10 chiffres purement numériques
+        if code.isdigit() and len(code) >= 11:
+            return True
+
+        return False
+
+    def _is_false_positive_product(self, code: str) -> bool:
+        """Détecte les faux positifs courants dans l'extraction de produits."""
+        code_normalized = code.upper().replace('-', '').replace('_', '')
+
+        # Liste noire de termes à exclure
+        blacklist = {
+            # Termes machines (anglais)
+            'XAXIS', 'YAXIS', 'ZAXIS',
+            'AAXIS', 'BAXIS', 'CAXIS',
+
+            # Termes machines (turc)
+            'XEKSENI', 'YEKSENI', 'ZEKSENI',
+            'EKSENI',  # "axe" en turc
+
+            # Mots courants français
+            'CIJOINT', 'CIJOINTS', 'CIJOINTE', 'CIJOINTES',
+            'ENPIECE', 'ENPIECES',
+
+            # Mots courants anglais
+            'ATTACHED', 'ATTACHMENT',
+            'DRAWING', 'DRAWINGS',
+            'SKETCH', 'SKETCHES',
+
+            # Termes génériques
+            'PIECE', 'PIECES', 'PART', 'PARTS',
+            'ITEM', 'ITEMS', 'REF', 'REFERENCE',
+        }
+
+        # Vérifier si le code est dans la blacklist
+        if code_normalized in blacklist:
+            return True
+
+        # Vérifier si le code CONTIENT un terme de la blacklist (ex: "X-AXIS" contient "XAXIS")
+        for term in blacklist:
+            if len(term) >= 4 and term in code_normalized:
                 return True
 
         return False
@@ -491,8 +560,10 @@ CONTENU:
             matches = re.findall(pattern, body, re.IGNORECASE)
             for match in matches:
                 ref = match.strip().upper()
-                # Filtrer les numéros de téléphone
-                if ref and len(ref) >= 6 and ref not in found_refs and not self._is_phone_number(ref):
+                # Filtrer les numéros de téléphone ET les faux positifs courants
+                if (ref and len(ref) >= 6 and ref not in found_refs
+                    and not self._is_phone_number(ref)
+                    and not self._is_false_positive_product(ref)):
                     found_refs.add(ref)
 
         # Trouver la quantité globale ou utiliser 1 par défaut
@@ -518,24 +589,45 @@ CONTENU:
         return products
 
     def _clean_html(self, html_content: str) -> str:
-        """Nettoie le contenu HTML pour extraire le texte."""
+        """Nettoie le contenu HTML pour extraire le texte TOUT EN PRÉSERVANT LES ADRESSES EMAIL."""
         if not html_content:
             return ""
 
-        # Supprimer les balises HTML
-        text = re.sub(r'<style[^>]*>[\s\S]*?</style>', '', html_content)
-        text = re.sub(r'<script[^>]*>[\s\S]*?</script>', '', text)
-        text = re.sub(r'<[^>]+>', ' ', text)
-
-        # Décoder les entités HTML courantes
-        text = text.replace('&nbsp;', ' ')
+        # ÉTAPE 1: Décoder les entités HTML AVANT extraction des emails
+        # (car les emails peuvent être encodés comme &lt;email@domain.com&gt;)
+        text = html_content.replace('&nbsp;', ' ')
         text = text.replace('&amp;', '&')
         text = text.replace('&lt;', '<')
         text = text.replace('&gt;', '>')
         text = text.replace('&quot;', '"')
         text = text.replace('&#39;', "'")
 
-        # Nettoyer les espaces
+        # ÉTAPE 2: Extraire et protéger les adresses email (maintenant décodées)
+        # Pattern pour détecter les emails dans <email@domain.com>
+        email_pattern = r'<([\w\.-]+@[\w\.-]+\.\w+)>'
+        emails_found = []
+
+        def save_email(match):
+            """Remplace l'email par un placeholder et sauvegarde l'email"""
+            email = match.group(1)
+            placeholder = f"__EMAIL_{len(emails_found)}__"
+            emails_found.append(email)
+            return placeholder
+
+        # Remplacer les emails par des placeholders
+        text = re.sub(email_pattern, save_email, text)
+
+        # ÉTAPE 3: Supprimer les balises HTML (maintenant sans risque pour les emails)
+        text = re.sub(r'<style[^>]*>[\s\S]*?</style>', '', text)
+        text = re.sub(r'<script[^>]*>[\s\S]*?</script>', '', text)
+        text = re.sub(r'<[^>]+>', ' ', text)
+
+        # ÉTAPE 4: Réinjecter les emails (sans les angle brackets pour éviter confusion HTML)
+        for idx, email in enumerate(emails_found):
+            placeholder = f"__EMAIL_{idx}__"
+            text = text.replace(placeholder, email)  # Juste l'email, sans <>
+
+        # ÉTAPE 5: Nettoyer les espaces
         text = re.sub(r'\s+', ' ', text)
 
         return text.strip()
