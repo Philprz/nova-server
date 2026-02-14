@@ -30,6 +30,8 @@ from routes.routes_export_json import router as export_json_router
 from routes.routes_export_json_v2 import router as export_json_v2_router
 from routes.routes_webhooks import router as webhooks_router
 from routes.routes_mail import router as mail_router
+from services.webhook_scheduler import start_webhook_scheduler, stop_webhook_scheduler
+
 if sys.platform == "win32":
     os.environ["PYTHONIOENCODING"] = "utf-8"
 
@@ -105,6 +107,13 @@ async def lifespan(app: FastAPI):
         else:
             logger.warning("DEMARRAGE EN MODE DEGRADE")
 
+        # Démarrage du scheduler de renouvellement automatique des webhooks
+        try:
+            await start_webhook_scheduler()
+            logger.info("✅ Webhook auto-renewal system started")
+        except Exception as e:
+            logger.error(f"❌ Failed to start webhook scheduler: {e}")
+
         # 2. CHARGEMENT DES MODULES
         logger.info("Chargement des modules...")
 
@@ -132,6 +141,13 @@ async def lifespan(app: FastAPI):
         logger.error(f"Erreur critique au démarrage: {e}")
         raise
     finally:
+        # Arrêt du scheduler de renouvellement automatique
+        try:
+            await stop_webhook_scheduler()
+            logger.info("✅ Webhook auto-renewal system stopped")
+        except Exception as e:
+            logger.error(f"❌ Error stopping webhook scheduler: {e}")
+
         logger.info("Arrêt de NOVA")
 
 # Création de l'application FastAPI

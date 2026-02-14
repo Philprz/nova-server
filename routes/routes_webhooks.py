@@ -300,3 +300,26 @@ async def delete_subscription(subscription_id: str):
     except Exception as e:
         logger.error(f"Error deleting subscription: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/scheduler/status")
+async def get_scheduler_status():
+    """Retourne le statut du système de renouvellement automatique."""
+    try:
+        from services.webhook_scheduler import get_webhook_scheduler
+
+        scheduler = get_webhook_scheduler()
+        next_run = scheduler.get_next_run_time()
+
+        return {
+            "success": True,
+            "scheduler": {
+                "is_running": scheduler.is_running(),
+                "next_run_time": next_run,
+                "timezone": "Europe/Paris (UTC+1)"
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting scheduler status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

@@ -23,6 +23,7 @@ starlette>=0.37.2
 anyio>=4.5.0
 mcp>=1.13.0
 fastmcp>=0.1.2
+apscheduler>=3.11.0
 
 # Parsers pour tarifs fournisseurs
 pymupdf>=1.23.0
