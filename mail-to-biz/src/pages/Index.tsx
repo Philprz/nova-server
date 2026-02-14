@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { AppHeader } from '@/components/AppHeader';
 import { Sidebar } from '@/components/Sidebar';
+import { WebhookStatusBadge } from '@/components/WebhookStatusBadge';
 import { EmailList } from '@/components/EmailList';
 import { QuoteValidation } from '@/components/QuoteValidation';
 import { QuoteSummary } from '@/components/QuoteSummary';
@@ -10,6 +11,7 @@ import { AccountSelection } from '@/components/AccountSelection';
 import { getMockEmails, processEmails } from '@/hooks/useMockData';
 import { useEmails } from '@/hooks/useEmails';
 import { useEmailMode } from '@/hooks/useEmailMode';
+import { useWebhookNotifications } from '@/hooks/useWebhookNotifications';
 import { ProcessedEmail } from '@/types/email';
 import { Loader2, RefreshCw, Wifi, WifiOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -37,6 +39,13 @@ const Index = () => {
 
   // Emails de démonstration (mock)
   const [mockEmails] = useState<ProcessedEmail[]>(() => processEmails(getMockEmails()));
+
+  // Notifications webhook pour emails traités automatiquement
+  const webhookStatus = useWebhookNotifications({
+    enabled: !isDemoMode && currentView === 'inbox',
+    emailIds: quotes.map(q => q.email.id),
+    pollInterval: 10000 // Vérification toutes les 10 secondes
+  });
 
   // Sélectionner la source de données selon le mode
   const displayEmails = isDemoMode ? mockEmails : liveEmails;
@@ -143,6 +152,11 @@ const Index = () => {
                     </>
                   )}
                 </Badge>
+                <WebhookStatusBadge
+                  notifiedCount={webhookStatus.notifiedCount}
+                  lastCheck={webhookStatus.lastCheck}
+                  isActive={!isDemoMode && currentView === 'inbox'}
+                />
                 {isLoading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
               </div>
 
