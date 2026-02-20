@@ -283,6 +283,59 @@ def link_decision_to_quote(decision_id: str, doc_entry: int, doc_num: int):
     logger.info(f"✓ Décision {decision_id} liée au devis {doc_num}")
 
 
+def update_pricing_decision(decision_id: str, update_data: dict) -> bool:
+    """
+    ✨ NOUVEAU : Met à jour une décision pricing avec de nouvelles valeurs
+
+    Args:
+        decision_id: ID de la décision à mettre à jour
+        update_data: Dictionnaire des champs à mettre à jour
+
+    Returns:
+        True si succès, False sinon
+    """
+    if not update_data:
+        logger.warning(f"Aucune donnée à mettre à jour pour {decision_id}")
+        return False
+
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        # Construire la requête UPDATE dynamiquement
+        set_clauses = []
+        values = []
+
+        for key, value in update_data.items():
+            set_clauses.append(f"{key} = ?")
+            values.append(value)
+
+        values.append(decision_id)  # Pour le WHERE
+
+        query = f"""
+            UPDATE pricing_decisions
+            SET {', '.join(set_clauses)}
+            WHERE decision_id = ?
+        """
+
+        cursor.execute(query, values)
+        conn.commit()
+
+        rows_affected = cursor.rowcount
+        conn.close()
+
+        if rows_affected > 0:
+            logger.info(f"✓ Décision {decision_id} mise à jour ({len(update_data)} champ(s))")
+            return True
+        else:
+            logger.warning(f"⚠ Décision {decision_id} introuvable pour mise à jour")
+            return False
+
+    except Exception as e:
+        logger.error(f"✗ Erreur mise à jour décision {decision_id}: {e}")
+        return False
+
+
 def update_daily_statistics():
     """Met à jour les statistiques quotidiennes"""
     conn = get_connection()

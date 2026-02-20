@@ -358,6 +358,76 @@ async def get_attachment_content(message_id: str, attachment_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/emails/{message_id}/attachments/{attachment_id}/stream")
+async def stream_attachment(message_id: str, attachment_id: str):
+    """
+    Stream une pièce jointe directement (sans base64).
+    Utilisable comme src dans une iframe ou un lien de téléchargement.
+    """
+    from fastapi.responses import StreamingResponse
+    import io
+
+    graph_service = get_graph_service()
+
+    if not graph_service.is_configured():
+        raise HTTPException(status_code=400, detail="Microsoft Graph credentials not configured")
+
+    try:
+        # Récupérer les métadonnées pour le nom et le content-type
+        attachments = await graph_service.get_attachments(message_id)
+        attachment_info = next((a for a in attachments if a.id == attachment_id), None)
+
+        content_type = attachment_info.content_type if attachment_info else "application/octet-stream"
+        filename = attachment_info.name if attachment_info else "attachment"
+
+        # Récupérer le contenu binaire
+        content_bytes = await graph_service.get_attachment_content(message_id, attachment_id)
+
+        # Encoder le nom de fichier pour l'en-tête (RFC 5987)
+        safe_name = filename.encode('ascii', errors='replace').decode('ascii')
+
+        return StreamingResponse(
+            io.BytesIO(content_bytes),
+            media_type=content_type,
+            headers={
+                "Content-Disposition": f'inline; filename="{safe_name}"',
+                "Content-Length": str(len(content_bytes)),
+                "Cache-Control": "no-store"
+            }
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error streaming attachment: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/emails/{message_id}/body")
+async def get_email_body(message_id: str):
+    """
+    Retourne le corps HTML de l'email directement (pour affichage dans iframe via src URL).
+    """
+    from fastapi.responses import HTMLResponse, PlainTextResponse
+
+    graph_service = get_graph_service()
+
+    if not graph_service.is_configured():
+        raise HTTPException(status_code=400, detail="Microsoft Graph credentials not configured")
+
+    try:
+        email = await graph_service.get_email(message_id, include_attachments=False)
+
+        if email.body_content_type and email.body_content_type.lower() == 'html':
+            return HTMLResponse(content=email.body_content or "", status_code=200)
+        else:
+            return PlainTextResponse(content=email.body_content or email.body_preview or "", status_code=200)
+
+    except Exception as e:
+        logger.error(f"Error fetching email body: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/emails/{message_id}/analyze", response_model=EmailAnalysisResult)
 async def analyze_email(message_id: str, force: bool = False):
     """
@@ -670,6 +740,15 @@ async def analyze_email(message_id: str, force: bool = False):
 
                         # Créer produit enrichi avec pricing
                         enriched_dict = product.dict()
+                        # Sérialiser historical_sales (objets Pydantic → dicts)
+                        historical_sales_data = []
+                        if decision.historical_sales:
+                            for sale in decision.historical_sales:
+                                try:
+                                    historical_sales_data.append(sale.dict() if hasattr(sale, 'dict') else dict(sale))
+                                except Exception:
+                                    pass
+
                         enriched_dict.update({
                             "unit_price": decision.calculated_price,
                             "line_total": decision.calculated_price * product.quantity,
@@ -680,8 +759,28 @@ async def analyze_email(message_id: str, force: bool = False):
                             "supplier_price": decision.supplier_price,
                             "margin_applied": decision.margin_applied,
                             "confidence_score": decision.confidence_score,
-                            "alerts": decision.alerts
+                            "alerts": decision.alerts,
+                            "decision_id": decision.decision_id,
+                            "historical_sales": historical_sales_data,
+                            "last_sale_price": decision.last_sale_price,
+                            "last_sale_date": str(decision.last_sale_date) if decision.last_sale_date else None,
+                            "average_price_others": decision.average_price_others,
                         })
+
+                        # Ajouter prix SAP moyen (AvgStdPrice) pour transparence
+                        try:
+                            from services.sap_cache_db import get_sap_cache_db
+                            import sqlite3 as _sqlite3
+                            _sap_cache = get_sap_cache_db()
+                            _conn = _sqlite3.connect(_sap_cache.db_path)
+                            _cur = _conn.cursor()
+                            _cur.execute("SELECT Price FROM sap_items WHERE ItemCode = ?", (product.item_code,))
+                            _row = _cur.fetchone()
+                            _conn.close()
+                            if _row and _row[0]:
+                                enriched_dict["sap_avg_price"] = _row[0]
+                        except Exception:
+                            pass
 
                         from services.email_matcher import MatchedProduct
                         enriched_product = MatchedProduct(**enriched_dict)
@@ -834,6 +933,38 @@ async def get_email_analysis(message_id: str):
         return EmailAnalysisResult(**existing_analysis)
 
     return None
+
+
+@router.delete("/emails/{message_id}/cache")
+async def clear_email_cache(message_id: str):
+    """
+    Vide le cache d'analyse pour un email spécifique.
+    La prochaine analyse (avec ?force=true) recalculera tout depuis zéro.
+    """
+    global _analysis_cache
+
+    cleared_memory = message_id in _analysis_cache
+    if cleared_memory:
+        del _analysis_cache[message_id]
+
+    # Vider aussi la base de données persistante
+    cleared_db = False
+    try:
+        from services.email_analysis_db import get_email_analysis_db
+        analysis_db = get_email_analysis_db()
+        analysis_db.delete_analysis(message_id)
+        cleared_db = True
+    except Exception:
+        pass
+
+    logger.info(f"Cache vidé pour {message_id} (mémoire={cleared_memory}, DB={cleared_db})")
+
+    return {
+        "success": True,
+        "message_id": message_id,
+        "cleared_memory": cleared_memory,
+        "cleared_db": cleared_db
+    }
 
 
 @router.post("/emails/{message_id}/mark-read")
@@ -1310,4 +1441,176 @@ async def retry_product_search(
 
     except Exception as e:
         logger.error(f"Retry search error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/emails/{message_id}/recalculate-pricing")
+async def recalculate_pricing(message_id: str):
+    """
+    Recalcule les prix pour un email déjà analysé.
+    Utile pour les emails analysés avant l'implémentation de la Phase 5.
+
+    Returns:
+        Analyse mise à jour avec les prix calculés
+    """
+    global _analysis_cache
+
+    try:
+        # 1. Récupérer analyse en cache
+        if message_id not in _analysis_cache:
+            raise HTTPException(status_code=404, detail="Analyse non trouvée en cache")
+
+        cached_entry = _analysis_cache[message_id]
+        if isinstance(cached_entry, dict) and 'data' in cached_entry:
+            result = cached_entry['data']
+        else:
+            result = cached_entry
+
+        # 2. Vérifier qu'il y a des produits matchés
+        if not result.product_matches or len(result.product_matches) == 0:
+            return {
+                "success": False,
+                "message": "Aucun produit trouvé dans cette analyse"
+            }
+
+        # 3. Vérifier si pricing engine est activé
+        pricing_enabled = os.getenv("PRICING_ENGINE_ENABLED", "false").lower() == "true"
+
+        if not pricing_enabled:
+            raise HTTPException(
+                status_code=503,
+                detail="Le moteur de pricing n'est pas activé (PRICING_ENGINE_ENABLED=false)"
+            )
+
+        # 4. Importer les modules nécessaires
+        from services.pricing_engine import get_pricing_engine
+        from services.pricing_models import PricingContext
+        from services.email_matcher import MatchedProduct
+
+        pricing_engine = get_pricing_engine()
+
+        # 5. Récupérer CardCode client
+        card_code = "UNKNOWN"
+        if result.client_matches and len(result.client_matches) > 0:
+            best_client = result.client_matches[0]
+            card_code = best_client.get('card_code', 'UNKNOWN')
+        elif result.extracted_data and result.extracted_data.client_card_code:
+            card_code = result.extracted_data.client_card_code
+
+        logger.info(f"🔄 Recalcul pricing pour {message_id} - Client: {card_code}")
+
+        # 6. Préparer contextes pricing pour tous les produits
+        pricing_contexts = []
+        original_products = []
+
+        for product_data in result.product_matches:
+            # Convertir dict en MatchedProduct si nécessaire
+            if isinstance(product_data, dict):
+                product = MatchedProduct(**product_data)
+            else:
+                product = product_data
+
+            # Skip si produit non trouvé dans SAP
+            if product.not_found_in_sap:
+                original_products.append(product)
+                continue
+
+            context = PricingContext(
+                item_code=product.item_code,
+                card_code=card_code,
+                quantity=product.quantity,
+                supplier_price=None,  # Sera récupéré automatiquement
+                apply_margin=float(os.getenv("PRICING_DEFAULT_MARGIN", "45.0")),
+                force_recalculate=True  # Force le recalcul même si déjà en cache
+            )
+            pricing_contexts.append((product, context))
+
+        # 7. Calcul parallèle des prix
+        t_start = time.time()
+
+        pricing_tasks = [
+            pricing_engine.calculate_price(ctx)
+            for _, ctx in pricing_contexts
+        ]
+
+        pricing_results = await asyncio.gather(*pricing_tasks, return_exceptions=True)
+
+        # 8. Enrichir produits avec résultats pricing
+        enriched_products = []
+        pricing_success_count = 0
+        pricing_errors = []
+
+        for i, (product, context) in enumerate(pricing_contexts):
+            pricing_result = pricing_results[i]
+
+            # Gestion erreurs
+            if isinstance(pricing_result, Exception):
+                error_msg = f"{product.item_code}: {str(pricing_result)}"
+                logger.error(f"Pricing error - {error_msg}")
+                pricing_errors.append(error_msg)
+                enriched_products.append(product)
+                continue
+
+            if pricing_result.success and pricing_result.decision:
+                decision = pricing_result.decision
+
+                # Créer produit enrichi avec pricing
+                enriched_dict = product.dict()
+                enriched_dict.update({
+                    "unit_price": decision.calculated_price,
+                    "line_total": decision.calculated_price * product.quantity,
+                    "pricing_case": decision.case_type.value,
+                    "pricing_justification": decision.justification,
+                    "requires_validation": decision.requires_validation,
+                    "validation_reason": decision.validation_reason,
+                    "supplier_price": decision.supplier_price,
+                    "margin_applied": decision.margin_applied,
+                    "confidence_score": decision.confidence_score,
+                    "alerts": decision.alerts,
+                    "decision_id": decision.decision_id
+                })
+
+                enriched_product = MatchedProduct(**enriched_dict)
+                enriched_products.append(enriched_product)
+
+                pricing_success_count += 1
+
+                logger.info(
+                    f"  ✓ {decision.case_type.value}: {product.item_code} → "
+                    f"{decision.calculated_price:.2f} EUR (marge {decision.margin_applied:.0f}%)"
+                )
+            else:
+                # Fallback: garder produit sans pricing
+                enriched_products.append(product)
+
+        # 9. Ajouter produits non trouvés dans SAP (sans pricing)
+        enriched_products.extend(original_products)
+
+        # 10. Mettre à jour le cache avec les produits enrichis
+        result.product_matches = [p.dict() for p in enriched_products]
+
+        # Mettre à jour le cache (gérer les deux formats)
+        if isinstance(_analysis_cache[message_id], dict) and 'data' in _analysis_cache[message_id]:
+            _analysis_cache[message_id]['data'] = result
+        else:
+            _analysis_cache[message_id] = result
+
+        duration_ms = (time.time() - t_start) * 1000
+
+        logger.info(
+            f"✅ Recalcul pricing terminé : {duration_ms:.0f}ms - "
+            f"{pricing_success_count}/{len(pricing_contexts)} succès"
+        )
+
+        return {
+            "success": True,
+            "pricing_calculated": pricing_success_count,
+            "total_products": len(pricing_contexts),
+            "duration_ms": duration_ms,
+            "errors": pricing_errors if pricing_errors else None,
+            "analysis": result.dict()
+        }
+
+    except Exception as e:
+        logger.error(f"Recalculate pricing error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

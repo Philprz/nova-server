@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
-import { ArrowLeft, CheckCircle, Calculator, FileText, TrendingUp, Building2, Package, Search, Loader2, UserCheck, UserPlus, AlertCircle, Plus } from 'lucide-react';
+import { ArrowLeft, CheckCircle, Calculator, FileText, TrendingUp, Building2, Package, Search, Loader2, UserCheck, UserPlus, AlertCircle, Plus, RefreshCw, Mail, Paperclip, Eye, ChevronDown, ChevronUp } from 'lucide-react';
 import { ProcessedEmail } from '@/types/email';
 import { CreateItemDialog } from './CreateItemDialog';
+import { PriceEditorDialog } from './PriceEditorDialog';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -15,6 +16,15 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { recalculatePricing, fetchGraphEmail } from '@/lib/graphApi';
+import type { GraphEmail } from '@/lib/graphApi';
+import { toast } from 'sonner';
 
 interface SapClient {
   CardCode: string;
@@ -53,6 +63,16 @@ export function QuoteSummary({ quote, onValidate, onBack }: QuoteSummaryProps) {
   const [searchingArticle, setSearchingArticle] = useState<{[key: number]: boolean}>({});
   const [articleStatus, setArticleStatus] = useState<{[key: number]: {found: boolean, message: string, itemCode?: string}}>({});
 
+  // État pour le recalcul des prix
+  const [recalculating, setRecalculating] = useState(false);
+
+  // État pour la visualisation de l'email source
+  const [showEmailContent, setShowEmailContent] = useState(false);
+  const [viewingAttachment, setViewingAttachment] = useState<{ name: string; url: string; contentType: string } | null>(null);
+  const [loadingAttachment] = useState<string | null>(null);
+  const [fullEmail, setFullEmail] = useState<GraphEmail | null>(null);
+  const [loadingEmail, setLoadingEmail] = useState(false);
+
   // État pour le dialog de création d'article
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [articleToCreate, setArticleToCreate] = useState<{lineNum: number, itemCode: string, itemDescription: string} | null>(null);
@@ -61,11 +81,61 @@ export function QuoteSummary({ quote, onValidate, onBack }: QuoteSummaryProps) {
   const clientName = doc?.businessPartner.CardName || 'Client inconnu';
   const clientEmail = doc?.businessPartner.ContactEmail || quote.email.from.emailAddress.address;
 
-  // Articles extraits
-  const articles = doc?.documentLines || [];
+  // Articles extraits avec enrichissement automatique des prix
+  const [enrichedArticles, setEnrichedArticles] = useState<any[]>([]);
 
-  // Marge par défaut
-  const margin = 18;
+  // Marge par défaut RONDOT-SAS (min 35%, cible 40%, max 45%)
+  const margin = 40;
+
+  // ✨ NOUVEAUTÉ : Enrichir automatiquement les articles avec les prix depuis product_matches
+  useEffect(() => {
+    const baseArticles = doc?.documentLines || [];
+    const productMatches = (quote.analysisResult?.product_matches as any[]) || [];
+
+    if (productMatches.length > 0) {
+      // Créer une map des prix par item_code
+      const priceMap = new Map();
+      productMatches.forEach((pm: any) => {
+        priceMap.set(pm.item_code, {
+          unit_price: pm.unit_price,
+          line_total: pm.line_total,
+          pricing_case: pm.pricing_case,
+          pricing_justification: pm.pricing_justification,
+          margin_applied: pm.margin_applied,
+          requires_validation: pm.requires_validation,
+          validation_reason: pm.validation_reason,
+          supplier_price: pm.supplier_price,
+          decision_id: pm.decision_id,
+          historical_sales: pm.historical_sales,
+          sap_avg_price: pm.sap_avg_price,
+          last_sale_price: pm.last_sale_price,
+          last_sale_date: pm.last_sale_date,
+          average_price_others: pm.average_price_others,
+          alerts: pm.alerts,
+          confidence_score: pm.confidence_score,
+        });
+      });
+
+      // Enrichir les articles avec les prix et toutes les métadonnées pricing
+      const enriched = baseArticles.map((article: any) => {
+        const pricing = priceMap.get(article.ItemCode);
+        if (pricing) {
+          return {
+            ...article,
+            ...pricing,  // Copie TOUS les champs pricing (supplier_price, decision_id, historical_sales, sap_avg_price, etc.)
+          };
+        }
+        return article;
+      });
+
+      setEnrichedArticles(enriched);
+    } else {
+      setEnrichedArticles(baseArticles);
+    }
+  }, [doc?.documentLines, quote.analysisResult?.product_matches]);
+
+  // Utiliser les articles enrichis
+  const articles = enrichedArticles;
 
   // ✨ Helpers pricing automatique (Phase 5)
   const calculateTotals = () => {
@@ -115,6 +185,37 @@ export function QuoteSummary({ quote, onValidate, onBack }: QuoteSummaryProps) {
   };
 
   const totals = calculateTotals();
+
+  // ✨ NOUVEAUTÉ : Pré-initialiser articleStatus pour les produits déjà trouvés
+  useEffect(() => {
+    const productMatches = (quote.analysisResult?.product_matches as any[]) || [];
+    const baseArticles = doc?.documentLines || [];
+
+    if (productMatches.length > 0 && baseArticles.length > 0) {
+      const initialStatus: {[key: number]: {found: boolean, message: string, itemCode?: string}} = {};
+
+      // Créer une map des product_matches par item_code
+      const matchMap = new Map();
+      productMatches.forEach((pm: any) => {
+        if (pm.item_code && !pm.not_found_in_sap) {
+          matchMap.set(pm.item_code, {
+            found: true,
+            message: 'Trouvé automatiquement',
+            itemCode: pm.item_code
+          });
+        }
+      });
+
+      // Marquer les articles trouvés en utilisant leur LineNum
+      baseArticles.forEach((article: any) => {
+        if (article.ItemCode && matchMap.has(article.ItemCode)) {
+          initialStatus[article.LineNum] = matchMap.get(article.ItemCode);
+        }
+      });
+
+      setArticleStatus(initialStatus);
+    }
+  }, [quote.analysisResult?.product_matches, doc?.documentLines]);
 
   // Auto-sélection si le client SAP est déjà identifié par le matching backend
   useEffect(() => {
@@ -178,6 +279,102 @@ export function QuoteSummary({ quote, onValidate, onBack }: QuoteSummaryProps) {
   const handleCreateNew = () => {
     setSelectedClient(null);
     setCreateNewClient(true);
+  };
+
+  // Ouvrir/fermer l'email source — fetche le corps complet + attachments si nécessaire
+  const handleToggleEmail = async () => {
+    const opening = !showEmailContent;
+    setShowEmailContent(opening);
+
+    if (!opening || fullEmail) return; // Déjà chargé ou on ferme
+
+    const needsFullBody = !quote.email.body?.content || quote.email.body.content === quote.email.bodyPreview;
+    const needsAttachments = quote.email.hasAttachments && quote.email.attachments.length === 0;
+
+    if (!needsFullBody && !needsAttachments) return; // Données déjà disponibles
+
+    setLoadingEmail(true);
+    try {
+      const result = await fetchGraphEmail(quote.email.id);
+      if (result.success && result.data) {
+        setFullEmail(result.data);
+      }
+    } catch {
+      toast.error('Impossible de charger le contenu de l\'email');
+    } finally {
+      setLoadingEmail(false);
+    }
+  };
+
+  // Ouvrir une pièce jointe dans le viewer via l'endpoint de streaming
+  const openAttachment = (att: { id: string; name: string; contentType: string; size: number; contentBytes?: string }) => {
+    const emailId = encodeURIComponent(quote.email.id);
+    const attId = encodeURIComponent(att.id);
+    const streamUrl = `/api/graph/emails/${emailId}/attachments/${attId}/stream`;
+    setViewingAttachment({ name: att.name, url: streamUrl, contentType: att.contentType });
+  };
+
+  // Recalculer les prix automatiquement
+  const handleRecalculatePricing = async () => {
+    if (!quote.email?.id) {
+      toast.error("ID de l'email introuvable");
+      return;
+    }
+
+    setRecalculating(true);
+
+    try {
+      toast.info("Calcul des prix en cours...");
+      const result = await recalculatePricing(quote.email.id);
+
+      if (result.success && result.analysis) {
+        toast.success(
+          `Prix calculés avec succès ! ${result.pricing_calculated}/${result.total_products} produits (${result.duration_ms.toFixed(0)}ms)`
+        );
+
+        // ✨ NOUVEAUTÉ : Mettre à jour l'état local au lieu de recharger la page
+        if (result.analysis.product_matches) {
+          // Ré-enrichir les articles avec les nouveaux prix
+          const baseArticles = doc?.documentLines || [];
+          const productMatches = result.analysis.product_matches;
+
+          const priceMap = new Map();
+          productMatches.forEach((pm: any) => {
+            priceMap.set(pm.item_code, {
+              unit_price: pm.unit_price,
+              line_total: pm.line_total,
+              pricing_case: pm.pricing_case,
+              margin_applied: pm.margin_applied,
+              requires_validation: pm.requires_validation
+            });
+          });
+
+          const enriched = baseArticles.map((article: any) => {
+            const pricing = priceMap.get(article.ItemCode);
+            if (pricing) {
+              return {
+                ...article,
+                unit_price: pricing.unit_price,
+                line_total: pricing.line_total,
+                pricing_case: pricing.pricing_case,
+                margin_applied: pricing.margin_applied,
+                requires_validation: pricing.requires_validation
+              };
+            }
+            return article;
+          });
+
+          setEnrichedArticles(enriched);
+        }
+      } else {
+        toast.error("Échec du calcul des prix");
+      }
+    } catch (error: any) {
+      console.error('Recalculate pricing error:', error);
+      toast.error(error.message || "Erreur lors du calcul des prix");
+    } finally {
+      setRecalculating(false);
+    }
   };
 
   // Rechercher un article dans SAP
@@ -280,6 +477,164 @@ export function QuoteSummary({ quote, onValidate, onBack }: QuoteSummaryProps) {
         <h1 className="text-2xl font-bold text-foreground">Synthèse du devis</h1>
         <p className="text-muted-foreground">Pré-analyse automatique avant création SAP</p>
       </div>
+
+      {/* Email source */}
+      <Card className="card-elevated">
+        <CardHeader
+          className="pb-3 cursor-pointer select-none"
+          onClick={handleToggleEmail}
+        >
+          <CardTitle className="flex items-center justify-between text-lg">
+            <span className="flex items-center gap-2">
+              <Mail className="w-5 h-5 text-primary" />
+              Email source
+            </span>
+            <div className="flex items-center gap-2">
+              {quote.email.hasAttachments && (
+                <Badge variant="outline" className="text-xs">
+                  <Paperclip className="w-3 h-3 mr-1" />
+                  {fullEmail ? fullEmail.attachments.length : quote.email.attachments.length || '?'} PJ
+                </Badge>
+              )}
+              {showEmailContent ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+            </div>
+          </CardTitle>
+          <div className="grid grid-cols-2 gap-1 text-sm mt-1 pointer-events-none">
+            <div>
+              <span className="text-muted-foreground">De : </span>
+              <span className="font-medium">{quote.email.from.emailAddress.name}</span>
+              <span className="text-muted-foreground text-xs ml-1">({quote.email.from.emailAddress.address})</span>
+            </div>
+            <div>
+              <span className="text-muted-foreground">Reçu : </span>
+              <span>{new Date(quote.email.receivedDateTime).toLocaleString('fr-FR')}</span>
+            </div>
+            <div className="col-span-2">
+              <span className="text-muted-foreground">Objet : </span>
+              <span className="font-medium">{quote.email.subject}</span>
+            </div>
+          </div>
+        </CardHeader>
+
+        {showEmailContent && (
+          <CardContent className="space-y-4 pt-0">
+            <Separator />
+
+            {loadingEmail ? (
+              <div className="flex items-center justify-center py-6 text-muted-foreground gap-2">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Chargement du contenu...
+              </div>
+            ) : (
+              <>
+                {/* Corps de l'email */}
+                <div>
+                  <p className="text-xs text-muted-foreground mb-2 font-medium uppercase tracking-wide">Corps du message</p>
+                  <div className="border rounded overflow-hidden bg-white">
+                    {(() => {
+                      const bodyType = fullEmail?.body_content_type || quote.email.body?.contentType;
+                      const isHtml = bodyType === 'html' || bodyType === 'HTML';
+                      if (isHtml) {
+                        // Utiliser l'endpoint /body pour éviter les restrictions de sandbox
+                        const bodyUrl = `/api/graph/emails/${encodeURIComponent(quote.email.id)}/body`;
+                        return (
+                          <iframe
+                            src={bodyUrl}
+                            className="w-full"
+                            style={{ height: '300px', border: 'none' }}
+                            title="Contenu email"
+                          />
+                        );
+                      }
+                      const bodyContent = fullEmail?.body_content || quote.email.body?.content;
+                      return (
+                        <pre className="p-3 text-sm text-foreground whitespace-pre-wrap max-h-64 overflow-y-auto font-sans">
+                          {bodyContent || quote.email.bodyPreview || '(Contenu non disponible)'}
+                        </pre>
+                      );
+                    })()}
+                  </div>
+                </div>
+
+                {/* Pièces jointes */}
+                {(() => {
+                  const attachments = fullEmail
+                    ? fullEmail.attachments.map(a => ({ id: a.id, name: a.name, contentType: a.content_type, size: a.size, contentBytes: a.content_bytes }))
+                    : quote.email.attachments;
+                  if (attachments.length === 0 && !quote.email.hasAttachments) return null;
+                  return (
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-2 font-medium uppercase tracking-wide">
+                        Pièces jointes {attachments.length === 0 && quote.email.hasAttachments ? '(chargement…)' : ''}
+                      </p>
+                      <div className="space-y-2">
+                        {attachments.map((att) => (
+                          <div key={att.id} className="flex items-center justify-between p-2 border rounded bg-muted/20">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <Paperclip className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                              <span className="text-sm font-medium truncate">{att.name}</span>
+                              <span className="text-xs text-muted-foreground flex-shrink-0">
+                                ({Math.round(att.size / 1024)} Ko)
+                              </span>
+                            </div>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={(e) => { e.stopPropagation(); openAttachment(att); }}
+                              className="ml-2 flex-shrink-0"
+                            >
+                              <Eye className="w-3 h-3 mr-1" />
+                              Visualiser
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
+              </>
+            )}
+          </CardContent>
+        )}
+      </Card>
+
+      {/* Dialog viewer pièce jointe */}
+      {viewingAttachment && (
+        <Dialog open onOpenChange={() => setViewingAttachment(null)}>
+          <DialogContent className="max-w-5xl p-0 overflow-hidden" style={{ height: '90vh' }}>
+            <DialogHeader className="px-4 py-3 border-b flex-row items-center justify-between">
+              <DialogTitle className="flex items-center gap-2 text-base">
+                <Paperclip className="w-4 h-4" />
+                {viewingAttachment.name}
+              </DialogTitle>
+              <a
+                href={viewingAttachment.url}
+                download={viewingAttachment.name}
+                className="text-xs text-muted-foreground hover:text-foreground underline mr-8"
+                onClick={(e) => e.stopPropagation()}
+              >
+                Télécharger
+              </a>
+            </DialogHeader>
+            {viewingAttachment.contentType.startsWith('image/') ? (
+              <div className="flex items-center justify-center p-4 overflow-auto" style={{ height: 'calc(90vh - 60px)' }}>
+                <img
+                  src={viewingAttachment.url}
+                  alt={viewingAttachment.name}
+                  className="max-w-full max-h-full object-contain"
+                />
+              </div>
+            ) : (
+              <iframe
+                src={viewingAttachment.url}
+                className="w-full"
+                style={{ height: 'calc(90vh - 60px)', border: 'none' }}
+                title={viewingAttachment.name}
+              />
+            )}
+          </DialogContent>
+        </Dialog>
+      )}
 
       {/* Client Block avec recherche SAP */}
       <Card className="card-elevated">
@@ -441,34 +796,15 @@ export function QuoteSummary({ quote, onValidate, onBack }: QuoteSummaryProps) {
                         {line.Quantity} {line.UnitOfMeasure}
                       </TableCell>
                       <TableCell className="text-right">
-                        {line.unit_price != null ? (
-                          <div className="flex flex-col items-end gap-1">
-                            <span className="font-semibold text-lg">
-                              {line.unit_price.toFixed(2)} €
-                            </span>
-                            {line.pricing_case && (
-                              <Badge
-                                variant={getCasVariant(line.pricing_case)}
-                                className="text-xs"
-                              >
-                                {formatCasLabel(line.pricing_case)}
-                              </Badge>
-                            )}
-                            {line.line_total && (
-                              <span className="text-sm text-muted-foreground">
-                                Total: {line.line_total.toFixed(2)} €
-                              </span>
-                            )}
-                            {line.requires_validation && (
-                              <Badge variant="outline" className="text-xs text-orange-600 border-orange-600">
-                                <AlertCircle className="w-3 h-3 mr-1" />
-                                Validation requise
-                              </Badge>
-                            )}
-                          </div>
-                        ) : (
-                          <span className="text-muted-foreground">À calculer</span>
-                        )}
+                        <PriceEditorDialog
+                          line={line}
+                          onPriceUpdated={(newPrice) => {
+                            // Mettre à jour le prix dans la ligne localement
+                            line.unit_price = newPrice;
+                            line.line_total = newPrice * (line.Quantity || 1);
+                            line.pricing_case = 'CAS_MANUAL';
+                          }}
+                        />
                       </TableCell>
                       <TableCell className="text-center">
                         <div className="flex items-center justify-center gap-2">
@@ -537,10 +873,30 @@ export function QuoteSummary({ quote, onValidate, onBack }: QuoteSummaryProps) {
               <Calculator className="w-5 h-5 text-primary" />
               Pricing
             </span>
-            <Badge className="bg-primary/10 text-primary border-primary/20">
-              <TrendingUp className="w-3 h-3 mr-1" />
-              Calcul automatique
-            </Badge>
+            <Button
+              variant={totals.subtotal > 0 ? "outline" : "default"}
+              size="sm"
+              onClick={handleRecalculatePricing}
+              disabled={recalculating}
+              className="gap-2"
+            >
+              {recalculating ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Calcul en cours...
+                </>
+              ) : totals.subtotal > 0 ? (
+                <>
+                  <RefreshCw className="w-4 h-4" />
+                  Recalculer
+                </>
+              ) : (
+                <>
+                  <TrendingUp className="w-4 h-4" />
+                  Calculer les prix
+                </>
+              )}
+            </Button>
           </CardTitle>
         </CardHeader>
         <CardContent>

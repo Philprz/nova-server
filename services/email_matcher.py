@@ -53,6 +53,14 @@ class MatchedProduct(BaseModel):
     confidence_score: float = 1.0  # 0.0 à 1.0
     alerts: List[str] = []  # Liste d'alertes (ex: variation prix)
 
+    # ✨ CHAMPS TRAÇABILITÉ (nécessaires pour PriceEditor frontend)
+    decision_id: Optional[str] = None  # ID décision pricing (pour mise à jour manuelle)
+    historical_sales: List[Any] = []  # 3 dernières ventes (pour affichage frontend)
+    sap_avg_price: Optional[float] = None  # Prix moyen SAP (AvgStdPrice)
+    last_sale_price: Optional[float] = None  # Dernier prix vente (CAS 1/2)
+    last_sale_date: Optional[str] = None  # Date dernière vente
+    average_price_others: Optional[float] = None  # Prix moyen autres clients (CAS 3)
+
 
 class MatchResult(BaseModel):
     clients: List[MatchedClient] = []
@@ -130,7 +138,7 @@ class EmailMatcher:
                             self._client_first_letter[first_letter] = []
                         self._client_first_letter[first_letter].append(client)
 
-            logger.info(f"✅ Clients chargés: {len(self._clients_cache)} "
+            logger.info(f"[OK] Clients charges: {len(self._clients_cache)} "
                         f"({len(self._client_domains)} domaines, "
                         f"{len(self._client_normalized)} noms normalisés, "
                         f"{len(self._client_first_letter)} index lettres)")
@@ -150,7 +158,7 @@ class EmailMatcher:
                     if item_name:
                         self._items_normalized[code] = self._normalize(item_name)
 
-            logger.info(f"✅ Produits chargés: {len(self._items_cache)} "
+            logger.info(f"[OK] Produits charges: {len(self._items_cache)} "
                         f"({len(self._items_normalized)} noms normalisés)")
 
         except Exception as e:
@@ -387,7 +395,7 @@ class EmailMatcher:
 
                         # Match exact compact
                         if compact_name == domain_base:
-                            logger.info(f"[Stratégie 1b] MATCH! {card_code}: '{compact_name}' = '{domain_base}' → score 97")
+                            logger.info(f"[Strategie 1b] MATCH! {card_code}: '{compact_name}' = '{domain_base}' -> score 97")
                             has_domain_match = True
                             best_score = 97
                             best_reason = f"Domaine match nom exact: {domain} = {' '.join(name_parts[:num_words])}"
@@ -515,6 +523,39 @@ class EmailMatcher:
 
     # --- Matching produits ---
 
+    def _create_matched_product_from_sap(
+        self,
+        item: Dict[str, Any],
+        quantity: int,
+        score: int,
+        match_reason: str,
+        not_found_in_sap: bool = False
+    ) -> MatchedProduct:
+        """
+        Crée un MatchedProduct depuis un item SAP avec tous les champs incluant prix.
+
+        Args:
+            item: Dictionnaire item SAP depuis cache
+            quantity: Quantité détectée
+            score: Score de matching (0-100)
+            match_reason: Raison du match
+            not_found_in_sap: True si produit non trouvé dans SAP
+
+        Returns:
+            MatchedProduct avec prix SAP inclus
+        """
+        return MatchedProduct(
+            item_code=item.get("ItemCode", ""),
+            item_name=item.get("ItemName", ""),
+            quantity=quantity,
+            score=score,
+            match_reason=match_reason,
+            not_found_in_sap=not_found_in_sap,
+            # Prix depuis SAP (sera utilisé par pricing engine si disponible)
+            unit_price=item.get("Price"),  # Prix SAP de base
+            supplier_price=item.get("SupplierPrice")  # Prix fournisseur si disponible
+        )
+
     def _match_single_product_intelligent(
         self,
         code: str,
@@ -540,44 +581,93 @@ class EmailMatcher:
         """
         code_upper = code.upper()
         qty = self._extract_quantity_near(text, code)
+        print(f"      🔎 Analyse: {code} (supplier: {supplier_card_code})", flush=True)
+        logger.debug(f"[MATCH] Matching code: {code} (supplier: {supplier_card_code})")
 
         # --- ÉTAPE 1: Match exact par ItemCode ---
+        # 1a. Chercher dans le cache mémoire (rapide, 5000 premiers produits)
         if code_upper in self._items_cache:
             item = self._items_cache[code_upper]
-            return MatchedProduct(
-                item_code=item.get("ItemCode", code_upper),
-                item_name=item.get("ItemName", ""),
+            return self._create_matched_product_from_sap(
+                item=item,
                 quantity=qty,
                 score=100,
-                match_reason="Code exact SAP"
+                match_reason="Code exact SAP (cache)"
             )
 
         if code in self._items_cache:
             item = self._items_cache[code]
-            return MatchedProduct(
-                item_code=item.get("ItemCode", code),
-                item_name=item.get("ItemName", ""),
+            return self._create_matched_product_from_sap(
+                item=item,
                 quantity=qty,
                 score=100,
-                match_reason="Code exact SAP"
+                match_reason="Code exact SAP (cache)"
             )
 
-        # --- ÉTAPE 2: Recherche dans product_mapping_db (apprentissage) ---
-        if supplier_card_code:
-            mapping_db = self._get_mapping_db()
-            mapping = mapping_db.get_mapping(code, supplier_card_code)
+        # 1b. Fallback: Chercher dans le cache SQLite (TOUS les produits SAP)
+        try:
+            sap_cache_items = self._cache_db.search_items(code, limit=1)
+            if sap_cache_items:
+                item = {
+                    "ItemCode": sap_cache_items[0]["ItemCode"],
+                    "ItemName": sap_cache_items[0]["ItemName"]
+                }
+                print(f"         ✅ Trouvé dans cache SQLite: {code} → {item['ItemName'][:40]}", flush=True)
+                logger.debug(f"   [OK] Found in SQLite cache: {code}")
+                return self._create_matched_product_from_sap(
+                    item=item,
+                    quantity=qty,
+                    score=100,
+                    match_reason="Code exact SAP (base locale)"
+                )
+        except Exception as e:
+            logger.debug(f"   [SQLite fallback] Error: {e}")
 
-            if mapping and mapping.get("matched_item_code"):
-                matched_code = mapping["matched_item_code"]
-                if matched_code in self._items_cache:
-                    item = self._items_cache[matched_code]
-                    return MatchedProduct(
-                        item_code=item.get("ItemCode", matched_code),
-                        item_name=item.get("ItemName", ""),
+        # --- ÉTAPE 2: Recherche dans product_mapping_db (apprentissage) ---
+        # Chercher mapping avec supplier_card_code (si fourni) ou GLOBAL
+        mapping_db = self._get_mapping_db()
+        mapping = mapping_db.get_mapping(code, supplier_card_code)
+        print(f"         📋 Mapping trouvé: {mapping.get('matched_item_code') if mapping else 'AUCUN'}", flush=True)
+        logger.debug(f"   [MAPPING] Lookup result: {mapping}")
+
+        if mapping and mapping.get("matched_item_code"):
+            matched_code = mapping["matched_item_code"]
+            print(f"         ✅ Mapping: {code} → {matched_code}", flush=True)
+            logger.debug(f"   [OK] Found mapping: {code} -> {matched_code}")
+
+            # Chercher d'abord dans cache mémoire
+            if matched_code in self._items_cache:
+                item = self._items_cache[matched_code]
+                print(f"         ✅ Article en cache: {matched_code}", flush=True)
+                logger.debug(f"   [OK] Item found in cache: {matched_code}")
+                return self._create_matched_product_from_sap(
+                    item=item,
+                    quantity=qty,
+                    score=95,
+                    match_reason=f"Mapping appris ({mapping.get('match_method')})"
+                )
+
+            # Fallback: Chercher dans cache SQLite
+            try:
+                sap_cache_items = self._cache_db.search_items(matched_code, limit=1)
+                if sap_cache_items:
+                    item = {
+                        "ItemCode": sap_cache_items[0]["ItemCode"],
+                        "ItemName": sap_cache_items[0]["ItemName"]
+                    }
+                    print(f"         ✅ Article trouvé dans base locale: {matched_code}", flush=True)
+                    logger.debug(f"   [OK] Mapped item found in SQLite: {matched_code}")
+                    return self._create_matched_product_from_sap(
+                        item=item,
                         quantity=qty,
                         score=95,
-                        match_reason=f"Mapping appris ({mapping.get('match_method')})"
+                        match_reason=f"Mapping appris ({mapping.get('match_method')}) + base locale"
                     )
+            except Exception as e:
+                logger.debug(f"   [SQLite fallback] Error for mapped item: {e}")
+
+            print(f"         ⚠️ Mapping trouvé MAIS article {matched_code} introuvable!", flush=True)
+            logger.warning(f"   [WARNING] Mapping found but item {matched_code} NOT found anywhere!")
 
         # --- ÉTAPE 3: Fuzzy match sur ItemName avec description (optimisé) ---
         if description and len(description) >= 4:
@@ -635,9 +725,8 @@ class EmailMatcher:
                     status="VALIDATED"  # Score >= 90 → auto-validé
                 )
 
-                return MatchedProduct(
-                    item_code=item.get("ItemCode", item_code),
-                    item_name=item.get("ItemName", ""),
+                return self._create_matched_product_from_sap(
+                    item=item,
                     quantity=qty,
                     score=best_score,
                     match_reason=reason
@@ -764,6 +853,7 @@ class EmailMatcher:
             text: Texte complet (email + PDF)
             supplier_card_code: CardCode du fournisseur pour apprentissage
         """
+        print(f"\n{'='*80}\n🔍 _MATCH_PRODUCTS APPELÉ - supplier_card_code: {supplier_card_code}\n{'='*80}\n", flush=True)
         matches: List[MatchedProduct] = []
         matched_codes = set()
         text_normalized = self._normalize(text)
@@ -819,7 +909,8 @@ class EmailMatcher:
                 filtered_codes.add(code)
 
         potential_codes = filtered_codes
-        logger.info(f"Extracted {len(potential_codes)} potential product codes")
+        print(f"📦 CODES EXTRAITS ({len(potential_codes)}): {list(potential_codes)[:20]}\n", flush=True)
+        logger.info(f"Extracted {len(potential_codes)} potential product codes: {list(potential_codes)[:10]}")
 
         # Utiliser matching intelligent pour chaque code
         for code in potential_codes:
@@ -835,12 +926,15 @@ class EmailMatcher:
             )
 
             if matched_product:
+                print(f"   ✅ MATCH TROUVÉ: {code} → {matched_product.item_code} (score: {matched_product.score})\n", flush=True)
                 matches.append(matched_product)
                 matched_codes.add(code)
                 matched_codes.add(code.upper())
                 if matched_product.score >= 100:
                     # Match exact, pas besoin de chercher les variantes
                     continue
+            else:
+                print(f"   ❌ PAS DE MATCH: {code}\n", flush=True)
 
         # Si des produits ont été trouvés via matching intelligent, on retourne
         if matches:
@@ -861,9 +955,8 @@ class EmailMatcher:
                 if code_upper not in matched_codes:
                     item = self._items_cache[code_upper]
                     qty = self._extract_quantity_near(text, code)
-                    matches.append(MatchedProduct(
-                        item_code=item.get("ItemCode", code_upper),
-                        item_name=item.get("ItemName", ""),
+                    matches.append(self._create_matched_product_from_sap(
+                        item=item,
                         quantity=qty,
                         score=100,
                         match_reason=f"Code exact: {code_upper}"
@@ -876,9 +969,8 @@ class EmailMatcher:
                 if code not in matched_codes:
                     item = self._items_cache[code]
                     qty = self._extract_quantity_near(text, code)
-                    matches.append(MatchedProduct(
-                        item_code=item.get("ItemCode", code),
-                        item_name=item.get("ItemName", ""),
+                    matches.append(self._create_matched_product_from_sap(
+                        item=item,
                         quantity=qty,
                         score=100,
                         match_reason=f"Code exact: {code}"
@@ -892,9 +984,8 @@ class EmailMatcher:
                     if item_code.startswith(code_upper) or code_upper.startswith(item_code):
                         if item_code not in matched_codes:
                             qty = self._extract_quantity_near(text, code)
-                            matches.append(MatchedProduct(
-                                item_code=item_code,
-                                item_name=item.get("ItemName", ""),
+                            matches.append(self._create_matched_product_from_sap(
+                                item=item,
                                 quantity=qty,
                                 score=80,
                                 match_reason=f"Code partiel: {code} ~ {item_code}"
@@ -967,9 +1058,8 @@ class EmailMatcher:
                 if qty == 1:  # Pas de qté trouvée par nom, chercher globalement
                     qty = self._extract_quantity_global(text)
 
-                matches.append(MatchedProduct(
-                    item_code=item_code,
-                    item_name=item_name,
+                matches.append(self._create_matched_product_from_sap(
+                    item=item,
                     quantity=qty,
                     score=best_score,
                     match_reason=best_reason

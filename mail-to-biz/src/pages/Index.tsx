@@ -40,18 +40,26 @@ const Index = () => {
   // Emails de démonstration (mock)
   const [mockEmails] = useState<ProcessedEmail[]>(() => processEmails(getMockEmails()));
 
-  // Notifications webhook pour emails traités automatiquement
-  const webhookStatus = useWebhookNotifications({
-    enabled: !isDemoMode && currentView === 'inbox',
-    emailIds: quotes.map(q => q.email.id),
-    pollInterval: 10000 // Vérification toutes les 10 secondes
-  });
-
   // Sélectionner la source de données selon le mode
   const displayEmails = isDemoMode ? mockEmails : liveEmails;
   const isLoading = !isDemoMode && liveLoading;
 
   const quotes = displayEmails.filter((e) => e.isQuote);
+
+  // Notifications webhook pour emails traités automatiquement
+  const webhookStatus = useWebhookNotifications({
+    enabled: !isDemoMode && currentView === 'inbox',
+    emails: quotes.map(q => ({
+      id: q.email.id,
+      subject: q.email.subject,
+      clientName: q.email.from.emailAddress.name
+    })),
+    pollInterval: 10000, // Vérification toutes les 10 secondes
+    onViewEmail: (emailId) => {
+      const quote = quotes.find(q => q.email.id === emailId);
+      if (quote) handleSelectQuote(quote);
+    }
+  });
   // Compter les devis non traités : pas de preSapDocument OU status pending
   const pendingCount = quotes.filter((q) => {
     const status = q.preSapDocument?.meta.validationStatus;

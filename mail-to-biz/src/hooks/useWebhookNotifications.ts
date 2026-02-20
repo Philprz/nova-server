@@ -26,10 +26,15 @@ interface WebhookNotificationOptions {
   enabled?: boolean;
 
   /**
-   * Liste des emails à surveiller
+   * Liste des emails à surveiller avec leurs métadonnées
    * Si vide, ne surveille rien
    */
-  emailIds?: string[];
+  emails?: Array<{ id: string; subject?: string; clientName?: string }>;
+
+  /**
+   * Callback déclenché quand l'utilisateur clique "Voir" sur le toast
+   */
+  onViewEmail?: (emailId: string) => void;
 }
 
 interface NotificationState {
@@ -41,8 +46,11 @@ export function useWebhookNotifications(options: WebhookNotificationOptions = {}
   const {
     pollInterval = 10000, // 10 secondes par défaut
     enabled = true,
-    emailIds = []
+    emails = [],
+    onViewEmail
   } = options;
+
+  const emailIds = emails.map(e => e.id);
 
   const [state, setState] = useState<NotificationState>({
     notifiedIds: new Set(),
@@ -84,32 +92,35 @@ export function useWebhookNotifications(options: WebhookNotificationOptions = {}
               lastCheck: Date.now()
             }));
 
+            // Récupérer les métadonnées de l'email (subject, clientName)
+            const emailMeta = emails.find(e => e.id === emailId);
+
             // Afficher toast selon type
             if (analysis.is_quote_request) {
               // Toast succès pour devis
               notifyQuoteProcessed({
-                clientName: analysis.client_match?.matched_client?.CardName,
-                productCount: analysis.products?.length || 0,
-                emailSubject: analysis.subject,
-                caseType: analysis.pricing_decisions?.[0]?.case_type
+                clientName: emailMeta?.clientName || analysis.client_matches?.[0]?.card_name,
+                productCount: analysis.product_matches?.length || analysis.extracted_data?.products?.length || 0,
+                emailSubject: emailMeta?.subject,
+                caseType: analysis.product_matches?.[0]?.pricing_case,
+                onView: onViewEmail ? () => onViewEmail(emailId) : undefined
               });
 
-              // Si pricing calculé, notification supplémentaire
-              if (analysis.pricing_decisions && analysis.pricing_decisions.length > 0) {
-                const firstDecision = analysis.pricing_decisions[0];
+              // Si pricing calculé via product_matches, notification supplémentaire
+              const pricedMatches = analysis.product_matches?.filter(m => m.unit_price != null) ?? [];
+              if (pricedMatches.length > 0) {
+                const firstCase = pricedMatches[0].pricing_case ?? '';
+                const totalHT = pricedMatches.reduce((sum, m) => sum + (m.line_total ?? 0), 0);
                 notifyPricingCalculated({
-                  caseType: firstDecision.case_type,
-                  productCount: analysis.pricing_decisions.length,
-                  totalHT: analysis.pricing_decisions.reduce(
-                    (sum, d) => sum + (d.calculated_price || 0),
-                    0
-                  )
+                  caseType: firstCase,
+                  productCount: pricedMatches.length,
+                  totalHT: totalHT > 0 ? totalHT : undefined
                 });
               }
             } else {
               // Toast info pour non-devis
               notifyEmailAnalyzed({
-                emailSubject: analysis.subject,
+                emailSubject: emailMeta?.subject,
                 classification: analysis.classification
               });
             }
@@ -134,7 +145,7 @@ export function useWebhookNotifications(options: WebhookNotificationOptions = {}
         clearInterval(intervalRef.current);
       }
     };
-  }, [enabled, emailIds.join(','), pollInterval]);
+  }, [enabled, emails.map(e => e.id).join(','), pollInterval]);
 
   return {
     notifiedCount: state.notifiedIds.size,

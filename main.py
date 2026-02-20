@@ -25,6 +25,7 @@ from routes.routes_graph import router as graph_router
 from routes.routes_sap_business import router as sap_business_router
 from routes.routes_pricing_validation import router as pricing_validation_router
 from routes.routes_sap_creation import router as sap_creation_router
+from routes.routes_sap_quotation import router as sap_quotation_router
 from routes.routes_product_validation import router as product_validation_router
 from routes.routes_export_json import router as export_json_router
 from routes.routes_export_json_v2 import router as export_json_v2_router
@@ -36,8 +37,14 @@ if sys.platform == "win32":
     os.environ["PYTHONIOENCODING"] = "utf-8"
 
 # Configuration du logger pour éviter les erreurs d'emojis
+# Forcer UTF-8 pour stdout sur Windows
+import io
+if sys.platform == "win32":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler('nova.log', encoding='utf-8'),
@@ -179,6 +186,7 @@ app.include_router(mail_router, prefix="/api", tags=["Mail-to-Biz"])  # API Mail
 app.include_router(sap_business_router)  # API SAP Business pour mail-to-biz
 app.include_router(pricing_validation_router, prefix="/api/validations", tags=["Pricing Validation"])
 app.include_router(sap_creation_router, prefix="/api/sap", tags=["SAP Creation"])
+app.include_router(sap_quotation_router)  # POST /api/sap/quotation - Création devis SAP B1
 app.include_router(product_validation_router)  # API validation produits externes
 app.include_router(export_json_router)  # API export JSON pre-sap-quote avec matching backend
 app.include_router(export_json_v2_router)  # API export JSON v2 (réutilise analyse existante)

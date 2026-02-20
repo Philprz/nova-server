@@ -259,16 +259,21 @@ class WebhookService:
 
         return subscriptions
 
-    def get_subscriptions_to_renew(self) -> list:
+    def get_subscriptions_to_renew(self, hours_before_expiration: int = 24) -> list:
         """
         Récupère les subscriptions qui doivent être renouvelées.
-        (Expire dans moins de 24 heures)
+
+        Args:
+            hours_before_expiration: Nombre d'heures avant expiration (défaut: 24)
+
+        Returns:
+            Liste des subscriptions à renouveler
         """
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
 
-        # Calcul date limite : maintenant + 24h
-        threshold = (datetime.utcnow() + timedelta(hours=24)).isoformat() + "Z"
+        # Calcul date limite : maintenant + N heures
+        threshold = (datetime.utcnow() + timedelta(hours=hours_before_expiration)).isoformat() + "Z"
 
         cursor.execute("""
             SELECT id, resource, expiration_datetime

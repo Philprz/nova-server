@@ -79,6 +79,66 @@ class SAPHistoryService:
             logger.error(f"✗ Erreur récupération historique vente : {e}")
             return None
 
+    async def get_last_n_sales_to_client(
+        self,
+        item_code: str,
+        card_code: str,
+        limit: int = 3,
+        lookback_days: int = 365
+    ) -> List[SalesHistoryEntry]:
+        """
+        Récupère les N dernières ventes d'un article à un client (pour affichage historique)
+
+        Args:
+            item_code: Code article
+            card_code: Code client
+            limit: Nombre de ventes à récupérer (défaut 3)
+            lookback_days: Période de recherche (défaut 365j)
+
+        Returns:
+            Liste des dernières ventes (max N), triée par date décroissante
+        """
+        try:
+            cutoff_date = (date.today() - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
+
+            # Requête SAP avec filtre OData
+            params = {
+                "$filter": f"CardCode eq '{card_code}' and DocDate ge '{cutoff_date}'",
+                "$expand": "DocumentLines",
+                "$orderby": "DocDate desc",
+                "$top": 50  # Limite pour performance
+            }
+
+            result = await self.sap_service._call_sap("/Invoices", params=params)
+
+            # Parcourir les factures pour trouver toutes les occurrences de l'article
+            sales = []
+            for invoice in result.get("value", []):
+                if len(sales) >= limit:
+                    break  # On a assez de ventes
+
+                for line in invoice.get("DocumentLines", []):
+                    if line.get("ItemCode") == item_code:
+                        sales.append(SalesHistoryEntry(
+                            doc_entry=invoice.get("DocEntry"),
+                            doc_num=invoice.get("DocNum"),
+                            doc_date=datetime.strptime(invoice.get("DocDate"), "%Y-%m-%d").date(),
+                            card_code=invoice.get("CardCode"),
+                            item_code=line.get("ItemCode"),
+                            quantity=line.get("Quantity", 0),
+                            unit_price=line.get("UnitPrice", 0),
+                            line_total=line.get("LineTotal", 0),
+                            discount_percent=line.get("DiscountPercent", 0)
+                        ))
+                        break  # Une seule ligne par facture suffit
+
+            logger.info(f"✓ {len(sales)} vente(s) trouvée(s) pour {item_code} au client {card_code}")
+            return sales
+
+        except Exception as e:
+            logger.error(f"✗ Erreur récupération historique ventes : {e}")
+            return []
+
     async def get_sales_to_other_clients(
         self,
         item_code: str,

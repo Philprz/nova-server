@@ -67,6 +67,9 @@ class SAPCacheDB:
                 ItemCode TEXT PRIMARY KEY,
                 ItemName TEXT NOT NULL,
                 ItemGroup INTEGER,
+                Price REAL,
+                Currency TEXT DEFAULT 'EUR',
+                SupplierPrice REAL,
                 last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
@@ -76,6 +79,25 @@ class SAPCacheDB:
             CREATE INDEX IF NOT EXISTS idx_items_name
             ON sap_items(ItemName COLLATE NOCASE)
         """)
+
+        # Migration : Ajouter colonnes prix si elles n'existent pas (pour bases existantes)
+        try:
+            cursor.execute("ALTER TABLE sap_items ADD COLUMN Price REAL")
+            logger.info("✅ Colonne Price ajoutée à sap_items")
+        except sqlite3.OperationalError:
+            pass  # Colonne déjà existante
+
+        try:
+            cursor.execute("ALTER TABLE sap_items ADD COLUMN Currency TEXT DEFAULT 'EUR'")
+            logger.info("✅ Colonne Currency ajoutée à sap_items")
+        except sqlite3.OperationalError:
+            pass  # Colonne déjà existante
+
+        try:
+            cursor.execute("ALTER TABLE sap_items ADD COLUMN SupplierPrice REAL")
+            logger.info("✅ Colonne SupplierPrice ajoutée à sap_items")
+        except sqlite3.OperationalError:
+            pass  # Colonne déjà existante
 
         # Table de métadonnées de synchronisation
         cursor.execute("""
@@ -266,7 +288,7 @@ class SAPCacheDB:
 
             while True:
                 items_batch = await sap_service._call_sap("/Items", params={
-                    "$select": "ItemCode,ItemName,ItemsGroupCode",
+                    "$select": "ItemCode,ItemName,ItemsGroupCode,AvgStdPrice",
                     "$filter": "Valid eq 'Y' and Frozen eq 'N'",  # Seulement articles actifs
                     "$top": batch_size,
                     "$skip": skip,
@@ -295,14 +317,20 @@ class SAPCacheDB:
                 # Gérer les ItemName NULL en utilisant ItemCode comme fallback
                 item_name = item.get("ItemName") or item.get("ItemCode") or "Unknown"
 
+                # Récupérer le prix (AvgStdPrice = prix moyen standard)
+                price = item.get("AvgStdPrice")
+                currency = item.get("PurchaseCurrency") or "EUR"
+
                 cursor.execute("""
                     INSERT INTO sap_items
-                    (ItemCode, ItemName, ItemGroup, last_updated)
-                    VALUES (?, ?, ?, ?)
+                    (ItemCode, ItemName, ItemGroup, Price, Currency, last_updated)
+                    VALUES (?, ?, ?, ?, ?, ?)
                 """, (
                     item.get("ItemCode"),
                     item_name,
                     item.get("ItemsGroupCode"),
+                    price,
+                    currency,
                     datetime.now().isoformat()
                 ))
 

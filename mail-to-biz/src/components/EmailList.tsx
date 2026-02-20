@@ -98,10 +98,10 @@ export function EmailList({ emails, onSelectQuote, analyzingEmailId }: EmailList
                       ) : item.analysisResult ? (
                         <>
                           <FileText className="w-3 h-3 mr-1" />
-                          Synthèse
+                          Visualiser
                         </>
                       ) : (
-                        'Analyser'
+                        'Visualiser'
                       )}
                     </Button>
                   </>

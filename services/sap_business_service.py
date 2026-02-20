@@ -140,8 +140,22 @@ class SAPBusinessService:
             if e.response.status_code == 401:
                 # Session expirée, réessayer après login
                 logger.warning("Session expirée, reconnexion...")
+                self.session_id = None
                 if await self.login():
                     return await self._call_sap(endpoint, method, payload, params)
+
+            elif e.response.status_code == 500:
+                # Vérifier si c'est un Switch company error (code 305)
+                try:
+                    error_body = e.response.json()
+                    if error_body.get("error", {}).get("code") == 305:
+                        logger.warning("Switch company error (305), réinitialisation session et reconnexion...")
+                        self.session_id = None
+                        self.session_timeout = None
+                        if await self.login():
+                            return await self._call_sap(endpoint, method, payload, params)
+                except Exception:
+                    pass
 
             logger.error(f"Erreur SAP {e.response.status_code}: {e.response.text}")
             raise

@@ -14,8 +14,9 @@ export function notifyQuoteProcessed(data: {
   productCount: number;
   emailSubject?: string;
   caseType?: string;
+  onView?: () => void;
 }) {
-  const { clientName, productCount, emailSubject, caseType } = data;
+  const { clientName, productCount, emailSubject, caseType, onView } = data;
 
   const clientInfo = clientName || 'Client inconnu';
   const subject = emailSubject ? ` - ${emailSubject}` : '';
@@ -32,8 +33,7 @@ export function notifyQuoteProcessed(data: {
     action: {
       label: '👁️ Voir',
       onClick: () => {
-        // Le clic sera géré par le composant parent
-        console.log('[Toast] Voir synthèse demandé');
+        onView?.();
       }
     }
   });

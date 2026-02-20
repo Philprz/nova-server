@@ -4,7 +4,7 @@ Conforme à l'organigramme des 4 CAS déterministes
 """
 
 from pydantic import BaseModel, Field, field_validator
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from datetime import datetime, date
 from enum import Enum
 
@@ -132,10 +132,31 @@ class PricingDecision(BaseModel):
     supplier_price: Optional[float] = Field(None, description="Prix fournisseur utilisé")
     margin_applied: Optional[float] = Field(None, description="Marge appliquée (%)")
 
-    # Historique de référence
+    # Historique de référence (dernière vente uniquement - legacy)
     last_sale_date: Optional[date] = Field(None, description="Date dernière vente")
     last_sale_price: Optional[float] = Field(None, description="Prix dernière vente")
     last_sale_doc_num: Optional[int] = Field(None, description="Numéro devis/facture référence")
+
+    # ✨ NOUVEAU : Historique complet des 3 dernières ventes
+    historical_sales: List[SalesHistoryEntry] = Field(
+        default_factory=list,
+        description="Liste des 3 dernières ventes pour transparence"
+    )
+
+    # ✨ NOUVEAU : Analyse brute SAP (traçabilité complète)
+    sap_price_analysis: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Résultat brut de fn_ITS_GetPriceAnalysis"
+    )
+
+    # ✨ NOUVEAU : Variance pricing 35-45%
+    price_range_min: Optional[float] = Field(None, description="Prix minimum (marge 35%)")
+    price_range_max: Optional[float] = Field(None, description="Prix maximum (marge 45%)")
+    suggested_margin_min: float = Field(default=35.0, description="Marge minimale suggérée")
+    suggested_margin_max: float = Field(default=45.0, description="Marge maximale suggérée")
+
+    # ✨ NOUVEAU : Type de prix (somme ou unitaire)
+    is_sum: bool = Field(default=False, description="True si montant total, False si prix unitaire")
 
     # Variation prix fournisseur (pour CAS 2)
     price_variation: Optional[SupplierPriceVariation] = None
@@ -161,6 +182,28 @@ class PricingDecision(BaseModel):
         if 'calculated_price' in data and 'quantity' in data:
             return round(data['calculated_price'] * data['quantity'], 2)
         return v if v else 0.0
+
+    @field_validator('price_range_min', mode='before')
+    @classmethod
+    def calculate_price_range_min(cls, v, info):
+        """Calcul automatique prix minimum (marge 35%)"""
+        data = info.data
+        if v is None and 'supplier_price' in data and data['supplier_price']:
+            supplier_price = data['supplier_price']
+            margin_min = data.get('suggested_margin_min', 35.0)
+            return round(supplier_price * (1 + margin_min / 100), 2)
+        return v
+
+    @field_validator('price_range_max', mode='before')
+    @classmethod
+    def calculate_price_range_max(cls, v, info):
+        """Calcul automatique prix maximum (marge 45%)"""
+        data = info.data
+        if v is None and 'supplier_price' in data and data['supplier_price']:
+            supplier_price = data['supplier_price']
+            margin_max = data.get('suggested_margin_max', 45.0)
+            return round(supplier_price * (1 + margin_max / 100), 2)
+        return v
 
     class Config:
         json_schema_extra = {
