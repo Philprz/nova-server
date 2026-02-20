@@ -16,7 +16,9 @@ from services.validation_models import (
     ValidationPriority,
     ValidationListFilter,
     ValidationStatistics,
-    ValidationBulkAction
+    ValidationBulkAction,
+    PriceUpdateRequest,
+    PriceUpdateResult
 )
 
 logger = logging.getLogger(__name__)
@@ -396,4 +398,88 @@ async def get_validation_dashboard():
 
     except Exception as e:
         logger.error(f"Erreur récupération dashboard: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.patch("/decisions/{decision_id}/update-price", response_model=PriceUpdateResult)
+async def update_decision_price(
+    decision_id: str,
+    request: PriceUpdateRequest
+):
+    """
+    ✨ NOUVEAU : Modification manuelle du prix d'une décision pricing
+
+    Permet à l'utilisateur d'ajuster le prix proposé par le moteur de pricing.
+    La modification est tracée avec raison et utilisateur.
+
+    Args:
+        decision_id: ID de la décision pricing à modifier
+        request: Nouveau prix + raison + utilisateur
+
+    Returns:
+        Résultat de la modification avec anciens/nouveaux prix et marge
+    """
+    try:
+        import services.pricing_audit_db as pricing_audit_db
+
+        # 1. Récupérer la décision originale depuis la base d'audit
+        decision = pricing_audit_db.get_decision_by_id(decision_id)
+
+        if not decision:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Décision pricing {decision_id} introuvable"
+            )
+
+        old_price = decision.get('calculated_price')
+        supplier_price = decision.get('supplier_price')
+
+        if not old_price:
+            raise HTTPException(
+                status_code=400,
+                detail="Prix original introuvable dans la décision"
+            )
+
+        # 2. Calculer la nouvelle marge
+        new_margin = 0.0
+        if supplier_price and supplier_price > 0:
+            new_margin = ((request.new_price - supplier_price) / supplier_price) * 100
+
+        # 3. Mettre à jour la décision dans la base d'audit
+        update_data = {
+            'calculated_price': request.new_price,
+            'line_total': request.new_price * decision.get('quantity', 1),
+            'margin_applied': new_margin,
+            'case_type': 'CAS_MANUAL',  # Marquer comme modification manuelle
+            'modification_reason': request.modification_reason or "Prix ajusté manuellement",
+            'modified_by': request.modified_by or "unknown",
+            'modified_at': datetime.now().isoformat()
+        }
+
+        success = pricing_audit_db.update_pricing_decision(decision_id, update_data)
+
+        if not success:
+            raise HTTPException(
+                status_code=500,
+                detail="Erreur lors de la mise à jour de la décision"
+            )
+
+        logger.info(
+            f"✓ Prix modifié : {decision_id} → {old_price:.2f} EUR → {request.new_price:.2f} EUR "
+            f"(marge {new_margin:.1f}%) par {request.modified_by}"
+        )
+
+        return PriceUpdateResult(
+            success=True,
+            decision_id=decision_id,
+            old_price=old_price,
+            new_price=request.new_price,
+            margin_applied=round(new_margin, 2),
+            message=f"Prix modifié avec succès (marge: {new_margin:.1f}%)"
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"✗ Erreur modification prix {decision_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))

@@ -281,3 +281,46 @@ class ValidationWorkflowConfig(BaseModel):
                 ]
             }
         }
+
+
+class PriceUpdateRequest(BaseModel):
+    """
+    Requête de modification manuelle de prix
+    Utilisé quand l'utilisateur ajuste le prix proposé par le moteur
+    """
+    decision_id: str = Field(description="ID de la décision pricing à modifier")
+    new_price: float = Field(gt=0, description="Nouveau prix unitaire")
+    modification_reason: Optional[str] = Field(None, description="Raison de la modification")
+    modified_by: Optional[str] = Field(None, description="Email de l'utilisateur qui modifie")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "decision_id": "550e8400-e29b-41d4-a716-446655440000",
+                "new_price": 165.50,
+                "modification_reason": "Ajustement commercial sur demande client",
+                "modified_by": "commercial@rondot-sas.fr"
+            }
+        }
+
+
+class PriceUpdateResult(BaseModel):
+    """Résultat d'une modification de prix"""
+    success: bool
+    decision_id: str
+    old_price: float
+    new_price: float
+    margin_applied: float = Field(description="Nouvelle marge calculée (%)")
+    message: str
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "success": True,
+                "decision_id": "550e8400-e29b-41d4-a716-446655440000",
+                "old_price": 150.00,
+                "new_price": 165.50,
+                "margin_applied": 48.5,
+                "message": "Prix modifié avec succès"
+            }
+        }

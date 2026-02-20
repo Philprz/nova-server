@@ -90,32 +90,55 @@ class ProductMappingDB:
     def get_mapping(
         self,
         external_code: str,
-        supplier_card_code: str
+        supplier_card_code: str = None
     ) -> Optional[Dict[str, Any]]:
         """
         Récupère un mapping existant pour un code externe + fournisseur.
+        Si aucun mapping spécifique n'est trouvé, cherche un mapping GLOBAL.
 
         Returns:
             Dict avec matched_item_code, confidence_score, etc. ou None
         """
+        logger.debug(f"🔎 get_mapping called: external_code={external_code}, supplier={supplier_card_code}")
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
 
+        # Essayer d'abord avec le supplier_card_code fourni
+        if supplier_card_code:
+            cursor.execute("""
+                SELECT * FROM product_code_mapping
+                WHERE external_code = ? AND supplier_card_code = ?
+                AND status = 'VALIDATED'
+            """, (external_code, supplier_card_code))
+
+            row = cursor.fetchone()
+
+            if row:
+                conn.close()
+                logger.debug(f"   ✅ Found specific mapping for supplier {supplier_card_code}")
+                # Mettre à jour use_count et last_used
+                self._increment_usage(external_code, supplier_card_code)
+                return dict(row)
+
+        # Si rien trouvé, essayer avec mapping GLOBAL
+        logger.debug(f"   🔄 No specific mapping, trying GLOBAL...")
         cursor.execute("""
             SELECT * FROM product_code_mapping
-            WHERE external_code = ? AND supplier_card_code = ?
+            WHERE external_code = ? AND supplier_card_code = 'GLOBAL'
             AND status = 'VALIDATED'
-        """, (external_code, supplier_card_code))
+        """, (external_code,))
 
         row = cursor.fetchone()
         conn.close()
 
         if row:
-            # Mettre à jour use_count et last_used
-            self._increment_usage(external_code, supplier_card_code)
+            logger.debug(f"   ✅ Found GLOBAL mapping: {external_code} → {dict(row).get('matched_item_code')}")
+            # Mettre à jour use_count et last_used pour le mapping GLOBAL
+            self._increment_usage(external_code, 'GLOBAL')
             return dict(row)
 
+        logger.debug(f"   ❌ No mapping found for {external_code}")
         return None
 
     def save_mapping(

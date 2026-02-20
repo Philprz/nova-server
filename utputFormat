@@ -1,0 +1,6 @@
+HTTP/1.1 307 Temporary Redirect
+date: Tue, 17 Feb 2026 15:45:25 GMT
+server: uvicorn
+content-length: 0
+location: http://localhost:8001/api/graph/emails
+

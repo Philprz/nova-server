@@ -326,3 +326,82 @@ export function graphEmailToEmailMessage(graphEmail: GraphEmail): import('@/type
     })),
   };
 }
+
+// ============================================
+// ✨ PRICING API - Modification de prix
+// ============================================
+
+export interface PriceUpdateRequest {
+  decision_id: string;
+  new_price: number;
+  modification_reason?: string;
+  modified_by?: string;
+}
+
+export interface PriceUpdateResult {
+  success: boolean;
+  decision_id: string;
+  old_price: number;
+  new_price: number;
+  margin_applied: number;
+  message: string;
+}
+
+/**
+ * Met à jour le prix d'une décision pricing
+ */
+export async function updateDecisionPrice(
+  decisionId: string,
+  newPrice: number,
+  reason?: string,
+  modifiedBy?: string
+): Promise<PriceUpdateResult> {
+  const response = await fetch(`/api/validations/decisions/${decisionId}/update-price`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      decision_id: decisionId,
+      new_price: newPrice,
+      modification_reason: reason,
+      modified_by: modifiedBy,
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Erreur inconnue' }));
+    throw new Error(error.detail || `Erreur HTTP ${response.status}`);
+  }
+
+  return response.json();
+}
+
+export interface RecalculatePricingResult {
+  success: boolean;
+  pricing_calculated: number;
+  total_products: number;
+  duration_ms: number;
+  errors?: string[];
+  analysis: EmailAnalysisResult;
+}
+
+/**
+ * Recalcule les prix pour un email déjà analysé
+ * Utile pour les emails analysés avant l'implémentation de la Phase 5
+ */
+export async function recalculatePricing(emailId: string): Promise<RecalculatePricingResult> {
+  const response = await fetch(`${GRAPH_API_BASE}/emails/${emailId}/recalculate-pricing`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Erreur inconnue' }));
+    throw new Error(error.detail || `Erreur HTTP ${response.status}`);
+  }
+
+  return response.json();
+}
