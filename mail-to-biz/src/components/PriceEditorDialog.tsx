@@ -45,12 +45,16 @@ export function PriceEditorDialog({ line, onPriceUpdated }: PriceEditorDialogPro
   const hasPrice = line.unit_price != null;
   const supplierPrice = line.supplier_price || 0;
 
+  // Un produit est "vraiment nouveau" uniquement s'il n'a pas de code SAP.
+  // CAS_4_NP avec ItemCode = article SAP sans historique de vente (différent de "nouveau produit").
+  const hasItemCode = !!(line.ItemCode && line.ItemCode !== 'À définir');
+
   const getCasVariant = (casType?: string) => {
     switch (casType) {
       case 'CAS_1_HC': return 'default';
       case 'CAS_2_HCM': return 'warning';
       case 'CAS_3_HA': return 'secondary';
-      case 'CAS_4_NP': return 'destructive';
+      case 'CAS_4_NP': return hasItemCode ? 'secondary' : 'destructive';
       default: return 'default';
     }
   };
@@ -60,7 +64,7 @@ export function PriceEditorDialog({ line, onPriceUpdated }: PriceEditorDialogPro
       case 'CAS_1_HC': return 'Historique Client';
       case 'CAS_2_HCM': return 'Prix Modifié';
       case 'CAS_3_HA': return 'Prix Moyen';
-      case 'CAS_4_NP': return 'Nouveau Produit';
+      case 'CAS_4_NP': return hasItemCode ? 'Sans historique' : 'Nouveau Produit';
       case 'SAP_FUNCTION': return 'SAP Direct';
       case 'CAS_MANUAL': return 'Manuel';
       default: return 'Prix calculé';

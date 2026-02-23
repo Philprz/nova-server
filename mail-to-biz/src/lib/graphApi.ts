@@ -405,3 +405,106 @@ export async function recalculatePricing(emailId: string): Promise<RecalculatePr
 
   return response.json();
 }
+
+// ============================================================
+// PIÈCES JOINTES STOCKÉES LOCALEMENT
+// ============================================================
+
+export interface StoredAttachment {
+  id: number;
+  email_id: string;
+  attachment_id: string;
+  filename: string;
+  content_type: string;
+  size: number;
+  local_path: string;
+  downloaded_at: string;
+  is_previewable: boolean;
+}
+
+export interface StoredAttachmentsResponse {
+  email_id: string;
+  count: number;
+  attachments: StoredAttachment[];
+  already_stored?: boolean;
+}
+
+/** Liste les PJ stockées localement pour un email. */
+export async function fetchStoredAttachments(
+  emailId: string
+): Promise<StoredAttachmentsResponse> {
+  const response = await fetch(
+    `${GRAPH_API_BASE}/emails/stored-attachments?email_id=${encodeURIComponent(emailId)}`
+  );
+  if (!response.ok) throw new Error(`Erreur ${response.status}`);
+  return response.json();
+}
+
+/** Déclenche le stockage des PJ si pas encore fait (idempotent). */
+export async function triggerAttachmentStorage(
+  emailId: string
+): Promise<StoredAttachmentsResponse> {
+  const response = await fetch(
+    `${GRAPH_API_BASE}/emails/store-attachments?email_id=${encodeURIComponent(emailId)}`,
+    { method: 'POST' }
+  );
+  if (!response.ok) throw new Error(`Erreur ${response.status}`);
+  return response.json();
+}
+
+/** URL pour servir une PJ depuis le stockage local (utilisable en href ou iframe src). */
+export function getStoredAttachmentUrl(emailId: string, attachmentId: string, download = false): string {
+  const base = `${GRAPH_API_BASE}/emails/stored-attachments/serve?email_id=${encodeURIComponent(emailId)}&attachment_id=${encodeURIComponent(attachmentId)}`;
+  return download ? `${base}&download=true` : base;
+}
+
+// ============================================================
+// CORRECTIONS MANUELLES
+// ============================================================
+
+export interface QuoteCorrection {
+  id?: number;
+  email_id: string;
+  field_type: 'client' | 'product' | 'delivery' | 'general';
+  field_index?: number | null;
+  field_name: string;
+  original_value?: string | null;
+  corrected_value: string;
+  corrected_at?: string;
+  corrected_by?: string;
+}
+
+export interface CorrectionsResponse {
+  email_id: string;
+  count: number;
+  corrections: QuoteCorrection[];
+}
+
+/** Récupère les corrections manuelles pour un email. */
+export async function fetchCorrections(emailId: string): Promise<CorrectionsResponse> {
+  const response = await fetch(
+    `${GRAPH_API_BASE}/emails/corrections?email_id=${encodeURIComponent(emailId)}`
+  );
+  if (!response.ok) throw new Error(`Erreur ${response.status}`);
+  return response.json();
+}
+
+/** Sauvegarde des corrections (lot). */
+export async function saveCorrections(
+  emailId: string,
+  corrections: Omit<QuoteCorrection, 'id' | 'email_id' | 'corrected_at'>[]
+): Promise<CorrectionsResponse> {
+  const response = await fetch(
+    `${GRAPH_API_BASE}/emails/corrections?email_id=${encodeURIComponent(emailId)}`,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ corrections }),
+    }
+  );
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ detail: 'Erreur inconnue' }));
+    throw new Error(err.detail || `Erreur ${response.status}`);
+  }
+  return response.json();
+}
