@@ -10,12 +10,12 @@ import httpx
 import asyncio
 import time
 from datetime import datetime
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Body
 from pydantic import BaseModel
 from typing import Optional, List
 from dotenv import load_dotenv
 
-from services.graph_service import get_graph_service, GraphEmail, GraphAttachment, GraphEmailsResponse
+from services.graph_service import get_graph_service, GraphEmail, GraphAttachment, GraphEmailsResponse, GraphAPIError
 from services.email_analyzer import get_email_analyzer, extract_pdf_text, EmailAnalysisResult, ExtractedQuoteData, ExtractedProduct
 from services.email_matcher import get_email_matcher
 from services.duplicate_detector import get_duplicate_detector, DuplicateType, QuoteStatus
@@ -278,6 +278,96 @@ async def get_emails(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ============================================================
+# ROUTES STATIQUES (doivent être déclarées AVANT /emails/{message_id}
+# car FastAPI matche dans l'ordre de déclaration)
+# ============================================================
+
+@router.get("/emails/debug-id")
+async def debug_email_id(id: str = Query(None)):
+    """Endpoint de debug temporaire pour vérifier la valeur reçue."""
+    return {"received_id": id, "length": len(id) if id else 0, "last5": id[-5:] if id else None}
+
+
+@router.get("/emails/body")
+async def get_email_body(id: str = Query(..., description="Microsoft Graph message ID")):
+    """
+    Retourne le corps HTML de l'email.
+    Utilise un query param ?id=... pour éviter les problèmes de routage avec les IDs
+    Graph qui contiennent des caractères spéciaux (/, =, +).
+    """
+    from fastapi.responses import HTMLResponse, PlainTextResponse
+
+    graph_service = get_graph_service()
+
+    if not graph_service.is_configured():
+        raise HTTPException(status_code=400, detail="Microsoft Graph credentials not configured")
+
+    logger.info(
+        "EMAIL_BODY_REQUEST message_id_len=%d mailbox=%s",
+        len(id), graph_service.mailbox_address
+    )
+
+    try:
+        email = await graph_service.get_email(id, include_attachments=False)
+
+        logger.info(
+            "EMAIL_BODY_OK subject=%r body_type=%s body_len=%d",
+            email.subject,
+            email.body_content_type,
+            len(email.body_content or "")
+        )
+
+        if email.body_content_type and email.body_content_type.lower() == "html":
+            return HTMLResponse(content=email.body_content or "", status_code=200)
+        else:
+            return PlainTextResponse(content=email.body_content or email.body_preview or "", status_code=200)
+
+    except GraphAPIError as e:
+        logger.error("EMAIL_BODY_GRAPH_ERROR status=%d detail=%s", e.status_code, e.detail)
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
+    except Exception as e:
+        logger.exception("EMAIL_BODY_UNEXPECTED_ERROR")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/emails/stored-attachments")
+async def list_stored_attachments(email_id: str = Query(..., description="Microsoft Graph message ID")):
+    """
+    Liste les pièces jointes stockées localement pour un email.
+    Utilise ?email_id=... pour éviter les problèmes de routage avec les IDs spéciaux.
+    """
+    logger.info("LIST_STORED_ATTACHMENTS email_id_len=%d", len(email_id))
+    try:
+        from services.attachment_storage_service import get_attachment_storage
+        storage = get_attachment_storage()
+        attachments = storage.get_stored_attachments(email_id)
+        logger.info("LIST_STORED_ATTACHMENTS_OK count=%d", len(attachments))
+        return {
+            "email_id": email_id,
+            "count": len(attachments),
+            "attachments": [a.to_dict() for a in attachments],
+        }
+    except Exception as e:
+        logger.exception("LIST_STORED_ATTACHMENTS_ERROR")
+        raise HTTPException(status_code=500, detail=f"Erreur lecture stockage: {e}")
+
+
+@router.get("/emails/corrections")
+async def get_corrections(email_id: str = Query(..., description="Microsoft Graph message ID")):
+    """Récupère les corrections manuelles appliquées à un devis."""
+    from services.quote_corrections_db import get_quote_corrections_db
+    db = get_quote_corrections_db()
+    corrections = db.get_corrections(email_id)
+    return {
+        "email_id": email_id,
+        "count": len(corrections),
+        "corrections": [c.to_dict() for c in corrections],
+    }
+
+
+# ============================================================
+
 @router.get("/emails/{message_id}", response_model=GraphEmail)
 async def get_email(message_id: str):
     """
@@ -288,12 +378,21 @@ async def get_email(message_id: str):
     if not graph_service.is_configured():
         raise HTTPException(status_code=400, detail="Microsoft Graph credentials not configured")
 
+    logger.info(
+        "GET_EMAIL_REQUEST message_id_len=%d mailbox=%s",
+        len(message_id), graph_service.mailbox_address
+    )
+
     try:
         email = await graph_service.get_email(message_id, include_attachments=True)
+        logger.info("GET_EMAIL_OK subject=%r attachments=%d", email.subject, len(email.attachments))
         return email
 
+    except GraphAPIError as e:
+        logger.error("GET_EMAIL_GRAPH_ERROR status=%d detail=%s", e.status_code, e.detail)
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
     except Exception as e:
-        logger.error(f"Error fetching email {message_id}: {e}")
+        logger.exception("GET_EMAIL_UNEXPECTED_ERROR")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -307,12 +406,21 @@ async def get_email_attachments(message_id: str):
     if not graph_service.is_configured():
         raise HTTPException(status_code=400, detail="Microsoft Graph credentials not configured")
 
+    logger.info(
+        "GET_ATTACHMENTS_REQUEST message_id_len=%d mailbox=%s",
+        len(message_id), graph_service.mailbox_address
+    )
+
     try:
         attachments = await graph_service.get_attachments(message_id)
+        logger.info("GET_ATTACHMENTS_OK count=%d", len(attachments))
         return attachments
 
+    except GraphAPIError as e:
+        logger.error("GET_ATTACHMENTS_GRAPH_ERROR status=%d detail=%s", e.status_code, e.detail)
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
     except Exception as e:
-        logger.error(f"Error fetching attachments for {message_id}: {e}")
+        logger.exception("GET_ATTACHMENTS_UNEXPECTED_ERROR")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -400,31 +508,6 @@ async def stream_attachment(message_id: str, attachment_id: str):
         raise
     except Exception as e:
         logger.error(f"Error streaming attachment: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/emails/{message_id}/body")
-async def get_email_body(message_id: str):
-    """
-    Retourne le corps HTML de l'email directement (pour affichage dans iframe via src URL).
-    """
-    from fastapi.responses import HTMLResponse, PlainTextResponse
-
-    graph_service = get_graph_service()
-
-    if not graph_service.is_configured():
-        raise HTTPException(status_code=400, detail="Microsoft Graph credentials not configured")
-
-    try:
-        email = await graph_service.get_email(message_id, include_attachments=False)
-
-        if email.body_content_type and email.body_content_type.lower() == 'html':
-            return HTMLResponse(content=email.body_content or "", status_code=200)
-        else:
-            return PlainTextResponse(content=email.body_content or email.body_preview or "", status_code=200)
-
-    except Exception as e:
-        logger.error(f"Error fetching email body: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -749,6 +832,20 @@ async def analyze_email(message_id: str, force: bool = False):
                                 except Exception:
                                     pass
 
+                        is_new_product = (
+                            product.item_code is None
+                            and decision.supplier_price is None
+                            and not decision.historical_sales
+                        )
+                        logger.info(
+                            "Product classification — item_code=%s case=%s "
+                            "found_in_sap=%s is_truly_new=%s",
+                            product.item_code,
+                            decision.case_type.value,
+                            not product.not_found_in_sap,
+                            is_new_product,
+                        )
+
                         enriched_dict.update({
                             "unit_price": decision.calculated_price,
                             "line_total": decision.calculated_price * product.quantity,
@@ -891,6 +988,18 @@ async def analyze_email(message_id: str, force: bool = False):
             logger.info(f"💾 Analysis persisted to DB for {message_id}")
         except Exception as e:
             logger.warning(f"Could not persist analysis to DB (non-critical): {e}")
+
+        # Stocker les pièces jointes en arrière-plan (non bloquant)
+        if email.has_attachments:
+            try:
+                from services.attachment_storage_service import get_attachment_storage
+                attachment_storage = get_attachment_storage()
+                asyncio.create_task(
+                    attachment_storage.download_and_store_all(message_id, message_id, graph_service)
+                )
+                logger.info(f"Stockage PJ lancé en arrière-plan pour {message_id}")
+            except Exception as e:
+                logger.warning(f"Stockage PJ non lancé (non-critique): {e}")
 
         return result
 
@@ -1614,3 +1723,157 @@ async def recalculate_pricing(message_id: str):
     except Exception as e:
         logger.error(f"Recalculate pricing error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================
+# ENDPOINTS : PIÈCES JOINTES STOCKÉES LOCALEMENT
+# ============================================================
+
+@router.post("/emails/store-attachments")
+async def trigger_attachment_storage(email_id: str = Query(..., description="Microsoft Graph message ID")):
+    """
+    Déclenche le téléchargement et stockage des pièces jointes si pas encore fait.
+    Idempotent : si déjà stockées, retourne la liste existante.
+    """
+    from services.attachment_storage_service import get_attachment_storage
+    storage = get_attachment_storage()
+    graph_service = get_graph_service()
+
+    if not graph_service.is_configured():
+        raise HTTPException(status_code=400, detail="Microsoft Graph credentials not configured")
+
+    # Vérifier si déjà stockées
+    existing = storage.get_stored_attachments(email_id)
+    if existing:
+        return {
+            "email_id": email_id,
+            "stored_count": len(existing),
+            "already_stored": True,
+            "attachments": [a.to_dict() for a in existing],
+        }
+
+    # Télécharger maintenant (synchrone pour avoir le résultat immédiatement)
+    try:
+        stored = await storage.download_and_store_all(email_id, email_id, graph_service)
+        return {
+            "email_id": email_id,
+            "stored_count": len(stored),
+            "already_stored": False,
+            "attachments": [a.to_dict() for a in stored],
+        }
+    except Exception as e:
+        logger.error("Erreur stockage PJ pour %s: %s", email_id[:30], e)
+        raise HTTPException(status_code=500, detail=f"Erreur stockage: {e}")
+
+
+@router.get("/emails/stored-attachments/serve")
+async def serve_stored_attachment(
+    email_id: str = Query(..., description="Microsoft Graph message ID"),
+    attachment_id: str = Query(..., description="Attachment ID"),
+    download: bool = False,
+):
+    """
+    Sert une pièce jointe depuis le stockage local (disque).
+    Plus fiable que /stream car ne nécessite pas de reconnexion Graph.
+
+    Paramètre `download=true` force le téléchargement (Content-Disposition: attachment).
+    Sinon, affichage inline (pour PDF, images).
+    """
+    from fastapi.responses import FileResponse
+    from services.attachment_storage_service import get_attachment_storage, PREVIEWABLE_TYPES
+    import mimetypes
+
+    storage = get_attachment_storage()
+
+    # Chercher le fichier stocké
+    att_path = storage.get_attachment_path(email_id, attachment_id)
+    if att_path is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Pièce jointe non trouvée localement. Lancez /store-attachments d'abord."
+        )
+
+    # Récupérer le nom de fichier original depuis DB
+    stored = storage._get_from_db(email_id, attachment_id)
+    filename = stored.filename if stored else att_path.name
+    content_type = stored.content_type if stored else mimetypes.guess_type(str(att_path))[0]
+    content_type = content_type or "application/octet-stream"
+
+    # Disposition
+    if download or content_type not in PREVIEWABLE_TYPES:
+        disposition = "attachment"
+    else:
+        disposition = "inline"
+
+    safe_name = filename.encode('ascii', errors='replace').decode('ascii')
+
+    return FileResponse(
+        path=str(att_path),
+        media_type=content_type,
+        filename=safe_name,
+        headers={
+            "Content-Disposition": f'{disposition}; filename="{safe_name}"',
+            "Cache-Control": "private, max-age=3600",  # Cache 1h (fichier local stable)
+        }
+    )
+
+
+# ============================================================
+# ENDPOINTS : CORRECTIONS MANUELLES
+# ============================================================
+
+@router.put("/emails/corrections")
+async def save_corrections(
+    email_id: str = Query(..., description="Microsoft Graph message ID"),
+    body: dict = Body(...),
+):
+    """
+    Sauvegarde des corrections manuelles sur les données extraites.
+
+    Body attendu :
+    ```json
+    {
+      "corrections": [
+        {
+          "field_type": "product",
+          "field_index": 0,
+          "field_name": "quantity",
+          "corrected_value": 15,
+          "original_value": 10
+        },
+        {
+          "field_type": "client",
+          "field_name": "card_name",
+          "corrected_value": "MARMARA CAM TURKEY"
+        }
+      ]
+    }
+    ```
+    """
+    from services.quote_corrections_db import get_quote_corrections_db
+    db = get_quote_corrections_db()
+
+    corrections_list = body.get("corrections", [])
+    if not corrections_list:
+        raise HTTPException(status_code=400, detail="'corrections' list is required and must not be empty")
+
+    saved = db.save_corrections_batch(email_id, corrections_list)
+    return {
+        "email_id": email_id,
+        "saved_count": len(saved),
+        "corrections": [c.to_dict() for c in saved],
+    }
+
+
+@router.delete("/emails/corrections")
+async def delete_correction(
+    email_id: str = Query(..., description="Microsoft Graph message ID"),
+    field_type: str = Query(...),
+    field_name: str = Query(...),
+    field_index: Optional[int] = Query(None),
+):
+    """Supprime une correction spécifique (restitue la valeur originale)."""
+    from services.quote_corrections_db import get_quote_corrections_db
+    db = get_quote_corrections_db()
+    db.delete_correction(email_id, field_type, field_name, field_index)
+    return {"success": True, "message": f"Correction {field_type}/{field_name} supprimée"}

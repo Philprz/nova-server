@@ -7,6 +7,8 @@ Token caching au niveau module avec expiration automatique.
 import os
 import time
 import logging
+import base64
+import json
 import httpx
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel
@@ -15,6 +17,37 @@ from dotenv import load_dotenv
 load_dotenv()
 
 logger = logging.getLogger(__name__)
+
+
+class GraphAPIError(Exception):
+    """Erreur Microsoft Graph API avec conservation du vrai code HTTP."""
+
+    def __init__(self, status_code: int, detail: str):
+        self.status_code = status_code
+        self.detail = detail
+        super().__init__(detail)
+
+
+def detect_token_type(token: str) -> str:
+    """
+    Détecte si le token JWT est delegated (scp) ou application (roles).
+    Décodage sans vérification de signature – uniquement pour logging.
+    """
+    try:
+        parts = token.split(".")
+        if len(parts) < 2:
+            return "unknown"
+        payload = parts[1]
+        # Padding base64url
+        payload += "=" * (-len(payload) % 4)
+        claims = json.loads(base64.b64decode(payload).decode("utf-8"))
+        if "scp" in claims:
+            return "delegated"
+        if "roles" in claims:
+            return "application"
+        return "unknown"
+    except Exception:
+        return "unknown"
 
 # Cache du token au niveau module
 _token_cache = {
@@ -138,6 +171,14 @@ class GraphService:
 
         url = f"{self.graph_base_url}{endpoint}"
 
+        # ── Logging structuré AVANT l'appel ──────────────────────────────
+        token_type = detect_token_type(token)
+        logger.info(
+            "GRAPH_REQUEST method=%s url=%s token_type=%s",
+            method, url, token_type,
+            extra={"params": str(params)[:200] if params else None}
+        )
+
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.request(
                 method=method,
@@ -150,8 +191,14 @@ class GraphService:
                 }
             )
 
+            # ── Logging structuré APRÈS l'appel ──────────────────────────
+            logger.info(
+                "GRAPH_RESPONSE status=%d url=%s body_preview=%s",
+                response.status_code, url, response.text[:500] if response.content else ""
+            )
+
             if response.status_code == 401:
-                # Token expiré, invalider le cache et réessayer
+                # Token expiré, invalider le cache et réessayer une fois
                 global _token_cache
                 _token_cache["access_token"] = None
                 _token_cache["expires_at"] = 0
@@ -168,11 +215,21 @@ class GraphService:
                     }
                 )
 
+                logger.info(
+                    "GRAPH_RETRY status=%d url=%s",
+                    response.status_code, url
+                )
+
             if response.status_code >= 400:
                 error_data = response.json() if response.content else {}
-                error_msg = error_data.get("error", {}).get("message", f"Graph API error ({response.status_code})")
-                logger.error(f"Graph API error: {error_msg}")
-                raise Exception(error_msg)
+                error_msg = error_data.get("error", {}).get("message",
+                    f"Graph API error ({response.status_code})")
+                logger.error(
+                    "GRAPH_ERROR status=%d url=%s message=%s body=%s",
+                    response.status_code, url, error_msg, response.text[:1000]
+                )
+                # Lever GraphAPIError avec le VRAI code HTTP (pas 500)
+                raise GraphAPIError(status_code=response.status_code, detail=error_msg)
 
             return response.json() if response.content else {}
 
@@ -181,6 +238,7 @@ class GraphService:
         token = await self.get_access_token()
 
         url = f"{self.graph_base_url}{endpoint}"
+        logger.info("GRAPH_REQUEST_RAW url=%s", url)
 
         async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.get(
@@ -188,8 +246,13 @@ class GraphService:
                 headers={"Authorization": f"Bearer {token}"}
             )
 
+            logger.info("GRAPH_RESPONSE_RAW status=%d url=%s", response.status_code, url)
+
             if response.status_code >= 400:
-                raise Exception(f"Graph API error ({response.status_code})")
+                raise GraphAPIError(
+                    status_code=response.status_code,
+                    detail=f"Graph API raw error ({response.status_code})"
+                )
 
             return response.content
 

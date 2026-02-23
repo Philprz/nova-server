@@ -1,13 +1,17 @@
 import { useState, useEffect } from 'react';
-import { ArrowLeft, CheckCircle, Calculator, FileText, TrendingUp, Building2, Package, Search, Loader2, UserCheck, UserPlus, AlertCircle, Plus, RefreshCw, Mail, Paperclip, Eye, ChevronDown, ChevronUp } from 'lucide-react';
+import { ArrowLeft, CheckCircle, Calculator, FileText, TrendingUp, Building2, Package, Search, Loader2, UserCheck, UserPlus, AlertCircle, Plus, RefreshCw, Mail, Paperclip } from 'lucide-react';
 import { ProcessedEmail } from '@/types/email';
 import { CreateItemDialog } from './CreateItemDialog';
 import { PriceEditorDialog } from './PriceEditorDialog';
+import { EmailSourceTab } from './EmailSourceTab';
+import { AttachmentsTab } from './AttachmentsTab';
+import { ExtractedDataTab } from './ExtractedDataTab';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Input } from '@/components/ui/input';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Table,
   TableBody,
@@ -16,14 +20,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { recalculatePricing, fetchGraphEmail } from '@/lib/graphApi';
-import type { GraphEmail } from '@/lib/graphApi';
+import { recalculatePricing } from '@/lib/graphApi';
 import { toast } from 'sonner';
 
 interface SapClient {
@@ -65,13 +62,6 @@ export function QuoteSummary({ quote, onValidate, onBack }: QuoteSummaryProps) {
 
   // État pour le recalcul des prix
   const [recalculating, setRecalculating] = useState(false);
-
-  // État pour la visualisation de l'email source
-  const [showEmailContent, setShowEmailContent] = useState(false);
-  const [viewingAttachment, setViewingAttachment] = useState<{ name: string; url: string; contentType: string } | null>(null);
-  const [loadingAttachment] = useState<string | null>(null);
-  const [fullEmail, setFullEmail] = useState<GraphEmail | null>(null);
-  const [loadingEmail, setLoadingEmail] = useState(false);
 
   // État pour le dialog de création d'article
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
@@ -281,39 +271,6 @@ export function QuoteSummary({ quote, onValidate, onBack }: QuoteSummaryProps) {
     setCreateNewClient(true);
   };
 
-  // Ouvrir/fermer l'email source — fetche le corps complet + attachments si nécessaire
-  const handleToggleEmail = async () => {
-    const opening = !showEmailContent;
-    setShowEmailContent(opening);
-
-    if (!opening || fullEmail) return; // Déjà chargé ou on ferme
-
-    const needsFullBody = !quote.email.body?.content || quote.email.body.content === quote.email.bodyPreview;
-    const needsAttachments = quote.email.hasAttachments && quote.email.attachments.length === 0;
-
-    if (!needsFullBody && !needsAttachments) return; // Données déjà disponibles
-
-    setLoadingEmail(true);
-    try {
-      const result = await fetchGraphEmail(quote.email.id);
-      if (result.success && result.data) {
-        setFullEmail(result.data);
-      }
-    } catch {
-      toast.error('Impossible de charger le contenu de l\'email');
-    } finally {
-      setLoadingEmail(false);
-    }
-  };
-
-  // Ouvrir une pièce jointe dans le viewer via l'endpoint de streaming
-  const openAttachment = (att: { id: string; name: string; contentType: string; size: number; contentBytes?: string }) => {
-    const emailId = encodeURIComponent(quote.email.id);
-    const attId = encodeURIComponent(att.id);
-    const streamUrl = `/api/graph/emails/${emailId}/attachments/${attId}/stream`;
-    setViewingAttachment({ name: att.name, url: streamUrl, contentType: att.contentType });
-  };
-
   // Recalculer les prix automatiquement
   const handleRecalculatePricing = async () => {
     if (!quote.email?.id) {
@@ -478,163 +435,34 @@ export function QuoteSummary({ quote, onValidate, onBack }: QuoteSummaryProps) {
         <p className="text-muted-foreground">Pré-analyse automatique avant création SAP</p>
       </div>
 
-      {/* Email source */}
-      <Card className="card-elevated">
-        <CardHeader
-          className="pb-3 cursor-pointer select-none"
-          onClick={handleToggleEmail}
-        >
-          <CardTitle className="flex items-center justify-between text-lg">
-            <span className="flex items-center gap-2">
-              <Mail className="w-5 h-5 text-primary" />
-              Email source
-            </span>
-            <div className="flex items-center gap-2">
-              {quote.email.hasAttachments && (
-                <Badge variant="outline" className="text-xs">
-                  <Paperclip className="w-3 h-3 mr-1" />
-                  {fullEmail ? fullEmail.attachments.length : quote.email.attachments.length || '?'} PJ
-                </Badge>
-              )}
-              {showEmailContent ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
-            </div>
-          </CardTitle>
-          <div className="grid grid-cols-2 gap-1 text-sm mt-1 pointer-events-none">
-            <div>
-              <span className="text-muted-foreground">De : </span>
-              <span className="font-medium">{quote.email.from.emailAddress.name}</span>
-              <span className="text-muted-foreground text-xs ml-1">({quote.email.from.emailAddress.address})</span>
-            </div>
-            <div>
-              <span className="text-muted-foreground">Reçu : </span>
-              <span>{new Date(quote.email.receivedDateTime).toLocaleString('fr-FR')}</span>
-            </div>
-            <div className="col-span-2">
-              <span className="text-muted-foreground">Objet : </span>
-              <span className="font-medium">{quote.email.subject}</span>
-            </div>
-          </div>
-        </CardHeader>
-
-        {showEmailContent && (
-          <CardContent className="space-y-4 pt-0">
-            <Separator />
-
-            {loadingEmail ? (
-              <div className="flex items-center justify-center py-6 text-muted-foreground gap-2">
-                <Loader2 className="w-4 h-4 animate-spin" />
-                Chargement du contenu...
-              </div>
-            ) : (
-              <>
-                {/* Corps de l'email */}
-                <div>
-                  <p className="text-xs text-muted-foreground mb-2 font-medium uppercase tracking-wide">Corps du message</p>
-                  <div className="border rounded overflow-hidden bg-white">
-                    {(() => {
-                      const bodyType = fullEmail?.body_content_type || quote.email.body?.contentType;
-                      const isHtml = bodyType === 'html' || bodyType === 'HTML';
-                      if (isHtml) {
-                        // Utiliser l'endpoint /body pour éviter les restrictions de sandbox
-                        const bodyUrl = `/api/graph/emails/${encodeURIComponent(quote.email.id)}/body`;
-                        return (
-                          <iframe
-                            src={bodyUrl}
-                            className="w-full"
-                            style={{ height: '300px', border: 'none' }}
-                            title="Contenu email"
-                          />
-                        );
-                      }
-                      const bodyContent = fullEmail?.body_content || quote.email.body?.content;
-                      return (
-                        <pre className="p-3 text-sm text-foreground whitespace-pre-wrap max-h-64 overflow-y-auto font-sans">
-                          {bodyContent || quote.email.bodyPreview || '(Contenu non disponible)'}
-                        </pre>
-                      );
-                    })()}
-                  </div>
-                </div>
-
-                {/* Pièces jointes */}
-                {(() => {
-                  const attachments = fullEmail
-                    ? fullEmail.attachments.map(a => ({ id: a.id, name: a.name, contentType: a.content_type, size: a.size, contentBytes: a.content_bytes }))
-                    : quote.email.attachments;
-                  if (attachments.length === 0 && !quote.email.hasAttachments) return null;
-                  return (
-                    <div>
-                      <p className="text-xs text-muted-foreground mb-2 font-medium uppercase tracking-wide">
-                        Pièces jointes {attachments.length === 0 && quote.email.hasAttachments ? '(chargement…)' : ''}
-                      </p>
-                      <div className="space-y-2">
-                        {attachments.map((att) => (
-                          <div key={att.id} className="flex items-center justify-between p-2 border rounded bg-muted/20">
-                            <div className="flex items-center gap-2 min-w-0">
-                              <Paperclip className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-                              <span className="text-sm font-medium truncate">{att.name}</span>
-                              <span className="text-xs text-muted-foreground flex-shrink-0">
-                                ({Math.round(att.size / 1024)} Ko)
-                              </span>
-                            </div>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={(e) => { e.stopPropagation(); openAttachment(att); }}
-                              className="ml-2 flex-shrink-0"
-                            >
-                              <Eye className="w-3 h-3 mr-1" />
-                              Visualiser
-                            </Button>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })()}
-              </>
+      {/* Onglets principaux */}
+      <Tabs defaultValue="synthese">
+        <TabsList className="w-full justify-start">
+          <TabsTrigger value="synthese" className="flex items-center gap-1.5">
+            <FileText className="w-3.5 h-3.5" />
+            Synthèse
+          </TabsTrigger>
+          <TabsTrigger value="email" className="flex items-center gap-1.5">
+            <Mail className="w-3.5 h-3.5" />
+            Email source
+          </TabsTrigger>
+          <TabsTrigger value="pieces-jointes" className="flex items-center gap-1.5">
+            <Paperclip className="w-3.5 h-3.5" />
+            Pièces jointes
+            {quote.email.hasAttachments && (
+              <Badge variant="secondary" className="ml-1 text-[10px] px-1 py-0 h-4">
+                {quote.email.attachments.length || '?'}
+              </Badge>
             )}
-          </CardContent>
-        )}
-      </Card>
+          </TabsTrigger>
+          <TabsTrigger value="donnees" className="flex items-center gap-1.5">
+            <CheckCircle className="w-3.5 h-3.5" />
+            Données extraites
+          </TabsTrigger>
+        </TabsList>
 
-      {/* Dialog viewer pièce jointe */}
-      {viewingAttachment && (
-        <Dialog open onOpenChange={() => setViewingAttachment(null)}>
-          <DialogContent className="max-w-5xl p-0 overflow-hidden" style={{ height: '90vh' }}>
-            <DialogHeader className="px-4 py-3 border-b flex-row items-center justify-between">
-              <DialogTitle className="flex items-center gap-2 text-base">
-                <Paperclip className="w-4 h-4" />
-                {viewingAttachment.name}
-              </DialogTitle>
-              <a
-                href={viewingAttachment.url}
-                download={viewingAttachment.name}
-                className="text-xs text-muted-foreground hover:text-foreground underline mr-8"
-                onClick={(e) => e.stopPropagation()}
-              >
-                Télécharger
-              </a>
-            </DialogHeader>
-            {viewingAttachment.contentType.startsWith('image/') ? (
-              <div className="flex items-center justify-center p-4 overflow-auto" style={{ height: 'calc(90vh - 60px)' }}>
-                <img
-                  src={viewingAttachment.url}
-                  alt={viewingAttachment.name}
-                  className="max-w-full max-h-full object-contain"
-                />
-              </div>
-            ) : (
-              <iframe
-                src={viewingAttachment.url}
-                className="w-full"
-                style={{ height: 'calc(90vh - 60px)', border: 'none' }}
-                title={viewingAttachment.name}
-              />
-            )}
-          </DialogContent>
-        </Dialog>
-      )}
+        {/* Onglet Synthèse — contenu principal */}
+        <TabsContent value="synthese" className="space-y-6 mt-4">
 
       {/* Client Block avec recherche SAP */}
       <Card className="card-elevated">
@@ -988,6 +816,37 @@ export function QuoteSummary({ quote, onValidate, onBack }: QuoteSummaryProps) {
           </div>
         </CardContent>
       </Card>
+
+        </TabsContent>
+
+        {/* Onglet Email source */}
+        <TabsContent value="email" className="mt-4">
+          <EmailSourceTab
+            emailId={quote.email.id}
+            fromName={quote.email.from.emailAddress.name}
+            fromAddress={quote.email.from.emailAddress.address}
+            subject={quote.email.subject}
+            receivedDateTime={quote.email.receivedDateTime}
+            bodyPreview={quote.email.bodyPreview}
+          />
+        </TabsContent>
+
+        {/* Onglet Pièces jointes */}
+        <TabsContent value="pieces-jointes" className="mt-4">
+          <AttachmentsTab
+            emailId={quote.email.id}
+            hasAttachments={quote.email.hasAttachments}
+          />
+        </TabsContent>
+
+        {/* Onglet Données extraites */}
+        <TabsContent value="donnees" className="mt-4">
+          <ExtractedDataTab
+            emailId={quote.email.id}
+            analysisResult={quote.analysisResult as any}
+          />
+        </TabsContent>
+      </Tabs>
 
       {/* Actions */}
       <div className="flex justify-between items-center pt-4">

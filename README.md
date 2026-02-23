@@ -1,6 +1,6 @@
 # NOVA-SERVER - Plateforme Intelligente de Gestion Commerciale
 
-**Statut : 🟢 OPÉRATIONNEL** | **Version : 2.7.0** | **Dernière MAJ : 13/02/2026**
+**Statut : 🟢 OPÉRATIONNEL** | **Version : 2.8.0** | **Dernière MAJ : 20/02/2026**
 
 ## 🎯 Vue d'Ensemble
 
@@ -1171,6 +1171,261 @@ print([t[0] for t in cursor.fetchall()])"
 
 # Résultat attendu: ['email_analysis', 'mail_processing_log', 'quote_draft']
 ```
+
+#### 2.8 Visualisation Email Source + Stockage PJ + Corrections Manuelles ⭐ NOUVEAU (v2.8.0)
+
+**Objectif :** Permettre à l'utilisateur de valider un devis en ayant accès à toutes les sources d'information : email original, pièces jointes, données extraites corrigibles — depuis une interface unifiée en onglets.
+
+**Problématique résolue :**
+
+Avant v2.8.0 :
+
+- ❌ Corps de l'email affiché via `<iframe>` → bloqué par cookies/CORS en production
+- ❌ Pièces jointes streamées depuis Graph API → ré-authentification à chaque visualisation
+- ❌ Aucun moyen de corriger les données extraites par l'IA avant envoi SAP
+- ❌ Interface QuoteSummary sans navigation structurée
+
+**Solution v2.8.0 :**
+
+Navigation par onglets et stockage local des pièces jointes.
+
+**Architecture — 4 onglets dans QuoteSummary :**
+
+```
+┌────────────────────────────────────────────────────────────┐
+│  QuoteSummary (React)                                       │
+│  ┌──────────┬──────────────┬──────────────┬─────────────┐  │
+│  │ Synthèse │ Email source │ Pièces jointes│ Données     │  │
+│  │ (défaut) │              │   (N)         │ extraites   │  │
+│  └──────────┴──────────────┴──────────────┴─────────────┘  │
+│                                                              │
+│  Synthèse : Client SAP + Articles + Pricing + Justification │
+│  Email    : Métadonnées + Corps HTML (fetch + DOMPurify)    │
+│  PJ       : Liste + Visualiseur (stockage local)            │
+│  Données  : Tableau éditable avec corrections persistées    │
+└────────────────────────────────────────────────────────────┘
+```
+
+**Onglet "Email source" — EmailSourceTab.tsx :**
+
+- `fetch()` + `DOMPurify.sanitize()` remplace l'ancienne approche `<iframe>`
+- Affiche métadonnées (expéditeur, sujet, date reçue) + corps HTML
+- Fallback sur `bodyPreview` si le body ne charge pas
+- Protection XSS : tags `script`, `iframe`, `form`, `input` filtrés
+
+**Onglet "Pièces jointes" — AttachmentsTab.tsx :**
+
+- Chargement depuis `GET /api/graph/emails/{id}/stored-attachments` (disque local)
+- Si PJ non encore stockées : bouton "Télécharger maintenant" (`POST /store-attachments`)
+- Visualiseur intégré : `<img>` pour images, `<iframe>` pour PDF (via `FileResponse` local)
+- Téléchargement direct via `?download=true`
+- Avantage : aucune ré-authentification Graph, fiabilité maximale
+
+**Onglet "Données extraites" — ExtractedDataTab.tsx :**
+
+| Champ | Valeur extraite | Action |
+| ----- | --------------- | ------ |
+| Client (nom) | MARMARA CAM | ✏️ Corriger |
+| Client (code SAP) | C00042 | ✏️ Corriger |
+| Produit 1 — Référence | C315-6305RS | ✏️ Corriger |
+| Produit 1 — Quantité | 10 | ✏️ Corriger |
+| Délai de livraison | Urgent | ✏️ Corriger |
+
+- Édition inline (clic crayon → Input → Valider)
+- Corrections persistées via `PUT /api/graph/emails/{id}/corrections`
+- Badge "Corrigé" + affichage valeur originale barrée
+- Annulation correction via `DELETE /corrections/{field_type}/{field_name}`
+- **Corrections appliquées automatiquement** lors de l'envoi dans SAP (`apply_corrections()`)
+
+**Backend — Nouveau service de stockage PJ :**
+
+```python
+class AttachmentStorageService:
+    """
+    Télécharge et stocke localement les PJ Office 365.
+    Stockage : data/attachments/{sha256_email_id}/{att_id}_{filename}
+    Limite : 15 MB par pièce jointe
+    """
+    async def download_and_store_all(email_id, message_id, graph_service)
+    def get_stored_attachments(email_id) -> List[StoredAttachment]
+    def get_attachment_path(email_id, attachment_id) -> Optional[Path]
+    def cleanup_old_attachments(days=30)
+```
+
+Table SQLite `stored_attachments` dans `email_analysis.db` :
+```sql
+CREATE TABLE stored_attachments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email_id TEXT NOT NULL,
+    attachment_id TEXT NOT NULL,
+    filename TEXT NOT NULL,
+    content_type TEXT,
+    size INTEGER,
+    local_path TEXT NOT NULL,
+    downloaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(email_id, attachment_id)
+)
+```
+
+**Backend — Service corrections manuelles :**
+
+```python
+class QuoteCorrectionsDB:
+    """
+    Persistance des corrections sur les champs extraits.
+    field_type : "client" | "product" | "delivery" | "general"
+    Désérialisation automatique (int, float, bool, JSON, str)
+    """
+    def save_correction(email_id, field_type, field_name, corrected_value, ...)
+    def get_corrections(email_id) -> List[QuoteCorrection]
+    def apply_corrections(email_id, analysis_result) -> analysis_result  # deepcopy overlay
+    def delete_correction(email_id, field_type, field_name, field_index)
+```
+
+Table SQLite `quote_corrections` dans `email_analysis.db` :
+```sql
+CREATE TABLE quote_corrections (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email_id TEXT NOT NULL,
+    field_type TEXT NOT NULL,       -- "client" | "product" | "delivery"
+    field_index INTEGER,            -- Index produit (0-based) ou NULL
+    field_name TEXT NOT NULL,
+    original_value TEXT,
+    corrected_value TEXT NOT NULL,
+    corrected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    corrected_by TEXT DEFAULT 'user',
+    UNIQUE(email_id, field_type, field_index, field_name)
+)
+```
+
+**Nouveaux endpoints API (`routes/routes_graph.py`) :**
+
+```
+GET  /api/graph/emails/{id}/stored-attachments
+     → Liste les PJ stockées localement
+
+POST /api/graph/emails/{id}/store-attachments
+     → Déclenche téléchargement/stockage (idempotent)
+
+GET  /api/graph/emails/{id}/stored-attachments/{att_id}/serve
+     → Sert le fichier depuis disque (FileResponse)
+     → Paramètre ?download=true pour forcer téléchargement
+
+GET  /api/graph/emails/{id}/corrections
+     → Lit toutes les corrections manuelles
+
+PUT  /api/graph/emails/{id}/corrections
+     → Sauvegarde corrections (batch)
+     Body: { corrections: [{field_type, field_name, field_index, corrected_value, original_value}] }
+
+DELETE /api/graph/emails/{id}/corrections/{field_type}/{field_name}
+     → Supprime une correction (avec ?field_index= optionnel)
+```
+
+**Déclenchement automatique stockage PJ :**
+
+Lors de chaque analyse email (`POST /analyze`), si l'email a des pièces jointes, le téléchargement est lancé en arrière-plan (non-bloquant) :
+
+```python
+# Dans analyze_email_endpoint() — routes_graph.py
+if email.has_attachments:
+    asyncio.create_task(
+        attachment_storage.download_and_store_all(message_id, message_id, graph_service)
+    )
+```
+
+#### 2.9 Service SAP B1 Sales Quotation ⭐ NOUVEAU (v2.8.0)
+
+**Objectif :** Service dédié à la création de devis SAP Business One (Sales Quotations) depuis les données NOVA, avec gestion robuste des erreurs et traçabilité complète.
+
+**Fonctionnalités :**
+
+- 📄 **Création Sales Quotation** via SAP B1 Service Layer (`POST /Quotations`)
+- 🔐 **Authentification B1SESSION** avec retry automatique sur 401
+- ⏱️ **Timeout configurable** (10 secondes par défaut)
+- 📦 **Produits SAP ou hors-SAP** (ItemCode optionnel)
+- 🔍 **Validation Pydantic** des données avant envoi
+- 📝 **Payload audit** retourné pour traçabilité
+
+**Modèles :**
+
+```python
+class QuotationLine(BaseModel):
+    ItemCode: Optional[str]         # Optionnel (produit non-SAP supporté)
+    ItemDescription: str            # Obligatoire
+    Quantity: float                 # > 0
+    UnitPrice: Optional[float]
+    DiscountPercent: float = 0.0    # 0-100%
+    TaxCode: Optional[str]
+    WarehouseCode: Optional[str]
+    FreeText: Optional[str]
+
+class QuotationPayload(BaseModel):
+    CardCode: str                   # Obligatoire
+    DocumentLines: List[QuotationLine]  # Au moins 1 ligne
+    DocDate: Optional[str]          # Format YYYY-MM-DD (date du jour si absent)
+    DocDueDate: Optional[str]
+    ValidUntil: Optional[str]
+    Comments: Optional[str]
+    SalesPersonCode: Optional[int]
+    NumAtCard: Optional[str]
+    # Champs NOVA (exclus du payload SAP) :
+    email_id: Optional[str]
+    email_subject: Optional[str]
+    nova_source: str = "NOVA_MAIL_TO_BIZ"
+```
+
+**Endpoints :**
+
+```
+POST /api/sap/quotation
+     → Crée un devis SAP
+     → 201 : {doc_entry, doc_num, doc_total, card_name, sap_payload}
+     → 503 : Timeout ou échec connexion SAP
+     → 422 : Erreur métier SAP (CardCode inconnu, etc.)
+
+GET  /api/sap/quotation/status
+     → Health check connexion SAP
+```
+
+**Tests :**
+
+```bash
+pytest tests/test_sap_quotation.py -v
+# 24 tests - 0 erreurs
+# TestQuotationModels (5), TestBuildSapPayload (9), TestCreateSalesQuotation (5), TestSingleton (1)
+```
+
+**Fichiers créés :**
+
+- `services/sap_quotation_service.py` - Service avec auth B1SESSION, retry 401, timeout 10s
+- `routes/routes_sap_quotation.py` - Endpoints POST /api/sap/quotation
+- `tests/test_sap_quotation.py` - 24 tests unitaires (mock HTTP)
+
+**Bénéfices v2.8.0 :**
+
+- ✅ **Visualisation complète** — email, PJ et données dans un seul écran
+- ✅ **Fiabilité PJ** — stockage local, zéro dépendance Graph pour la consultation
+- ✅ **Corrections traçables** — persistées en SQLite, appliquées automatiquement au payload SAP
+- ✅ **Interface structurée** — 4 onglets dans QuoteSummary (shadcn/ui Tabs)
+- ✅ **Sécurité HTML** — DOMPurify sur le corps email (protection XSS)
+- ✅ **Quotation SAP robuste** — retry 401, timeout, validation Pydantic, 24 tests
+
+**Fichiers créés/modifiés :**
+
+| Fichier | Action | Lignes |
+| ------- | ------ | ------ |
+| `services/attachment_storage_service.py` | Créé | ~400 |
+| `services/quote_corrections_db.py` | Créé | ~340 |
+| `services/sap_quotation_service.py` | Créé | ~280 |
+| `routes/routes_sap_quotation.py` | Créé | ~120 |
+| `tests/test_sap_quotation.py` | Créé | ~362 |
+| `mail-to-biz/src/components/EmailSourceTab.tsx` | Créé | ~150 |
+| `mail-to-biz/src/components/AttachmentsTab.tsx` | Créé | ~180 |
+| `mail-to-biz/src/components/ExtractedDataTab.tsx` | Créé | ~440 |
+| `mail-to-biz/src/lib/graphApi.ts` | Modifié | +80 lignes |
+| `mail-to-biz/src/components/QuoteSummary.tsx` | Modifié | restructuré Tabs |
+| `routes/routes_graph.py` | Modifié | +5 endpoints |
 
 ---
 

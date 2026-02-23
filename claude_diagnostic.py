@@ -69,7 +69,7 @@ class ClaudeDiagnostic:
         
         # Test simple avec le modèle utilisé
         payload = {
-            "model": "claude-3-7-sonnet-20250219",
+            "model": "claude-sonnet-4-6",
             "max_tokens": 100,
             "system": "Tu es un assistant de test. Réponds simplement 'TEST OK'.",
             "messages": [
