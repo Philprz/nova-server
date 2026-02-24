@@ -35,7 +35,7 @@ echo   1/2 - Demarrage Backend FastAPI
 echo ========================================
 echo.
 echo Demarrage serveur FastAPI sur http://localhost:8001...
-start "NOVA Backend" cmd /k "python main.py"
+start "NOVA Backend" cmd /k ".venv\Scripts\python.exe main.py"
 
 REM Attendre que le backend demarre
 timeout /t 5 /nobreak >nul

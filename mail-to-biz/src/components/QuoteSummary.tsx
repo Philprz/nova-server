@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { ArrowLeft, CheckCircle, Calculator, FileText, TrendingUp, Building2, Package, Search, Loader2, UserCheck, UserPlus, AlertCircle, Plus, RefreshCw, Mail, Paperclip } from 'lucide-react';
+import { ArrowLeft, CheckCircle, Calculator, FileText, TrendingUp, Building2, Package, Search, Loader2, UserCheck, UserPlus, AlertCircle, RefreshCw, Mail, Paperclip, RotateCcw, X } from 'lucide-react';
 import { ProcessedEmail } from '@/types/email';
 import { CreateItemDialog } from './CreateItemDialog';
 import { PriceEditorDialog } from './PriceEditorDialog';
@@ -20,7 +20,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { recalculatePricing } from '@/lib/graphApi';
+import { recalculatePricing, excludeProduct, setManualCode, retrySearchProduct } from '@/lib/graphApi';
 import { toast } from 'sonner';
 
 interface SapClient {
@@ -59,6 +59,22 @@ export function QuoteSummary({ quote, onValidate, onBack }: QuoteSummaryProps) {
   // État pour la recherche d'articles SAP
   const [searchingArticle, setSearchingArticle] = useState<{[key: number]: boolean}>({});
   const [articleStatus, setArticleStatus] = useState<{[key: number]: {found: boolean, message: string, itemCode?: string}}>({});
+
+  // État pour les quantités modifiées
+  const [quantityOverrides, setQuantityOverrides] = useState<{[lineNum: number]: number}>({});
+
+  // État pour les articles ignorés (exclus du devis)
+  const [ignoredItems, setIgnoredItems] = useState<{[lineNum: number]: boolean}>({});
+
+  // État pour la saisie manuelle du code SAP
+  const [showManualInput, setShowManualInput] = useState<{[lineNum: number]: boolean}>({});
+  const [manualCodeInput, setManualCodeInput] = useState<{[lineNum: number]: string}>({});
+  const [manualCodeLoading, setManualCodeLoading] = useState<{[lineNum: number]: boolean}>({});
+
+  // État pour les résultats de relance de recherche
+  const [retryResults, setRetryResults] = useState<{[lineNum: number]: any[]}>({});
+  const [showRetryResults, setShowRetryResults] = useState<{[lineNum: number]: boolean}>({});
+  const [retryLoading, setRetryLoading] = useState<{[lineNum: number]: boolean}>({});
 
   // État pour le recalcul des prix
   const [recalculating, setRecalculating] = useState(false);
@@ -138,8 +154,10 @@ export function QuoteSummary({ quote, onValidate, onBack }: QuoteSummaryProps) {
     let count = 0;
 
     articles.forEach((line: any) => {
+      if (ignoredItems[line.LineNum]) return;
       if (line.unit_price && line.Quantity) {
-        const lineTotal = line.unit_price * line.Quantity;
+        const effectiveQty = quantityOverrides[line.LineNum] ?? line.Quantity;
+        const lineTotal = line.unit_price * effectiveQty;
         subtotal += lineTotal;
 
         if (line.margin_applied) {
@@ -331,6 +349,100 @@ export function QuoteSummary({ quote, onValidate, onBack }: QuoteSummaryProps) {
       toast.error(error.message || "Erreur lors du calcul des prix");
     } finally {
       setRecalculating(false);
+    }
+  };
+
+  // Gérer la modification de quantité
+  const handleQuantityChange = (lineNum: number, value: string) => {
+    const parsed = parseInt(value, 10);
+    if (!isNaN(parsed) && parsed > 0) {
+      setQuantityOverrides(prev => ({ ...prev, [lineNum]: parsed }));
+    }
+  };
+
+  // Réinitialiser la quantité à la valeur initiale
+  const handleQuantityReset = (lineNum: number) => {
+    setQuantityOverrides(prev => {
+      const updated = { ...prev };
+      delete updated[lineNum];
+      return updated;
+    });
+  };
+
+  // Ignorer un article (Option C)
+  const handleIgnoreItem = async (lineNum: number, itemCode: string) => {
+    try {
+      await excludeProduct(quote.email.id, itemCode, "Ignoré par l'utilisateur");
+      setIgnoredItems(prev => ({ ...prev, [lineNum]: true }));
+      toast.success('Article ignoré et exclu du devis');
+    } catch (error: any) {
+      toast.error(error.message || "Erreur lors de l'exclusion");
+    }
+  };
+
+  // Valider le code SAP saisi manuellement (Option A)
+  const handleManualCodeSubmit = async (lineNum: number, originalItemCode: string) => {
+    const code = (manualCodeInput[lineNum] || '').trim();
+    if (!code) return;
+
+    setManualCodeLoading(prev => ({ ...prev, [lineNum]: true }));
+    try {
+      const result = await setManualCode(quote.email.id, originalItemCode, code);
+      setEnrichedArticles(prev => prev.map((a: any) =>
+        a.LineNum === lineNum
+          ? { ...a, ItemCode: result.item_code, ItemDescription: result.item_name, not_found_in_sap: false }
+          : a
+      ));
+      setArticleStatus(prev => ({
+        ...prev,
+        [lineNum]: { found: true, message: `Code validé: ${result.item_code}`, itemCode: result.item_code }
+      }));
+      setShowManualInput(prev => ({ ...prev, [lineNum]: false }));
+      toast.success(`Article associé: ${result.item_name}`);
+    } catch (error: any) {
+      toast.error(error.message || 'Code SAP invalide');
+    } finally {
+      setManualCodeLoading(prev => ({ ...prev, [lineNum]: false }));
+    }
+  };
+
+  // Relancer la recherche SAP (Option B)
+  const handleRetrySearch = async (lineNum: number, itemCode: string, itemDescription: string) => {
+    setRetryLoading(prev => ({ ...prev, [lineNum]: true }));
+    try {
+      const result = await retrySearchProduct(quote.email.id, itemCode, itemDescription);
+      setRetryResults(prev => ({ ...prev, [lineNum]: result.items || [] }));
+      setShowRetryResults(prev => ({ ...prev, [lineNum]: true }));
+      if ((result.items || []).length === 0) {
+        toast.info('Aucun article trouvé pour cette référence');
+      }
+    } catch (error: any) {
+      toast.error(error.message || 'Erreur lors de la recherche');
+    } finally {
+      setRetryLoading(prev => ({ ...prev, [lineNum]: false }));
+    }
+  };
+
+  // Sélectionner un article dans les résultats de relance
+  const handleSelectRetryResult = async (lineNum: number, originalItemCode: string, selectedCode: string, selectedName: string) => {
+    setManualCodeLoading(prev => ({ ...prev, [lineNum]: true }));
+    try {
+      const result = await setManualCode(quote.email.id, originalItemCode, selectedCode);
+      setEnrichedArticles(prev => prev.map((a: any) =>
+        a.LineNum === lineNum
+          ? { ...a, ItemCode: result.item_code, ItemDescription: result.item_name, not_found_in_sap: false }
+          : a
+      ));
+      setArticleStatus(prev => ({
+        ...prev,
+        [lineNum]: { found: true, message: `Article sélectionné: ${result.item_code}`, itemCode: result.item_code }
+      }));
+      setShowRetryResults(prev => ({ ...prev, [lineNum]: false }));
+      toast.success(`Article associé: ${result.item_name}`);
+    } catch (error: any) {
+      toast.error(error.message || "Erreur lors de l'association");
+    } finally {
+      setManualCodeLoading(prev => ({ ...prev, [lineNum]: false }));
     }
   };
 
@@ -615,13 +727,34 @@ export function QuoteSummary({ quote, onValidate, onBack }: QuoteSummaryProps) {
                   const isSearching = searchingArticle[line.LineNum];
 
                   return (
-                    <TableRow key={line.LineNum}>
+                    <TableRow key={line.LineNum} className={ignoredItems[line.LineNum] ? 'opacity-40' : ''}>
                       <TableCell className="font-mono text-sm">
                         {line.ItemCode || 'À définir'}
                       </TableCell>
-                      <TableCell>{line.ItemDescription}</TableCell>
+                      <TableCell className={ignoredItems[line.LineNum] ? 'line-through text-muted-foreground' : ''}>{line.ItemDescription}</TableCell>
                       <TableCell className="text-right">
-                        {line.Quantity} {line.UnitOfMeasure}
+                        <div className="flex items-center justify-end gap-1">
+                          <Input
+                            type="number"
+                            min="1"
+                            value={quantityOverrides[line.LineNum] ?? line.Quantity}
+                            onChange={(e) => handleQuantityChange(line.LineNum, e.target.value)}
+                            className={`w-16 text-right h-7 text-sm px-1 ${quantityOverrides[line.LineNum] !== undefined ? 'border-warning text-warning font-semibold' : ''}`}
+                            disabled={!!ignoredItems[line.LineNum]}
+                          />
+                          {quantityOverrides[line.LineNum] !== undefined && (
+                            <button
+                              onClick={() => handleQuantityReset(line.LineNum)}
+                              className="text-muted-foreground hover:text-foreground transition-colors"
+                              title="Réinitialiser la quantité"
+                            >
+                              <RotateCcw className="w-3 h-3" />
+                            </button>
+                          )}
+                          {line.UnitOfMeasure && (
+                            <span className="text-xs text-muted-foreground">{line.UnitOfMeasure}</span>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell className="text-right">
                         <PriceEditorDialog
@@ -635,8 +768,141 @@ export function QuoteSummary({ quote, onValidate, onBack }: QuoteSummaryProps) {
                         />
                       </TableCell>
                       <TableCell className="text-center">
-                        <div className="flex items-center justify-center gap-2">
-                          {!status ? (
+                        {(() => {
+                          const isIgnored = !!ignoredItems[line.LineNum];
+                          const isNotFound = line.not_found_in_sap === true || (status && !status.found);
+
+                          if (isIgnored) {
+                            return (
+                              <Badge variant="outline" className="text-muted-foreground">
+                                Ignoré
+                              </Badge>
+                            );
+                          }
+
+                          if (status?.found) {
+                            return (
+                              <div>
+                                <Badge className="bg-success/10 text-success border-success/20">
+                                  <CheckCircle className="w-3 h-3 mr-1" />
+                                  Trouvé
+                                </Badge>
+                                {status.message && (
+                                  <p className="text-xs text-muted-foreground mt-1">{status.message}</p>
+                                )}
+                              </div>
+                            );
+                          }
+
+                          if (isNotFound) {
+                            return (
+                              <div className="space-y-1.5">
+                                <Badge variant="outline" className="text-destructive border-destructive">
+                                  <AlertCircle className="w-3 h-3 mr-1" />
+                                  Non trouvé
+                                </Badge>
+
+                                {/* Option A : saisie manuelle */}
+                                {showManualInput[line.LineNum] ? (
+                                  <div className="flex items-center gap-1">
+                                    <Input
+                                      placeholder="Code SAP..."
+                                      value={manualCodeInput[line.LineNum] || ''}
+                                      onChange={(e) => setManualCodeInput(prev => ({ ...prev, [line.LineNum]: e.target.value }))}
+                                      onKeyDown={(e) => e.key === 'Enter' && handleManualCodeSubmit(line.LineNum, line.ItemCode || '')}
+                                      className="h-7 text-xs w-24 px-1"
+                                      autoFocus
+                                    />
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-7 w-7 p-0"
+                                      onClick={() => handleManualCodeSubmit(line.LineNum, line.ItemCode || '')}
+                                      disabled={!!manualCodeLoading[line.LineNum]}
+                                    >
+                                      {manualCodeLoading[line.LineNum]
+                                        ? <Loader2 className="w-3 h-3 animate-spin" />
+                                        : <CheckCircle className="w-3 h-3" />}
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      className="h-7 w-7 p-0"
+                                      onClick={() => setShowManualInput(prev => ({ ...prev, [line.LineNum]: false }))}
+                                    >
+                                      <X className="w-3 h-3" />
+                                    </Button>
+                                  </div>
+
+                                /* Option B : résultats de relance */
+                                ) : showRetryResults[line.LineNum] ? (
+                                  <div className="space-y-1 text-left max-w-[180px]">
+                                    {(retryResults[line.LineNum] || []).length > 0 ? (
+                                      retryResults[line.LineNum].map((item: any) => (
+                                        <button
+                                          key={item.item_code}
+                                          className="flex flex-col w-full text-left px-1.5 py-1 rounded hover:bg-muted/60 transition-colors text-xs"
+                                          onClick={() => handleSelectRetryResult(line.LineNum, line.ItemCode || '', item.item_code, item.item_name)}
+                                          disabled={!!manualCodeLoading[line.LineNum]}
+                                        >
+                                          <span className="font-mono font-medium">{item.item_code}</span>
+                                          <span className="text-muted-foreground truncate">{item.item_name}</span>
+                                        </button>
+                                      ))
+                                    ) : (
+                                      <p className="text-xs text-muted-foreground px-1">Aucun résultat</p>
+                                    )}
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      className="h-6 text-xs w-full"
+                                      onClick={() => setShowRetryResults(prev => ({ ...prev, [line.LineNum]: false }))}
+                                    >
+                                      Fermer
+                                    </Button>
+                                  </div>
+
+                                /* Actions principales */
+                                ) : (
+                                  <div className="flex flex-col gap-1">
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-7 text-xs justify-start px-2"
+                                      onClick={() => setShowManualInput(prev => ({ ...prev, [line.LineNum]: true }))}
+                                    >
+                                      <FileText className="w-3 h-3 mr-1 flex-shrink-0" />
+                                      Saisir code SAP
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-7 text-xs justify-start px-2"
+                                      onClick={() => handleRetrySearch(line.LineNum, line.ItemCode || '', line.ItemDescription)}
+                                      disabled={!!retryLoading[line.LineNum]}
+                                    >
+                                      {retryLoading[line.LineNum]
+                                        ? <Loader2 className="w-3 h-3 mr-1 animate-spin flex-shrink-0" />
+                                        : <RefreshCw className="w-3 h-3 mr-1 flex-shrink-0" />}
+                                      Relancer la recherche
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      className="h-7 text-xs justify-start px-2 text-muted-foreground hover:text-destructive"
+                                      onClick={() => handleIgnoreItem(line.LineNum, line.ItemCode || '')}
+                                    >
+                                      <X className="w-3 h-3 mr-1 flex-shrink-0" />
+                                      Ignorer
+                                    </Button>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          }
+
+                          // Statut non vérifié → bouton Vérifier
+                          return (
                             <Button
                               variant="outline"
                               size="sm"
@@ -652,31 +918,8 @@ export function QuoteSummary({ quote, onValidate, onBack }: QuoteSummaryProps) {
                                 </>
                               )}
                             </Button>
-                          ) : status.found ? (
-                            <Badge className="bg-success/10 text-success border-success/20">
-                              <CheckCircle className="w-3 h-3 mr-1" />
-                              Trouvé
-                            </Badge>
-                          ) : (
-                            <div className="flex items-center gap-2">
-                              <Badge variant="outline" className="text-warning border-warning">
-                                <AlertCircle className="w-3 h-3 mr-1" />
-                                Non trouvé
-                              </Badge>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => createArticle(line.LineNum, line.ItemCode || '', line.ItemDescription)}
-                              >
-                                <Plus className="w-3 h-3 mr-1" />
-                                Créer
-                              </Button>
-                            </div>
-                          )}
-                        </div>
-                        {status && (
-                          <p className="text-xs text-muted-foreground mt-1">{status.message}</p>
-                        )}
+                          );
+                        })()}
                       </TableCell>
                     </TableRow>
                   );
@@ -854,18 +1097,27 @@ export function QuoteSummary({ quote, onValidate, onBack }: QuoteSummaryProps) {
           <ArrowLeft className="w-4 h-4 mr-2" />
           Retour
         </Button>
-        <Button
-          onClick={onValidate}
-          size="lg"
-          disabled={!doc || articles.length === 0 || (!selectedClient && !createNewClient)}
-        >
-          <CheckCircle className="w-4 h-4 mr-2" />
-          {!selectedClient && !createNewClient
+        {(() => {
+          const hasUnresolved = articles.some((line: any) => {
+            if (ignoredItems[line.LineNum]) return false;
+            const st = articleStatus[line.LineNum];
+            return line.not_found_in_sap === true && !(st?.found === true);
+          });
+          const isDisabled = !doc || articles.length === 0 || (!selectedClient && !createNewClient) || hasUnresolved;
+          const label = !selectedClient && !createNewClient
             ? 'Sélectionnez un client'
-            : articles.length > 0
-              ? 'Créer le devis SAP'
-              : 'Extraction incomplète'}
-        </Button>
+            : hasUnresolved
+              ? 'Résolvez les articles non trouvés'
+              : articles.length > 0
+                ? 'Créer le devis SAP'
+                : 'Extraction incomplète';
+          return (
+            <Button onClick={onValidate} size="lg" disabled={isDisabled}>
+              <CheckCircle className="w-4 h-4 mr-2" />
+              {label}
+            </Button>
+          );
+        })()}
       </div>
 
       {/* Dialog de création d'article */}

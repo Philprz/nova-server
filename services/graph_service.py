@@ -309,11 +309,12 @@ class GraphService:
     async def get_email(self, message_id: str, include_attachments: bool = True) -> GraphEmail:
         """
         Récupère un email complet avec son body et optionnellement ses pièces jointes.
-
-        Args:
-            message_id: ID du message
-            include_attachments: Inclure les métadonnées des pièces jointes
         """
+        logger.info(
+            "SVC_STEP_1 get_email mailbox=%s message_id_len=%d include_attachments=%s",
+            self.mailbox_address, len(message_id), include_attachments
+        )
+
         endpoint = f"/users/{self.mailbox_address}/messages/{message_id}"
         params = {
             "$select": "id,subject,from,receivedDateTime,bodyPreview,body,hasAttachments,isRead"
@@ -322,50 +323,95 @@ class GraphService:
         if include_attachments:
             params["$expand"] = "attachments($select=id,name,contentType,size)"
 
+        logger.info("SVC_STEP_2 get_email endpoint=%s", endpoint)
+
         data = await self._make_graph_request("GET", endpoint, params=params)
 
-        from_data = data.get("from", {}).get("emailAddress", {})
-        body_data = data.get("body", {})
+        logger.info(
+            "SVC_STEP_3 get_email data_keys=%s",
+            list(data.keys()) if data else "EMPTY"
+        )
+
+        from_data = data.get("from") or {}
+        from_data = from_data.get("emailAddress") or {}
+        body_data = data.get("body") or {}
+
+        logger.info("SVC_STEP_4 get_email from_keys=%s body_keys=%s", list(from_data.keys()), list(body_data.keys()))
 
         attachments = []
-        for att in data.get("attachments", []):
+        raw_atts = data.get("attachments") or []
+        logger.info("SVC_STEP_5 get_email raw_attachments_count=%d", len(raw_atts))
+
+        for i, att in enumerate(raw_atts):
+            odata_type = att.get("@odata.type", "")
+            logger.info(
+                "SVC_STEP_5_%d attachment odata_type=%s name=%r size=%r",
+                i, odata_type, att.get("name"), att.get("size")
+            )
+            # Ignorer les pièces jointes de type item (emails attachés) – elles n'ont pas de size
+            if "itemAttachment" in odata_type:
+                logger.info("SVC_STEP_5_%d SKIP itemAttachment", i)
+                continue
             attachments.append(GraphAttachment(
-                id=att.get("id", ""),
-                name=att.get("name", ""),
-                content_type=att.get("contentType", ""),
-                size=att.get("size", 0)
+                id=att.get("id") or "",
+                name=att.get("name") or "(sans nom)",
+                content_type=att.get("contentType") or "application/octet-stream",
+                size=att.get("size") or 0
             ))
 
-        return GraphEmail(
-            id=data.get("id", ""),
-            subject=data.get("subject", "(Sans objet)"),
-            from_name=from_data.get("name", ""),
-            from_address=from_data.get("address", ""),
-            received_datetime=data.get("receivedDateTime", ""),
-            body_preview=data.get("bodyPreview", ""),
-            body_content=body_data.get("content", ""),
-            body_content_type=body_data.get("contentType", "text"),
-            has_attachments=data.get("hasAttachments", False),
-            is_read=data.get("isRead", False),
+        logger.info("SVC_STEP_6 get_email building GraphEmail id=%r", data.get("id"))
+
+        email = GraphEmail(
+            id=data.get("id") or "",
+            subject=data.get("subject") or "(Sans objet)",
+            from_name=from_data.get("name") or "",
+            from_address=from_data.get("address") or "",
+            received_datetime=data.get("receivedDateTime") or "",
+            body_preview=data.get("bodyPreview") or "",
+            body_content=body_data.get("content") or "",
+            body_content_type=body_data.get("contentType") or "text",
+            has_attachments=bool(data.get("hasAttachments")),
+            is_read=bool(data.get("isRead")),
             attachments=attachments
         )
 
+        logger.info("SVC_STEP_7 get_email OK subject=%r", email.subject)
+        return email
+
     async def get_attachments(self, message_id: str) -> List[GraphAttachment]:
         """Récupère la liste des pièces jointes d'un email."""
+        logger.info("SVC_STEP_1 get_attachments mailbox=%s message_id_len=%d", self.mailbox_address, len(message_id))
+
         endpoint = f"/users/{self.mailbox_address}/messages/{message_id}/attachments"
         params = {"$select": "id,name,contentType,size"}
 
+        logger.info("SVC_STEP_2 get_attachments endpoint=%s", endpoint)
+
         data = await self._make_graph_request("GET", endpoint, params=params)
 
+        logger.info("SVC_STEP_3 get_attachments data_keys=%s", list(data.keys()) if data else "EMPTY")
+
         attachments = []
-        for att in data.get("value", []):
+        raw_list = data.get("value") or []
+        logger.info("SVC_STEP_4 get_attachments raw_count=%d", len(raw_list))
+
+        for i, att in enumerate(raw_list):
+            odata_type = att.get("@odata.type", "")
+            logger.info(
+                "SVC_STEP_4_%d att odata_type=%s name=%r size=%r",
+                i, odata_type, att.get("name"), att.get("size")
+            )
+            if "itemAttachment" in odata_type:
+                logger.info("SVC_STEP_4_%d SKIP itemAttachment", i)
+                continue
             attachments.append(GraphAttachment(
-                id=att.get("id", ""),
-                name=att.get("name", ""),
-                content_type=att.get("contentType", ""),
-                size=att.get("size", 0)
+                id=att.get("id") or "",
+                name=att.get("name") or "(sans nom)",
+                content_type=att.get("contentType") or "application/octet-stream",
+                size=att.get("size") or 0
             ))
 
+        logger.info("SVC_STEP_5 get_attachments final_count=%d", len(attachments))
         return attachments
 
     async def get_attachment_content(self, message_id: str, attachment_id: str) -> bytes:
