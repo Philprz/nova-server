@@ -6,7 +6,7 @@ timeout /t 2 /nobreak >nul
 
 echo Demarrage du serveur NOVA...
 cd C:\Users\PPZ\NOVA-SERVER
-start "NOVA Server" python main.py
+start "NOVA Server" .venv\Scripts\python.exe main.py
 
 echo Serveur redemarre ! Attendre 5 secondes...
 timeout /t 5 /nobreak >nul

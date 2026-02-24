@@ -508,3 +508,103 @@ export async function saveCorrections(
   }
   return response.json();
 }
+
+// ============================================================
+// ACTIONS PRODUITS (articles non trouvés SAP)
+// ============================================================
+
+export interface ExcludeProductResult {
+  status: string;
+  message: string;
+  email_id: string;
+  item_code: string;
+  reason?: string;
+  excluded_at: string;
+}
+
+export interface ManualCodeResult {
+  status: string;
+  message: string;
+  email_id: string;
+  original_code: string;
+  item_code: string;
+  item_name: string;
+  not_found_in_sap: boolean;
+}
+
+export interface RetrySearchItem {
+  item_code: string;
+  item_name: string;
+  quantity_on_hand?: number;
+}
+
+export interface RetrySearchResult {
+  email_id: string;
+  original_code: string;
+  search_query: string;
+  items: RetrySearchItem[];
+  count: number;
+}
+
+/** Exclut un article du devis (Option C - Ignorer). */
+export async function excludeProduct(
+  emailId: string,
+  itemCode: string,
+  reason?: string
+): Promise<ExcludeProductResult> {
+  const response = await fetch(
+    `${GRAPH_API_BASE}/emails/${encodeURIComponent(emailId)}/products/${encodeURIComponent(itemCode)}/exclude`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason }),
+    }
+  );
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ detail: 'Erreur inconnue' }));
+    throw new Error(err.detail || `Erreur ${response.status}`);
+  }
+  return response.json();
+}
+
+/** Associe un code SAP saisi manuellement à un article non trouvé (Option A). */
+export async function setManualCode(
+  emailId: string,
+  itemCode: string,
+  rondotCode: string
+): Promise<ManualCodeResult> {
+  const response = await fetch(
+    `${GRAPH_API_BASE}/emails/${encodeURIComponent(emailId)}/products/${encodeURIComponent(itemCode)}/manual-code`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rondot_code: rondotCode }),
+    }
+  );
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ detail: 'Erreur inconnue' }));
+    throw new Error(err.detail || `Erreur ${response.status}`);
+  }
+  return response.json();
+}
+
+/** Relance la recherche SAP pour un article non trouvé (Option B). */
+export async function retrySearchProduct(
+  emailId: string,
+  itemCode: string,
+  searchQuery?: string
+): Promise<RetrySearchResult> {
+  const response = await fetch(
+    `${GRAPH_API_BASE}/emails/${encodeURIComponent(emailId)}/products/${encodeURIComponent(itemCode)}/retry-search`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ search_query: searchQuery }),
+    }
+  );
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ detail: 'Erreur inconnue' }));
+    throw new Error(err.detail || `Erreur ${response.status}`);
+  }
+  return response.json();
+}

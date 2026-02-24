@@ -368,60 +368,110 @@ async def get_corrections(email_id: str = Query(..., description="Microsoft Grap
 
 # ============================================================
 
-@router.get("/emails/{message_id}", response_model=GraphEmail)
+@router.get("/emails/{message_id}")  # response_model retiré temporairement – évite la validation Pydantic post-retour
 async def get_email(message_id: str):
     """
     Récupère un email complet avec son body et ses pièces jointes.
     """
+    # ── STEP 1 : entrée endpoint ─────────────────────────────────────────
+    logger.info("STEP_1 GET_EMAIL_ENTER message_id_len=%d", len(message_id))
+
     graph_service = get_graph_service()
 
-    if not graph_service.is_configured():
-        raise HTTPException(status_code=400, detail="Microsoft Graph credentials not configured")
-
+    # ── STEP 2 : vérification dépendances ───────────────────────────────
     logger.info(
-        "GET_EMAIL_REQUEST message_id_len=%d mailbox=%s",
-        len(message_id), graph_service.mailbox_address
+        "STEP_2 GET_EMAIL_DEPS token_type=application mailbox_present=%s message_id_present=%s",
+        bool(graph_service.mailbox_address), bool(message_id)
     )
 
+    if not graph_service.is_configured():
+        logger.error("STEP_2_FAIL GET_EMAIL credentials not configured")
+        raise HTTPException(status_code=400, detail="Microsoft Graph credentials not configured")
+
     try:
+        # ── STEP 3 : avant appel Graph ───────────────────────────────────
+        logger.info(
+            "STEP_3 GET_EMAIL_BEFORE_GRAPH mailbox=%s",
+            graph_service.mailbox_address
+        )
+
         email = await graph_service.get_email(message_id, include_attachments=True)
-        logger.info("GET_EMAIL_OK subject=%r attachments=%d", email.subject, len(email.attachments))
-        return email
+
+        # ── STEP 4 : après appel Graph ───────────────────────────────────
+        logger.info(
+            "STEP_4 GET_EMAIL_AFTER_GRAPH subject=%r body_type=%s body_len=%d attachments=%d",
+            email.subject,
+            email.body_content_type,
+            len(email.body_content or ""),
+            len(email.attachments)
+        )
+
+        # ── STEP 5 : avant sérialisation JSON ───────────────────────────
+        logger.info("STEP_5 GET_EMAIL_BEFORE_SERIALIZE")
+        result = email.model_dump()
+
+        # ── STEP 6 : avant retour ────────────────────────────────────────
+        logger.info("STEP_6 GET_EMAIL_BEFORE_RETURN result_keys=%s", list(result.keys()))
+        return result
 
     except GraphAPIError as e:
-        logger.error("GET_EMAIL_GRAPH_ERROR status=%d detail=%s", e.status_code, e.detail)
+        logger.error(
+            "GET_EMAIL_GRAPH_ERROR status=%d detail=%s",
+            e.status_code, e.detail
+        )
         raise HTTPException(status_code=e.status_code, detail=e.detail)
     except Exception as e:
-        logger.exception("GET_EMAIL_UNEXPECTED_ERROR")
-        raise HTTPException(status_code=500, detail=str(e))
+        # STEP_ERR : stacktrace complète pour localiser la ligne exacte
+        logger.exception("GET_EMAIL_FULL_STACKTRACE message_id_len=%d error=%s", len(message_id), str(e))
+        raise HTTPException(status_code=500, detail=f"[GET_EMAIL] {type(e).__name__}: {e}")
 
 
-@router.get("/emails/{message_id}/attachments", response_model=List[GraphAttachment])
+@router.get("/emails/{message_id}/attachments")  # response_model retiré temporairement
 async def get_email_attachments(message_id: str):
     """
     Récupère la liste des pièces jointes d'un email.
     """
+    # ── STEP 1 ─────────────────────────────────────────────────────────
+    logger.info("STEP_1 GET_ATTACHMENTS_ENTER message_id_len=%d", len(message_id))
+
     graph_service = get_graph_service()
 
-    if not graph_service.is_configured():
-        raise HTTPException(status_code=400, detail="Microsoft Graph credentials not configured")
-
+    # ── STEP 2 ─────────────────────────────────────────────────────────
     logger.info(
-        "GET_ATTACHMENTS_REQUEST message_id_len=%d mailbox=%s",
-        len(message_id), graph_service.mailbox_address
+        "STEP_2 GET_ATTACHMENTS_DEPS mailbox_present=%s message_id_present=%s",
+        bool(graph_service.mailbox_address), bool(message_id)
     )
 
+    if not graph_service.is_configured():
+        logger.error("STEP_2_FAIL GET_ATTACHMENTS credentials not configured")
+        raise HTTPException(status_code=400, detail="Microsoft Graph credentials not configured")
+
     try:
+        # ── STEP 3 : avant appel Graph ───────────────────────────────────
+        logger.info("STEP_3 GET_ATTACHMENTS_BEFORE_GRAPH mailbox=%s", graph_service.mailbox_address)
+
         attachments = await graph_service.get_attachments(message_id)
-        logger.info("GET_ATTACHMENTS_OK count=%d", len(attachments))
-        return attachments
+
+        # ── STEP 4 : après appel Graph ───────────────────────────────────
+        logger.info("STEP_4 GET_ATTACHMENTS_AFTER_GRAPH count=%d", len(attachments))
+
+        # ── STEP 5 : sérialisation ───────────────────────────────────────
+        logger.info("STEP_5 GET_ATTACHMENTS_BEFORE_SERIALIZE")
+        result = [a.model_dump() for a in attachments]
+
+        # ── STEP 6 ───────────────────────────────────────────────────────
+        logger.info("STEP_6 GET_ATTACHMENTS_BEFORE_RETURN count=%d", len(result))
+        return result
 
     except GraphAPIError as e:
-        logger.error("GET_ATTACHMENTS_GRAPH_ERROR status=%d detail=%s", e.status_code, e.detail)
+        logger.error(
+            "GET_ATTACHMENTS_GRAPH_ERROR status=%d detail=%s",
+            e.status_code, e.detail
+        )
         raise HTTPException(status_code=e.status_code, detail=e.detail)
     except Exception as e:
-        logger.exception("GET_ATTACHMENTS_UNEXPECTED_ERROR")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("GET_ATTACHMENTS_FULL_STACKTRACE message_id_len=%d error=%s", len(message_id), str(e))
+        raise HTTPException(status_code=500, detail=f"[GET_ATTACHMENTS] {type(e).__name__}: {e}")
 
 
 class AttachmentContentResponse(BaseModel):
