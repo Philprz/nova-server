@@ -23,8 +23,26 @@ const Index = () => {
   const [currentView, setCurrentView] = useState<View>('account-selection');
   const [selectedQuote, setSelectedQuote] = useState<ProcessedEmail | null>(null);
 
+  // Emails marqués comme traités (persisté en localStorage)
+  const [processedEmailIds, setProcessedEmailIds] = useState<Set<string>>(() => {
+    try {
+      const stored = localStorage.getItem('nova_processed_emails');
+      if (stored) return new Set<string>(JSON.parse(stored));
+    } catch {}
+    return new Set<string>();
+  });
+
+  // Métadonnées des emails traités (N° SAP, date)
+  const [processedEmailsMeta, setProcessedEmailsMeta] = useState<Record<string, { sapDocNum?: number; createdAt: string }>>(() => {
+    try {
+      const stored = localStorage.getItem('nova_processed_emails_meta');
+      if (stored) return JSON.parse(stored);
+    } catch {}
+    return {};
+  });
+
   // Mode démo / live
-  const { mode, toggleMode, isDemoMode } = useEmailMode();
+  const { isDemoMode } = useEmailMode();
 
   // Emails réels (Microsoft Graph)
   const {
@@ -34,6 +52,7 @@ const Index = () => {
     analyzingEmailId,
     refreshEmails,
     analyzeEmail,
+    reanalyzeEmail,
     getLatestEmail,
   } = useEmails({ enabled: !isDemoMode, autoFetch: !isDemoMode });
 
@@ -101,13 +120,30 @@ const Index = () => {
     setCurrentView('summary');
   };
 
-  const handleValidate = (updatedDoc: ProcessedEmail) => {
+  const handleValidate = (_updatedDoc: ProcessedEmail) => {
     // En mode démo, mise à jour locale
     // En mode live, le backend gère l'état
     setSelectedQuote(null);
   };
 
-  const handleSummaryValidate = () => {
+  const handleSummaryValidate = (sapDocNum?: number) => {
+    // Marquer l'email comme traité
+    if (selectedQuote) {
+      const emailId = selectedQuote.email.id;
+      setProcessedEmailIds(prev => {
+        const next = new Set(prev);
+        next.add(emailId);
+        try { localStorage.setItem('nova_processed_emails', JSON.stringify([...next])); } catch {}
+        return next;
+      });
+      if (sapDocNum) {
+        setProcessedEmailsMeta(prev => {
+          const next = { ...prev, [emailId]: { sapDocNum, createdAt: new Date().toISOString() } };
+          try { localStorage.setItem('nova_processed_emails_meta', JSON.stringify(next)); } catch {}
+          return next;
+        });
+      }
+    }
     setSelectedQuote(null);
     setCurrentView('inbox');
   };
@@ -115,6 +151,15 @@ const Index = () => {
   const handleSummaryBack = () => {
     setSelectedQuote(null);
     setCurrentView('inbox');
+  };
+
+  const handleReanalyze = async () => {
+    if (!selectedQuote || isDemoMode) return;
+    const analysis = await reanalyzeEmail(selectedQuote.email.id);
+    if (analysis) {
+      const updated = getLatestEmail(selectedQuote.email.id);
+      if (updated) setSelectedQuote(updated);
+    }
   };
 
   const handleAccountSelect = () => {
@@ -180,9 +225,6 @@ const Index = () => {
                     Actualiser
                   </Button>
                 )}
-                <Button variant="outline" size="sm" onClick={toggleMode}>
-                  {isDemoMode ? 'Passer en Live' : 'Passer en Démo'}
-                </Button>
               </div>
             </div>
           )}
@@ -210,7 +252,14 @@ const Index = () => {
                   <p>Chargement des emails...</p>
                 </div>
               ) : (
-                <EmailList emails={displayEmails} onSelectQuote={handleSelectQuote} analyzingEmailId={analyzingEmailId} />
+                <EmailList
+                  emails={displayEmails}
+                  onSelectQuote={handleSelectQuote}
+                  analyzingEmailId={analyzingEmailId}
+                  processedIds={processedEmailIds}
+                  processedMeta={processedEmailsMeta}
+                  onReanalyze={!isDemoMode ? async (emailId) => { await reanalyzeEmail(emailId); } : undefined}
+                />
               )}
             </>
           )}
@@ -229,6 +278,9 @@ const Index = () => {
               quote={selectedQuote}
               onValidate={handleSummaryValidate}
               onBack={handleSummaryBack}
+              onReanalyze={!isDemoMode ? handleReanalyze : undefined}
+              isReanalyzing={analyzingEmailId === selectedQuote.email.id}
+              isProcessed={processedEmailIds.has(selectedQuote.email.id)}
             />
           )}
         </main>

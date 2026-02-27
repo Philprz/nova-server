@@ -1,5 +1,4 @@
 import { Mail, Bell } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
 
 interface AppHeaderProps {
   pendingCount: number;
@@ -25,9 +24,6 @@ export function AppHeader({ pendingCount }: AppHeaderProps) {
             <span className="text-sm font-medium">{pendingCount} en attente</span>
           </div>
         )}
-        <Badge variant="outline" className="bg-sidebar-accent text-sidebar-foreground border-sidebar-border">
-          Mode Démo
-        </Badge>
       </div>
     </header>
   );

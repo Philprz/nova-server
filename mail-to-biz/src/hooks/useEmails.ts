@@ -24,6 +24,7 @@ interface UseEmailsReturn {
   analyzingEmailId: string | null;
   refreshEmails: () => Promise<void>;
   analyzeEmail: (emailId: string) => Promise<EmailAnalysisResult | null>;
+  reanalyzeEmail: (emailId: string) => Promise<EmailAnalysisResult | null>;
   getEmailAnalysis: (emailId: string) => EmailAnalysisResult | undefined;
   getLatestEmail: (emailId: string) => ProcessedEmail | null;
 }
@@ -280,6 +281,68 @@ export function useEmails(options: UseEmailsOptions = {}): UseEmailsReturn {
     [analysisCache, toProcessedEmail]
   );
 
+  // Forcer une nouvelle analyse (ignore cache + DB, POST /analyze?force=true)
+  const reanalyzeEmail = useCallback(
+    async (emailId: string): Promise<EmailAnalysisResult | null> => {
+      try {
+        setAnalyzingEmailId(emailId);
+
+        // Vider le cache local pour cet email
+        setAnalysisCache((prev) => {
+          const newCache = new Map(prev);
+          newCache.delete(emailId);
+          return newCache;
+        });
+
+        const result = await analyzeGraphEmail(emailId, true); // force=true
+        if (!result.success || !result.data) return null;
+
+        const analysis = result.data;
+
+        setAnalysisCache((prev) => {
+          const newCache = new Map(prev);
+          newCache.set(emailId, analysis);
+          return newCache;
+        });
+
+        setEmails((prevEmails) => {
+          const newEmails = prevEmails.map((processedEmail) => {
+            if (processedEmail.email.id !== emailId) return processedEmail;
+            const graphEmail: GraphEmail = {
+              id: processedEmail.email.id,
+              subject: processedEmail.email.subject,
+              from_name: processedEmail.email.from.emailAddress.name,
+              from_address: processedEmail.email.from.emailAddress.address,
+              received_datetime: processedEmail.email.receivedDateTime,
+              body_preview: processedEmail.email.bodyPreview,
+              body_content: processedEmail.email.body.content,
+              body_content_type: processedEmail.email.body.contentType,
+              has_attachments: processedEmail.email.hasAttachments,
+              is_read: processedEmail.email.isRead,
+              attachments: processedEmail.email.attachments.map((a) => ({
+                id: a.id,
+                name: a.name,
+                content_type: a.contentType,
+                size: a.size,
+              })),
+            };
+            return toProcessedEmail(graphEmail, analysis);
+          });
+          emailsRef.current = newEmails;
+          return newEmails;
+        });
+
+        return analysis;
+      } catch (err) {
+        console.error('Error reanalyzing email:', err);
+        return null;
+      } finally {
+        setAnalyzingEmailId(null);
+      }
+    },
+    [toProcessedEmail]
+  );
+
   // Récupérer l'analyse d'un email depuis le cache
   const getEmailAnalysis = useCallback(
     (emailId: string): EmailAnalysisResult | undefined => {
@@ -431,6 +494,7 @@ export function useEmails(options: UseEmailsOptions = {}): UseEmailsReturn {
     analyzingEmailId,
     refreshEmails,
     analyzeEmail,
+    reanalyzeEmail,
     getEmailAnalysis,
     getLatestEmail,
   };

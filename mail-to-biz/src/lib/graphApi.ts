@@ -85,6 +85,12 @@ export interface ProductMatch {
   margin_applied?: number;
   confidence_score?: number;
   alerts?: string[];
+
+  // ✨ Champs poids (depuis SWeight1 SAP B1)
+  weight_unit_value?: number;   // Poids unitaire en kg
+  weight_unit?: string;         // Unité (toujours 'kg')
+  weight_total?: number;        // Poids total = weight_unit_value × quantity
+  // TODO: volume — champ SAP non identifié (SVolume1 potentiel, à valider)
 }
 
 export interface EmailAnalysisResult {
@@ -587,6 +593,69 @@ export async function setManualCode(
   }
   return response.json();
 }
+
+/** Met à jour la quantité d'un produit dans le cache d'analyse (persistance backend). */
+export async function updateProductQuantity(
+  emailId: string,
+  itemCode: string,
+  quantity: number
+): Promise<{ status: string; item_code: string; quantity: number }> {
+  const response = await fetch(
+    `${GRAPH_API_BASE}/emails/${encodeURIComponent(emailId)}/products/${encodeURIComponent(itemCode)}/quantity`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ quantity }),
+    }
+  );
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ detail: 'Erreur inconnue' }));
+    throw new Error(err.detail || `Erreur ${response.status}`);
+  }
+  return response.json();
+}
+
+// ─── Draft State ─────────────────────────────────────────────────────────────
+
+export interface DraftState {
+  found: boolean;
+  quantity_overrides?: Record<string, number>;
+  ignored_line_nums?: number[];
+  selected_client_code?: string | null;
+  selected_client_name?: string | null;
+  updated_at?: string;
+}
+
+/** Charge l'état UI sauvegardé pour un devis. */
+export async function loadDraftState(emailId: string): Promise<DraftState> {
+  const response = await fetch(
+    `${GRAPH_API_BASE}/emails/${encodeURIComponent(emailId)}/draft-state`
+  );
+  if (!response.ok) return { found: false };
+  return response.json();
+}
+
+/** Sauvegarde l'état UI d'un devis (debounce côté appelant recommandé). */
+export async function saveDraftState(
+  emailId: string,
+  state: {
+    quantity_overrides: Record<string, number>;
+    ignored_line_nums: number[];
+    selected_client_code?: string | null;
+    selected_client_name?: string | null;
+  }
+): Promise<void> {
+  await fetch(
+    `${GRAPH_API_BASE}/emails/${encodeURIComponent(emailId)}/draft-state`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(state),
+    }
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 /** Relance la recherche SAP pour un article non trouvé (Option B). */
 export async function retrySearchProduct(
