@@ -1,4 +1,4 @@
-import { Mail, Paperclip, FileText, Clock, Loader2 } from 'lucide-react';
+import { Mail, Paperclip, FileText, Clock, Loader2, CheckCircle2, RefreshCw } from 'lucide-react';
 import { ProcessedEmail } from '@/types/email';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -10,9 +10,12 @@ interface EmailListProps {
   emails: ProcessedEmail[];
   onSelectQuote: (quote: ProcessedEmail) => void;
   analyzingEmailId?: string | null;
+  processedIds?: Set<string>;
+  processedMeta?: Record<string, { sapDocNum?: number; createdAt: string }>;
+  onReanalyze?: (emailId: string) => Promise<void>;
 }
 
-export function EmailList({ emails, onSelectQuote, analyzingEmailId }: EmailListProps) {
+export function EmailList({ emails, onSelectQuote, analyzingEmailId, processedIds, processedMeta, onReanalyze }: EmailListProps) {
   return (
     <div className="space-y-4 animate-fade-in">
       <div className="flex items-center justify-between">
@@ -21,12 +24,29 @@ export function EmailList({ emails, onSelectQuote, analyzingEmailId }: EmailList
       </div>
 
       <div className="space-y-2">
-        {emails.map((item) => (
-          <Card 
+        {emails.map((item) => {
+          const isProcessed = processedIds?.has(item.email.id) ?? false;
+          const meta = processedMeta?.[item.email.id];
+          return (
+          <Card
             key={item.email.id}
-            className={`p-4 card-elevated cursor-pointer ${item.isQuote ? 'border-l-4 border-l-primary' : ''}`}
+            className={`card-elevated cursor-pointer ${
+              isProcessed
+                ? 'border-l-4 border-l-success'
+                : item.isQuote
+                  ? 'border-l-4 border-l-primary'
+                  : ''
+            }`}
           >
-            <div className="flex items-start gap-4">
+            {isProcessed && (
+              <div className="flex items-center gap-2 px-4 py-2 bg-success/10 border-b border-success/20 rounded-t-lg">
+                <CheckCircle2 className="w-4 h-4 text-success flex-shrink-0" />
+                <span className="text-sm font-semibold text-success">
+                  Devis SAP créé{meta?.sapDocNum ? ` — N° ${meta.sapDocNum}` : ''}
+                </span>
+              </div>
+            )}
+            <div className="flex items-start gap-4 p-4">
               <div className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center ${item.email.isRead ? 'bg-muted' : 'bg-primary/10'}`}>
                 <Mail className={`w-5 h-5 ${item.email.isRead ? 'text-muted-foreground' : 'text-primary'}`} />
               </div>
@@ -67,23 +87,27 @@ export function EmailList({ emails, onSelectQuote, analyzingEmailId }: EmailList
               <div className="flex flex-col items-end gap-2">
                 {item.isQuote ? (
                   <>
-                    <Badge className="status-badge-quote">
-                      <FileText className="w-3 h-3 mr-1" />
-                      Devis détecté
-                    </Badge>
-                    <Badge 
-                      variant="outline" 
-                      className={
-                        item.detection.confidence === 'high' ? 'border-success text-success' :
-                        item.detection.confidence === 'medium' ? 'border-warning text-warning' :
-                        'border-muted-foreground'
-                      }
-                    >
-                      Confiance: {item.detection.confidence}
-                    </Badge>
+                    {!isProcessed && (
+                      <Badge className="status-badge-quote">
+                        <FileText className="w-3 h-3 mr-1" />
+                        Devis détecté
+                      </Badge>
+                    )}
+                    {!isProcessed && (
+                      <Badge
+                        variant="outline"
+                        className={
+                          item.detection.confidence === 'high' ? 'border-success text-success' :
+                          item.detection.confidence === 'medium' ? 'border-warning text-warning' :
+                          'border-muted-foreground'
+                        }
+                      >
+                        Confiance: {item.detection.confidence}
+                      </Badge>
+                    )}
                     <Button
                       size="sm"
-                      variant={item.analysisResult ? "default" : "outline"}
+                      variant={isProcessed ? "ghost" : item.analysisResult ? "default" : "outline"}
                       disabled={analyzingEmailId === item.email.id}
                       onClick={(e) => {
                         e.stopPropagation();
@@ -95,15 +119,32 @@ export function EmailList({ emails, onSelectQuote, analyzingEmailId }: EmailList
                           <Loader2 className="w-3 h-3 mr-1 animate-spin" />
                           Analyse...
                         </>
-                      ) : item.analysisResult ? (
+                      ) : (
                         <>
                           <FileText className="w-3 h-3 mr-1" />
-                          Visualiser
+                          {isProcessed ? 'Consulter' : 'Visualiser'}
                         </>
-                      ) : (
-                        'Visualiser'
                       )}
                     </Button>
+                    {onReanalyze && item.analysisResult && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={analyzingEmailId === item.email.id}
+                        title="Relancer l'analyse complète"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onReanalyze(item.email.id);
+                        }}
+                      >
+                        {analyzingEmailId === item.email.id ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <RefreshCw className="w-3 h-3" />
+                        )}
+                        <span className="ml-1">Réanalyser</span>
+                      </Button>
+                    )}
                   </>
                 ) : (
                   <Badge variant="secondary">Non pertinent</Badge>
@@ -111,7 +152,8 @@ export function EmailList({ emails, onSelectQuote, analyzingEmailId }: EmailList
               </div>
             </div>
           </Card>
-        ))}
+        );
+        })}
       </div>
     </div>
   );

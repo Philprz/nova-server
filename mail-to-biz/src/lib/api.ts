@@ -38,9 +38,11 @@ export interface SAPQuotation {
 }
 
 export interface CreateQuoteLine {
-  ItemCode: string;
+  ItemCode?: string;
+  ItemDescription: string;
   Quantity: number;
   UnitPrice?: number;
+  DiscountPercent?: number;
 }
 
 export interface CreateQuoteRequest {
@@ -48,7 +50,19 @@ export interface CreateQuoteRequest {
   DocDate?: string;
   DocDueDate?: string;
   Comments?: string;
+  NumAtCard?: string;
+  email_id?: string;
+  email_subject?: string;
   DocumentLines: CreateQuoteLine[];
+}
+
+export interface PreviewResponse {
+  validation_status: string;
+  client: { CardCode: string };
+  lines: CreateQuoteLine[];
+  totals: { subtotal: number; lines_count: number };
+  currency: string;
+  sap_payload: Record<string, unknown>;
 }
 
 // Test de connexion SAP
@@ -180,31 +194,74 @@ export async function getSAPQuotations(cardCode?: string, limit = 50): Promise<A
   }
 }
 
-// Créer un devis SAP
+// Prévisualiser un devis SAP (sans envoi à SAP)
+export async function previewSAPQuotation(
+  request: CreateQuoteRequest
+): Promise<ApiResponse<PreviewResponse>> {
+  try {
+    const response = await fetch('/api/sap/quotation/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      return { success: false, error: data.detail?.message || data.detail || 'Erreur preview' };
+    }
+    return { success: true, data };
+  } catch (error) {
+    return { success: false, error: `Erreur réseau: ${error}` };
+  }
+}
+
+// Créer un devis SAP (endpoint production avec session management complet)
 export async function createSAPQuotation(request: CreateQuoteRequest): Promise<ApiResponse<{
-  DocEntry: number;
-  DocNum: string;
-  CardCode: string;
-  DocTotal: number;
+  doc_entry: number;
+  doc_num: number;
+  card_code: string;
+  doc_total: number;
+  message: string;
+  retried: boolean;
+  retry_reason?: string;
 }>> {
   try {
-    const response = await fetch(`${API_BASE}/quotations`, {
+    const response = await fetch('/api/sap/quotation', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(request),
     });
 
     const data = await response.json();
 
-    return {
-      success: data.success,
-      data: data.quotation,
-      error: data.error,
-    };
+    if (!response.ok) {
+      return { success: false, error: data.detail?.message || data.detail || 'Erreur création SAP' };
+    }
+
+    return { success: true, data };
   } catch (error) {
-    return { success: false, error: `Erreur: ${error}` };
+    return { success: false, error: `Erreur réseau: ${error}` };
+  }
+}
+
+// Devis SAP déjà créé pour cet email
+export interface ExistingQuoteInfo {
+  found: boolean;
+  id?: number;
+  client_code?: string;
+  total_ht?: number;
+  sap_doc_entry?: number;
+  sap_doc_num?: number;
+  status?: string;
+  created_at?: string;
+}
+
+export async function getExistingQuoteForEmail(emailId: string): Promise<ExistingQuoteInfo> {
+  try {
+    const response = await fetch(`/api/sap/quotation/by-email/${encodeURIComponent(emailId)}`);
+    if (!response.ok) return { found: false };
+    return response.json();
+  } catch {
+    return { found: false };
   }
 }
 
