@@ -85,6 +85,8 @@ class QuotationResult(BaseModel):
     message: str = ""
     error_code: Optional[str] = None      # Code erreur SAP si échec
     sap_payload: Optional[Dict] = None    # Payload envoyé (pour debug/audit)
+    retried: bool = False                 # True si un retry a été nécessaire
+    retry_reason: Optional[str] = None   # Raison du retry (ex: "Switch company error")
 
 
 # ============================================================
@@ -186,8 +188,15 @@ class SAPQuotationService:
             "DocDueDate": payload.DocDueDate or today,
         }
 
+        # Construire le champ Comments : texte libre + tag email NOVA pour traçabilité SAP
+        comments_parts = []
         if payload.Comments:
-            sap_doc["Comments"] = payload.Comments
+            comments_parts.append(payload.Comments)
+        if payload.email_id:
+            # Tag unique pour retrouver l'email source directement depuis SAP
+            comments_parts.append(f"[NOVA-EMAIL-ID:{payload.email_id}]")
+        if comments_parts:
+            sap_doc["Comments"] = "\n".join(comments_parts)
         if payload.SalesPersonCode is not None:
             sap_doc["SalesPersonCode"] = payload.SalesPersonCode
         if payload.NumAtCard:
@@ -250,15 +259,42 @@ class SAPQuotationService:
     # Création devis
     # ----------------------------------------------------------
 
+    def _parse_sap_error(self, response) -> tuple[str, str]:
+        """Extrait (error_msg, error_code) d'une réponse SAP non-201."""
+        try:
+            error_data = response.json()
+            error_msg = error_data.get("error", {}).get("message", {})
+            if isinstance(error_msg, dict):
+                error_msg = error_msg.get("value", str(error_data))
+            error_code = str(error_data.get("error", {}).get("code", "SAP_ERROR"))
+        except Exception:
+            error_msg = response.text[:300]
+            error_code = f"HTTP_{response.status_code}"
+        return error_msg, error_code
+
+    def _is_switch_company_error(self, response) -> bool:
+        """Détecte l'erreur SAP 305 'Switch company error: -1102'."""
+        if response.status_code != 500:
+            return False
+        try:
+            code = response.json().get("error", {}).get("code")
+            return str(code) == "305"
+        except Exception:
+            return False
+
     async def create_sales_quotation(self, payload: QuotationPayload) -> QuotationResult:
         """
         Crée un devis (Sales Quotation) dans SAP B1.
+
+        Retry automatique sur l'erreur SAP 305 "Switch company error" :
+        réinitialise la session et retente une seule fois.
 
         Args:
             payload: QuotationPayload validé
 
         Returns:
-            QuotationResult avec DocEntry, DocNum, DocTotal si succès
+            QuotationResult avec DocEntry, DocNum, DocTotal si succès.
+            Le champ `retried=True` est positionné si un retry a été nécessaire.
         """
         if not await self.ensure_session():
             return QuotationResult(
@@ -277,8 +313,28 @@ class SAPQuotationService:
             payload.email_id or "N/A",
         )
 
+        retried = False
+        retry_reason: Optional[str] = None
+
         try:
             response = await self._call_sap_post("/Quotations", sap_payload)
+
+            # Retry automatique sur erreur SAP 305 "Switch company error"
+            if self._is_switch_company_error(response):
+                retry_reason = "Switch company error (SAP 305) — réinitialisation session"
+                logger.warning("⚠️ SAP 305 Switch company error — reset session et retry...")
+                self.session_id = None
+                self.session_timeout = None
+                if not await self.login():
+                    return QuotationResult(
+                        success=False,
+                        message="Erreur SAP : impossible de renouveler la session (305)",
+                        error_code="SAP_LOGIN_FAILED",
+                        sap_payload=sap_payload,
+                    )
+                retried = True
+                logger.info("🔄 Retry création devis SAP après reset session...")
+                response = await self._call_sap_post("/Quotations", sap_payload)
 
             if response.status_code == 201:
                 data = response.json()
@@ -286,10 +342,11 @@ class SAPQuotationService:
                 doc_num = data.get("DocNum")
                 doc_total = data.get("DocTotal")
                 logger.info(
-                    "✅ Devis SAP créé | DocEntry=%s | DocNum=%s | Total=%.2f€",
+                    "✅ Devis SAP créé | DocEntry=%s | DocNum=%s | Total=%.2f€%s",
                     doc_entry,
                     doc_num,
                     doc_total or 0,
+                    " (après retry)" if retried else "",
                 )
                 return QuotationResult(
                     success=True,
@@ -301,19 +358,12 @@ class SAPQuotationService:
                     card_name=data.get("CardName"),
                     message=f"Devis SAP n°{doc_num} créé avec succès",
                     sap_payload=sap_payload,
+                    retried=retried,
+                    retry_reason=retry_reason,
                 )
 
-            # Erreur SAP
-            try:
-                error_data = response.json()
-                error_msg = error_data.get("error", {}).get("message", {})
-                if isinstance(error_msg, dict):
-                    error_msg = error_msg.get("value", str(error_data))
-                error_code = str(error_data.get("error", {}).get("code", "SAP_ERROR"))
-            except Exception:
-                error_msg = response.text[:300]
-                error_code = f"HTTP_{response.status_code}"
-
+            # Erreur définitive après éventuel retry
+            error_msg, error_code = self._parse_sap_error(response)
             logger.error(
                 "❌ Erreur SAP %s | %s | Payload CardCode=%s",
                 response.status_code,
@@ -325,6 +375,8 @@ class SAPQuotationService:
                 message=f"Erreur SAP ({response.status_code}): {error_msg}",
                 error_code=error_code,
                 sap_payload=sap_payload,
+                retried=retried,
+                retry_reason=retry_reason,
             )
 
         except httpx.TimeoutException:

@@ -1,287 +1,92 @@
-# Scripts de Démarrage NOVA-SERVER
+# Démarrage et Déploiement NOVA-SERVER
 
-## 📦 Scripts Disponibles
+## Architecture serveur
 
-NOVA-SERVER dispose de **3 scripts de démarrage** pour lancer facilement le backend et le frontend :
+Ce Windows Server héberge **deux applications Python** indépendantes :
 
-| Script | Plateforme | Description |
-|--------|-----------|-------------|
-| `start-nova.bat` | Windows | Script batch Windows |
-| `start-nova.sh` | Linux/Mac | Script shell Bash |
-| `start-nova.py` | Tous | Script Python universel (recommandé) |
+| Application | Exécutable | Port | Rôle |
+| ----------- | ---------- | ---- | ---- |
+| **NOVA** | `.venv\Scripts\python.exe main.py` | **8001** | Mail-to-Biz, IA, SAP |
+| **BIOFORCE** | `C:\Python\python.exe main.py` | **8000** | Application Bioforce |
+
+Le domaine `nova-rondot.itspirit.ovh` pointe vers ce serveur et est redirigé vers NOVA (port 8001).
+
+> **ATTENTION** : Ne jamais tuer tous les processus `python.exe` — cela arrêterait aussi BIOFORCE.
 
 ---
 
-## 🚀 Utilisation
+## Démarrage NOVA
 
-### Windows
-
-**Méthode 1 : Double-clic**
-```
-Double-cliquer sur start-nova.bat
-```
-
-**Méthode 2 : Terminal**
 ```cmd
-start-nova.bat
+cd C:\Users\PPZ\NOVA-SERVER
+.venv\Scripts\python.exe main.py
 ```
 
-**Méthode 3 : Python (recommandé)**
+## Redémarrage NOVA (sans toucher BIOFORCE)
+
+Utiliser le script corrigé :
+
 ```cmd
-python start-nova.py
+restart_server.bat
 ```
 
-### Linux / Mac
-
-**Méthode 1 : Script Bash**
-```bash
-chmod +x start-nova.sh
-./start-nova.sh
-```
-
-**Méthode 2 : Python (recommandé)**
-```bash
-python3 start-nova.py
-```
+Ce script identifie uniquement le PID NOVA (chemin `.venv\Scripts\python.exe`) avant de le tuer.
 
 ---
 
-## 🔧 Fonctionnement
+## URLs d'accès
 
-### 1. Démarrage Backend (FastAPI)
-
-Le script démarre automatiquement le serveur FastAPI sur **http://localhost:8001**
-
-### 2. Démarrage Frontend (Optionnel)
-
-Si **Node.js** est installé ET que le dossier `mail-to-biz/src/` existe :
-- Le script démarre le **React Dev Server** sur **http://localhost:5173**
-
-Sinon :
-- Le frontend **compilé** est servi par FastAPI sur **/mail-to-biz**
+| Service | URL |
+| ------- | --- |
+| Mail-to-Biz | <http://localhost:8001/mail-to-biz> |
+| NOVA Assistant | <http://localhost:8001/interface/itspirit> |
+| Documentation API | <http://localhost:8001/docs> |
+| Health Check | <http://localhost:8001/health> |
+| Frontend dev (Vite) | <http://localhost:8082/mail-to-biz/> |
 
 ---
 
-## 📍 URLs d'Accès
+## Développement frontend (mail-to-biz)
 
-Une fois NOVA démarré, vous pouvez accéder à :
+### Mode développement (hot-reload)
 
-| Service | URL | Description |
-|---------|-----|-------------|
-| **Backend API** | http://localhost:8001 | API REST FastAPI |
-| **Mail-to-Biz** | http://localhost:8001/mail-to-biz | Interface mail-to-biz (React) |
-| **NOVA Assistant** | http://localhost:8001/interface/itspirit | Assistant IA conversationnel |
-| **Documentation API** | http://localhost:8001/docs | Swagger UI interactive |
-| **Health Check** | http://localhost:8001/health | Statut système |
-| **Frontend Dev** | http://localhost:5173 | React Dev Server (si actif) |
-
----
-
-## 🛑 Arrêt
-
-### Windows
-- Appuyer sur **une touche** dans la fenêtre du script
-- Ou fermer les fenêtres de console
-
-### Linux / Mac / Python
-- Appuyer sur **CTRL+C** dans le terminal
-
-Les processus sont arrêtés proprement.
-
----
-
-## ⚙️ Configuration
-
-### Ports par Défaut
-
-- **Backend** : 8000 (configurable dans `.env` : `APP_PORT`)
-- **Frontend Dev** : 5173 (configurable dans `mail-to-biz/vite.config.ts`)
-
-### Variables d'Environnement
-
-Le backend utilise le fichier `.env` pour sa configuration.
-
-Voir [README.md](README.md) pour la liste complète des variables.
-
----
-
-## 🐛 Dépannage
-
-### Problème : "Port déjà utilisé"
-
-Les scripts tuent automatiquement les processus existants sur les ports 8000 et 5173.
-
-Si le problème persiste :
-
-**Windows :**
 ```cmd
-netstat -ano | findstr :8000
-taskkill /F /PID <PID>
-```
-
-**Linux/Mac :**
-```bash
-lsof -ti:8000 | xargs kill -9
-```
-
-### Problème : "Python non trouvé"
-
-Installer Python 3.9+ depuis https://www.python.org/downloads/
-
-### Problème : "Node.js non trouvé"
-
-Le frontend **compilé** sera servi par FastAPI (pas besoin de Node.js en production).
-
-Pour développement frontend, installer Node.js : https://nodejs.org/
-
----
-
-## 📊 Logs
-
-### Backend
-
-Les logs FastAPI sont affichés dans la console :
-- Fichier : `nova.log`
-- Format : `YYYY-MM-DD HH:MM:SS - module - LEVEL - message`
-
-### Frontend Dev
-
-Les logs Vite/React sont affichés dans la console du frontend.
-
----
-
-## 🔄 Workflow Développement
-
-### 1. Développement Backend uniquement
-
-```bash
-python main.py
-```
-
-### 2. Développement Frontend uniquement
-
-```bash
 cd mail-to-biz
 npm run dev
 ```
 
-### 3. Développement Full-Stack
+Accessible sur `http://localhost:8082/mail-to-biz/`
 
-```bash
-# Windows
-start-nova.bat
+Le proxy Vite redirige automatiquement les appels `/api/*` vers `localhost:8001`.
 
-# Linux/Mac
-./start-nova.sh
+### Build et mise en production
 
-# Universel
-python start-nova.py
-```
-
----
-
-## 📚 Documentation Technique
-
-### start-nova.py (Recommandé)
-
-**Avantages :**
-- ✅ Multiplateforme (Windows, Linux, Mac)
-- ✅ Gestion propre des processus
-- ✅ Vérifications préalables (Python, Node.js)
-- ✅ Libération automatique des ports
-- ✅ Arrêt propre avec CTRL+C
-- ✅ Affichage couleurs dans terminal
-
-**Fonctionnalités :**
-```python
-# Vérifications
-check_python()      # Python 3.9+
-check_node()        # Node.js installé
-check_frontend_source()  # mail-to-biz/src/ existe
-
-# Démarrage
-start_backend()     # FastAPI sur port 8000
-start_frontend()    # React Dev sur port 5173 (optionnel)
-
-# Nettoyage
-cleanup()           # Arrêt propre des processus
-```
-
-### start-nova.bat (Windows)
-
-Script batch natif Windows avec gestion des fenêtres séparées.
-
-### start-nova.sh (Linux/Mac)
-
-Script shell Bash avec gestion des signaux SIGINT/SIGTERM.
-
----
-
-## 🎯 Cas d'Usage
-
-### Production
-
-```bash
-# Backend uniquement (frontend compilé servi par FastAPI)
-python main.py
-```
-
-Le frontend est déjà compilé dans `frontend/` et servi par FastAPI.
-
-### Développement
-
-```bash
-# Full-stack avec hot-reload
-python start-nova.py
-```
-
-- Backend : Hot-reload uvicorn
-- Frontend : Hot-reload Vite
-
-### CI/CD
-
-```bash
-# Build frontend
+```cmd
 cd mail-to-biz
 npm run build
-cp -r dist/* ../frontend/
-
-# Démarrage production
-cd ..
-python main.py
 ```
 
----
-
-## 🔐 Sécurité
-
-### Production
-
-- Modifier `APP_HOST` dans `.env` : `APP_HOST=127.0.0.1` (local uniquement)
-- Utiliser un reverse proxy (Nginx, Caddy)
-- Activer HTTPS
-- Configurer CORS restrictif
-
-### Développement
-
-- `APP_HOST=0.0.0.0` permet l'accès réseau local
-- Utile pour tester sur mobile/tablette
+Le build est **directement écrit dans `../frontend/`** (configuré dans `vite.config.ts`).
+FastAPI sert `frontend/` sur `/mail-to-biz` — la mise en ligne est **immédiate**, aucune copie manuelle nécessaire.
 
 ---
 
-## 📝 Version
+## Dépannage
 
-**Scripts v1.0.0** (09/02/2026)
-- Démarrage unifié backend + frontend
-- Support Windows, Linux, Mac
-- Gestion propre des processus
-- Libération automatique des ports
+### Vérifier quel Python tourne sur quel port
 
----
+```cmd
+wmic process where "name='python.exe'" get ProcessId,ExecutablePath,CommandLine
+```
 
-## 🆘 Support
+### Routes FastAPI qui ne répondent pas
 
-Pour toute question ou problème :
-1. Vérifier les logs : `nova.log`
-2. Vérifier le health check : http://localhost:8001/health
-3. Consulter la documentation : http://localhost:8001/docs
+Si une route retourne une erreur inattendue après modification de code Python :
+
+1. Vérifier que le serveur a bien été redémarré (le code Python est chargé au démarrage)
+2. Supprimer les `.pyc` stale si nécessaire : `del routes\__pycache__\*.pyc`
+3. Redémarrer via `restart_server.bat`
+
+### Logs
+
+Les logs uvicorn s'affichent dans la fenêtre de console du serveur NOVA.

@@ -101,6 +101,9 @@ class EmailAnalysisResult(BaseModel):
     requires_user_choice: bool = False  # True si choix utilisateur nécessaire
     user_choice_reason: Optional[str] = None  # Raison du choix manuel
 
+    # Référence commande client (Form No, PO No, etc.) → utilisée dans NumAtCard SAP
+    customer_reference: Optional[str] = None
+
 
 # Prompt LLM pour l'analyse des emails
 EMAIL_CLASSIFICATION_PROMPT = """Tu es un assistant spécialisé dans la classification des emails commerciaux pour une entreprise industrielle.
@@ -129,9 +132,21 @@ EXTRACTION DES INFORMATIONS CLIENT (important pour validation):
 
 EXTRACTION DES PRODUITS:
 - Description: description complète du produit
-- Quantité: nombre d'unités demandées
+- Quantité: nombre d'unités demandées POUR CE PRODUIT SPÉCIFIQUE (sur la même ligne ou directement associé au produit)
 - Unité: pcs, kg, m, l, etc.
 - Référence: code produit, référence fournisseur si mentionnée
+
+RÈGLES CRITIQUES POUR LES QUANTITÉS:
+- N'extraire QUE les quantités directement associées à un produit (sur la même ligne que la description/référence du produit, ou avec indicateur clair comme "qté:", "qty:", "x2", "2 pcs")
+- Par défaut à 1 si la quantité d'un produit n'est pas clairement indiquée
+- IGNORER absolument les nombres suivants (NE JAMAIS les utiliser comme quantités):
+  * Numéros de formulaire, de document, de commande (ex: "Formulaire 194", "BC n°194", "Devis 2567")
+  * Numéros de page (ex: "Page 1/3")
+  * Dates et années (ex: 2024, 2025)
+  * Codes postaux (ex: 75001)
+  * Numéros de téléphone ou fax
+  * Numéros d'identification (SIRET, TVA, etc.)
+  * Tout nombre qui n'est PAS sur la même ligne que la description ou référence d'un produit
 
 Réponds UNIQUEMENT en JSON valide (pas de texte avant ou après):
 {
@@ -646,34 +661,216 @@ def get_email_analyzer() -> EmailAnalyzer:
     return _email_analyzer
 
 
-# Utilitaire pour extraire le texte des PDFs
+# ---------------------------------------------------------------------------
+# Utilitaires pour extraire le texte des PDFs
+# ---------------------------------------------------------------------------
+
+# Unités de quantité reconnues (insensible à la casse)
+_QTY_UNIT_WORDS = frozenset({
+    'adet', 'pcs', 'pc', 'pieces', 'pièces', 'units', 'unités',
+    'stk', 'stück', 'ea', 'each', 'qty', 'qté',
+})
+
+# Bandes de colonnes du formulaire Sheppee / Marmara Cam (coordonnées PDF en points)
+_COL_QTY_X_MIN = 360      # Colonne "Quantity"  : x >= 360
+_COL_ROWNO_X_MAX = 70     # Colonne "Row No"    : x <= 70
+_COL_DETAIL_X_MIN = 200   # Colonne "Material Detail" : x >= 200
+_COL_NAME_X_MIN = 70      # Colonne "Material Name"   : 70 <= x < 200
+_COL_NAME_X_MAX = 200
+
+
+def _extract_offer_request_form_text(tmp_path: str) -> str:
+    """
+    Extraction structurée d'un 'Offer Request Form' basée sur les coordonnées de mots (PyMuPDF).
+
+    Stratégie :
+      1. Pour chaque page, lire les mots avec leurs coordonnées X/Y.
+      2. Identifier la colonne "Quantity" (x >= 360) et extraire les paires (nombre, unité).
+      3. Identifier la colonne "Row No" (x <= 70) et extraire les entiers dans l'ordre Y.
+      4. Identifier la colonne "Material Detail" (x >= 200) et extraire les codes après "CODE:".
+      5. Associer par index (même ordre Y dans le document).
+      6. Sérialiser en "Row N: CODE - DESC - QTY Adet" lisible par _extract_offer_request_rows().
+
+    Fonctionnement sans "Adet" :
+      Les colonnes sont identifiées par POSITION (x/y), pas par le mot "Adet".
+      Toute valeur numérique dans la colonne Quantity est une quantité valide,
+      quelle que soit l'unité (Adet, pcs, unités, ou simple nombre).
+
+    Retourne "" si le PDF n'est pas un Offer Request Form reconnu (fallback vers texte brut).
+    """
+    try:
+        import fitz
+    except ImportError:
+        return ""
+
+    all_rows: Dict[int, Dict] = {}   # row_no → {code, qty, desc}
+    plain_text_pages: List[str] = []
+
+    try:
+        doc = fitz.open(tmp_path)
+    except Exception as e:
+        logger.warning(f"[PDF COORDS] fitz.open failed: {e}")
+        return ""
+
+    for page in doc:
+        plain_text_pages.append(page.get_text())
+        words = page.get_text('words')  # liste de (x0, y0, x1, y1, text, ...)
+
+        # Pré-condition : la page doit contenir au moins un mot d'unité de quantité
+        # OU la colonne "Quantity" doit être détectée via des décimaux à x >= QTY_X_MIN
+        texts_lower = {w[4].lower() for w in words}
+        has_unit = bool(texts_lower & _QTY_UNIT_WORDS)
+        # Si pas d'unité, vérifier s'il y a des décimaux dans la zone Qty (format "2,00")
+        has_qty_decimals = any(
+            w[0] >= _COL_QTY_X_MIN and re.match(r'^\d+[.,]\d+$', w[4])
+            for w in words
+        )
+        if not has_unit and not has_qty_decimals:
+            continue  # Pas un tableau Offer Request sur cette page
+
+        # --- 1. Quantités dans la colonne Qty (x >= QTY_X_MIN) ---
+        qty_col = sorted(
+            [(w[1], w[0], w[4]) for w in words if w[0] >= _COL_QTY_X_MIN],
+            key=lambda x: x[0],  # trier par Y
+        )
+
+        qty_values: List[tuple] = []  # [(qty_int, y_position)]
+        i = 0
+        while i < len(qty_col):
+            y, x, text = qty_col[i]
+            if re.match(r'^\d+[.,]\d+$', text):
+                qty_int = int(float(text.replace(',', '.')))
+                # Chercher une unité dans les prochains mots de la même colonne (y proche)
+                found_unit = False
+                for j in range(i + 1, min(i + 4, len(qty_col))):
+                    next_y, _, next_text = qty_col[j]
+                    if abs(next_y - y) <= 30 and next_text.lower() in _QTY_UNIT_WORDS:
+                        qty_values.append((qty_int, y))
+                        i = j + 1
+                        found_unit = True
+                        break
+                if not found_unit:
+                    # Pas d'unité trouvée mais le nombre est dans la colonne Qty → accepter quand même
+                    # (cas de PDF sans mot d'unité, juste un chiffre)
+                    qty_values.append((qty_int, y))
+                    i += 1
+            else:
+                i += 1
+
+        if not qty_values:
+            continue
+
+        # --- 2. Row No dans la colonne RowNo (x <= ROWNO_X_MAX) ---
+        rowno_with_y = sorted(
+            [(w[1], int(w[4])) for w in words if w[0] <= _COL_ROWNO_X_MAX and w[4].isdigit()],
+            key=lambda x: x[0],  # trier par Y
+        )
+        rowno_values = [rn for (_, rn) in rowno_with_y]
+
+        # --- 3. Codes : mot après "CODE:" dans la colonne Detail (x >= DETAIL_X_MIN) ---
+        detail_sorted = sorted(
+            [(w[0], w[1], w[4]) for w in words if w[0] >= _COL_DETAIL_X_MIN],
+            key=lambda w: (w[1], w[0]),  # Y puis X
+        )
+        code_values: List[tuple] = []  # [(code_str, y_position)]
+        for didx, (dx, dy, dtext) in enumerate(detail_sorted):
+            if dtext.upper() == 'CODE:':
+                # Chercher le code sur la même ligne OU la ligne suivante
+                # (certains PDFs renvoient le code à la ligne, ex: "SHEPPEE CODE:\nC233-50AT10-1940G3)")
+                nearby = [
+                    (nx, ny, nt) for (nx, ny, nt) in detail_sorted[didx + 1:]
+                    if abs(ny - dy) <= 15  # tolérance élargie pour codes à la ligne suivante
+                ]
+                if nearby:
+                    raw_code = nearby[0][2]
+                    # Extraire le code en ignorant les caractères non-valides (ex: ")")
+                    code_match = re.match(r'([A-Z0-9][A-Z0-9\-\.]{2,})', raw_code, re.IGNORECASE)
+                    if code_match:
+                        code_values.append((code_match.group(1), dy))
+        code_values.sort(key=lambda x: x[1])
+        codes = [c for (c, _) in code_values]
+
+        # --- 4. Associer par index (même ordre Y dans le document) ---
+        n = min(len(qty_values), len(rowno_values), len(codes))
+        if n == 0:
+            logger.debug(
+                f"[PDF COORDS] Page sans correspondance complète: "
+                f"qtys={len(qty_values)}, rownos={len(rowno_values)}, codes={len(codes)}"
+            )
+            continue
+
+        for idx in range(n):
+            qty_val, qty_y = qty_values[idx]
+            row_no = rowno_values[idx]
+            code = codes[idx]
+
+            # Description depuis la colonne Material Name (70 <= x < 200) autour de qty_y
+            name_words = [
+                w[4] for w in words
+                if _COL_NAME_X_MIN <= w[0] < _COL_NAME_X_MAX and abs(w[1] - qty_y) <= 55
+            ]
+            description = ' '.join(name_words[:6]) if name_words else 'PART'
+
+            all_rows[row_no] = {'code': code, 'qty': qty_val, 'desc': description}
+
+    doc.close()
+
+    if not all_rows:
+        logger.debug("[PDF COORDS] Aucun Offer Request Form détecté dans le PDF")
+        return ""
+
+    # Sérialiser en format "Row N: CODE - DESC - QTY Adet"
+    # → lisible par email_matcher._extract_offer_request_rows()
+    structured_lines = []
+    for row_no in sorted(all_rows.keys()):
+        row = all_rows[row_no]
+        line = f"Row {row_no}: {row['code']} - {row['desc']} - {row['qty']} Adet"
+        structured_lines.append(line)
+
+    plain_text = '\n'.join(plain_text_pages)
+    structured = '\n'.join(structured_lines)
+
+    logger.info(
+        f"[PDF COORDS] Offer Request Form extrait : {len(all_rows)} lignes "
+        f"(Row {min(all_rows)} → Row {max(all_rows)})"
+    )
+    return plain_text + "\n\n" + structured
+
+
 async def extract_pdf_text(pdf_bytes: bytes) -> str:
     """
     Extrait le texte d'un PDF à partir de ses bytes.
-    Utilise le PDFParser existant de file_parsers.py.
+
+    Stratégie (par priorité) :
+      1. Détection Offer Request Form via coordonnées PyMuPDF (colonne-aware)
+         → produit "Row N: CODE - DESC - QTY Adet" pour _extract_offer_request_rows()
+      2. Texte brut PyMuPDF (fallback pour PDFs non-tabulaires)
+      3. Texte brut pdfplumber (fallback si PyMuPDF absent)
     """
     try:
-        from services.file_parsers import PDFParser
-
         # Sauvegarder temporairement le PDF
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
             tmp.write(pdf_bytes)
             tmp_path = tmp.name
 
         try:
-            # Parser le PDF
             import fitz  # PyMuPDF
 
+            # --- Tentative 1 : Offer Request Form avec coordonnées ---
+            structured = _extract_offer_request_form_text(tmp_path)
+            if structured:
+                return structured
+
+            # --- Tentative 2 : Texte brut PyMuPDF (comportement existant) ---
             doc = fitz.open(tmp_path)
             text = ""
             for page in doc:
                 text += page.get_text()
             doc.close()
-
             return text.strip()
 
         except ImportError:
-            # Fallback pdfplumber
+            # --- Fallback : pdfplumber (comportement existant inchangé) ---
             try:
                 import pdfplumber
                 with pdfplumber.open(tmp_path) as pdf:
@@ -688,7 +885,6 @@ async def extract_pdf_text(pdf_bytes: bytes) -> str:
                 return ""
 
         finally:
-            # Nettoyer le fichier temporaire
             import os
             try:
                 os.unlink(tmp_path)

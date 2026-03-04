@@ -30,6 +30,42 @@ _analysis_cache: dict = {}
 _backend_start_time = datetime.now()  # Pour invalider le cache au redémarrage
 
 
+def _load_analysis(message_id: str):
+    """
+    Retourne l'analyse depuis le cache mémoire ou la DB persistante.
+    Lève HTTPException 404 si introuvable dans les deux.
+    Met à jour le cache si chargé depuis la DB.
+    """
+    global _analysis_cache
+    if message_id not in _analysis_cache:
+        from services.email_analysis_db import get_email_analysis_db
+        existing = get_email_analysis_db().get_analysis(message_id)
+        if not existing:
+            raise HTTPException(status_code=404, detail="Analyse non trouvée")
+        _analysis_cache[message_id] = {
+            'data': EmailAnalysisResult(**existing),
+            'timestamp': datetime.now()
+        }
+    cached_entry = _analysis_cache[message_id]
+    if isinstance(cached_entry, dict) and 'data' in cached_entry:
+        return cached_entry['data']
+    return cached_entry
+
+
+def _persist_analysis(message_id: str, result) -> None:
+    """
+    Sauvegarde le résultat d'analyse mis à jour dans email_analysis_db.
+    Appelé après chaque mutation (recalcul, exclusion, code manuel, quantité).
+    Non bloquant : les erreurs sont loggées mais n'interrompent pas l'opération.
+    """
+    try:
+        from services.email_analysis_db import get_email_analysis_db
+        analysis_dict = result.dict() if hasattr(result, 'dict') else result
+        get_email_analysis_db().update_analysis_result(message_id, analysis_dict)
+    except Exception as e:
+        logger.warning(f"Could not persist analysis after mutation (non-critical): {e}")
+
+
 class ConnectionTestDetails(BaseModel):
     tenantId: bool = False
     clientId: bool = False
@@ -580,15 +616,25 @@ async def analyze_email(message_id: str, force: bool = False):
 
         existing_analysis = analysis_db.get_analysis(message_id)
         if existing_analysis:
-            logger.info(f"📦 Analysis loaded from DB for {message_id} (NO RECOMPUTE)")
+            # Vérifier si c'est une vraie analyse LLM+SAP (contient client_matches ou classification)
+            # ou juste une notification webhook (format simplifié sans matching SAP complet)
+            is_proper_analysis = (
+                'client_matches' in existing_analysis
+                or 'classification' in existing_analysis
+            )
 
-            # Mettre en cache mémoire pour accès rapide
-            _analysis_cache[message_id] = {
-                'data': EmailAnalysisResult(**existing_analysis),
-                'timestamp': datetime.now()
-            }
+            if is_proper_analysis:
+                logger.info(f"📦 Analysis loaded from DB for {message_id} (NO RECOMPUTE)")
 
-            return EmailAnalysisResult(**existing_analysis)
+                # Mettre en cache mémoire pour accès rapide
+                _analysis_cache[message_id] = {
+                    'data': EmailAnalysisResult(**existing_analysis),
+                    'timestamp': datetime.now()
+                }
+
+                return EmailAnalysisResult(**existing_analysis)
+            else:
+                logger.info(f"⚠️ DB entry for {message_id} is webhook-only format — forcing full re-analysis")
 
     # Vérifier le cache mémoire (sauf si force=True)
     # Invalider le cache s'il date d'avant le démarrage du backend
@@ -752,6 +798,11 @@ async def analyze_email(message_id: str, force: bool = False):
             # Stocker tous les matches (pour choix utilisateur si nécessaire)
             result.client_matches = [c.dict() for c in match_result.clients]  # Convertir en dict pour JSON
             result.product_matches = [p.dict() for p in match_result.products]
+
+            # Référence commande client (Form No, PO, etc.) → transmis au frontend pour NumAtCard
+            if match_result.customer_reference:
+                result.customer_reference = match_result.customer_reference
+                logger.info(f"📋 Référence client extraite : {match_result.customer_reference}")
 
             # --- AUTO-VALIDATION CLIENT ---
             if match_result.clients:
@@ -1190,19 +1241,8 @@ async def confirm_client_choice(message_id: str, choice: ClientChoiceRequest):
     Returns:
         Confirmation du choix avec mise à jour du cache
     """
-    global _analysis_cache
-
     try:
-        # Récupérer l'analyse en cache
-        if message_id not in _analysis_cache:
-            raise HTTPException(status_code=404, detail="Email analysis not found in cache")
-
-        cached_entry = _analysis_cache[message_id]
-        # Gérer le nouveau format avec timestamp
-        if isinstance(cached_entry, dict) and 'data' in cached_entry:
-            result = cached_entry['data']
-        else:
-            result = cached_entry
+        result = _load_analysis(message_id)
 
         # Mettre à jour les données extraites avec le choix utilisateur
         if result.extracted_data is None:
@@ -1265,19 +1305,8 @@ async def confirm_products_choice(message_id: str, choice: ProductChoiceRequest)
     Returns:
         Confirmation des choix avec mise à jour du cache
     """
-    global _analysis_cache
-
     try:
-        # Récupérer l'analyse en cache
-        if message_id not in _analysis_cache:
-            raise HTTPException(status_code=404, detail="Email analysis not found in cache")
-
-        cached_entry = _analysis_cache[message_id]
-        # Gérer le nouveau format avec timestamp
-        if isinstance(cached_entry, dict) and 'data' in cached_entry:
-            result = cached_entry['data']
-        else:
-            result = cached_entry
+        result = _load_analysis(message_id)
 
         # Mettre à jour les données extraites avec les choix utilisateur
         if result.extracted_data is None:
@@ -1337,13 +1366,8 @@ async def get_validation_status(message_id: str):
     Returns:
         Statut détaillé des validations requises
     """
-    global _analysis_cache
-
     try:
-        if message_id not in _analysis_cache:
-            raise HTTPException(status_code=404, detail="Email analysis not found in cache")
-
-        result = _analysis_cache[message_id]
+        result = _load_analysis(message_id)
 
         return {
             "requires_user_choice": result.requires_user_choice,
@@ -1379,33 +1403,43 @@ async def exclude_product_from_quote(
     Exclut un article du devis.
     Trace l'action pour audit et apprentissage futur.
     """
-    global _analysis_cache
-
     try:
-        # 1. Récupérer analyse en cache
-        if message_id not in _analysis_cache:
-            raise HTTPException(status_code=404, detail="Analyse non trouvée")
+        # 1. Récupérer analyse en cache ou DB
+        result = _load_analysis(message_id)
 
-        cached_entry = _analysis_cache[message_id]
-        # Gérer le nouveau format avec timestamp
-        if isinstance(cached_entry, dict) and 'data' in cached_entry:
-            result = cached_entry['data']
-        else:
-            result = cached_entry
-
-        # 2. Retirer le produit de la liste
+        # 2. Retirer le produit de la liste (en mémorisant son index pour la correction)
+        excluded_index = None
         if result.product_matches:
+            for idx, p in enumerate(result.product_matches):
+                code = p.get("item_code") if isinstance(p, dict) else getattr(p, 'item_code', None)
+                if code == item_code:
+                    excluded_index = idx
+                    break
             original_count = len(result.product_matches)
             result.product_matches = [
                 p for p in result.product_matches
-                if p.get("item_code") != item_code
+                if (p.get("item_code") if isinstance(p, dict) else getattr(p, 'item_code', None)) != item_code
             ]
             removed_count = original_count - len(result.product_matches)
 
             if removed_count == 0:
                 logger.warning(f"Produit {item_code} non trouvé dans l'analyse {message_id}")
 
-        # 3. Tracer l'action (audit + apprentissage)
+        # 3. Persistance en base (correction overlay)
+        try:
+            from services.quote_corrections_db import get_quote_corrections_db
+            get_quote_corrections_db().save_correction(
+                email_id=message_id,
+                field_type="product",
+                field_name="excluded",
+                corrected_value="true",
+                field_index=excluded_index,
+                original_value="false",
+            )
+        except Exception as e:
+            logger.warning(f"Correction DB non sauvegardée (non bloquant): {e}")
+
+        # 4. Tracer l'action (audit + apprentissage)
         try:
             from services.product_mapping_db import get_product_mapping_db
             mapping_db = get_product_mapping_db()
@@ -1418,6 +1452,7 @@ async def exclude_product_from_quote(
             logger.warning(f"Could not log exclusion (non-critical): {e}")
 
         logger.info(f"Produit {item_code} exclu du devis {message_id}")
+        _persist_analysis(message_id, result)
 
         return {
             "success": True,
@@ -1441,59 +1476,101 @@ async def set_manual_product_code(
     Remplace un code article non trouvé par un code RONDOT saisi manuellement.
     Enregistre le mapping pour apprentissage automatique futur.
     """
-    global _analysis_cache
-
     try:
-        # 1. Récupérer analyse en cache
-        if message_id not in _analysis_cache:
-            raise HTTPException(status_code=404, detail="Analyse non trouvée")
+        # 1. Récupérer analyse en cache ou depuis la DB
+        result = _load_analysis(message_id)
 
-        cached_entry = _analysis_cache[message_id]
-        if isinstance(cached_entry, dict) and 'data' in cached_entry:
-            result = cached_entry['data']
-        else:
-            result = cached_entry
-
-        # 2. Vérifier que le code RONDOT existe dans SAP
+        # 2. Vérifier que le code RONDOT existe dans SAP (lookup exact)
         from services.sap_business_service import get_sap_business_service
         sap_service = get_sap_business_service()
 
-        sap_items = await sap_service.search_items(request.rondot_code, limit=1)
-
-        if not sap_items:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Code RONDOT '{request.rondot_code}' non trouvé dans SAP"
+        sap_item = None
+        sap_unavailable = False
+        try:
+            sap_item = await sap_service.get_item_by_code(request.rondot_code)
+            if sap_item is None:
+                # SAP a répondu mais le code n'existe pas
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Code RONDOT '{request.rondot_code}' non trouvé dans SAP"
+                )
+        except HTTPException:
+            raise
+        except Exception as e:
+            # SAP inaccessible : on accepte le code manuellement sans validation
+            logger.warning(f"SAP inaccessible lors de la validation du code manuel '{request.rondot_code}': {e}")
+            sap_unavailable = True
+            from services.sap_business_service import SAPItem
+            sap_item = SAPItem(
+                ItemCode=request.rondot_code,
+                ItemName=request.rondot_code,
+                Price=None,
+                InStock=None
             )
-
-        sap_item = sap_items[0]
 
         # 3. Mettre à jour le produit dans l'analyse
         product_updated = False
         if result.product_matches:
             for product in result.product_matches:
                 if product.get("item_code") == item_code:
-                    product["item_code"] = sap_item.item_code
-                    product["item_name"] = sap_item.item_name
+                    product["original_item_code"] = item_code  # Garde le code externe original pour le matching frontend
+                    product["item_code"] = sap_item.ItemCode
+                    product["item_name"] = sap_item.ItemName
                     product["not_found_in_sap"] = False
                     product["match_reason"] = "Code RONDOT saisi manuellement"
                     product["score"] = 100
                     product_updated = True
                     break
 
-        # 4. Enregistrer mapping pour apprentissage
+        # 4. Enregistrer mapping pour apprentissage + persistance correction
         try:
             from services.product_mapping_db import get_product_mapping_db
             mapping_db = get_product_mapping_db()
             mapping_db.add_mapping(
                 external_code=item_code,
-                sap_code=sap_item.item_code,
+                sap_code=sap_item.ItemCode,
                 source="manual_user_input",
                 confidence=1.0
             )
-            logger.info(f"Mapping ajouté: {item_code} → {sap_item.item_code}")
+            logger.info(f"Mapping ajouté: {item_code} → {sap_item.ItemCode}")
         except Exception as e:
             logger.warning(f"Could not save mapping (non-critical): {e}")
+
+        # Persistance correction en base
+        try:
+            from services.quote_corrections_db import get_quote_corrections_db
+            product_idx = next(
+                (i for i, p in enumerate(result.product_matches or [])
+                 if (p.get("item_code") if isinstance(p, dict) else getattr(p, 'item_code', None)) == sap_item.ItemCode),
+                None
+            )
+            corrections_db = get_quote_corrections_db()
+            corrections_db.save_correction(
+                email_id=message_id,
+                field_type="product",
+                field_name="item_code",
+                corrected_value=sap_item.ItemCode,
+                field_index=product_idx,
+                original_value=item_code,
+            )
+            corrections_db.save_correction(
+                email_id=message_id,
+                field_type="product",
+                field_name="item_name",
+                corrected_value=sap_item.ItemName,
+                field_index=product_idx,
+                original_value=None,
+            )
+            corrections_db.save_correction(
+                email_id=message_id,
+                field_type="product",
+                field_name="not_found_in_sap",
+                corrected_value="false",
+                field_index=product_idx,
+                original_value="true",
+            )
+        except Exception as e:
+            logger.warning(f"Correction DB (manual-code) non sauvegardée (non bloquant): {e}")
 
         # 5. Recalculer pricing pour ce produit
         unit_price = None
@@ -1504,11 +1581,11 @@ async def set_manual_product_code(
             pricing_engine = get_pricing_engine()
 
             card_code = result.extracted_data.client_card_code if result.extracted_data else "UNKNOWN"
-            quantity = next((p.get("quantity", 1) for p in result.product_matches if p.get("item_code") == sap_item.item_code), 1)
+            quantity = next((p.get("quantity", 1) for p in result.product_matches if p.get("item_code") == sap_item.ItemCode), 1)
 
             pricing_result = await pricing_engine.calculate_price(
                 PricingContext(
-                    item_code=sap_item.item_code,
+                    item_code=sap_item.ItemCode,
                     card_code=card_code,
                     quantity=quantity
                 )
@@ -1517,7 +1594,7 @@ async def set_manual_product_code(
             if pricing_result.success and pricing_result.decision:
                 # Enrichir avec pricing
                 for product in result.product_matches:
-                    if product.get("item_code") == sap_item.item_code:
+                    if product.get("item_code") == sap_item.ItemCode:
                         product["unit_price"] = pricing_result.decision.calculated_price
                         product["line_total"] = pricing_result.decision.line_total
                         product["pricing_case"] = pricing_result.decision.case_type.value
@@ -1527,14 +1604,18 @@ async def set_manual_product_code(
         except Exception as e:
             logger.warning(f"Could not calculate pricing (non-critical): {e}")
 
+        _persist_analysis(message_id, result)
+
         return {
             "success": True,
             "original_code": item_code,
-            "rondot_code": sap_item.item_code,
-            "item_name": sap_item.item_name,
+            "item_code": sap_item.ItemCode,
+            "rondot_code": sap_item.ItemCode,
+            "item_name": sap_item.ItemName,
             "unit_price": unit_price,
             "mapping_saved": True,
-            "product_updated": product_updated
+            "product_updated": product_updated,
+            "sap_validated": not sap_unavailable
         }
 
     except HTTPException:
@@ -1542,6 +1623,58 @@ async def set_manual_product_code(
     except Exception as e:
         logger.error(f"Manual code error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+class QuantityUpdateRequest(BaseModel):
+    quantity: int
+
+
+@router.patch("/emails/{message_id}/products/{item_code}/quantity")
+async def update_product_quantity(message_id: str, item_code: str, body: QuantityUpdateRequest):
+    """
+    Met à jour la quantité d'un produit dans le cache d'analyse.
+    Persiste la modification pour que le recalcul de prix utilise la bonne quantité.
+    """
+    result = _load_analysis(message_id)
+
+    if body.quantity <= 0:
+        raise HTTPException(status_code=400, detail="La quantité doit être > 0")
+
+    updated = False
+    product_index = None
+    original_qty = None
+    for idx, pm in enumerate(result.product_matches or []):
+        code = pm.get('item_code') if isinstance(pm, dict) else getattr(pm, 'item_code', None)
+        if code == item_code:
+            original_qty = pm.get('quantity', 1) if isinstance(pm, dict) else getattr(pm, 'quantity', 1)
+            if isinstance(pm, dict):
+                pm['quantity'] = body.quantity
+            else:
+                pm.quantity = body.quantity
+            product_index = idx
+            updated = True
+            break
+
+    if not updated:
+        raise HTTPException(status_code=404, detail=f"Produit '{item_code}' non trouvé dans l'analyse")
+
+    # Persistance en base
+    try:
+        from services.quote_corrections_db import get_quote_corrections_db
+        get_quote_corrections_db().save_correction(
+            email_id=message_id,
+            field_type="product",
+            field_name="quantity",
+            corrected_value=str(body.quantity),
+            field_index=product_index,
+            original_value=str(original_qty),
+        )
+    except Exception as e:
+        logger.warning(f"Correction DB non sauvegardée (non bloquant): {e}")
+
+    logger.info(f"Quantité mise à jour: {message_id}/{item_code}[{product_index}] {original_qty} → {body.quantity}")
+    _persist_analysis(message_id, result)
+    return {"status": "ok", "item_code": item_code, "quantity": body.quantity}
 
 
 @router.post("/emails/{message_id}/products/{item_code}/retry-search")
@@ -1554,25 +1687,16 @@ async def retry_product_search(
     Relance la recherche SAP pour un article non trouvé.
     Utile si l'article a été créé dans SAP en parallèle.
     """
-    global _analysis_cache
-
     try:
-        # 1. Récupérer analyse en cache
-        if message_id not in _analysis_cache:
-            raise HTTPException(status_code=404, detail="Analyse non trouvée")
-
-        cached_entry = _analysis_cache[message_id]
-        if isinstance(cached_entry, dict) and 'data' in cached_entry:
-            result = cached_entry['data']
-        else:
-            result = cached_entry
+        # 1. Récupérer analyse en cache ou DB
+        result = _load_analysis(message_id)
 
         # 2. Rechercher dans SAP
         from services.sap_business_service import get_sap_business_service
         sap_service = get_sap_business_service()
 
         search_query = request.search_query or item_code
-        sap_items = await sap_service.search_items(search_query, limit=5)
+        sap_items = await sap_service.search_items(search_query, top=5)
 
         if not sap_items:
             return {
@@ -1590,9 +1714,9 @@ async def retry_product_search(
             "count": len(sap_items),
             "items": [
                 {
-                    "item_code": item.item_code,
-                    "item_name": item.item_name,
-                    "quantity_on_hand": getattr(item, 'quantity_on_hand', None)
+                    "item_code": item.ItemCode,
+                    "item_name": item.ItemName,
+                    "quantity_on_hand": getattr(item, 'InStock', None)
                 }
                 for item in sap_items
             ]
@@ -1612,18 +1736,9 @@ async def recalculate_pricing(message_id: str):
     Returns:
         Analyse mise à jour avec les prix calculés
     """
-    global _analysis_cache
-
     try:
-        # 1. Récupérer analyse en cache
-        if message_id not in _analysis_cache:
-            raise HTTPException(status_code=404, detail="Analyse non trouvée en cache")
-
-        cached_entry = _analysis_cache[message_id]
-        if isinstance(cached_entry, dict) and 'data' in cached_entry:
-            result = cached_entry['data']
-        else:
-            result = cached_entry
+        # 1. Récupérer analyse en cache ou DB
+        result = _load_analysis(message_id)
 
         # 2. Vérifier qu'il y a des produits matchés
         if not result.product_matches or len(result.product_matches) == 0:
@@ -1707,6 +1822,21 @@ async def recalculate_pricing(message_id: str):
                 error_msg = f"{product.item_code}: {str(pricing_result)}"
                 logger.error(f"Pricing error - {error_msg}")
                 pricing_errors.append(error_msg)
+                # Même si pricing échoue, on rafraîchit le poids depuis le cache local
+                try:
+                    from services.sap_cache_db import get_sap_cache_db
+                    cached_item = get_sap_cache_db().get_item_by_code(product.item_code)
+                    if cached_item and cached_item.get("weight_unit_value"):
+                        w = cached_item["weight_unit_value"]
+                        p_dict = product.dict()
+                        p_dict["weight_unit_value"] = w
+                        p_dict["weight_unit"] = "kg"
+                        p_dict["weight_total"] = round(w * product.quantity, 4)
+                        from services.email_matcher import MatchedProduct
+                        enriched_products.append(MatchedProduct(**p_dict))
+                        continue
+                except Exception:
+                    pass
                 enriched_products.append(product)
                 continue
 
@@ -1728,6 +1858,17 @@ async def recalculate_pricing(message_id: str):
                     "alerts": decision.alerts,
                     "decision_id": decision.decision_id
                 })
+                # Rafraîchir le poids depuis le cache actuel (corrige les analyses antérieures)
+                try:
+                    from services.sap_cache_db import get_sap_cache_db
+                    cached_item = get_sap_cache_db().get_item_by_code(product.item_code)
+                    if cached_item and cached_item.get("weight_unit_value"):
+                        w = cached_item["weight_unit_value"]
+                        enriched_dict["weight_unit_value"] = w
+                        enriched_dict["weight_unit"] = "kg"
+                        enriched_dict["weight_total"] = round(w * product.quantity, 4)
+                except Exception:
+                    pass
 
                 enriched_product = MatchedProduct(**enriched_dict)
                 enriched_products.append(enriched_product)
@@ -1754,6 +1895,9 @@ async def recalculate_pricing(message_id: str):
         else:
             _analysis_cache[message_id] = result
 
+        # Persister en base pour que les prix soient disponibles au rechargement
+        _persist_analysis(message_id, result)
+
         duration_ms = (time.time() - t_start) * 1000
 
         logger.info(
@@ -1773,6 +1917,47 @@ async def recalculate_pricing(message_id: str):
     except Exception as e:
         logger.error(f"Recalculate pricing error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================
+# ENDPOINTS : DRAFT STATE (persistance état UI devis)
+# ============================================================
+
+class DraftStateRequest(BaseModel):
+    quantity_overrides: dict = {}   # {str(lineNum): qty}
+    ignored_line_nums: list = []    # [lineNum, ...]
+    selected_client_code: Optional[str] = None
+    selected_client_name: Optional[str] = None
+
+
+@router.get("/emails/{message_id}/draft-state")
+async def get_draft_state(message_id: str):
+    """
+    Charge l'état UI sauvegardé pour un devis en cours d'édition.
+    Retourne quantityOverrides, ignoredItems et selectedClient persistés.
+    """
+    from services.email_analysis_db import get_email_analysis_db
+    state = get_email_analysis_db().get_draft_state(message_id)
+    if not state:
+        return {"found": False}
+    return {"found": True, **state}
+
+
+@router.patch("/emails/{message_id}/draft-state")
+async def save_draft_state(message_id: str, body: DraftStateRequest):
+    """
+    Sauvegarde l'état UI d'un devis en cours d'édition.
+    Appelé automatiquement après chaque modification côté frontend.
+    """
+    from services.email_analysis_db import get_email_analysis_db
+    get_email_analysis_db().save_draft_state(
+        email_id=message_id,
+        quantity_overrides={str(k): v for k, v in body.quantity_overrides.items()},
+        ignored_line_nums=body.ignored_line_nums,
+        selected_client_code=body.selected_client_code,
+        selected_client_name=body.selected_client_name,
+    )
+    return {"status": "ok"}
 
 
 # ============================================================

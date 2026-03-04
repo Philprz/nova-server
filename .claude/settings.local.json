@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(sqlite3:*)"
+      "Bash(sqlite3:*)",
+      "Bash(cmd /c \"curl --max-time 5 http://localhost:8001/health\")"
     ]
   }
 }
