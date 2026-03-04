@@ -107,6 +107,7 @@ export interface EmailAnalysisResult {
   products_auto_validated?: boolean;
   requires_user_choice?: boolean;
   user_choice_reason?: string;
+  customer_reference?: string;  // Référence commande client (Form No, PO No…) → NumAtCard SAP
 }
 
 export interface ApiResponse<T> {

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, CheckCircle, Calculator, FileText, TrendingUp, Building2, Package, Search, Loader2, UserCheck, UserPlus, AlertCircle, AlertTriangle, RefreshCw, Mail, Paperclip, RotateCcw, X } from 'lucide-react';
+import { ArrowLeft, CheckCircle, Calculator, FileText, TrendingUp, Building2, Package, Search, Loader2, UserCheck, UserPlus, AlertCircle, AlertTriangle, RefreshCw, Mail, Paperclip, RotateCcw, X, Pencil } from 'lucide-react';
 import { ProcessedEmail } from '@/types/email';
 import { CreateItemDialog } from './CreateItemDialog';
 import { PriceEditorDialog } from './PriceEditorDialog';
@@ -87,6 +87,9 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
   const [retryResults, setRetryResults] = useState<{[lineNum: number]: any[]}>({});
   const [showRetryResults, setShowRetryResults] = useState<{[lineNum: number]: boolean}>({});
   const [retryLoading, setRetryLoading] = useState<{[lineNum: number]: boolean}>({});
+
+  // État pour l'ouverture des options de gestion sur les lignes déjà trouvées automatiquement
+  const [showOverrideOptions, setShowOverrideOptions] = useState<{[lineNum: number]: boolean}>({});
 
   // État pour le recalcul des prix
   const [recalculating, setRecalculating] = useState(false);
@@ -387,9 +390,13 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
       { ItemCode: 'A07042', ItemDescription: 'Transport', Quantity: 1, UnitPrice: transportPrice, DiscountPercent: 0 },
     ];
 
+    // Référence commande client (Form No, PO, etc.) → NumAtCard SAP
+    const customerRef = quote.analysisResult?.customer_reference ?? undefined;
+
     return {
       CardCode: selectedClient!.CardCode,
       Comments: `Devis suite email: ${quote.email.subject || ''}`,
+      NumAtCard: customerRef,
       email_id: quote.email.id,
       email_subject: quote.email.subject,
       DocumentLines: [...activeLines, ...fixedLines],
@@ -626,6 +633,7 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
       await excludeProduct(quote.email.id, itemCode, "Ignoré par l'utilisateur");
       const updated = { ...ignoredItems, [lineNum]: true };
       setIgnoredItems(updated);
+      setShowOverrideOptions(prev => ({ ...prev, [lineNum]: false }));
       triggerDraftSave(quantityOverrides, updated, selectedClient);
       toast.success('Article ignoré et exclu du devis');
     } catch (error: any) {
@@ -660,6 +668,7 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
         [lineNum]: { found: true, message: `Code validé: ${result.item_code}`, itemCode: result.item_code }
       }));
       setShowManualInput(prev => ({ ...prev, [lineNum]: false }));
+      setShowOverrideOptions(prev => ({ ...prev, [lineNum]: false }));
       toast.success(`Article associé: ${result.item_name}`);
     } catch (error: any) {
       toast.error(error.message || 'Code SAP invalide');
@@ -700,6 +709,7 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
         [lineNum]: { found: true, message: `Article sélectionné: ${result.item_code}`, itemCode: result.item_code }
       }));
       setShowRetryResults(prev => ({ ...prev, [lineNum]: false }));
+      setShowOverrideOptions(prev => ({ ...prev, [lineNum]: false }));
       toast.success(`Article associé: ${result.item_name}`);
     } catch (error: any) {
       toast.error(error.message || "Erreur lors de l'association");
@@ -1095,15 +1105,157 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
                           }
 
                           if (status?.found) {
+                            // Mode normal : badge + icône crayon pour ouvrir les options
+                            if (!showOverrideOptions[line.LineNum]) {
+                              return (
+                                <div className="flex flex-col items-center gap-1">
+                                  <div className="flex items-center gap-1">
+                                    <Badge className="bg-success/10 text-success border-success/20">
+                                      <CheckCircle className="w-3 h-3 mr-1" />
+                                      Trouvé
+                                    </Badge>
+                                    <Button
+                                      size="icon"
+                                      variant="ghost"
+                                      className="h-5 w-5 text-muted-foreground hover:text-foreground"
+                                      title="Modifier la correspondance"
+                                      onClick={() => setShowOverrideOptions(prev => ({ ...prev, [line.LineNum]: true }))}
+                                    >
+                                      <Pencil className="w-3 h-3" />
+                                    </Button>
+                                  </div>
+                                  {status.message && (
+                                    <p className="text-xs text-muted-foreground mt-1">{status.message}</p>
+                                  )}
+                                </div>
+                              );
+                            }
+
+                            // Mode override : mêmes contrôles que "Non trouvé"
+                            if (showManualInput[line.LineNum]) {
+                              return (
+                                <div className="space-y-1.5">
+                                  <Badge className="bg-success/10 text-success border-success/20">
+                                    <CheckCircle className="w-3 h-3 mr-1" />
+                                    Trouvé
+                                  </Badge>
+                                  <div className="flex items-center gap-1">
+                                    <Input
+                                      placeholder="Code SAP..."
+                                      value={manualCodeInput[line.LineNum] || ''}
+                                      onChange={(e) => setManualCodeInput(prev => ({ ...prev, [line.LineNum]: e.target.value }))}
+                                      onKeyDown={(e) => e.key === 'Enter' && handleManualCodeSubmit(line.LineNum, status?.itemCode || line.ItemCode || '')}
+                                      className="h-7 text-xs w-24 px-1"
+                                      autoFocus
+                                    />
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-7 w-7 p-0"
+                                      onClick={() => handleManualCodeSubmit(line.LineNum, status?.itemCode || line.ItemCode || '')}
+                                      disabled={!!manualCodeLoading[line.LineNum]}
+                                    >
+                                      {manualCodeLoading[line.LineNum]
+                                        ? <Loader2 className="w-3 h-3 animate-spin" />
+                                        : <CheckCircle className="w-3 h-3" />}
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      className="h-7 w-7 p-0"
+                                      onClick={() => setShowManualInput(prev => ({ ...prev, [line.LineNum]: false }))}
+                                    >
+                                      <X className="w-3 h-3" />
+                                    </Button>
+                                  </div>
+                                </div>
+                              );
+                            }
+
+                            if (showRetryResults[line.LineNum]) {
+                              return (
+                                <div className="space-y-1.5">
+                                  <Badge className="bg-success/10 text-success border-success/20">
+                                    <CheckCircle className="w-3 h-3 mr-1" />
+                                    Trouvé
+                                  </Badge>
+                                  <div className="space-y-1 text-left max-w-[180px]">
+                                    {(retryResults[line.LineNum] || []).length > 0 ? (
+                                      retryResults[line.LineNum].map((item: any) => (
+                                        <button
+                                          key={item.item_code}
+                                          className="flex flex-col w-full text-left px-1.5 py-1 rounded hover:bg-muted/60 transition-colors text-xs"
+                                          onClick={() => handleSelectRetryResult(line.LineNum, status?.itemCode || line.ItemCode || '', item.item_code, item.item_name)}
+                                          disabled={!!manualCodeLoading[line.LineNum]}
+                                        >
+                                          <span className="font-mono font-medium">{item.item_code}</span>
+                                          <span className="text-muted-foreground truncate">{item.item_name}</span>
+                                        </button>
+                                      ))
+                                    ) : (
+                                      <p className="text-xs text-muted-foreground px-1">Aucun résultat</p>
+                                    )}
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      className="h-6 text-xs w-full"
+                                      onClick={() => setShowRetryResults(prev => ({ ...prev, [line.LineNum]: false }))}
+                                    >
+                                      Fermer
+                                    </Button>
+                                  </div>
+                                </div>
+                              );
+                            }
+
+                            // Boutons d'action override
                             return (
-                              <div>
+                              <div className="space-y-1.5">
                                 <Badge className="bg-success/10 text-success border-success/20">
                                   <CheckCircle className="w-3 h-3 mr-1" />
                                   Trouvé
                                 </Badge>
-                                {status.message && (
-                                  <p className="text-xs text-muted-foreground mt-1">{status.message}</p>
-                                )}
+                                <div className="flex flex-col gap-1">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 text-xs justify-start px-2"
+                                    onClick={() => setShowManualInput(prev => ({ ...prev, [line.LineNum]: true }))}
+                                  >
+                                    <FileText className="w-3 h-3 mr-1 flex-shrink-0" />
+                                    Saisir code SAP
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 text-xs justify-start px-2"
+                                    onClick={() => handleRetrySearch(line.LineNum, status?.itemCode || line.ItemCode || '', line.ItemDescription)}
+                                    disabled={!!retryLoading[line.LineNum]}
+                                  >
+                                    {retryLoading[line.LineNum]
+                                      ? <Loader2 className="w-3 h-3 mr-1 animate-spin flex-shrink-0" />
+                                      : <RefreshCw className="w-3 h-3 mr-1 flex-shrink-0" />}
+                                    Relancer la recherche
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-7 text-xs justify-start px-2 text-muted-foreground hover:text-destructive"
+                                    onClick={() => handleIgnoreItem(line.LineNum, status?.itemCode || line.ItemCode || '')}
+                                  >
+                                    <X className="w-3 h-3 mr-1 flex-shrink-0" />
+                                    Ignorer
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-7 text-xs justify-start px-2 text-muted-foreground"
+                                    onClick={() => setShowOverrideOptions(prev => ({ ...prev, [line.LineNum]: false }))}
+                                  >
+                                    <X className="w-3 h-3 mr-1 flex-shrink-0" />
+                                    Annuler
+                                  </Button>
+                                </div>
                               </div>
                             );
                           }
@@ -1629,6 +1781,11 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
                 <Building2 className="w-4 h-4 text-muted-foreground" />
                 <span className="font-medium">{selectedClient?.CardName}</span>
                 <Badge variant="outline">{selectedClient?.CardCode}</Badge>
+                {quote.analysisResult?.customer_reference && (
+                  <Badge variant="secondary" className="ml-auto font-mono text-xs">
+                    Réf. client : {quote.analysisResult.customer_reference}
+                  </Badge>
+                )}
               </div>
 
               {/* Lignes du devis */}
