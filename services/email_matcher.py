@@ -21,6 +21,63 @@ WORD_PATTERN_6PLUS = re.compile(r'\b\w{6,}\b')  # Mots 6+ caractères
 EMAIL_PATTERN = re.compile(r'[\w._%+-]+@([\w.-]+\.\w{2,})', re.IGNORECASE)
 MAILTO_PATTERN = re.compile(r'mailto:([\w._%+-]+@([\w.-]+\.\w{2,}))', re.IGNORECASE)
 
+# Pattern strict Adet — utilisé par extract_quantity_strict_adet() et _extract_offer_request_rows()
+_ADET_STRICT_PATTERN = re.compile(r'\b(\d+(?:[.,]\d+)?)\s*Adet\b', re.IGNORECASE)
+
+# Patterns pour détecter une référence de commande client (PO, Form No, etc.)
+_CUSTOMER_REF_PATTERNS = [
+    re.compile(r'Form\s+No\s*[:\-]?\s*(\d+)', re.IGNORECASE),
+    re.compile(r'PO\s+(?:No|Number|N°|Num)\s*[:\-]?\s*([\w\-\/]+)', re.IGNORECASE),
+    re.compile(r'Order\s+(?:No|Number|N°|Ref)\s*[:\-]?\s*([\w\-\/]+)', re.IGNORECASE),
+    re.compile(r'Commande\s+(?:N°|No|Ref|Numéro)\s*[:\-]?\s*([\w\-\/]+)', re.IGNORECASE),
+    re.compile(r'Bon\s+de\s+commande\s*[:\-]?\s*([\w\-\/]+)', re.IGNORECASE),
+    re.compile(r'Ref(?:erence|érence)?\s+(?:client|commande|achat)\s*[:\-]?\s*([\w\-\/]+)', re.IGNORECASE),
+    re.compile(r'Notre\s+(?:référence|commande|BC)\s*[:\-]?\s*([\w\-\/]+)', re.IGNORECASE),
+    re.compile(r'(?:Your\s+)?(?:RFQ|RFP|Inquiry)\s+(?:No|Ref|#)\s*[:\-]?\s*([\w\-\/]+)', re.IGNORECASE),
+]
+
+
+def extract_customer_reference(text: str) -> Optional[str]:
+    """
+    Extrait la référence de commande/demande client depuis un texte email ou PDF.
+
+    Détecte : Form No, PO No/Number, Order No, Commande N°, Bon de commande,
+              Référence client, Notre référence, RFQ/RFP Ref, etc.
+
+    Retourne None si aucune référence trouvée.
+    """
+    if not text:
+        return None
+    for pattern in _CUSTOMER_REF_PATTERNS:
+        m = pattern.search(text)
+        if m:
+            return m.group(1).strip()
+    return None
+
+
+def extract_quantity_strict_adet(text: str) -> Optional[float]:
+    """
+    Extrait UNIQUEMENT les quantités sous la forme : nombre + 'Adet'.
+
+    RÈGLE MÉTIER ABSOLUE (documents type 'Offer Request Form' Marmara Cam) :
+    La quantité valide est UNIQUEMENT le nombre immédiatement suivi du mot 'Adet'.
+
+    Exemples VALIDES   : '50,00 Adet', '2 Adet', '1,00 Adet', '2,00 Adet'
+    Exemples INVALIDES : 'DİŞ SAYISI: 194', '1940mm', '50AT10', '1160 LG', 'POS.8'
+
+    INTERDIT :
+      - Fallback sur le premier entier trouvé
+      - Inférer depuis texte technique
+      - Toute autre heuristique numérique
+
+    Retourne None si aucune correspondance — JAMAIS de valeur par défaut.
+    """
+    match = _ADET_STRICT_PATTERN.search(text)
+    if match:
+        qty_str = match.group(1).replace(',', '.')
+        return float(qty_str)
+    return None
+
 
 # --- Modèles de résultat ---
 
@@ -58,8 +115,19 @@ class MatchedProduct(BaseModel):
     historical_sales: List[Any] = []  # 3 dernières ventes (pour affichage frontend)
     sap_avg_price: Optional[float] = None  # Prix moyen SAP (AvgStdPrice)
     last_sale_price: Optional[float] = None  # Dernier prix vente (CAS 1/2)
+
+    # ✨ CHAMP ORDRE SOURCE (Offer Request Form)
+    row_no: Optional[int] = None  # Numéro de ligne dans le document source (Row No du PDF)
     last_sale_date: Optional[str] = None  # Date dernière vente
     average_price_others: Optional[float] = None  # Prix moyen autres clients (CAS 3)
+
+    # ✨ CHAMPS POIDS (depuis SWeight1 SAP B1)
+    weight_unit_value: Optional[float] = None  # Poids unitaire en kg (SWeight1)
+    weight_unit: str = 'kg'                    # Unité de poids (SAP B1 stocke en kg)
+    weight_total: Optional[float] = None       # Poids total = weight_unit_value × quantity
+
+    # TODO: volume — champ SAP non identifié pour ce projet.
+    # Candidat probable : SVolume1 (à valider avec équipe SAP Rondot avant implémentation).
 
 
 class MatchResult(BaseModel):
@@ -67,6 +135,7 @@ class MatchResult(BaseModel):
     products: List[MatchedProduct] = []
     best_client: Optional[MatchedClient] = None
     extracted_domains: List[str] = []
+    customer_reference: Optional[str] = None  # Référence commande client (Form No, PO No, etc.)
 
 
 # --- Service principal ---
@@ -280,11 +349,15 @@ class EmailMatcher:
         # 3. Matcher les produits (avec apprentissage si supplier connu)
         matched_products = self._match_products(full_text, supplier_card_code)
 
+        # 4. Extraire la référence commande client (Form No, PO, etc.)
+        customer_ref = extract_customer_reference(full_text)
+
         return MatchResult(
             clients=matched_clients,
             products=matched_products,
             best_client=best_client,
-            extracted_domains=extracted_domains
+            extracted_domains=extracted_domains,
+            customer_reference=customer_ref,
         )
 
     # --- Extraction des domaines email ---
@@ -544,6 +617,13 @@ class EmailMatcher:
         Returns:
             MatchedProduct avec prix SAP inclus
         """
+        weight_unit_value = item.get("weight_unit_value")
+        weight_total = (
+            round(weight_unit_value * quantity, 4)
+            if weight_unit_value and quantity
+            else None
+        )
+
         return MatchedProduct(
             item_code=item.get("ItemCode", ""),
             item_name=item.get("ItemName", ""),
@@ -553,7 +633,11 @@ class EmailMatcher:
             not_found_in_sap=not_found_in_sap,
             # Prix depuis SAP (sera utilisé par pricing engine si disponible)
             unit_price=item.get("Price"),  # Prix SAP de base
-            supplier_price=item.get("SupplierPrice")  # Prix fournisseur si disponible
+            supplier_price=item.get("SupplierPrice"),  # Prix fournisseur si disponible
+            # Poids depuis cache SAP (SWeight1)
+            weight_unit_value=weight_unit_value,
+            weight_unit='kg',
+            weight_total=weight_total,
         )
 
     def _match_single_product_intelligent(
@@ -608,10 +692,7 @@ class EmailMatcher:
         try:
             sap_cache_items = self._cache_db.search_items(code, limit=1)
             if sap_cache_items:
-                item = {
-                    "ItemCode": sap_cache_items[0]["ItemCode"],
-                    "ItemName": sap_cache_items[0]["ItemName"]
-                }
+                item = sap_cache_items[0]  # Full dict avec weight_unit_value inclus
                 print(f"         ✅ Trouvé dans cache SQLite: {code} → {item['ItemName'][:40]}", flush=True)
                 logger.debug(f"   [OK] Found in SQLite cache: {code}")
                 return self._create_matched_product_from_sap(
@@ -622,6 +703,41 @@ class EmailMatcher:
                 )
         except Exception as e:
             logger.debug(f"   [SQLite fallback] Error: {e}")
+
+        # 1c. Fallback normalisé : chercher sans tirets/espaces (ex: C391-15-LM → C391-15LM-SPARE)
+        # Note: ItemCode SAP est une ref interne (A13044), la ref fournisseur est dans ItemName
+        try:
+            code_normalized = code.replace('-', '').replace(' ', '').upper()
+            if code_normalized != code.replace(' ', '').upper():  # Seulement si le code avait des tirets
+                sap_cache_items = self._cache_db.search_items_normalized(code, limit=5)
+                if sap_cache_items:
+                    # Comparer contre ItemName normalisé (la ref fournisseur y est stockée)
+                    def _score_item(item):
+                        name_norm = item["ItemName"].replace('-', '').replace(' ', '').upper()
+                        # Match exact : code normalisé est sous-chaîne du ItemName normalisé
+                        # Préférer le nom le plus court (plus spécifique au code)
+                        if code_normalized in name_norm:
+                            return 1.0 + (1.0 / max(len(name_norm), 1))
+                        # Sinon fuzzy
+                        return SequenceMatcher(None, code_normalized, name_norm).ratio()
+
+                    best = max(sap_cache_items, key=_score_item)
+                    name_norm = best["ItemName"].replace('-', '').replace(' ', '').upper()
+                    ic_norm = best["ItemCode"].replace('-', '').replace(' ', '').upper()
+
+                    # Validé si code normalisé est sous-chaîne du nom ou du code
+                    if code_normalized in name_norm or code_normalized in ic_norm:
+                        score = int(90 * len(code_normalized) / max(len(name_norm), 1))
+                        score = max(score, 75)  # Minimum 75 pour un match sous-chaîne confirmé
+                        print(f"         ✅ Trouvé (normalisé): {code} → {best['ItemCode']} | {best['ItemName'][:40]}", flush=True)
+                        return self._create_matched_product_from_sap(
+                            item=best,
+                            quantity=qty,
+                            score=score,
+                            match_reason=f"Ref fournisseur dans ItemName: {code} ~ {best['ItemName'][:40]}"
+                        )
+        except Exception as e:
+            logger.debug(f"   [SQLite normalized fallback] Error: {e}")
 
         # --- ÉTAPE 2: Recherche dans product_mapping_db (apprentissage) ---
         # Chercher mapping avec supplier_card_code (si fourni) ou GLOBAL
@@ -651,10 +767,7 @@ class EmailMatcher:
             try:
                 sap_cache_items = self._cache_db.search_items(matched_code, limit=1)
                 if sap_cache_items:
-                    item = {
-                        "ItemCode": sap_cache_items[0]["ItemCode"],
-                        "ItemName": sap_cache_items[0]["ItemName"]
-                    }
+                    item = sap_cache_items[0]  # Full dict avec weight_unit_value inclus
                     print(f"         ✅ Article trouvé dans base locale: {matched_code}", flush=True)
                     logger.debug(f"   [OK] Mapped item found in SQLite: {matched_code}")
                     return self._create_matched_product_from_sap(
@@ -861,6 +974,51 @@ class EmailMatcher:
         # ===== PHASE 0 : EXTRACTION DESCRIPTIONS (pour apprentissage) =====
         product_descriptions = self._extract_product_descriptions(text)
         logger.info(f"Extracted {len(product_descriptions)} product descriptions from text")
+
+        # ===== PHASE 0B : CHEMIN OFFER REQUEST FORM (Row N + Adet strict) =====
+        # Si le document est un "Offer Request Form" (format Marmara Cam 26576), on utilise
+        # une extraction structurée : quantité UNIQUEMENT via pattern "nombre Adet" (strict).
+        # Aucune valeur technique (ex: DİŞ SAYISI: 194) ne peut être confondue avec une quantité.
+        offer_rows = self._extract_offer_request_rows(text)
+        if offer_rows:
+            print(f"📋 FORMAT OFFER REQUEST FORM DÉTECTÉ — {len(offer_rows)} lignes Row+Adet", flush=True)
+            logger.info(f"[OFFER REQUEST] Chemin structuré activé ({len(offer_rows)} lignes)")
+            offer_matches: List[MatchedProduct] = []
+            offer_matched_codes: set = set()
+            for row in offer_rows:  # déjà triés par row_no
+                code = row['code']
+                if code.upper() in offer_matched_codes:
+                    continue
+                product = self._match_single_product_intelligent(
+                    code=code,
+                    description=row['description'],
+                    text=text,
+                    supplier_card_code=supplier_card_code,
+                )
+                if product is None:
+                    # Non trouvé dans SAP : créer entrée pending avec quantité Adet
+                    product = MatchedProduct(
+                        item_code=code,
+                        item_name=row['description'] or f"Produit externe {code}",
+                        quantity=row['quantity'],
+                        score=50,
+                        match_reason="Référence détectée (Offer Request Form) — non trouvée dans SAP",
+                        not_found_in_sap=True,
+                        row_no=row['row_no'],
+                    )
+                else:
+                    # Forcer la quantité Adet (prioritaire sur _extract_quantity_near)
+                    product = product.model_copy(update={
+                        'quantity': row['quantity'],
+                        'row_no': row['row_no'],
+                    })
+                offer_matches.append(product)
+                offer_matched_codes.add(code.upper())
+
+            # Tri final par row_no (ordre du document source)
+            offer_matches.sort(key=lambda m: (m.row_no or 0))
+            print(f"✅ OFFER REQUEST: {len(offer_matches)} produits, triés par Row No", flush=True)
+            return offer_matches
 
         # ===== PHASE 1 : MATCHING PAR CODE (ItemCode) avec apprentissage =====
 
@@ -1087,29 +1245,93 @@ class EmailMatcher:
         matches.sort(key=lambda m: m.score, reverse=True)
         return matches[:10]  # Top 10 maximum
 
+    # --- Extraction structurée Offer Request Form ---
+
+    # Pattern interne pour matcher une ligne "Row N: CODE - DESC - QTY Adet"
+    _OFFER_ROW_PATTERN = re.compile(
+        r'Row\s+(\d+)\s*:\s*'                  # Row N:
+        r'([A-Z0-9][A-Z0-9\-\.]+)\s*'          # CODE (ex: HST-117-03, C233-50AT10-1940G3)
+        r'[-–]\s*'                              # séparateur
+        r'(.+?)\s*'                             # DESCRIPTION (non-greedy)
+        r'\b(\d+(?:[.,]\d+)?)\s*Adet\b',       # QTY Adet (STRICT — pas de fallback)
+        re.IGNORECASE,
+    )
+
+    def _extract_offer_request_rows(self, text: str) -> List[Dict[str, Any]]:
+        """
+        Extrait les lignes structurées d'un document 'Offer Request Form'.
+
+        Format attendu : 'Row <N>: <CODE> - <DESCRIPTION> - <QTY> Adet'
+
+        RÈGLE MÉTIER : La quantité est détectée UNIQUEMENT via le pattern strict
+        'nombre Adet'. Aucun fallback sur d'autres valeurs numériques du texte.
+
+        Garde-fou : quantité > 50 sur une ligne autre que Row 1 → warning + vérification.
+
+        Returns:
+            Liste triée par row_no : [{'row_no': int, 'code': str, 'description': str, 'quantity': int}]
+            Liste vide si le texte n'est pas au format Offer Request Form.
+        """
+        # Pré-condition : le texte doit contenir au moins une ligne "Row N:"
+        if not re.search(r'Row\s+\d+\s*:', text, re.IGNORECASE):
+            return []
+
+        rows = []
+        for m in self._OFFER_ROW_PATTERN.finditer(text):
+            row_no = int(m.group(1))
+            code = m.group(2).strip()
+            description = m.group(3).strip().rstrip('-–').strip()
+            qty_str = m.group(4).replace(',', '.')
+            quantity = int(float(qty_str))
+
+            # Garde-fou : quantité suspecte sur ligne non-première
+            if quantity > 50 and row_no != 1:
+                logger.warning(
+                    f"[ADET GUARD] Row {row_no}: quantité suspicieusement élevée ({quantity}) "
+                    f"pour code {code} — mot 'Adet' confirmé dans le contexte, ligne acceptée."
+                )
+
+            rows.append({
+                'row_no': row_no,
+                'code': code,
+                'description': description,
+                'quantity': quantity,
+            })
+
+        rows.sort(key=lambda r: r['row_no'])
+        logger.info(f"[OFFER REQUEST] {len(rows)} lignes extraites (quantités strictes Adet)")
+        return rows
+
     # --- Extraction de quantité contextuelle ---
 
-    def _extract_quantity_near(self, text: str, code: str, radius: int = 80) -> int:
+    # Mots-clés précédant un deux-points qui indiquent un n° de dessin/référence (pas une quantité)
+    _DRAWING_KEYWORDS = {
+        'drawing', 'dwg', 'plan', 'dessin', 'ref', 'reference', 'fig', 'figure',
+        'folio', 'item no', 'item number', 'part no', 'part number', 'no', 'n°',
+        'revision', 'rev', 'sheet', 'page', 'pos', 'position', 'index', 'serie',
+        'serial', 'numéro', 'numero',
+    }
+
+    def _extract_quantity_near(self, text: str, code: str, radius: int = 200) -> int:
         """Extrait la quantité mentionnée près d'un code produit."""
-        # Trouver la position du code dans le texte
+        # Trouver la première occurrence du code dans le texte
         idx = text.find(code)
         if idx == -1:
             idx = text.lower().find(code.lower())
         if idx == -1:
             return 1  # Défaut
 
-        # Extraire le contexte autour du code
+        # Extraire le contexte autour du code (rayon élargi)
         start = max(0, idx - radius)
         end = min(len(text), idx + len(code) + radius)
         context = text[start:end]
 
-        # Patterns de quantité
+        # Patterns de quantité (du plus spécifique au plus général)
         qty_patterns = [
             r'qt[eéy]\s*[:\s]*(\d+)',
             r'quantit[eé]\s*[:\s]*(\d+)',
-            r'(\d+)\s*(?:pcs|pi[eè]ces?|unit[eé]s?)',
+            r'(\d+)\s*(?:pcs|pi[eè]ces?|unit[eé]s?|adet|stk|stück)',  # incl. Adet (turc)
             r'x\s*(\d+)',
-            r':\s*(\d+)\b',
         ]
 
         for pattern in qty_patterns:
@@ -1117,7 +1339,19 @@ class EmailMatcher:
             if match:
                 try:
                     qty = int(match.group(1))
-                    if 0 < qty < 100000:  # Sanity check
+                    if 0 < qty < 100000:
+                        return qty
+                except (ValueError, IndexError):
+                    pass
+
+        # Dernier recours : nombre après deux-points, sauf si précédé d'un mot de dessin/référence
+        for m in re.finditer(r':\s*(\d+)\b', context, re.IGNORECASE):
+            pre = context[max(0, m.start() - 30):m.start()].lower()
+            pre = re.sub(r'[^\w\s]', ' ', pre)  # Normaliser
+            if not any(kw in pre for kw in self._DRAWING_KEYWORDS):
+                try:
+                    qty = int(m.group(1))
+                    if 0 < qty < 100000:
                         return qty
                 except (ValueError, IndexError):
                     pass
@@ -1129,7 +1363,7 @@ class EmailMatcher:
         qty_patterns = [
             r'qt[eéy]\s*[:\s]*(\d+)',
             r'quantit[eé]\s*[:\s]*(\d+)',
-            r'(\d+)\s*(?:pcs|pièces?|units?|unités?)',
+            r'(\d+)\s*(?:pcs|pièces?|units?|unités?|adet|stk|stück)',
             r'x\s*(\d+)',
         ]
 

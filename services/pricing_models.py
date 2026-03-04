@@ -17,6 +17,7 @@ class PricingCaseType(str, Enum):
     CAS_3_HA = "CAS_3_HA"      # Historique Autres clients
     CAS_4_NP = "CAS_4_NP"      # Nouveau Produit
     CAS_MANUAL = "CAS_MANUAL"  # Prix manuel (validation commerciale)
+    UK_SUBSIDIARY = "UK_SUBSIDIARY"  # Filiale UK (F0014/F0018) : PA × taux × remise / diviseur
 
 
 class SupplierPriceVariation(BaseModel):
@@ -90,6 +91,9 @@ class PricingContext(BaseModel):
     supplier_code: Optional[str] = None
     supplier_name: Optional[str] = None
 
+    # Devise du prix fournisseur (détectée depuis le tarif ou fournie explicitement)
+    supplier_currency: str = Field(default="EUR", description="Devise du prix fournisseur (EUR, GBP, USD, CHF)")
+
     # Options de calcul
     force_recalculate: bool = Field(default=False, description="Forcer recalcul même si stable")
     apply_margin: float = Field(default=45.0, description="Marge à appliquer (défaut 45%)")
@@ -129,7 +133,10 @@ class PricingDecision(BaseModel):
     confidence_score: float = Field(default=1.0, ge=0.0, le=1.0, description="Niveau de confiance (0-1)")
 
     # Données sources
-    supplier_price: Optional[float] = Field(None, description="Prix fournisseur utilisé")
+    supplier_price: Optional[float] = Field(None, description="Prix fournisseur utilisé (converti en EUR)")
+    supplier_currency: str = Field(default="EUR", description="Devise originale du prix fournisseur")
+    supplier_price_original: Optional[float] = Field(None, description="Prix fournisseur dans sa devise d'origine (avant conversion)")
+    exchange_rate_applied: Optional[float] = Field(None, description="Taux de change appliqué (si devise != EUR)")
     margin_applied: Optional[float] = Field(None, description="Marge appliquée (%)")
 
     # Historique de référence (dernière vente uniquement - legacy)

@@ -144,6 +144,130 @@ async def get_items(search: str = "", limit: int = 10):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/items/export")
+async def export_items_excel(
+    search: str = "",
+    max_items: int = 50000
+):
+    """
+    Exporte le catalogue d'articles depuis le cache local (supplier_tariffs.db → sap_items).
+
+    Params:
+        search    : Filtre sur code ou désignation (optionnel)
+        max_items : Limite maximale (défaut: 50 000)
+
+    Example:
+        GET /api/sap/items/export
+        GET /api/sap/items/export?search=MOT
+    """
+    import io
+    import re
+    import sqlite3
+    from pathlib import Path as FilePath
+    from datetime import datetime
+    from fastapi.responses import StreamingResponse
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment
+
+    # Caractères XML illégaux dans xlsx (caractères de contrôle hors tab/LF/CR)
+    _illegal_xml = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]')
+
+    def _clean(value):
+        """Nettoie une valeur pour l'écriture dans Excel."""
+        if isinstance(value, str):
+            return _illegal_xml.sub('', value).strip()
+        return value
+
+    try:
+        # ── Lecture depuis la base locale ──────────────────────────────────
+        db_path = FilePath(__file__).parent.parent / "supplier_tariffs.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+
+        sql = "SELECT ItemCode, ItemName, ItemGroup, Price, Currency, last_updated FROM sap_items"
+        sql_params: list = []
+
+        if search:
+            sql += " WHERE (ItemCode LIKE ? OR ItemName LIKE ?)"
+            sql_params += [f"%{search}%", f"%{search}%"]
+
+        sql += " ORDER BY ItemCode ASC LIMIT ?"
+        sql_params.append(max_items)
+
+        rows = conn.execute(sql, sql_params).fetchall()
+        conn.close()
+
+        logger.info(f"Export Excel (cache local): {len(rows)} articles")
+
+        # ── Construction du fichier Excel ──────────────────────────────────
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Articles SAP"
+
+        HEADER_COLOR = "1F4E79"
+        ALT_ROW_COLOR = "EEF4FB"
+
+        columns = [
+            ("Code Article", 18),
+            ("Désignation",  52),
+            ("Groupe",       10),
+            ("Prix vente",   13),
+            ("Devise",        8),
+            ("Dernière MAJ", 18),
+        ]
+
+        for col_idx, (label, width) in enumerate(columns, 1):
+            cell = ws.cell(row=1, column=col_idx, value=label)
+            cell.font = Font(bold=True, color="FFFFFF", size=11)
+            cell.fill = PatternFill(start_color=HEADER_COLOR, end_color=HEADER_COLOR, fill_type="solid")
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+            ws.column_dimensions[cell.column_letter].width = width
+
+        ws.row_dimensions[1].height = 22
+        ws.freeze_panes = "A2"
+
+        alt_fill = PatternFill(start_color=ALT_ROW_COLOR, end_color=ALT_ROW_COLOR, fill_type="solid")
+
+        for row_idx, row in enumerate(rows, 2):
+            row_fill = alt_fill if row_idx % 2 == 0 else None
+            last_upd = (row["last_updated"] or "")[:10]
+            row_values = [
+                row["ItemCode"],
+                row["ItemName"],
+                row["ItemGroup"],
+                row["Price"],
+                row["Currency"] or "EUR",
+                last_upd,
+            ]
+            for col_idx, value in enumerate(row_values, 1):
+                cell = ws.cell(row=row_idx, column=col_idx, value=_clean(value))
+                if row_fill:
+                    cell.fill = row_fill
+                if col_idx == 4:
+                    cell.alignment = Alignment(horizontal="right")
+
+        # Ligne de résumé
+        summary_row = len(rows) + 3
+        now_str = datetime.now().strftime("%d/%m/%Y %H:%M")
+        ws.cell(row=summary_row, column=1, value=f"Total : {len(rows)} articles").font = Font(italic=True, color="888888", size=9)
+        ws.cell(row=summary_row, column=2, value=f"Exporté le {now_str}").font = Font(italic=True, color="888888", size=9)
+
+        buffer = io.BytesIO()
+        wb.save(buffer)
+        buffer.seek(0)
+
+        filename = f"articles_sap_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        return StreamingResponse(
+            buffer,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename={filename}"},
+        )
+
+    except Exception as e:
+        logger.error(f"Export Excel articles SAP échoué: {e}")
+        raise HTTPException(status_code=500, detail=f"Erreur export: {str(e)}")
+
+
 @router.post("/items/search", response_model=ItemSearchResponse)
 async def search_items(request: ItemSearchRequest):
     """
@@ -661,3 +785,72 @@ async def create_quotation_from_email(
     except Exception as e:
         logger.error(f"Create quotation from email failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/items/{item_code}/weight-debug")
+async def debug_item_weight(item_code: str):
+    """
+    Diagnostic poids article : interroge SAP pour tous les champs poids possibles.
+    Permet d'identifier quel champ OData contient la valeur affichée dans SAP B1.
+
+    Example:
+        GET /api/sap/items/A11473/weight-debug
+    """
+    import sqlite3
+    from pathlib import Path as FilePath
+
+    sap_service = get_sap_business_service()
+
+    # 1. Requête SAP directe — article complet, cherche la valeur 0.42 dans tous les champs
+    sap_data = {}
+    sap_error = None
+    try:
+        result = await sap_service._call_sap(f"/Items('{item_code}')")
+        # Champs contenant "weight" dans le nom
+        weight_named = {k: v for k, v in result.items() if "weight" in k.lower()}
+        # Champs UDF (User Defined Fields, préfixe U_)
+        udf_fields = {k: v for k, v in result.items() if k.startswith("U_")}
+        # Tous les champs numériques non nuls (pour localiser 0.42)
+        numeric_nonzero = {
+            k: v for k, v in result.items()
+            if isinstance(v, (int, float)) and v not in (0, 0.0) and not isinstance(v, bool)
+        }
+        sap_data = {
+            "ItemCode": result.get("ItemCode"),
+            "ItemName": result.get("ItemName"),
+            "weight_named_fields": weight_named,
+            "udf_fields": udf_fields,
+            "all_numeric_nonzero": numeric_nonzero,
+            "all_field_names": sorted(result.keys()),
+        }
+    except Exception as exc:
+        sap_error = str(exc)
+
+    # 2. Valeur en cache SQLite
+    cache_data = {}
+    try:
+        db_path = FilePath(__file__).parent.parent / "supplier_tariffs.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT ItemCode, ItemName, weight_unit_value, last_updated FROM sap_items WHERE ItemCode = ?",
+            (item_code,),
+        ).fetchone()
+        conn.close()
+        if row:
+            cache_data = dict(row)
+        else:
+            cache_data = {"info": "Article non trouvé dans le cache local"}
+    except Exception as exc:
+        cache_data = {"error": str(exc)}
+
+    return {
+        "item_code": item_code,
+        "sap_live": sap_data,
+        "sap_error": sap_error,
+        "cache_local": cache_data,
+        "hint": (
+            "Si SWeight1=null mais Weight1 a la bonne valeur, "
+            "mettre à jour sap_cache_db.py : remplacer SWeight1 par Weight1 dans $select et l'INSERT."
+        ),
+    }

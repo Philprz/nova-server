@@ -19,6 +19,7 @@ from services.sap_history_service import get_sap_history_service
 from services.supplier_tariffs_db import search_products
 import services.pricing_audit_db as pricing_audit_db
 from services.sap_sql_service import get_sap_sql_service
+from services.currency_service import get_currency_service
 
 logger = logging.getLogger(__name__)
 
@@ -84,11 +85,46 @@ class PricingEngine:
         try:
             # Récupérer prix fournisseur si non fourni
             if context.supplier_price is None:
-                context.supplier_price = await self._get_supplier_price(context.item_code)
-                if context.supplier_price is None:
+                fetched_price, fetched_currency, fetched_supplier_code = await self._get_supplier_price(context.item_code)
+                if fetched_price is None:
                     return PricingResult(
                         success=False,
                         error=f"Prix fournisseur introuvable pour {context.item_code}"
+                    )
+                context.supplier_price = fetched_price
+                # Appliquer la devise détectée seulement si non déjà renseignée
+                if context.supplier_currency == "EUR":
+                    context.supplier_currency = fetched_currency
+                # Injecter le code fournisseur si non déjà renseigné
+                if fetched_supplier_code and not context.supplier_code:
+                    context.supplier_code = fetched_supplier_code
+
+            # Fournisseurs filiales UK (F0014 HEYE INTERNATIONAL, F0018 SHEPPEE) :
+            # formule dédiée PA × taux_fixe × remise / diviseur_marge — bypass conversion marché et SAP
+            _UK_SUPPLIERS = frozenset({'F0014', 'F0018'})
+            if context.supplier_code in _UK_SUPPLIERS and context.supplier_currency == 'GBP':
+                return await self._handle_uk_subsidiary_pricing(context, start_time)
+
+            # Conversion devise → EUR si le prix fournisseur est dans une autre devise
+            supplier_price_original = None
+            exchange_rate_applied = None
+            if context.supplier_currency != "EUR":
+                currency_service = get_currency_service()
+                converted = await currency_service.convert_to_base(
+                    context.supplier_price, context.supplier_currency
+                )
+                if converted is not None:
+                    supplier_price_original = context.supplier_price
+                    exchange_rate_applied = round(converted / context.supplier_price, 6)
+                    logger.info(
+                        f"✓ Conversion devise: {supplier_price_original:.4f} {context.supplier_currency} "
+                        f"→ {converted:.4f} EUR (taux: {exchange_rate_applied:.6f})"
+                    )
+                    context.supplier_price = converted
+                else:
+                    logger.warning(
+                        f"⚠ Conversion {context.supplier_currency}→EUR impossible pour {context.item_code}, "
+                        f"prix utilisé tel quel"
                     )
 
             # ÉTAPE 0 : Tenter d'utiliser la fonction SAP fn_ITS_GetPriceAnalysis (prioritaire)
@@ -107,6 +143,7 @@ class PricingEngine:
 
                     # La fonction SAP a retourné un prix recommandé
                     decision = self._create_decision_from_sap_function(context, sap_price_analysis, historical_sales)
+                    decision = self._enrich_decision_currency(decision, context.supplier_currency, supplier_price_original, exchange_rate_applied)
                     processing_time = (datetime.now() - start_time).total_seconds() * 1000
 
                     # Sauvegarder la décision dans la base d'audit
@@ -153,6 +190,9 @@ class PricingEngine:
                 else:
                     # CAS 4 : Nouveau produit jamais vendu
                     decision = await self._handle_new_product(context)
+
+            # Enrichir la décision avec les infos de devise
+            decision = self._enrich_decision_currency(decision, context.supplier_currency, supplier_price_original, exchange_rate_applied)
 
             # Calcul temps de traitement
             processing_time = (datetime.now() - start_time).total_seconds() * 1000
@@ -514,26 +554,54 @@ class PricingEngine:
             alerts=[]
         )
 
-    async def _get_supplier_price(self, item_code: str) -> Optional[float]:
+    def _enrich_decision_currency(
+        self,
+        decision: PricingDecision,
+        supplier_currency: str,
+        supplier_price_original: Optional[float],
+        exchange_rate_applied: Optional[float]
+    ) -> PricingDecision:
         """
-        Récupère le prix fournisseur depuis supplier_tariffs_db.
+        Enrichit une PricingDecision avec les informations de devise.
+        Ajoute une note de conversion dans la justification si applicable.
+        """
+        update_fields = {'supplier_currency': supplier_currency}
+
+        if supplier_price_original is not None and exchange_rate_applied is not None:
+            update_fields['supplier_price_original'] = supplier_price_original
+            update_fields['exchange_rate_applied'] = exchange_rate_applied
+            currency_note = (
+                f" [Conversion: {supplier_price_original:.4f} {supplier_currency} "
+                f"→ {decision.supplier_price:.4f} EUR, taux {exchange_rate_applied:.6f}]"
+            )
+            update_fields['justification'] = decision.justification + currency_note
+
+        return decision.model_copy(update=update_fields)
+
+    async def _get_supplier_price(self, item_code: str) -> tuple:
+        """
+        Récupère le prix fournisseur et sa devise depuis supplier_tariffs_db.
 
         Stratégie :
         1. Chercher directement par item_code SAP
         2. Si rien, chercher les références fournisseurs connues via product_mapping_db
-        3. Si rien, utiliser le prix SAP (AvgStdPrice) comme fallback
+        3. Si rien, utiliser le prix SAP (AvgStdPrice) comme fallback (EUR uniquement)
+
+        Returns:
+            (price: Optional[float], currency: str) — ex: (12.50, "GBP")
         """
         try:
             # 1. Cherche directement par item_code SAP
             products = search_products(item_code, limit=1)
             if products:
                 price = products[0].get('unit_price')
+                currency = products[0].get('currency', 'EUR') or 'EUR'
+                supplier_code = products[0].get('supplier_code')
                 if price and price > 0:
-                    logger.debug(f"Prix fournisseur direct pour {item_code}: {price}")
-                    return price
+                    logger.debug(f"Prix fournisseur direct pour {item_code}: {price} {currency}")
+                    return price, currency, supplier_code
 
             # 2. Chercher via le mapping de références (external_code → SAP)
-            # Le mapping_db connaît les refs fournisseurs associées au code SAP
             try:
                 from services.product_mapping_db import get_product_mapping_db
                 mapping_db = get_product_mapping_db()
@@ -543,7 +611,6 @@ class PricingEngine:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
 
-                # Chercher toutes les refs externes qui mappent vers ce code SAP
                 cursor.execute("""
                     SELECT external_code FROM product_code_mapping
                     WHERE matched_item_code = ? AND status = 'VALIDATED'
@@ -556,9 +623,10 @@ class PricingEngine:
                     products = search_products(ext_code, limit=1)
                     if products:
                         price = products[0].get('unit_price')
+                        currency = products[0].get('currency', 'EUR') or 'EUR'
                         if price and price > 0:
-                            logger.debug(f"Prix fournisseur via mapping {ext_code}→{item_code}: {price}")
-                            return price
+                            logger.debug(f"Prix fournisseur via mapping {ext_code}→{item_code}: {price} {currency}")
+                            return price, currency, products[0].get('supplier_code')
             except Exception as map_err:
                 logger.debug(f"Mapping lookup failed: {map_err}")
 
@@ -576,31 +644,30 @@ class PricingEngine:
                 conn.close()
 
                 if row and row['ItemName']:
-                    # Extraire ref numérique du nom SAP (ex: "2323060165 BRACKET SHORT" → "2323060165")
                     import re
                     nums = re.findall(r'\b\d{7,}\b', row['ItemName'])
                     for num in nums:
                         products = search_products(num, limit=1)
                         if products:
                             price = products[0].get('unit_price')
+                            currency = products[0].get('currency', 'EUR') or 'EUR'
                             if price and price > 0:
-                                logger.debug(f"Prix fournisseur via nom SAP {num}→{item_code}: {price}")
-                                return price
+                                logger.debug(f"Prix fournisseur via nom SAP {num}→{item_code}: {price} {currency}")
+                                return price, currency, None
 
-                    # Fallback ultime : prix SAP (AvgStdPrice)
+                    # Fallback ultime : prix SAP (AvgStdPrice) — toujours en EUR
                     if row['Price'] and row['Price'] > 0:
                         sap_price = row['Price']
-                        # Estimer prix fournisseur à partir du prix de vente SAP (marge 40%)
                         estimated_cost = round(sap_price / 1.40, 2)
                         logger.info(f"Fallback prix fournisseur estimé pour {item_code}: {estimated_cost} EUR (basé sur AvgStdPrice {sap_price})")
-                        return estimated_cost
+                        return estimated_cost, 'EUR', None
             except Exception as sap_err:
                 logger.debug(f"SAP cache lookup failed: {sap_err}")
 
-            return None
+            return None, 'EUR', None
         except Exception as e:
             logger.error(f"✗ Erreur récupération prix fournisseur : {e}")
-            return None
+            return None, 'EUR', None
 
     def _apply_margin(self, supplier_price: float, margin_percent: float) -> float:
         """Applique la marge sur le prix fournisseur"""
@@ -611,6 +678,76 @@ class PricingEngine:
         if supplier_price == 0:
             return 0.0
         return round(((sale_price - supplier_price) / supplier_price) * 100, 2)
+
+    async def _handle_uk_subsidiary_pricing(
+        self,
+        context: PricingContext,
+        start_time: datetime
+    ) -> PricingResult:
+        """
+        Formule dédiée fournisseurs filiales UK (F0014 HEYE INTERNATIONAL, F0018 SHEPPEE).
+
+        PA (£) × taux_gbp_eur × remise_fournisseur / diviseur_marge
+
+        Paramètres configurables via .env :
+          UK_SUPPLIER_GBP_EUR_RATE   (défaut 1.20 — taux fixe £→€ accord commercial)
+          UK_SUPPLIER_DISCOUNT_RATE  (défaut 0.75 — remise 25% appliquée automatiquement)
+          UK_SUPPLIER_MARGIN_DIVISOR (défaut 0.60 — marge 40% sur prix de vente)
+        """
+        gbp_eur_rate    = float(os.getenv("UK_SUPPLIER_GBP_EUR_RATE",   "1.20"))
+        discount_rate   = float(os.getenv("UK_SUPPLIER_DISCOUNT_RATE",  "0.75"))
+        margin_divisor  = float(os.getenv("UK_SUPPLIER_MARGIN_DIVISOR", "0.60"))
+
+        pa_gbp            = context.supplier_price
+        pa_eur            = pa_gbp * gbp_eur_rate
+        pa_after_discount = pa_eur * discount_rate
+        final_price       = round(pa_after_discount / margin_divisor, 2)
+        margin_on_pv      = round((1 - margin_divisor) * 100, 1)   # 40.0 %
+        discount_pct      = round((1 - discount_rate)  * 100, 1)   # 25.0 %
+
+        decision = PricingDecision(
+            decision_id=str(uuid.uuid4()),
+            item_code=context.item_code,
+            card_code=context.card_code,
+            quantity=context.quantity,
+            case_type=PricingCaseType.UK_SUBSIDIARY,
+            case_description=(
+                f"Filiale UK ({context.supplier_code}) : "
+                f"PA × {gbp_eur_rate} (£→€) × {discount_rate} (remise {discount_pct}%) "
+                f"/ {margin_divisor} (marge {margin_on_pv}%)"
+            ),
+            calculated_price=final_price,
+            line_total=round(final_price * context.quantity, 2),
+            currency="EUR",
+            justification=(
+                f"{pa_gbp:.4f} £ × {gbp_eur_rate} = {pa_eur:.4f} € "
+                f"× {discount_rate} = {pa_after_discount:.4f} € "
+                f"/ {margin_divisor} = {final_price:.2f} €"
+            ),
+            supplier_price=round(pa_after_discount, 4),
+            supplier_currency="GBP",
+            supplier_price_original=pa_gbp,
+            exchange_rate_applied=gbp_eur_rate,
+            margin_applied=margin_on_pv,
+            requires_validation=False,
+            confidence_score=1.0,
+            alerts=[],
+        )
+
+        processing_time = (datetime.now() - start_time).total_seconds() * 1000
+        pricing_audit_db.save_pricing_decision(decision)
+
+        logger.info(
+            f"✓ Pricing UK_SUBSIDIARY ({context.supplier_code}) : "
+            f"{context.item_code} {pa_gbp:.4f} £ → {final_price:.2f} € "
+            f"(taux {gbp_eur_rate}, remise {discount_pct}%, marge {margin_on_pv}%)"
+        )
+
+        return PricingResult(
+            success=True,
+            decision=decision,
+            processing_time_ms=round(processing_time, 2)
+        )
 
 
 # Instance singleton

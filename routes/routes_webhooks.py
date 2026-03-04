@@ -196,7 +196,7 @@ async def auto_process_email(message_id: str):
             "from_address": email.from_address,
             "from_name": email.from_name,
             "pdf_contents": pdf_contents,
-            "received_at": email.received_datetime.isoformat() if email.received_datetime else None
+            "received_at": email.received_datetime if email.received_datetime else None
         }
 
         # Traiter avec nouveau workflow (LLM + SAP + Pricing + Persist)

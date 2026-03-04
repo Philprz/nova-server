@@ -154,6 +154,104 @@ class EmailAnalysisDB:
 
         logger.info(f"Analysis deleted for email {email_id}")
 
+    def update_analysis_result(self, email_id: str, analysis_result: Dict[str, Any]):
+        """
+        Met à jour uniquement le analysis_result sans toucher subject/from_address.
+        Utilisé après les mutations (recalcul pricing, exclusions, corrections de code).
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        product_matches = analysis_result.get('product_matches', [])
+        has_pricing = any(p.get('unit_price') is not None for p in product_matches)
+        extracted_data = analysis_result.get('extracted_data', {})
+        client_card_code = extracted_data.get('client_card_code') if extracted_data else None
+
+        cursor.execute("""
+            UPDATE email_analysis
+            SET analysis_result = ?, has_pricing = ?, client_card_code = ?,
+                product_count = ?, analyzed_at = ?
+            WHERE email_id = ?
+        """, (
+            json.dumps(analysis_result, ensure_ascii=False),
+            has_pricing,
+            client_card_code,
+            len(product_matches),
+            datetime.now().isoformat(),
+            email_id,
+        ))
+
+        conn.commit()
+        conn.close()
+        logger.info(f"Analysis result updated for email {email_id} (pricing: {has_pricing})")
+
+    # ----------------------------------------------------------
+    # Draft state — state UI spécifique (quantités, articles ignorés, client sélectionné)
+    # ----------------------------------------------------------
+
+    def _init_draft_table(self):
+        """Crée la table quote_draft_state si elle n'existe pas."""
+        conn = sqlite3.connect(self.db_path)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS quote_draft_state (
+                email_id            TEXT PRIMARY KEY,
+                quantity_overrides  TEXT,
+                ignored_line_nums   TEXT,
+                selected_client_code TEXT,
+                selected_client_name TEXT,
+                updated_at          TEXT NOT NULL
+            )
+        """)
+        conn.commit()
+        conn.close()
+
+    def save_draft_state(
+        self,
+        email_id: str,
+        quantity_overrides: Dict[str, int],
+        ignored_line_nums: list,
+        selected_client_code: Optional[str],
+        selected_client_name: Optional[str],
+    ):
+        """Sauvegarde l'état UI d'un devis en cours d'édition."""
+        self._init_draft_table()
+        conn = sqlite3.connect(self.db_path)
+        conn.execute("""
+            INSERT OR REPLACE INTO quote_draft_state
+            (email_id, quantity_overrides, ignored_line_nums,
+             selected_client_code, selected_client_name, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (
+            email_id,
+            json.dumps(quantity_overrides),
+            json.dumps(ignored_line_nums),
+            selected_client_code,
+            selected_client_name,
+            datetime.now().isoformat(),
+        ))
+        conn.commit()
+        conn.close()
+        logger.debug(f"Draft state saved for email {email_id}")
+
+    def get_draft_state(self, email_id: str) -> Optional[Dict[str, Any]]:
+        """Charge l'état UI sauvegardé pour un devis."""
+        self._init_draft_table()
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM quote_draft_state WHERE email_id = ?", (email_id,))
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return None
+        return {
+            "quantity_overrides": json.loads(row["quantity_overrides"] or "{}"),
+            "ignored_line_nums": json.loads(row["ignored_line_nums"] or "[]"),
+            "selected_client_code": row["selected_client_code"],
+            "selected_client_name": row["selected_client_name"],
+            "updated_at": row["updated_at"],
+        }
+
     def get_statistics(self) -> Dict[str, int]:
         """Retourne des statistiques sur les analyses."""
         conn = sqlite3.connect(self.db_path)

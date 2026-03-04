@@ -38,17 +38,44 @@ def is_supported_file(file_path: str) -> bool:
     return get_file_type(file_path) is not None
 
 
+def detect_currency(text: str) -> str:
+    """Détecte la devise dans une chaîne de texte.
+
+    Retourne le code ISO : 'EUR', 'GBP', 'USD' ou 'CHF'.
+    Priorité : GBP > USD > CHF > EUR (défaut).
+    """
+    if not text:
+        return "EUR"
+    t = str(text).upper()
+    if '£' in t or 'GBP' in t or 'POUND' in t or 'STERLING' in t:
+        return "GBP"
+    if '$' in t or 'USD' in t or 'DOLLAR' in t:
+        return "USD"
+    if 'CHF' in t or 'FRANC SUISSE' in t:
+        return "CHF"
+    return "EUR"
+
+
 def extract_price(text: str) -> Optional[float]:
-    """Extrait un prix d'une chaîne de texte."""
+    """Extrait un prix d'une chaîne de texte (valeur numérique seule).
+
+    La devise associée est détectée séparément via detect_currency().
+    """
     if not text:
         return None
 
-    # Patterns pour les prix
+    # Patterns ordonnés : avec symbole monétaire en premier (plus précis)
     patterns = [
-        r'(\d+[.,]\d{2})\s*(?:€|EUR|euro)',  # 123.45 € ou 123,45 EUR
-        r'(?:€|EUR)\s*(\d+[.,]\d{2})',        # € 123.45
-        r'(\d+[.,]\d{2,3})',                   # Juste un nombre décimal
-        r'(\d+)\s*(?:€|EUR|euro)',             # 123 €
+        r'(\d+[.,]\d{2})\s*(?:€|EUR|euro)',   # 123.45 € ou 123,45 EUR
+        r'(?:€|EUR)\s*(\d+[.,]\d{2})',         # € 123.45
+        r'(\d+[.,]\d{2})\s*(?:£|GBP)',         # 123.45 £ ou GBP
+        r'(?:£|GBP)\s*(\d+[.,]\d{2})',         # £ 123.45
+        r'(\d+[.,]\d{2})\s*(?:\$|USD)',         # 123.45 $ ou USD
+        r'(?:\$|USD)\s*(\d+[.,]\d{2})',         # $ 123.45
+        r'(\d+[.,]\d{2})\s*(?:CHF)',            # 123.45 CHF
+        r'CHF\s*(\d+[.,]\d{2})',                # CHF 123.45
+        r'(\d+[.,]\d{2,3})',                    # Nombre décimal seul
+        r'(\d+)\s*(?:€|EUR|euro|£|GBP|\$|USD|CHF)',  # Entier avec devise
     ]
 
     for pattern in patterns:
@@ -158,9 +185,11 @@ class PDFParser:
 
         # Mapping des colonnes
         col_mapping = {
-            'reference': ['ref', 'réf', 'reference', 'référence', 'code', 'sku', 'article'],
+            'reference': ['ref', 'réf', 'reference', 'référence', 'code', 'sku', 'article',
+                          'item no', 'part no', 'no.', 'part number', 'item number'],
             'designation': ['designation', 'désignation', 'description', 'libellé', 'libelle', 'nom', 'produit'],
-            'price': ['prix', 'price', 'tarif', 'pu', 'p.u.', 'montant', 'ht'],
+            'price': ['prix', 'price', 'tarif', 'pu', 'p.u.', 'montant', 'ht',
+                      'selling', 'list price', 'net price', 'unit price', 'sell price'],
             'supplier': ['fournisseur', 'supplier', 'marque', 'brand'],
             'delivery': ['délai', 'delai', 'livraison', 'delivery', 'dispo']
         }
@@ -172,10 +201,19 @@ class PDFParser:
                     col_indices[field] = i
                     break
 
+        # Détecter la devise depuis le header de la colonne prix (ex: "Prix £" → GBP)
+        price_header = headers[col_indices['price']] if 'price' in col_indices else ''
+        table_currency = detect_currency(price_header)
+
         # Parser les lignes de données
         for row in table[1:]:
             if not row or all(cell is None or str(cell).strip() == '' for cell in row):
                 continue
+
+            # Détecter la devise dans la cellule prix (priorité sur header)
+            raw_price_cell = str(row[col_indices['price']]) if 'price' in col_indices and col_indices['price'] < len(row) else ''
+            cell_currency = detect_currency(raw_price_cell)
+            row_currency = cell_currency if cell_currency != "EUR" else table_currency
 
             product = {
                 'supplier_reference': row[col_indices.get('reference')] if 'reference' in col_indices and col_indices['reference'] < len(row) else None,
@@ -183,7 +221,7 @@ class PDFParser:
                 'unit_price': extract_price(row[col_indices.get('price')]) if 'price' in col_indices and col_indices['price'] < len(row) else None,
                 'supplier_name': row[col_indices.get('supplier')] if 'supplier' in col_indices and col_indices['supplier'] < len(row) else None,
                 'delivery_time': row[col_indices.get('delivery')] if 'delivery' in col_indices and col_indices['delivery'] < len(row) else None,
-                'currency': 'EUR',
+                'currency': row_currency,
                 'additional_data': {'source_file': Path(file_path).name}
             }
 
@@ -213,7 +251,7 @@ class PDFParser:
                     'supplier_reference': ref,
                     'designation': line[:200] if len(line) > 200 else line,
                     'unit_price': price,
-                    'currency': 'EUR',
+                    'currency': detect_currency(line),
                     'additional_data': {'source_file': Path(file_path).name, 'raw_line': line}
                 }
                 products.append(product)
@@ -270,9 +308,14 @@ class ExcelParser:
 
         # Mapping des colonnes
         col_mapping = {
-            'reference': ['ref', 'réf', 'reference', 'référence', 'code', 'sku', 'article', 'code article', 'code produit'],
-            'designation': ['designation', 'désignation', 'description', 'libellé', 'libelle', 'nom', 'produit', 'intitulé'],
-            'price': ['prix', 'price', 'tarif', 'pu', 'p.u.', 'montant', 'prix ht', 'prix unitaire', 'pu ht'],
+            'reference': ['ref', 'réf', 'reference', 'référence', 'code', 'sku', 'article',
+                          'code article', 'code produit', 'item no', 'part no', 'no.',
+                          'part number', 'item number'],
+            'designation': ['designation', 'désignation', 'description', 'libellé', 'libelle',
+                            'nom', 'produit', 'intitulé', 'item description'],
+            'price': ['prix', 'price', 'tarif', 'pu', 'p.u.', 'montant', 'prix ht',
+                      'prix unitaire', 'pu ht', 'selling', 'list price', 'net price',
+                      'unit price', 'sell price', 'tarif net'],
             'supplier': ['fournisseur', 'supplier', 'marque', 'brand', 'fabricant'],
             'delivery': ['délai', 'delai', 'livraison', 'delivery', 'dispo', 'disponibilité'],
             'category': ['catégorie', 'categorie', 'category', 'famille', 'type'],
@@ -285,6 +328,10 @@ class ExcelParser:
                 if any(kw in header for kw in keywords):
                     col_indices[field] = i
                     break
+
+        # Détecter la devise depuis le header de la colonne prix (ex: "Prix £" → GBP)
+        price_header = headers[col_indices['price']] if 'price' in col_indices else ''
+        sheet_currency = detect_currency(price_header)
 
         # Parser les lignes de données
         for row in rows[header_row_idx + 1:]:
@@ -308,6 +355,11 @@ class ExcelParser:
                         return float(cell_val)
                 return None
 
+            # Détecter la devise dans la cellule prix (priorité sur header de colonne)
+            raw_price_cell = get_cell('price') or ''
+            cell_currency = detect_currency(raw_price_cell)
+            row_currency = cell_currency if cell_currency != "EUR" else sheet_currency
+
             product = {
                 'supplier_reference': get_cell('reference'),
                 'designation': get_cell('designation'),
@@ -316,7 +368,7 @@ class ExcelParser:
                 'delivery_time': get_cell('delivery'),
                 'category': get_cell('category'),
                 'brand': get_cell('brand'),
-                'currency': 'EUR',
+                'currency': row_currency,
                 'additional_data': {
                     'source_file': Path(file_path).name,
                     'sheet_name': sheet_name
@@ -381,9 +433,12 @@ class CSVParser:
 
         # Mapping des champs
         field_mapping = {
-            'reference': ['ref', 'réf', 'reference', 'référence', 'code', 'sku', 'article'],
-            'designation': ['designation', 'désignation', 'description', 'libellé', 'libelle', 'nom', 'produit'],
-            'price': ['prix', 'price', 'tarif', 'pu', 'p.u.', 'montant', 'prix ht'],
+            'reference': ['ref', 'réf', 'reference', 'référence', 'code', 'sku', 'article',
+                          'item no', 'part no', 'no.', 'part number', 'item number'],
+            'designation': ['designation', 'désignation', 'description', 'libellé', 'libelle',
+                            'nom', 'produit', 'item description'],
+            'price': ['prix', 'price', 'tarif', 'pu', 'p.u.', 'montant', 'prix ht',
+                      'selling', 'list price', 'net price', 'unit price', 'sell price'],
             'supplier': ['fournisseur', 'supplier', 'marque'],
             'delivery': ['délai', 'delai', 'livraison', 'delivery']
         }
@@ -403,13 +458,20 @@ class CSVParser:
 
         price_str = find_value(field_mapping['price'])
 
+        # Détecter la devise depuis la valeur du prix et/ou la clé de colonne
+        price_key = next(
+            (k for k in normalized if any(n in k for n in field_mapping['price'])),
+            ''
+        )
+        currency = detect_currency(price_str or '') or detect_currency(price_key)
+
         return {
             'supplier_reference': ref,
             'designation': designation,
             'unit_price': extract_price(price_str) if price_str else None,
             'supplier_name': find_value(field_mapping['supplier']),
             'delivery_time': find_value(field_mapping['delivery']),
-            'currency': 'EUR',
+            'currency': currency,
             'additional_data': {'source_file': Path(file_path).name}
         }
 

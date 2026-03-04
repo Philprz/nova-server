@@ -99,6 +99,12 @@ class SAPCacheDB:
         except sqlite3.OperationalError:
             pass  # Colonne déjà existante
 
+        try:
+            cursor.execute("ALTER TABLE sap_items ADD COLUMN weight_unit_value REAL")
+            logger.info("✅ Colonne weight_unit_value ajoutée à sap_items")
+        except sqlite3.OperationalError:
+            pass  # Colonne déjà existante
+
         # Table de métadonnées de synchronisation
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS sap_sync_metadata (
@@ -288,7 +294,7 @@ class SAPCacheDB:
 
             while True:
                 items_batch = await sap_service._call_sap("/Items", params={
-                    "$select": "ItemCode,ItemName,ItemsGroupCode,AvgStdPrice",
+                    "$select": "ItemCode,ItemName,ItemsGroupCode,AvgStdPrice,SalesUnitWeight",
                     "$filter": "Valid eq 'Y' and Frozen eq 'N'",  # Seulement articles actifs
                     "$top": batch_size,
                     "$skip": skip,
@@ -321,16 +327,21 @@ class SAPCacheDB:
                 price = item.get("AvgStdPrice")
                 currency = item.get("PurchaseCurrency") or "EUR"
 
+                # Poids unitaire vente (SalesUnitWeight en kg dans SAP B1, unité SalesWeightUnit=3=kg)
+                weight = item.get("SalesUnitWeight")
+                weight = weight if weight and weight > 0 else None
+
                 cursor.execute("""
                     INSERT INTO sap_items
-                    (ItemCode, ItemName, ItemGroup, Price, Currency, last_updated)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    (ItemCode, ItemName, ItemGroup, Price, Currency, weight_unit_value, last_updated)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                 """, (
                     item.get("ItemCode"),
                     item_name,
                     item.get("ItemsGroupCode"),
                     price,
                     currency,
+                    weight,
                     datetime.now().isoformat()
                 ))
 
@@ -441,6 +452,31 @@ class SAPCacheDB:
             WHERE ItemCode LIKE ? OR ItemName LIKE ?
             LIMIT ?
         """, (f"%{query}%", f"%{query}%", limit))
+
+        rows = cursor.fetchall()
+        conn.close()
+
+        return [dict(row) for row in rows]
+
+    def search_items_normalized(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
+        """
+        Recherche d'articles avec normalisation des codes (suppression tirets et espaces).
+        Permet de trouver C391-15LM-SPARE depuis C391-15-LM, ou C315-6305 RS depuis C315-6305RS.
+        """
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        # Normaliser la requête : supprimer tirets et espaces
+        query_normalized = query.replace('-', '').replace(' ', '').upper()
+
+        # Cherche dans ItemCode ET ItemName normalisés (les refs fournisseur sont souvent dans ItemName)
+        cursor.execute("""
+            SELECT * FROM sap_items
+            WHERE REPLACE(REPLACE(UPPER(ItemCode), '-', ''), ' ', '') LIKE ?
+               OR REPLACE(REPLACE(UPPER(ItemName), '-', ''), ' ', '') LIKE ?
+            LIMIT ?
+        """, (f"%{query_normalized}%", f"%{query_normalized}%", limit))
 
         rows = cursor.fetchall()
         conn.close()

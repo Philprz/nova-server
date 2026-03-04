@@ -208,6 +208,31 @@ class SAPBusinessService:
             logger.error(f"✗ Erreur recherche articles: {e}")
             return []
 
+    async def get_item_by_code(self, item_code: str) -> Optional["SAPItem"]:
+        """
+        Lookup exact d'un article par ItemCode.
+        Retourne None si l'article n'existe pas dans SAP.
+        Lève une exception si SAP est inaccessible.
+        """
+        try:
+            result = await self._call_sap(
+                f"/Items('{item_code}')",
+                params={"$select": "ItemCode,ItemName,QuantityOnStock"}
+            )
+            return SAPItem(
+                ItemCode=result.get("ItemCode", ""),
+                ItemName=result.get("ItemName", ""),
+                Price=None,
+                InStock=result.get("QuantityOnStock")
+            )
+        except Exception as e:
+            err_str = str(e)
+            # SAP retourne 404 ou un message "does not exist" si l'article n'existe pas
+            if "404" in err_str or "does not exist" in err_str.lower() or "No matching records" in err_str:
+                return None
+            # Pour toute autre erreur (réseau, session, etc.) on relance
+            raise
+
     async def get_item_price(
         self,
         item_code: str,
