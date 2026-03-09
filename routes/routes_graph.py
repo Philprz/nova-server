@@ -389,6 +389,200 @@ async def list_stored_attachments(email_id: str = Query(..., description="Micros
         raise HTTPException(status_code=500, detail=f"Erreur lecture stockage: {e}")
 
 
+@router.get("/emails/manual-list")
+async def list_manual_requests():
+    """
+    Retourne la liste des demandes de devis saisies manuellement.
+    Chaque élément est formaté comme un GraphEmail pour compatibilité frontend.
+    """
+    from services.email_analysis_db import get_email_analysis_db
+    rows = get_email_analysis_db().list_manual_requests()
+    emails = []
+    for r in rows:
+        emails.append({
+            "id": r["email_id"],
+            "subject": r["subject"],
+            "from_name": r["from_name"],
+            "from_address": "saisie.manuelle@rondot.fr",
+            "received_datetime": r["created_at"],
+            "body_preview": r["body_preview"] or "",
+            "body_content": r["body_preview"] or "",
+            "body_content_type": "text",
+            "has_attachments": False,
+            "is_read": True,
+            "attachments": [],
+            "is_quote_by_subject": True,
+            "source": "manual",
+        })
+    return {"emails": emails, "total_count": len(emails)}
+
+
+class ManualQuoteItem(BaseModel):
+    item_code: str
+    item_name: Optional[str] = None
+    quantity: int = 1
+
+
+class ManualQuotePayload(BaseModel):
+    source: str = "manual"
+    client: str  # card_code SAP
+    client_name: Optional[str] = None
+    items: List[ManualQuoteItem]
+    notes: Optional[str] = None
+
+
+@router.post("/emails/manual-request")
+async def create_manual_quote_request(payload: ManualQuotePayload):
+    """
+    Crée une demande de devis manuelle (saisie téléphonique / oral).
+    Passe dans le même pipeline que les emails (matching SAP + pricing).
+    Retourne { email_id, analysis_result }.
+    """
+    import uuid
+    from datetime import datetime as dt
+    from services.email_analysis_db import get_email_analysis_db
+    from services.sap_cache_db import SAPCacheDB
+
+    # Générer un ID unique préfixé "manual_"
+    ts = dt.now().strftime("%Y%m%d_%H%M%S")
+    short_id = uuid.uuid4().hex[:8]
+    email_id = f"manual_{ts}_{short_id}"
+
+    # Résoudre les noms depuis le cache SAP si absents
+    cache = SAPCacheDB()
+    client_name = payload.client_name
+    if not client_name:
+        sap_client = cache.get_client_by_code(payload.client)
+        client_name = sap_client["CardName"] if sap_client else payload.client
+
+    # Résoudre les noms d'articles
+    items_resolved = []
+    for it in payload.items:
+        name = it.item_name
+        if not name:
+            sap_item = cache.get_item_by_code(it.item_code)
+            name = sap_item["ItemName"] if sap_item else it.item_code
+        items_resolved.append({"item_code": it.item_code, "item_name": name, "quantity": it.quantity})
+
+    # Construire le résultat d'analyse directement (pas de LLM nécessaire)
+    product_matches = [
+        {
+            "item_code": i["item_code"],
+            "item_name": i["item_name"],
+            "quantity": i["quantity"],
+            "score": 100,
+            "match_reason": "Saisie manuelle",
+            "not_found_in_sap": False,
+        }
+        for i in items_resolved
+    ]
+
+    body_preview = ", ".join(f"{i['item_name']} x{i['quantity']}" for i in items_resolved)
+    subject = f"Demande manuelle — {client_name} ({len(items_resolved)} produit{'s' if len(items_resolved) > 1 else ''})"
+
+    analysis_result = {
+        "classification": "QUOTE_REQUEST",
+        "confidence": "high",
+        "is_quote_request": True,
+        "reasoning": "Demande créée manuellement par l'utilisateur",
+        "quick_filter_passed": True,
+        "client_matches": [
+            {
+                "card_code": payload.client,
+                "card_name": client_name,
+                "score": 100,
+                "match_reason": "Saisie manuelle",
+            }
+        ],
+        "product_matches": product_matches,
+        "client_auto_validated": True,
+        "products_auto_validated": True,
+        "requires_user_choice": False,
+        "extracted_data": {
+            "client_name": client_name,
+            "client_card_code": payload.client,
+            "client_email": None,
+            "products": [
+                {
+                    "description": i["item_name"],
+                    "quantity": i["quantity"],
+                    "unit": "pcs",
+                    "reference": i["item_code"],
+                }
+                for i in items_resolved
+            ],
+            "delivery_requirement": None,
+            "urgency": "normal",
+            "notes": payload.notes,
+        },
+    }
+
+    # Phase pricing (si activé) — même pipeline que les emails
+    pricing_enabled = os.getenv("PRICING_ENGINE_ENABLED", "false").lower() == "true"
+    if pricing_enabled:
+        try:
+            from services.pricing_engine import get_pricing_engine
+            from services.pricing_models import PricingContext
+
+            pricing_engine = get_pricing_engine()
+            pricing_tasks = []
+            for i, item in enumerate(items_resolved):
+                ctx = PricingContext(
+                    item_code=item["item_code"],
+                    card_code=payload.client,
+                    quantity=item["quantity"],
+                    supplier_price=None,
+                    apply_margin=float(os.getenv("PRICING_DEFAULT_MARGIN", "45.0")),
+                    force_recalculate=False,
+                )
+                pricing_tasks.append((i, ctx))
+
+            import asyncio as _asyncio
+            pricing_results = await _asyncio.gather(
+                *[pricing_engine.calculate_price(ctx) for _, ctx in pricing_tasks],
+                return_exceptions=True
+            )
+
+            for idx, (i, _) in enumerate(pricing_tasks):
+                pr = pricing_results[idx]
+                if not isinstance(pr, Exception) and pr.success and pr.decision:
+                    d = pr.decision
+                    product_matches[i].update({
+                        "unit_price": d.suggested_price,
+                        "line_total": d.suggested_price * items_resolved[i]["quantity"] if d.suggested_price else None,
+                        "pricing_case": d.case_type.value if d.case_type else None,
+                        "pricing_justification": d.justification,
+                        "requires_validation": d.requires_validation,
+                        "supplier_price": d.supplier_price,
+                        "margin_applied": d.margin_applied,
+                        "confidence_score": d.confidence_score,
+                    })
+            analysis_result["product_matches"] = product_matches
+        except Exception as e:
+            logger.warning(f"Pricing engine failed for manual request (non-blocking): {e}")
+
+    # Persister dans email_analysis_db
+    db = get_email_analysis_db()
+    db.save_analysis(
+        email_id=email_id,
+        subject=subject,
+        from_address="saisie.manuelle@rondot.fr",
+        analysis_result=analysis_result,
+    )
+    db.save_manual_request(
+        email_id=email_id,
+        subject=subject,
+        from_name="Saisie manuelle",
+        body_preview=body_preview,
+        client_card_code=payload.client,
+        client_name=client_name,
+    )
+
+    logger.info(f"Manual quote request created: {email_id} client={payload.client} items={len(items_resolved)}")
+
+    return {"email_id": email_id, "analysis_result": analysis_result}
+
+
 @router.get("/emails/corrections")
 async def get_corrections(email_id: str = Query(..., description="Microsoft Graph message ID")):
     """Récupère les corrections manuelles appliquées à un devis."""
@@ -1928,6 +2122,7 @@ class DraftStateRequest(BaseModel):
     ignored_line_nums: list = []    # [lineNum, ...]
     selected_client_code: Optional[str] = None
     selected_client_name: Optional[str] = None
+    transport_price_override: Optional[float] = None
 
 
 @router.get("/emails/{message_id}/draft-state")
@@ -1956,6 +2151,7 @@ async def save_draft_state(message_id: str, body: DraftStateRequest):
         ignored_line_nums=body.ignored_line_nums,
         selected_client_code=body.selected_client_code,
         selected_client_name=body.selected_client_name,
+        transport_price_override=body.transport_price_override,
     )
     return {"status": "ok"}
 

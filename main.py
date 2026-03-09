@@ -31,6 +31,8 @@ from routes.routes_export_json import router as export_json_router
 from routes.routes_export_json_v2 import router as export_json_v2_router
 from routes.routes_webhooks import router as webhooks_router
 from routes.routes_mail import router as mail_router
+from routes.routes_packing import router as packing_router
+from routes.routes_shipping import router as shipping_router
 from services.webhook_scheduler import start_webhook_scheduler, stop_webhook_scheduler
 
 if sys.platform == "win32":
@@ -190,6 +192,8 @@ app.include_router(sap_quotation_router)  # POST /api/sap/quotation - Création 
 app.include_router(product_validation_router)  # API validation produits externes
 app.include_router(export_json_router)  # API export JSON pre-sap-quote avec matching backend
 app.include_router(export_json_v2_router)  # API export JSON v2 (réutilise analyse existante)
+app.include_router(packing_router)   # POST /api/packing/calculate — Colisage FFD
+app.include_router(shipping_router)  # POST /api/shipping/quote — Transport DHL Express
 # Route WebSocket pour l'assistant intelligent manquante
 @app.websocket("/ws/assistant/{task_id}")
 async def websocket_assistant_endpoint(websocket: WebSocket, task_id: str):

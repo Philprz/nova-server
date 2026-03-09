@@ -218,11 +218,17 @@ async def get_sap_rondot_products(
     search: Optional[str] = Query(None, description="Recherche par nom ou code"),
     limit: int = Query(50, ge=1, le=500)
 ):
-    """Récupère les produits SAP Rondot"""
-    endpoint = "/Items?$select=ItemCode,ItemName,ItemType,QuantityOnStock"
+    """Récupère les produits SAP Rondot (articles actifs uniquement, Frozen=N)"""
+    endpoint = "/Items?$select=ItemCode,ItemName,ItemType,QuantityOnStock,Frozen"
+
+    # Toujours filtrer les articles inactifs (Frozen = 'tYES' dans SAP B1)
+    active_filter = "Frozen eq 'tNO'"
 
     if search:
-        endpoint += f"&$filter=contains(ItemName,'{search}') or contains(ItemCode,'{search}')"
+        search_filter = f"(contains(ItemName,'{search}') or contains(ItemCode,'{search}'))"
+        endpoint += f"&$filter={active_filter} and {search_filter}"
+    else:
+        endpoint += f"&$filter={active_filter}"
 
     endpoint += f"&$orderby=ItemCode&$top={limit}"
 

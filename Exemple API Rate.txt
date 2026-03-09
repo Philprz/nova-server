@@ -1,0 +1,45 @@
+{
+
+	"customerDetails": {
+		"receiverDetails": {
+				"postalCode": "DUBAI",
+				"cityName": "DUBAI",
+				"countryCode": "AE"
+		},
+	"shipperDetails": {
+		"postalCode": "13002",
+		"cityName": "MARSEILLE",
+		"countryCode": "FR"
+	}
+	},
+	"accounts": [{
+		"typeCode": "shipper",
+		"number": "220294850"
+	}],
+
+	"plannedShippingDateAndTime": "2026-03-03T16:00:00GMT+00:00",
+	"unitOfMeasurement": "metric",
+	"isCustomsDeclarable": true,
+	"monetaryAmount": [{
+		"typeCode": "declaredValue",
+		"value": 10,
+		"currency": "EUR"
+	}],
+
+
+	
+	"requestAllValueAddedServices": false,
+	"returnStandardProductsOnly": true,
+	"nextBusinessDay": true,
+   
+	"packages": [
+		{
+		"weight": 10,
+		"dimensions": {
+			"length": 1,
+			"width": 1,
+			"height": 1
+		}
+	}
+	]
+}

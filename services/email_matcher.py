@@ -12,8 +12,78 @@ from difflib import SequenceMatcher
 from typing import Optional, List, Dict, Any, Tuple
 from pydantic import BaseModel
 from functools import lru_cache
+from thefuzz import fuzz as _fuzz
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Normalisation texte (module-level, partagée entre méthodes)
+# ---------------------------------------------------------------------------
+
+def normalize_text(text: str) -> str:
+    """
+    Normalise un texte pour la comparaison fuzzy.
+
+    Étapes :
+    1. Minuscules
+    2. Suppression des accents (NFD)
+    3. Suppression de la ponctuation (garde lettres/chiffres/espaces)
+    4. Suppression des espaces multiples
+    """
+    if not text:
+        return ""
+    text = text.lower()
+    text = unicodedata.normalize('NFD', text)
+    text = ''.join(c for c in text if unicodedata.category(c) != 'Mn')
+    text = re.sub(r'[^\w\s]', ' ', text)
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
+
+
+def _discriminating_score(query_norm: str, item_norm: str) -> int:
+    """
+    Score de similarité amélioré pour différencier des variantes quasi-identiques.
+
+    Problème de token_set_ratio pur : quand deux articles partagent un très long
+    libellé avec UN seul mot différent (ex: PREMIUM vs BASIC + même station de charge),
+    les deux scorent 100 car l'intersection de tokens communs vaut 100 par rapport
+    à elle-même.
+
+    Solution : pénaliser les mots présents dans l'ARTICLE mais absents de la REQUÊTE
+    (≥4 chars). Ces mots indiquent que l'article est une variante différente.
+
+    Exemples :
+      query="handy vii premium station de charge..."
+        → vs item "...premium..." : extra={pyrometre} → penalty=5  → 100-5=95  ✓
+        → vs item "...basic..."   : extra={basic,pyrometre} → penalty=10 → 93-10=83 < 85 ✓
+    """
+    base = _fuzz.token_set_ratio(query_norm, item_norm)
+    q_words = set(query_norm.split())
+    i_words = set(item_norm.split())
+    # Mots DANS l'article mais PAS dans la requête (≥4 chars) = mots discriminants potentiels
+    extra = {w for w in i_words - q_words if len(w) >= 4}
+    if extra:
+        penalty = min(15, len(extra) * 6)
+        base = max(0, base - penalty)
+    return base
+
+
+def normalize_code(code: str) -> str:
+    """
+    Normalise un code produit fournisseur pour la comparaison.
+
+    Supprime TOUS les caractères non-alphanumériques (tirets, slashes, espaces, points…)
+    et met en minuscules.
+
+    Exemples :
+      P-0301L-SLT  →  p0301lslt
+      P/0301L-SLT  →  p0301lslt   (même résultat → match!)
+      C391-15-LM   →  c39115lm
+    """
+    if not code:
+        return ""
+    return re.sub(r'[^a-z0-9]', '', code.lower())
 
 # --- Regex pré-compilés pour performance ---
 WORD_PATTERN_4PLUS = re.compile(r'\b\w{4,}\b')  # Mots 4+ caractères
@@ -227,8 +297,26 @@ class EmailMatcher:
                     if item_name:
                         self._items_normalized[code] = self._normalize(item_name)
 
+            # Pré-construire l'index des codes normalisés (refs fournisseurs)
+            # Permet P-0301L-SLT == P/0301L-SLT via normalize_code()
+            self._items_norm_code: Dict[str, str] = {}
+            for item_code, item in self._items_cache.items():
+                # 1. Indexer le code SAP normalisé (ex: "a10323" → "A10323")
+                nc = normalize_code(item_code)
+                if nc and nc not in self._items_norm_code:
+                    self._items_norm_code[nc] = item_code
+                # 2. Indexer le premier token de ItemName si ça ressemble à une ref fournisseur
+                #    (contient au moins un chiffre et >= 4 chars après normalisation)
+                item_name = item.get("ItemName", "")
+                if item_name:
+                    first_token = item_name.split()[0]
+                    nt = normalize_code(first_token)
+                    if len(nt) >= 4 and any(c.isdigit() for c in nt) and nt not in self._items_norm_code:
+                        self._items_norm_code[nt] = item_code
+
             logger.info(f"[OK] Produits charges: {len(self._items_cache)} "
-                        f"({len(self._items_normalized)} noms normalisés)")
+                        f"({len(self._items_normalized)} noms normalisés, "
+                        f"{len(self._items_norm_code)} codes normalisés indexés)")
 
         except Exception as e:
             logger.error(f"Erreur chargement cache SQLite: {e}")
@@ -236,6 +324,7 @@ class EmailMatcher:
             self._clients_cache = []
             self._items_cache = {}
             self._client_domains = {}
+            self._items_norm_code = {}
 
     async def _load_reference_data(self):
         """Charge les clients et produits depuis SAP (avec pagination)."""
@@ -704,6 +793,24 @@ class EmailMatcher:
         except Exception as e:
             logger.debug(f"   [SQLite fallback] Error: {e}")
 
+        # --- ÉTAPE 1d: Match par code normalisé (suppression de TOUTE ponctuation) ---
+        # Permet P-0301L-SLT == P/0301L-SLT (slash et tiret distincts chez fournisseurs)
+        # L'index _items_norm_code est pré-construit dans ensure_cache() sur le 1er token de ItemName
+        code_norm = normalize_code(code)
+        logger.debug("[EXTRACTED_CODE_NORMALIZED] %s → %s", code, code_norm)
+        if code_norm and len(code_norm) >= 4 and hasattr(self, '_items_norm_code'):
+            matched_sap_code = self._items_norm_code.get(code_norm)
+            if matched_sap_code and matched_sap_code in self._items_cache:
+                item = self._items_cache[matched_sap_code]
+                print(f"         ✅ Code normalisé: {code} → {matched_sap_code} | {item.get('ItemName', '')[:40]}", flush=True)
+                logger.info("[FINAL_DECISION] code_exact_normalized: %s → %s (norm=%s)", code, matched_sap_code, code_norm)
+                return self._create_matched_product_from_sap(
+                    item=item,
+                    quantity=qty,
+                    score=100,
+                    match_reason=f"Code normalisé: {code} → {matched_sap_code}"
+                )
+
         # 1c. Fallback normalisé : chercher sans tirets/espaces (ex: C391-15-LM → C391-15LM-SPARE)
         # Note: ItemCode SAP est une ref interne (A13044), la ref fournisseur est dans ItemName
         try:
@@ -782,47 +889,90 @@ class EmailMatcher:
             print(f"         ⚠️ Mapping trouvé MAIS article {matched_code} introuvable!", flush=True)
             logger.warning(f"   [WARNING] Mapping found but item {matched_code} NOT found anywhere!")
 
-        # --- ÉTAPE 3: Fuzzy match sur ItemName avec description (optimisé) ---
+        # --- ÉTAPE 3: Fuzzy match sur ItemName avec description ---
+        # Stratégie en 2 passes :
+        #   3a. SQL multi-token (pré-filtre rapide, ≤50 candidats)
+        #   3b. Scoring token_set_ratio (thefuzz) sur les candidats SQL
+        #   3c. Fallback sur l'itération mémoire si SQL retourne rien
         if description and len(description) >= 4:
-            desc_normalized = self._normalize(description)
-            # Pré-extraire les mots UNE SEULE FOIS (performance)
+            desc_normalized = normalize_text(description)
             desc_words = set(WORD_PATTERN_4PLUS.findall(desc_normalized))
 
             best_match = None
             best_score = 0
 
-            for item_code, item in self._items_cache.items():
-                # Utiliser le nom normalisé depuis le cache (au lieu de re-normaliser)
-                name_normalized = self._items_normalized.get(item_code, "")
-                if not name_normalized:
+            logger.info("[SEARCH_QUERY] Étape 3 description='%s'", description[:80])
+
+            # 3a. SQL multi-token : pré-filtre par mots-clés
+            cache_db = self._get_cache_db()
+            sql_candidates = cache_db.search_items_multitoken(description, limit=50)
+            logger.info("[SQL_RESULTS] %d candidats SQL pour description='%s'",
+                        len(sql_candidates), description[:60])
+
+            # 3b. Scoring thefuzz token_set_ratio sur candidats SQL
+            fuzzy_scores = []
+            for candidate in sql_candidates:
+                item_name = candidate.get("ItemName", "")
+                name_norm = normalize_text(item_name)
+                if not name_norm:
                     continue
 
-                # Match exact substring
-                if desc_normalized in name_normalized or name_normalized in desc_normalized:
-                    score = 85
-                    if score > best_score:
-                        best_score = score
-                        best_match = (item_code, item, "Nom similaire (substring)")
+                # _discriminating_score : token_set_ratio - pénalité mots discriminants
+                # (évite PREMIUM == BASIC quand libellés quasi-identiques)
+                tsr = _discriminating_score(desc_normalized, name_norm)
 
-                # Fuzzy match
-                ratio = SequenceMatcher(None, desc_normalized, name_normalized).ratio()
-                if ratio > 0.7:
-                    score = int(60 + ratio * 30)  # 60-90
-                    if score > best_score:
-                        best_score = score
-                        best_match = (item_code, item, f"Fuzzy nom ({ratio:.0%})")
+                # Bonus substring : si la description est entièrement dans le nom SAP
+                if desc_normalized in name_norm or name_norm in desc_normalized:
+                    tsr = max(tsr, 85)
 
-                # Match par mots communs (utilise pré-extraction des mots)
-                name_words = set(WORD_PATTERN_4PLUS.findall(name_normalized))
-                common_words = desc_words & name_words
+                fuzzy_scores.append((tsr, candidate))
+                if tsr > best_score:
+                    best_score = tsr
+                    best_match = (candidate.get("ItemCode", ""), candidate,
+                                  f"Token-set ratio SQL ({tsr}%)")
 
-                if len(common_words) >= 2:
-                    match_ratio = len(common_words) / max(len(desc_words), 1)
-                    if match_ratio > 0.5:
-                        score = int(60 + match_ratio * 20)  # 60-80
+            if fuzzy_scores:
+                top3 = sorted(fuzzy_scores, key=lambda x: x[0], reverse=True)[:3]
+                logger.info("[FUZZY_SCORES] Top-3: %s",
+                            [(s, r.get("ItemCode"), r.get("ItemName", "")[:40])
+                             for s, r in top3])
+
+            # 3c. Fallback mémoire si SQL n'a rien retourné
+            if not sql_candidates:
+                for item_code, item in self._items_cache.items():
+                    name_normalized = self._items_normalized.get(item_code, "")
+                    if not name_normalized:
+                        continue
+
+                    # Substring
+                    if desc_normalized in name_normalized or name_normalized in desc_normalized:
+                        score = 85
                         if score > best_score:
                             best_score = score
-                            best_match = (item_code, item, f"Mots communs: {', '.join(list(common_words)[:2])}")
+                            best_match = (item_code, item, "Nom similaire (substring)")
+
+                    # SequenceMatcher (fallback)
+                    ratio = SequenceMatcher(None, desc_normalized, name_normalized).ratio()
+                    if ratio > 0.7:
+                        score = int(60 + ratio * 30)
+                        if score > best_score:
+                            best_score = score
+                            best_match = (item_code, item, f"Fuzzy nom ({ratio:.0%})")
+
+                    # Mots communs
+                    name_words = set(WORD_PATTERN_4PLUS.findall(name_normalized))
+                    common_words = desc_words & name_words
+                    if len(common_words) >= 2:
+                        match_ratio = len(common_words) / max(len(desc_words), 1)
+                        if match_ratio > 0.5:
+                            score = int(60 + match_ratio * 20)
+                            if score > best_score:
+                                best_score = score
+                                best_match = (item_code, item,
+                                              f"Mots communs: {', '.join(list(common_words)[:2])}")
+
+            logger.info("[FINAL_SELECTION] Étape 3: best_score=%d item=%s",
+                        best_score, best_match[0] if best_match else None)
 
             # Si bon match trouvé (seuil augmenté à 90 pour éviter faux positifs), enregistrer dans mapping_db
             if best_match and best_score >= 90 and supplier_card_code:
@@ -1136,6 +1286,22 @@ class EmailMatcher:
                     matched_codes.add(code)
                 continue
 
+            # --- Stratégie 2bis : code normalisé (P-0301L-SLT == P/0301L-SLT) ---
+            code_norm = normalize_code(code)
+            if code_norm and len(code_norm) >= 4 and hasattr(self, '_items_norm_code'):
+                matched_sap_code = self._items_norm_code.get(code_norm)
+                if matched_sap_code and matched_sap_code not in matched_codes:
+                    item = self._items_cache[matched_sap_code]
+                    qty = self._extract_quantity_near(text, code)
+                    matches.append(self._create_matched_product_from_sap(
+                        item=item,
+                        quantity=qty,
+                        score=100,
+                        match_reason=f"Code normalisé: {code} → {matched_sap_code}"
+                    ))
+                    matched_codes.add(matched_sap_code)
+                    continue
+
             # --- Stratégie 3 : ItemCode partiel (score 80) ---
             if len(code) >= 6:
                 for item_code, item in self._items_cache.items():
@@ -1223,6 +1389,165 @@ class EmailMatcher:
                     match_reason=best_reason
                 ))
                 matched_codes.add(item_code)
+
+        # ===== PHASE 2bis : MATCHING PAR DESCRIPTION LONGUE (SQL multi-token + thefuzz) =====
+        #
+        # Objectif : matcher "HANDY VII PREMIUM + STATION DE CHARGE FIXE AVEC COMPENSATION DE FIBRE"
+        # contre "PYROMETRE HANDY VII PREMIUM + STATION DE CHARGE FIXE AVEC COMPENSATION DE FIBRE"
+        # même si aucun code produit n'a été extrait.
+        #
+        # Stratégie :
+        #   1. Extraire les séquences de mots significatifs (3+ mots de 3+ chars) du texte
+        #   2. Pour chaque séquence, lancer un SQL multi-token (pré-filtre)
+        #   3. Scorer avec token_set_ratio (thefuzz) — insensible à l'ordre et aux préfixes
+        #   4. Seuils : >= 85 = auto, 65-84 = suggestion
+        #
+        # Seule condition d'activation : au moins une séquence longue extraite du texte.
+
+        cache_db = self._get_cache_db()
+
+        # Extraire des séquences de mots pertinentes du texte
+        # Pattern : séquence d'au moins 3 mots de 3+ chars (pour éviter les faux positifs)
+        long_sequences = re.findall(
+            r'(?:(?:\b\w{3,}\b\s+){2,}\b\w{3,}\b)',
+            text_normalized
+        )
+        # Dédupliquer et garder les séquences longues (>= 15 chars)
+        seen_seqs: set = set()
+        unique_seqs = []
+        for seq in long_sequences:
+            seq = seq.strip()
+            if len(seq) >= 15 and seq not in seen_seqs:
+                seen_seqs.add(seq)
+                unique_seqs.append(seq)
+        # Limiter à 5 séquences les plus longues (performance)
+        unique_seqs.sort(key=len, reverse=True)
+        unique_seqs = unique_seqs[:5]
+
+        if unique_seqs:
+            logger.info("[SEARCH_QUERY] Phase 2bis: %d séquences, ex: '%s'",
+                        len(unique_seqs), unique_seqs[0][:60])
+
+        # item_code → (score, item, reason) — inclut les items DÉJÀ dans matches
+        # (pour permettre la mise à jour de score si Phase 2bis trouve mieux)
+        phase2bis_best: Dict[str, Any] = {}
+
+        for seq in unique_seqs:
+            sql_candidates = cache_db.search_items_multitoken(seq, limit=50)
+            logger.debug("[SQL_RESULTS] Phase 2bis seq='%s' → %d candidats",
+                         seq[:40], len(sql_candidates))
+
+            for candidate in sql_candidates:
+                item_code = candidate.get("ItemCode", "")
+                if not item_code:
+                    continue
+
+                item_name = candidate.get("ItemName", "")
+                name_norm = normalize_text(item_name)
+
+                tsr = _discriminating_score(seq, name_norm)
+
+                # Bonus substring
+                if seq in name_norm or name_norm in seq:
+                    tsr = max(tsr, 88)
+
+                prev = phase2bis_best.get(item_code, (0, None, ""))
+                if tsr > prev[0]:
+                    phase2bis_best[item_code] = (tsr, candidate, f"Token-set ratio ({tsr}%)")
+
+        # Trier par score et appliquer les seuils
+        sorted_phase2bis = sorted(phase2bis_best.items(),
+                                  key=lambda kv: kv[1][0], reverse=True)
+
+        logger.info("[FUZZY_SCORES] Phase 2bis top-5: %s",
+                    [(code, sc, r.get("ItemName", "")[:40])
+                     for code, (sc, r, _) in sorted_phase2bis[:5]])
+
+        added_2bis = 0
+        for item_code, (score, item, reason) in sorted_phase2bis:
+            if score < 65:
+                break  # Liste triée, on peut s'arrêter
+
+            # Vérifier si cet item est déjà dans matches (Phase 2 l'a peut-être trouvé avec un score plus bas)
+            existing_idx = next(
+                (i for i, m in enumerate(matches) if m.item_code == item_code), None
+            )
+            if existing_idx is not None:
+                # Mettre à jour le score si Phase 2bis a trouvé mieux
+                if score > matches[existing_idx].score:
+                    decision_reason = (f"Auto-match description ({score}%)"
+                                       if score >= 85
+                                       else f"Suggestion description ({score}%)")
+                    matches[existing_idx] = matches[existing_idx].model_copy(
+                        update={"score": score, "match_reason": decision_reason}
+                    )
+                    logger.info("[FINAL_SELECTION] Phase 2bis: UPDATE %s score %d→%d",
+                                item_code, matches[existing_idx].score, score)
+                continue  # Ne pas ajouter en doublon
+
+            if item_code in matched_codes:
+                continue
+
+            qty = self._extract_quantity_global(text)
+
+            # Décision selon seuil
+            if score >= 85:
+                decision_reason = f"Auto-match description ({score}%)"
+            else:
+                decision_reason = f"Suggestion description ({score}%)"
+
+            matches.append(self._create_matched_product_from_sap(
+                item=item,
+                quantity=qty,
+                score=score,
+                match_reason=decision_reason,
+            ))
+            matched_codes.add(item_code)
+            added_2bis += 1
+
+            logger.info("[FINAL_SELECTION] Phase 2bis: %s '%s' score=%d",
+                        item_code, item.get("ItemName", "")[:50], score)
+
+            if added_2bis >= 5:
+                break  # Limiter à 5 résultats par phase 2bis
+
+        # ===== REVALIDATION DES AUTO-MATCHES POST-PHASE 2bis =====
+        # Problème : le bonus substring (tsr = max(tsr, 88)) peut promouvoir à tort
+        # des variantes concurrentes en auto-match via une séquence GÉNÉRIQUE
+        # (ex: "charge fixe avec compensation" présent dans TOUTES les variantes HANDY VII).
+        # Solution : re-valider chaque auto-match avec _discriminating_score sur le TEXTE
+        # COMPLET de l'email. Si le score de revalidation est < 85, on déclasse en suggestion.
+        text_full_norm = normalize_text(text)
+        for i, m in enumerate(matches):
+            if m.score >= 85:
+                full_disc = _discriminating_score(text_full_norm, normalize_text(m.item_name or ""))
+                if full_disc < 85:
+                    logger.info(
+                        "[REVALIDATION] %s '%s' déclassé: score_phase2bis=%d → disc_full=%d",
+                        m.item_code, (m.item_name or "")[:40], m.score, full_disc
+                    )
+                    matches[i] = m.model_copy(update={
+                        "score": full_disc,
+                        "match_reason": f"Suggestion (revalidation disc: {full_disc}%)"
+                    })
+
+        # ===== NETTOYAGE POST-PHASE 2bis =====
+        # Problème : Phase 2 (mot-à-mot) génère de nombreuses suggestions via des mots
+        # génériques communs (ex: "avec", "pour") qui apparaissent à la fois dans le texte
+        # de l'email ET dans de nombreux libellés SAP. Ces suggestions sont du bruit.
+        #
+        # Solution : si des auto-matches (≥85) existent après revalidation, supprimer
+        # TOUTES les suggestions (<85). Les vrais produits demandés sont trouvés en
+        # auto-match par Phase 2bis ; les suggestions restantes sont de faux positifs.
+        auto_matches = [m for m in matches if m.score >= 85]
+        if auto_matches:
+            suggestions_suppressed = len([m for m in matches if m.score < 85])
+            if suggestions_suppressed > 0:
+                logger.info(
+                    "[CLEANUP] %d auto-match(s) trouvé(s) → suppression de %d suggestion(s) (bruit Phase 2)",
+                    len(auto_matches), suggestions_suppressed
+                )
+            matches = auto_matches
 
         # ===== PHASE 3 : CODES NON TROUVÉS DANS SAP =====
         # Ajouter les codes détectés mais absents de SAP

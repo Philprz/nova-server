@@ -1,0 +1,229 @@
+Received: from MR1P264MB2212.FRAP264.PROD.OUTLOOK.COM (2603:10a6:501:10::24)
+ by MRYP264MB7076.FRAP264.PROD.OUTLOOK.COM with HTTPS; Wed, 4 Mar 2026
+ 15:04:31 +0000
+ARC-Seal: i=2; a=rsa-sha256; s=arcselector10001; d=microsoft.com; cv=pass;
+ b=aqCPMh7YZ0xceS/qGPwGnvyuo21cpU2ZJiQRhSnuN2iw2GnxkHtI4IpBo2m6ZAOSJUdDSa5FvAKlVkQkcmVgqhn4nxSlthJKP2pvDV/xpBQcmVnwys4TBZTpEWl2wS4zoTlyYwGo9Tc4j54Fp671Uv6uT5b15B9s+JKTz5kPRRSjV5ydp7A+9uP8PGeeaQtb11ZfnxWHMIVmPJVmKgSPgvcEFpnhGNJHLYzL0CuokGAXK7+ZTj1MqNPJebXtbA87KTJOjInjsPviBa+zzO76IzlKMdtCcnZ17FSYVxJTlo1CwSy5rUOO11MQmbCpLS2ed24t1ARUGHLcjlyk7a6TCw==
+ARC-Message-Signature: i=2; a=rsa-sha256; c=relaxed/relaxed; d=microsoft.com;
+ s=arcselector10001;
+ h=From:Date:Subject:Message-ID:Content-Type:MIME-Version:X-MS-Exchange-AntiSpam-MessageData-ChunkCount:X-MS-Exchange-AntiSpam-MessageData-0:X-MS-Exchange-AntiSpam-MessageData-1;
+ bh=ZPuKExCuGTgFnSxQWeDNp3oFE16WxA3oqizvlgqn9h8=;
+ b=HXtiBq9yjTbam7k+mFzGgUn1BlSQDllYuEdZXbc66xfa88pkA6zJwaj77xpZU4cUZp+bFRGlMkHuShl88VMEYONkP5hPKYBlVs+URZjgngXLlIGmxsLdCLjvSVt5nbsK2vj5i1PaiuFpDSDzd4FklZOXeo3/g01m7AHk+jpAAHX/vv4+Xp4Li6TfmH75tDRqADCMAdZkkU8lo3PpYi/g5hd+kN4Ndsb090A6EAtjt8FSOM6Dh5UQ9af3vXXxvE75mqBKdviiAP23y6ZbdtnlVEa2IuTCoUz3hBZWjeV/AXXwmVZ0A8SyRj9rdBJlfZCDwcVniLgQlxdRRZtFFpnUOQ==
+ARC-Authentication-Results: i=2; mx.microsoft.com 1; spf=neutral (sender ip is
+ 2607:f8b0:4864:20::b12f) smtp.rcpttodomain=rondot-poc.itspirit.ovh
+ smtp.mailfrom=it-spirit.com; dmarc=pass (p=none sp=none pct=100) action=none
+ header.from=it-spirit.com; dkim=pass (signature was verified)
+ header.d=it-spirit.com; arc=pass (0 oda=0 ltdi=1)
+Received: from MR1P264CA0007.FRAP264.PROD.OUTLOOK.COM (2603:10a6:501:2e::12)
+ by MR1P264MB2212.FRAP264.PROD.OUTLOOK.COM (2603:10a6:501:10::24) with
+ Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id 15.20.9678.17; Wed, 4 Mar
+ 2026 15:04:28 +0000
+Received: from MR1PEPF00000D5A.FRAP264.PROD.OUTLOOK.COM
+ (2603:10a6:501:2e:cafe::79) by MR1P264CA0007.outlook.office365.com
+ (2603:10a6:501:2e::12) with Microsoft SMTP Server (version=TLS1_3,
+ cipher=TLS_AES_256_GCM_SHA384) id 15.20.9654.22 via Frontend Transport; Wed,
+ 4 Mar 2026 15:04:01 +0000
+Authentication-Results: spf=neutral (sender IP is 2607:f8b0:4864:20::b12f)
+ smtp.mailfrom=it-spirit.com; dkim=pass (signature was verified)
+ header.d=it-spirit.com;dmarc=pass action=none
+ header.from=it-spirit.com;compauth=pass reason=100
+Received-SPF: Neutral (protection.outlook.com: 2607:f8b0:4864:20::b12f is
+ neither permitted nor denied by domain of it-spirit.com)
+Received: from mail-yx1-xb12f.google.com (2607:f8b0:4864:20::b12f) by
+ MR1PEPF00000D5A.mail.protection.outlook.com (2603:10a6:508:1::107) with
+ Microsoft SMTP Server (version=TLS1_3, cipher=TLS_AES_256_GCM_SHA384) id
+ 15.20.9678.18 via Frontend Transport; Wed, 4 Mar 2026 15:04:28 +0000
+Received: by mail-yx1-xb12f.google.com with SMTP id 956f58d0204a3-64acd19e1dfso6007132d50.0
+        for <devis@rondot-poc.itspirit.ovh>; Wed, 04 Mar 2026 07:04:27 -0800 (PST)
+ARC-Seal: i=1; a=rsa-sha256; t=1772636666; cv=none;
+        d=google.com; s=arc-20240605;
+        b=VaWbKNBXNq7RnT4FupKmDqQYBXF10zMlU9dh59kLjRFNXPvbc2OCIPOFghGydj+RQp
+         Hs4FxtcRn/3xWeUh7QxJs8gBD4gAP90zfXZ3uE113yIiyTzltM0Ric7cPXK63bskJvt8
+         MHh9ZKPD5nxvzwNHtu0wYu/gkO0PHt1FqPSnIOodFn99yxXyM1jKHL8QGpkXrLNnIXlw
+         dES1skIajk6d24oFMJbHzK1ULP8IuilVL2ftollPC6i6JduTC8aPGcgeNGl1Wlxy02IT
+         Eq3bUHEA+CExspycbK9BDjppRknxW4IQQz87y3waltVcG5gRumLMttjsft1vC7nbBtZM
+         pA4A==
+ARC-Message-Signature: i=1; a=rsa-sha256; c=relaxed/relaxed; d=google.com; s=arc-20240605;
+        h=to:subject:message-id:date:from:in-reply-to:references:mime-version
+         :dkim-signature;
+        bh=ZPuKExCuGTgFnSxQWeDNp3oFE16WxA3oqizvlgqn9h8=;
+        fh=GsIqJ8XEjqGCg3TSTTtTvPJOIsBUgvSuUkwVZw5xOb0=;
+        b=ffnXmuYSDGGcGF+VDQI3tdnx709yc6TSe8K7I4HVJWoB7hlNCB/pz3Fnorwqwogcr/
+         RDghkgHcFYuhWdJ2aZ/rhsLx3r1jOHDU2yZj5AtUtwznXyIHIwM8zILoPYLvexOexv43
+         1qs8/Y3MqwIbliN35JnkA7QOj+YJLJxuwZ62byjqvZw1GZTXlA8/3Px+RayYqDnk4X8e
+         fI+hadLf8FR/FgEAAgHVEAR2YTwq05k72kd+CU24swwniG6o44zcMF/M4Yh0sFqqaNNZ
+         FUoUR0qoMDFNx1ByqRGjhlYseERLenpkyBlFP41nhYSbjuJXVqWRN1l5OqgJGsaC+Pnf
+         o56A==;
+        darn=rondot-poc.itspirit.ovh
+ARC-Authentication-Results: i=1; mx.google.com; arc=none
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+        d=it-spirit.com; s=google; t=1772636666; x=1773241466; darn=rondot-poc.itspirit.ovh;
+        h=to:subject:message-id:date:from:in-reply-to:references:mime-version
+         :from:to:cc:subject:date:message-id:reply-to;
+        bh=ZPuKExCuGTgFnSxQWeDNp3oFE16WxA3oqizvlgqn9h8=;
+        b=c30MSDIzvZLiIEyNoGAb6VD0A9JuUqCQBAl2duGMXWO/BOKmJKD4ggKt4vyIvvIhlQ
+         5vUvihQMn7mW9JxbTJ2HMIIE960ABbrbt98ZgOIMJ9OQCmvyAZGLx5UXWQ1GK2IE2ClC
+         zjJfgbIk53fc7dLEqUIyaEAgakIWt+fxbxglDBcN8PHM/zA2by7OuLWTnHVX1Ho0wNus
+         eypPIGCBnvSxi5xYSH4KI+qXWCrcuKAvzxEfzka1eoELP9uU6chx8ZClY/b9tFnInpeV
+         iR6qv1tb4OGxSTS2m9H4QXMkrgUsqBiVJ+DKoNTuPzUMrIqOQHFfgAENJTEXLJ2GSR4s
+         v/jw==
+X-Google-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+        d=1e100.net; s=20230601; t=1772636666; x=1773241466;
+        h=to:subject:message-id:date:from:in-reply-to:references:mime-version
+         :x-gm-gg:x-gm-message-state:from:to:cc:subject:date:message-id
+         :reply-to;
+        bh=ZPuKExCuGTgFnSxQWeDNp3oFE16WxA3oqizvlgqn9h8=;
+        b=cot9lVkgg6GldbQFEtlpSQHkelP6Egc4eRe2F005OZ347RyWLTDh+CqWhr8Hm7DePB
+         2trJb2mupW+T8eMfZDevMBP90ft0ucGTt2kbFof+dEF48hCd+wNp/0L4V8GujCKSJomi
+         xuIz0AmCNX3txCFjsknz4EaTpnnVcbZGS0IYRhBzRdst12Y5dm2burDfT2uRMLNJAQhD
+         z+IYAxo8lgG77974ycQ0v1lQCwmhVW/t9r6mLT2gqFfgnJmWQ8WEzB43FvhfNk6ITUJu
+         xt1+y11yBgJgYM9jh/ed0LjrPhXDPo9PYv4IwL+fUOGIQKUqh6cyr+zR+aXXdwOL7VKk
+         A4oQ==
+X-Gm-Message-State: AOJu0YxT8w7HUhvcduar5vO28U7B5VDb+6UOIMKyHp1TIberVdIDNuU8
+	Uv8mdY5q2BGEHO/n2fAOEY0RVZqD5BWZ5/MsMw7bERCW0gekuKUYux6OFIblrIQpCNTWoYzPp/3
+	ZAHF7rlV5jcZL2xH64ZxH2wSsAtWk35HPOAUXQNNp4Qujgq9rpGkv
+X-Gm-Gg: ATEYQzyRBJtc4pRLhpPrE0lZYVpxxGR353m1AVjNcA03hDLSFmrzIZWuoomFE2piQlp
+	DcEoGUdqRqlRH7MxdFTQvdoVDaIU+RUhaxBgfW6Wjo6Lpy766FT1TqMtztA6eCHAXcaC96+1atJ
+	m6KToisrV0U29SuD2BHoa4ZfkXtdbMhMmFM4hArY1KYLqob+XK1A5XtwmymPexuq9pDuWZ5qyt8
+	ENhjhDKntwTcsMVn/WbNMeklPlF26635fr6rGhZI5w9cTW/ZOT03oTznuJ6+H6JlxRyDbV/4G1F
+	At60SSLL7/Cf/C1jTHmYSx8rsCDZeIxGLpLfZk5r1/hfLxEQMhuvJCX2Zct5dUGaMnxmt7LT3/A
+	hW+3qY6w5GvEGD01K9YyVXXtz/w==
+X-Received: by 2002:a05:690e:d59:b0:63c:f5a6:f2ef with SMTP id
+ 956f58d0204a3-64cf9bece8dmr1626825d50.65.1772636665982; Wed, 04 Mar 2026
+ 07:04:25 -0800 (PST)
+References: <CA+YFF2YOteheUV5+oJc2VjM2UC7_1y5Ud-CLG_4-8X0NqVbO4w@mail.gmail.com>
+ <CA+YFF2ZAgkA2mm_W1UxEsqqYwfBUh4zwiFxVfDOB3ww-2tvFNg@mail.gmail.com>
+In-Reply-To: <CA+YFF2ZAgkA2mm_W1UxEsqqYwfBUh4zwiFxVfDOB3ww-2tvFNg@mail.gmail.com>
+From: Philippe PEREZ <p.perez@it-spirit.com>
+Date: Wed, 4 Mar 2026 16:04:13 +0100
+X-Gm-Features: AaiRm50XWO-09iel9wkDucbj1Kpx6SRTtTuNJGmBcMPKh0XTarfyXFf_UCMHJ_g
+Message-ID: <CA+YFF2bfVqbxFXm5RDK7+WqVyFnmj2vmRYtbSxFZ57eO5=YpHQ@mail.gmail.com>
+Subject: Demande de devis pour ALVER SPA
+To: devis@rondot-poc.itspirit.ovh
+Content-Type: multipart/alternative; boundary="000000000000cac38a064c342252"
+Return-Path: p.perez@it-spirit.com
+X-MS-Exchange-Organization-ExpirationStartTime: 04 Mar 2026 15:04:28.2905
+ (UTC)
+X-MS-Exchange-Organization-ExpirationStartTimeReason: OriginalSubmit
+X-MS-Exchange-Organization-ExpirationInterval: 1:00:00:00.0000000
+X-MS-Exchange-Organization-ExpirationIntervalReason: OriginalSubmit
+X-MS-Exchange-Organization-Network-Message-Id: 6a6e2508-7195-44bb-7bc2-08de79ff5500
+X-EOPAttributedMessage: 0
+X-EOPTenantAttributedMessage: 203feedd-7ba1-4180-a7c4-bb0d4e1d238f:0
+X-MS-Exchange-Organization-MessageDirectionality: Incoming
+X-MS-PublicTrafficType: Email
+X-MS-TrafficTypeDiagnostic: MR1PEPF00000D5A:EE_|MR1P264MB2212:EE_|MRYP264MB7076:EE_
+X-MS-Exchange-Organization-AuthSource: MR1PEPF00000D5A.FRAP264.PROD.OUTLOOK.COM
+X-MS-Exchange-Organization-AuthAs: Anonymous
+X-MS-Office365-Filtering-Correlation-Id: 6a6e2508-7195-44bb-7bc2-08de79ff5500
+X-MS-Exchange-Organization-SCL: 1
+X-Microsoft-Antispam: BCL:0;ARA:13230040|69100299015|7149299003|43022699015|3109299003|8096899003|4076899003;
+X-Forefront-Antispam-Report: CIP:2607:f8b0:4864:20::b12f;CTRY:;LANG:fr;SCL:1;SRV:;IPV:NLI;SFV:NSPM;H:mail-yx1-xb12f.google.com;PTR:mail-yx1-xb12f.google.com;CAT:NONE;SFS:(13230040)(69100299015)(7149299003)(43022699015)(3109299003)(8096899003)(4076899003);DIR:INB;
+X-MS-Exchange-CrossTenant-OriginalArrivalTime: 04 Mar 2026 15:04:28.0527
+ (UTC)
+X-MS-Exchange-CrossTenant-Network-Message-Id: 6a6e2508-7195-44bb-7bc2-08de79ff5500
+X-MS-Exchange-CrossTenant-Id: 203feedd-7ba1-4180-a7c4-bb0d4e1d238f
+X-MS-Exchange-CrossTenant-AuthSource: MR1PEPF00000D5A.FRAP264.PROD.OUTLOOK.COM
+X-MS-Exchange-CrossTenant-AuthAs: Anonymous
+X-MS-Exchange-CrossTenant-FromEntityHeader: Internet
+X-MS-Exchange-Transport-CrossTenantHeadersStamped: MR1P264MB2212
+X-MS-Exchange-Transport-EndToEndLatency: 00:00:03.9839311
+X-MS-Exchange-Processed-By-BccFoldering: 15.20.9678.010
+X-Microsoft-Antispam-Mailbox-Delivery:
+	ucf:0;jmr:0;auth:0;dest:I;ENG:(910005)(944506478)(944626604)(920097)(930201)(20251009189)(140003);
+X-Microsoft-Antispam-Message-Info:
+	=?utf-8?B?M2Q4WHdoUy9QQ01Jeks1dnFpU0JDcy9LbzE0aTVYU2c0VmJmRWlDMkJrMmxk?=
+ =?utf-8?B?SmR0V1F4VTJ4WkxTS0h5SDBvT2ppM3dUc1lLSGJBOFZad3FSZnF2VFVseFIz?=
+ =?utf-8?B?Z3ozK21FbUFkamkzUEs1a0hOUzU5R0tIWU80RHU5MzVuVjUza1BrcnA4WDIw?=
+ =?utf-8?B?NnAzcVR3L1B2RnRIUlAvYkR3aEtiOENFdXdEcjNEeFJaeUlvekhlTmtWUXc0?=
+ =?utf-8?B?MmRGQ3NWKzlEcys3M0IwWW9qUE1iVnJYME5meE1nTW5TK1cwTHVueWhtOThL?=
+ =?utf-8?B?S0VqbDhaZWZqMUxrVUFjdUJJanJuSE1LbjM2UVVJbUsrQS9tS3U5V2JaK2Z6?=
+ =?utf-8?B?VklMOFREbGlmbVZRaVBlTEg3RStRQmRMUFRpcDNyZ3NjMVVEV3Ezb29wVUpx?=
+ =?utf-8?B?bng2aHNQbFpyVjlEV205amlzcVJTY3RXTUhJellhc3lXK3ZzLytyL1FQODBW?=
+ =?utf-8?B?SHVrem9uWWpURVZDdzBhZElhQkNZbFNJTnRzclVGVitacVRsNW04eE04RWxE?=
+ =?utf-8?B?UkVEcnlmWU1vTldYVnRLbUtJOVdVSWErQXNLbFc5ZjRmb3UzOUY3VjhmaEFI?=
+ =?utf-8?B?bmpyRnlLMXNkZi9ia2lQa3pYME1TUnNRcTVscHhsYnhoeFdLem5scnBkZ3hP?=
+ =?utf-8?B?MlhvNjhMaXhtZkswdVRRM2xOcmR4R056dHNKeE1rVWJ3QmRqM1liM2NoZjBB?=
+ =?utf-8?B?MnB3dzNJQ3VnY2tQWTBHRWtVTFhqVXp4NnZXZHRKdzJ4Q2FxYmZxWmY2Mk1R?=
+ =?utf-8?B?ell4UWp1SWZNVGtSUkZXaDhZb01uM2NEbVB2ZVFrenpmQ2tXbS9UOWoxdGFJ?=
+ =?utf-8?B?Vzk4Y1lRaUpqc3lVM3NtU2c4SEpmdEpiKzlCaDNxcjdQWGRaWCtiLzZrUUhP?=
+ =?utf-8?B?ZWljSEN1UEo0Wm1Edmduc25LV1AxMVhZWk1FSWVsZngzeVJFZjRBczBMM1lG?=
+ =?utf-8?B?clFjNEVNZE5Zd1JreWhQRlMvTVgxQ05wdTl1Nldwd1pLWlVnaTc3T0psK256?=
+ =?utf-8?B?cGtxZ01nUGdJMm0weDd3ak0rV1ZKTlBNdTdJRjQ1RFdqRDEvWHFncllyZE5v?=
+ =?utf-8?B?VDBQSXdSNlFKYkFvaXRUdm1zd3BUL1JVQ3p5YkRGUjdldWxLN3pIaWdJTVZh?=
+ =?utf-8?B?aXFPNS9ZNVdMNGQ1cmN0cmZ1WWtKb2hrbEsvUkhUMEhKL2dBNlNQMjJnd2Q1?=
+ =?utf-8?B?RXdNKzlLODBOWi95OTdyTTg1aE01a01YTkRnQzBCbWJkaVpDOTBDcitjUUhv?=
+ =?utf-8?B?Mjk5S3NvR09MNGwycUFlVUN6SXJZL1pyVEh4NVE2a1dTUkN2UzFDQmRISDFr?=
+ =?utf-8?B?RnVoUklsd1Q1UVpCY1JOanp2S1pRUWE0UXFFdldQTXdBYSttaW5NbDdnZnIv?=
+ =?utf-8?B?WDFUdVg4S3hhY0I0TVgwRFBySnFsc1hISDU1SldibGhqVTdWZUh4bEpoL0Rm?=
+ =?utf-8?B?alFSTisweUFlR0NSNWEyM09GK2luazVsRCtkeDdHbzgrUDJXeitlOFMyN1Ju?=
+ =?utf-8?B?YXlLb05NejhScTBrZXVPbFNxMTVubmszVm5zcTBvUFByVC9NdHFCK3h2R3Vv?=
+ =?utf-8?B?UGtGWnVFdW54K1RBZmdqKzNJcW1jSm9xOEM4Snk2dzUrNnVzc0plSVFyTzVs?=
+ =?utf-8?B?WHVvMFZxRm5mekhiRllOejF2UTMrZ3RWcFlrdThWMGZ2TlEzMGxRNjgwZkJ0?=
+ =?utf-8?B?RUlEQnlmcnNydDByeVdQOURXdGtpN3dWQnJSVy9OR1BLZ09xSmVzUUZ1MjE0?=
+ =?utf-8?B?WHVVMzJsdDkyc1dLT1hWN2x1cDhaMGJwb3R0ZkwyZ1BpMWkwNU5QdGJ5U3dF?=
+ =?utf-8?B?RDJWVEZRaUJ1N0h2enY2TllIV08wcVEzaXNDNmRXMkZxaGlrR250NlNGaUlp?=
+ =?utf-8?B?YlZtOXRpSDQ4SEdqWFM4aERJS0xpTjVTZmtSR3ZIYTdkTjIxZkVVZGhMOGxI?=
+ =?utf-8?B?NUVvVFNRREd5UGp1dGt4anBNemYrM3BYcnNxT2VsRjRqTkJHNFRyQ1J0eHFE?=
+ =?utf-8?B?V0EzSEpHbXR5amxscVk2c0N6ZHJSRldiV21kVkdtUG9BSFZoRmRKb1VaY3pG?=
+ =?utf-8?B?QjM4L1FnNW8zY1pLMkJFRXJkanl1QTQ3V0wwM1FkZjN1RVQ4N2RJRHZHU0xK?=
+ =?utf-8?B?TXo3U2Q2dVEzclhUanRiQ2RuSG5tSEQyV1BxQzl0VS8vc0FnOUJoOGlIZXM4?=
+ =?utf-8?B?QWlVekFubWh0Q2kzZWVNWDN3RkFZSkFPNWNURm9NaWV1YXJ1MURJZjA0ckdt?=
+ =?utf-8?B?NzNLTk9QeXkrWnJ2bkJUTjlQWDhrL2xtTkNPd1JrR1B4V09tcmhlSDBJZE5o?=
+ =?utf-8?B?bGhjV1J0ckxEanJGUS9VYVJlVVdCcGxHOTZ1aFFlNVJESGJ6d1VhbisrcVE2?=
+ =?utf-8?B?QnlrQkRYcmNDL0svQTlxVGU3VjBBWU8wTVRRTXN3amhKeFpCVHJ6UkVLL3dt?=
+ =?utf-8?B?SkhNYnpVcFZmZmpMRXFjV2thdDBZOEtiTFpBaW5LOHZjZ3hldVFzQTZ0YklE?=
+ =?utf-8?B?YUJ6WnJHU29LRXA0YUQ3bUNTcnhIbjR1aTBIc2FtY2xJUHAwNG9DRjBkR01q?=
+ =?utf-8?B?RUJiaVN6VVVGclRySEwvZ2Q3ZjZiS2RjSTVMQVNINzlQWXpDT3p3ZURXckpk?=
+ =?utf-8?B?amVGL0JkNzR4dVRiS1A2Q05zMjFqUmdOTk1OTWo4RGd2d2hZSE5SMkMxT3Ax?=
+ =?utf-8?B?ckVvN0tMdzhHSUNEM1VSZGU3b1IrRkVlcjgxVm1rdmFSZm92a1c1T2xBcW9u?=
+ =?utf-8?B?Qmt5R2ZMczMzRVhoQUxhNUZBT2ROZ3Nxa2V5YzNHc0lES3dqODNsS2ZRRjhO?=
+ =?utf-8?B?TENpd2JXV1dsYjlSMklQZ1RxSGp6dkJLVFJjUkZoREtHbE44REpleXZlQ3dr?=
+ =?utf-8?B?TG5yREhXVU5nNjFCOWFyclR3UE1takM5L3JyWHBvTVhGV0tXY3FaWXVJeTVn?=
+ =?utf-8?B?eWg1V0RDMG9YODFrcEc3YStqZlZPYVU5OHkvUUt2LzRtMDdpdFBFdU1ZK3l1?=
+ =?utf-8?B?WndxTmQ1c096VnJTbjFXaTZubzFPd2FRQ0xLRjloQTBQeVVDT2RqWlBjQzY2?=
+ =?utf-8?B?aHRaRFV4aStxUzhPc2doYUpvNEJXRkhUZytZOXBMOGsyd2g5Z2phOWw4OThw?=
+ =?utf-8?B?VHFva2NmZWsrTkRpUGRINFBiSkxRMnByYlAvdjlhQnJGOE92anljTUE5VHV0?=
+ =?utf-8?B?VEVVVmlxaHkrVkUwd1ZiblpZczVUTHNiNW5IRnlrQzBpSDkzN2NyKzBLWk5Q?=
+ =?utf-8?B?YUlKQitoc1BHM2NITHhRSFJMY2psNTdhNFpMOFVoQm1oeWMyZE5DcCthUlpB?=
+ =?utf-8?B?SVFWZFNxVGUzRWZtL1JURTYrc2xBMThxQVFLZUJXbXZid0pwTmtrUWMrN0Zj?=
+ =?utf-8?Q?=3D?=
+MIME-Version: 1.0
+
+--000000000000cac38a064c342252
+Content-Type: text/plain; charset="UTF-8"
+Content-Transfer-Encoding: quoted-printable
+
+from: Aicha.HenniKouadri@saint-gobain.com
+ALVER SPA
+
+Bonjour,
+Pouvez-vous me chiffrer les produits suivants : 1 unit=C3=A9 de chaque.
+
+HANDY VII PREMIUM + STATION DE CHARGE FIXE AVEC COMPENSATION DE FIBRE
+HANDY VII BASIC + STATION DE CHARGE FIXE AVEC COMPENSATION DE FIBRE
+
+--000000000000cac38a064c342252
+Content-Type: text/html; charset="UTF-8"
+Content-Transfer-Encoding: quoted-printable
+
+<meta http-equiv=3D"Content-Type" content=3D"text/html; charset=3Dutf-8"><d=
+iv dir=3D"ltr"><div><img width=3D"0" height=3D"0" alt=3D"" src=3D"data:imag=
+e/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" styl=
+e=3D"display: flex;"></div><img width=3D"0" height=3D"0" class=3D"mailtrack=
+-img" alt=3D"" style=3D"display:flex" src=3D"https://mailtrack.io/trace/mai=
+l/2ebf378d804b5d0e77a36fb8aeeeefd95fa66024.png?u=3D11235312"><div class=3D"=
+gmail_quote gmail_quote_container"><div dir=3D"ltr"><div dir=3D"ltr"><div>f=
+rom:&nbsp;<a href=3D"mailto:Aicha.HenniKouadri@saint-gobain.com" target=3D"=
+_blank">Aicha.HenniKouadri@saint-gobain.com</a></div><div class=3D"gmail_qu=
+ote"><div dir=3D"ltr">ALVER SPA<br><br>Bonjour,&nbsp;<br>Pouvez-vous me chi=
+ffrer les produits suivants : 1 unit=C3=A9 de chaque.<br><br>HANDY VII PREM=
+IUM + STATION DE CHARGE FIXE AVEC COMPENSATION DE FIBRE<br>HANDY VII BASIC =
++ STATION DE CHARGE FIXE AVEC COMPENSATION DE FIBRE<img width=3D"0" height=
+=3D"0" alt=3D"" style=3D"display:flex" src=3D"data:image/gif;base64,R0lGODl=
+hAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"></div>
+</div></div>
+</div>
+</div></div>
+
+--000000000000cac38a064c342252--

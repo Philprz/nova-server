@@ -30,6 +30,8 @@ export interface GraphEmail {
   attachments: GraphAttachment[];
   /** Détection côté serveur : true si le sujet contient "chiffrage", "devis", etc. */
   is_quote_by_subject?: boolean;
+  /** Source de la demande : 'email' (Microsoft Graph) ou 'manual' (saisie manuelle) */
+  source?: 'email' | 'manual';
 }
 
 export interface GraphEmailsResponse {
@@ -624,6 +626,7 @@ export interface DraftState {
   ignored_line_nums?: number[];
   selected_client_code?: string | null;
   selected_client_name?: string | null;
+  transport_price_override?: number | null;
   updated_at?: string;
 }
 
@@ -644,6 +647,7 @@ export async function saveDraftState(
     ignored_line_nums: number[];
     selected_client_code?: string | null;
     selected_client_name?: string | null;
+    transport_price_override?: number | null;
   }
 ): Promise<void> {
   await fetch(
@@ -657,6 +661,60 @@ export async function saveDraftState(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DEMANDES MANUELLES
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface ManualQuoteItem {
+  item_code: string;
+  item_name?: string;
+  quantity: number;
+}
+
+export interface ManualQuotePayload {
+  source: 'manual';
+  client: string; // card_code SAP
+  client_name?: string;
+  items: ManualQuoteItem[];
+  notes?: string;
+}
+
+export interface ManualQuoteResult {
+  email_id: string;
+  analysis_result: EmailAnalysisResult;
+}
+
+/** Crée une demande de devis manuelle (téléphone / oral). */
+export async function createManualQuoteRequest(
+  payload: ManualQuotePayload
+): Promise<ManualQuoteResult> {
+  const response = await fetch(`${GRAPH_API_BASE}/emails/manual-request`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ detail: 'Erreur inconnue' }));
+    throw new Error(err.detail || `Erreur ${response.status}`);
+  }
+  return response.json();
+}
+
+/** Récupère la liste des demandes manuelles (format GraphEmail). */
+export async function fetchManualRequests(): Promise<ApiResponse<GraphEmailsResponse>> {
+  try {
+    const response = await fetch(`${GRAPH_API_BASE}/emails/manual-list`);
+    if (!response.ok) {
+      const error = await response.json();
+      return { success: false, error: error.detail || `Erreur ${response.status}` };
+    }
+    const data = await response.json();
+    return { success: true, data };
+  } catch (error) {
+    return { success: false, error: `Erreur réseau: ${error}` };
+  }
+}
 
 /** Relance la recherche SAP pour un article non trouvé (Option B). */
 export async function retrySearchProduct(

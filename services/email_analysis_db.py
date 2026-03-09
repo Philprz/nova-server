@@ -54,6 +54,19 @@ class EmailAnalysisDB:
             ON email_analysis(is_quote_request)
         """)
 
+        # Table pour les demandes manuelles
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS manual_requests (
+                email_id TEXT PRIMARY KEY,
+                subject TEXT NOT NULL,
+                from_name TEXT NOT NULL,
+                body_preview TEXT,
+                client_card_code TEXT,
+                client_name TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
         conn.commit()
         conn.close()
 
@@ -199,6 +212,7 @@ class EmailAnalysisDB:
                 ignored_line_nums   TEXT,
                 selected_client_code TEXT,
                 selected_client_name TEXT,
+                transport_price_override REAL,
                 updated_at          TEXT NOT NULL
             )
         """)
@@ -212,21 +226,31 @@ class EmailAnalysisDB:
         ignored_line_nums: list,
         selected_client_code: Optional[str],
         selected_client_name: Optional[str],
+        transport_price_override: Optional[float] = None,
     ):
         """Sauvegarde l'état UI d'un devis en cours d'édition."""
         self._init_draft_table()
+        # Migration silencieuse : ajouter la colonne si absente
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.execute("ALTER TABLE quote_draft_state ADD COLUMN transport_price_override REAL")
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
         conn = sqlite3.connect(self.db_path)
         conn.execute("""
             INSERT OR REPLACE INTO quote_draft_state
             (email_id, quantity_overrides, ignored_line_nums,
-             selected_client_code, selected_client_name, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+             selected_client_code, selected_client_name, transport_price_override, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
         """, (
             email_id,
             json.dumps(quantity_overrides),
             json.dumps(ignored_line_nums),
             selected_client_code,
             selected_client_name,
+            transport_price_override,
             datetime.now().isoformat(),
         ))
         conn.commit()
@@ -249,6 +273,7 @@ class EmailAnalysisDB:
             "ignored_line_nums": json.loads(row["ignored_line_nums"] or "[]"),
             "selected_client_code": row["selected_client_code"],
             "selected_client_name": row["selected_client_name"],
+            "transport_price_override": row["transport_price_override"],
             "updated_at": row["updated_at"],
         }
 
@@ -275,6 +300,46 @@ class EmailAnalysisDB:
             "with_pricing": row[2] or 0,
             "total_products": row[3] or 0
         }
+
+
+    # ----------------------------------------------------------
+    # Manual requests — demandes saisies manuellement (hors email)
+    # ----------------------------------------------------------
+
+    def save_manual_request(
+        self,
+        email_id: str,
+        subject: str,
+        from_name: str,
+        body_preview: str,
+        client_card_code: str,
+        client_name: str,
+    ):
+        """Enregistre les métadonnées d'une demande manuelle."""
+        conn = sqlite3.connect(self.db_path)
+        conn.execute("""
+            INSERT OR REPLACE INTO manual_requests
+            (email_id, subject, from_name, body_preview, client_card_code, client_name, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (email_id, subject, from_name, body_preview, client_card_code, client_name,
+              datetime.now().isoformat()))
+        conn.commit()
+        conn.close()
+        logger.info(f"Manual request saved: {email_id}")
+
+    def list_manual_requests(self) -> list:
+        """Retourne toutes les demandes manuelles triées par date décroissante."""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT email_id, subject, from_name, body_preview, client_card_code, client_name, created_at
+            FROM manual_requests
+            ORDER BY created_at DESC
+        """)
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
 
 
 # Singleton
