@@ -312,6 +312,44 @@ async def get_quotation_by_email(email_id: str):
         return {"found": False}
 
 
+@router.post("/quotation/batch-by-emails")
+async def get_quotations_by_emails(email_ids: list[str]):
+    """
+    Retourne les métadonnées de devis créés pour une liste d'email_ids.
+    Utilisé par le frontend pour synchroniser l'état entre navigateurs.
+    """
+    if not email_ids:
+        return {}
+    try:
+        conn = sqlite3.connect(_DB_PATH)
+        conn.row_factory = sqlite3.Row
+        placeholders = ",".join("?" * len(email_ids))
+        rows = conn.execute(
+            f"""
+            SELECT email_id, sap_doc_num, created_at
+            FROM quote_generation_log
+            WHERE email_id IN ({placeholders})
+            ORDER BY created_at DESC
+            """,
+            email_ids,
+        ).fetchall()
+        conn.close()
+
+        # Garder seulement le dernier devis par email_id
+        result: dict = {}
+        for row in rows:
+            eid = row["email_id"]
+            if eid and eid not in result:
+                result[eid] = {
+                    "sapDocNum": row["sap_doc_num"],
+                    "createdAt": row["created_at"],
+                }
+        return result
+    except Exception as exc:
+        logger.warning("batch-by-emails error: %s", exc)
+        return {}
+
+
 @router.get("/quotation/status")
 async def get_quotation_service_status():
     """

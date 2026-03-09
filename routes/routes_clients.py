@@ -306,6 +306,52 @@ async def _create_sap_client(request: ClientCreationRequest, existing_client_dat
             "error": f"Exception lors de la création SAP: {str(e)}"
         }
 
+@router.post("/refresh-cache")
+async def refresh_clients_cache():
+    """Force la re-synchronisation du cache clients depuis SAP (réutilise la session SAP existante)."""
+    try:
+        from services.sap_cache_db import get_sap_cache_db
+        from services.sap_business_service import get_sap_business_service
+        cache_db = get_sap_cache_db()
+        sap_service = get_sap_business_service()
+        stats_before = cache_db.get_cache_stats()
+        result = await cache_db.sync_clients_from_sap(sap_service)
+        stats_after = cache_db.get_cache_stats()
+        return {
+            "success": result.get("success", False),
+            "clients_before": stats_before.get("total_clients", 0),
+            "clients_after": stats_after.get("total_clients", 0),
+            "total_synced": result.get("total_records", 0),
+            "error": result.get("error"),
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+@router.get("/by-code")
+async def get_client_by_code(card_code: str):
+    """Retourne un client SAP par son CardCode exact (pour pré-remplir les adresses)."""
+    try:
+        from services.sap_cache_db import get_sap_cache_db
+        cache_db = get_sap_cache_db()
+        client = cache_db.get_client_by_code(card_code)
+        if client:
+            return {
+                "success": True,
+                "client": {
+                    "CardCode": client["CardCode"],
+                    "CardName": client["CardName"],
+                    "EmailAddress": client.get("EmailAddress"),
+                    "Phone1": client.get("Phone1"),
+                    "City": client.get("City"),
+                    "Country": client.get("Country"),
+                    "ZipCode": client.get("ZipCode"),
+                }
+            }
+        return {"success": False, "client": None}
+    except Exception as e:
+        return {"success": False, "client": None, "error": str(e)}
+
+
 @router.get("/search_clients")
 async def search_clients(q: str, source: str = "both", limit: int = 10):
     """
@@ -344,6 +390,7 @@ async def search_clients(q: str, source: str = "both", limit: int = 10):
                     "Phone1": client.get("Phone1"),
                     "City": client.get("City"),
                     "Country": client.get("Country"),
+                    "ZipCode": client.get("ZipCode"),
                     "similarity": 100  # Score par défaut (TODO: implémenter scoring fuzzy)
                 }
                 for client in sap_clients

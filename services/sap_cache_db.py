@@ -45,9 +45,15 @@ class SAPCacheDB:
                 Phone1 TEXT,
                 City TEXT,
                 Country TEXT,
+                ZipCode TEXT,
                 last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        # Migration : ajouter ZipCode si absent (DB existante)
+        try:
+            cursor.execute("ALTER TABLE sap_clients ADD COLUMN ZipCode TEXT")
+        except Exception:
+            pass  # Colonne déjà présente
 
         # Index pour recherche rapide par nom
         cursor.execute("""
@@ -187,7 +193,7 @@ class SAPCacheDB:
 
             while True:
                 clients_batch = await sap_service._call_sap("/BusinessPartners", params={
-                    "$select": "CardCode,CardName,EmailAddress,Phone1,City,Country",
+                    "$select": "CardCode,CardName,EmailAddress,Phone1,City,Country,ZipCode",
                     "$filter": "CardType eq 'cCustomer'",  # Seulement les clients (pas les fournisseurs)
                     "$top": batch_size,
                     "$skip": skip,
@@ -213,8 +219,8 @@ class SAPCacheDB:
 
                 cursor.execute("""
                     INSERT INTO sap_clients
-                    (CardCode, CardName, EmailAddress, Phone1, City, Country, last_updated)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    (CardCode, CardName, EmailAddress, Phone1, City, Country, ZipCode, last_updated)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     client.get("CardCode"),
                     card_name,
@@ -222,6 +228,7 @@ class SAPCacheDB:
                     client.get("Phone1"),
                     client.get("City"),
                     client.get("Country"),
+                    client.get("ZipCode"),
                     datetime.now().isoformat()
                 ))
 
@@ -431,6 +438,19 @@ class SAPCacheDB:
 
         return [dict(row) for row in rows]
 
+    def get_client_by_code(self, card_code: str) -> Optional[Dict[str, Any]]:
+        """Récupère un client par son CardCode exact (avec adresse complète)."""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT CardCode, CardName, EmailAddress, Phone1, City, Country, ZipCode FROM sap_clients WHERE CardCode = ?",
+            (card_code,)
+        )
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else None
+
     def search_items(self, query: str, limit: int = 10) -> List[Dict[str, Any]]:
         """
         Recherche d'articles par code ou nom.
@@ -457,6 +477,77 @@ class SAPCacheDB:
         conn.close()
 
         return [dict(row) for row in rows]
+
+    def search_items_multitoken(self, query: str, min_word_len: int = 4, limit: int = 50) -> List[Dict[str, Any]]:
+        """
+        Recherche multi-tokens avec stratégie AND → OR de secours.
+
+        Stratégie (du plus précis au plus large) :
+          1. AND des 2 tokens les plus longs (très précis, peu de résultats)
+          2. AND du token le plus long seul (si étape 1 vide)
+          3. OR de tous les tokens (filet de sécurité, limit 50)
+
+        Utilisé pour pré-filtrer les candidats avant le scoring thefuzz.
+
+        Args:
+            query       : description produit (ex: "HANDY VII PREMIUM STATION DE CHARGE")
+            min_word_len: longueur minimale d'un token (défaut 4)
+            limit       : max résultats SQL (défaut 50)
+        """
+        import re as _re
+        import unicodedata as _ud
+
+        # Normalisation légère (minuscules, sans accents, sans ponctuation)
+        q = query.lower()
+        q = _ud.normalize('NFD', q)
+        q = ''.join(c for c in q if _ud.category(c) != 'Mn')
+        q = _re.sub(r'[^\w\s]', ' ', q)
+
+        tokens_raw = [w for w in _re.findall(r'\b\w+\b', q) if len(w) >= min_word_len]
+        # Déduplique et trie par longueur décroissante (tokens longs = plus discriminants)
+        tokens = list(dict.fromkeys(sorted(tokens_raw, key=len, reverse=True)))
+
+        logger.debug("[SEARCH_QUERY] multi-token tokens=%s limit=%d", tokens[:5], limit)
+
+        if not tokens:
+            return self.search_items(query, limit=limit)
+
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        def _run(conditions: str, params: list) -> list:
+            cursor.execute(
+                f"SELECT * FROM sap_items WHERE {conditions} LIMIT ?",
+                params + [limit],
+            )
+            return [dict(r) for r in cursor.fetchall()]
+
+        results: list = []
+
+        # Étape 1 : AND des 2 tokens les plus longs (haute précision)
+        top2 = tokens[:2]
+        if len(top2) == 2:
+            cond = " AND ".join(["ItemName LIKE ?" for _ in top2])
+            results = _run(cond, [f"%{t}%" for t in top2])
+            logger.debug("[SQL_RESULTS] AND top-2 %s → %d résultats", top2, len(results))
+
+        # Étape 2 : AND du seul token le plus long (si étape 1 vide)
+        if not results and tokens:
+            cond = "ItemName LIKE ?"
+            results = _run(cond, [f"%{tokens[0]}%"])
+            logger.debug("[SQL_RESULTS] AND top-1 '%s' → %d résultats", tokens[0], len(results))
+
+        # Étape 3 : OR de tous les tokens (filet de sécurité)
+        if not results:
+            all_tok = tokens[:5]
+            cond = " OR ".join(["ItemName LIKE ?" for _ in all_tok])
+            results = _run(cond, [f"%{t}%" for t in all_tok])
+            logger.debug("[SQL_RESULTS] OR all %s → %d résultats", all_tok, len(results))
+
+        conn.close()
+        logger.debug("[SQL_RESULTS] total %d candidats pour tokens=%s", len(results), tokens[:5])
+        return results
 
     def search_items_normalized(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
         """

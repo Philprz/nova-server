@@ -13,15 +13,18 @@ import { useEmails } from '@/hooks/useEmails';
 import { useEmailMode } from '@/hooks/useEmailMode';
 import { useWebhookNotifications } from '@/hooks/useWebhookNotifications';
 import { ProcessedEmail } from '@/types/email';
-import { Loader2, RefreshCw, Wifi, WifiOff } from 'lucide-react';
+import { Loader2, RefreshCw, Wifi, WifiOff, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { ManualQuoteModal } from '@/components/ManualQuoteModal';
+import { ManualQuoteResult, graphEmailToEmailMessage } from '@/lib/graphApi';
 
 type View = 'account-selection' | 'inbox' | 'quotes' | 'config' | 'connectors' | 'summary';
 
 const Index = () => {
   const [currentView, setCurrentView] = useState<View>('account-selection');
   const [selectedQuote, setSelectedQuote] = useState<ProcessedEmail | null>(null);
+  const [manualModalOpen, setManualModalOpen] = useState(false);
 
   // Emails marqués comme traités (persisté en localStorage)
   const [processedEmailIds, setProcessedEmailIds] = useState<Set<string>>(() => {
@@ -54,6 +57,7 @@ const Index = () => {
     analyzeEmail,
     reanalyzeEmail,
     getLatestEmail,
+    addManualEmailToList,
   } = useEmails({ enabled: !isDemoMode, autoFetch: !isDemoMode });
 
   // Emails de démonstration (mock)
@@ -91,6 +95,32 @@ const Index = () => {
       refreshEmails();
     }
   }, [isDemoMode, currentView]);
+
+  // Synchroniser processedEmailsMeta depuis le backend quand les emails sont chargés
+  useEffect(() => {
+    if (isDemoMode || liveEmails.length === 0) return;
+    const quoteIds = liveEmails.filter(e => e.isQuote).map(e => e.email.id);
+    if (quoteIds.length === 0) return;
+
+    fetch('/api/sap/quotation/batch-by-emails', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(quoteIds),
+    })
+      .then(r => r.json())
+      .then((backendMeta: Record<string, { sapDocNum?: number; createdAt: string }>) => {
+        if (!backendMeta || Object.keys(backendMeta).length === 0) return;
+        // Fusionner : backend prime sur localStorage
+        setProcessedEmailsMeta(prev => ({ ...prev, ...backendMeta }));
+        // Marquer comme traités les IDs retournés par le backend
+        setProcessedEmailIds(prev => {
+          const next = new Set(prev);
+          Object.keys(backendMeta).forEach(id => next.add(id));
+          return next;
+        });
+      })
+      .catch(() => { /* silencieux */ });
+  }, [liveEmails, isDemoMode]);
 
   // Filet de sécurité: sync selectedQuote si liveEmails est mis à jour (ex: pré-analyse)
   useEffect(() => {
@@ -166,6 +196,42 @@ const Index = () => {
     setCurrentView('inbox');
   };
 
+  const handleManualCreated = (result: ManualQuoteResult) => {
+    // Construire un GraphEmail synthétique à partir du résultat backend
+    const clientName = result.analysis_result.extracted_data?.client_name ?? 'Client';
+    const itemCount = result.analysis_result.product_matches?.length ?? 0;
+    const bodyPreview = (result.analysis_result.product_matches ?? [])
+      .map((p: { item_name?: string; quantity?: number }) => `${p.item_name ?? p} x${p.quantity ?? 1}`)
+      .join(', ');
+    const syntheticGraphEmail = {
+      id: result.email_id,
+      subject: `Demande manuelle — ${clientName} (${itemCount} produit${itemCount > 1 ? 's' : ''})`,
+      from_name: 'Saisie manuelle',
+      from_address: 'saisie.manuelle@rondot.fr',
+      received_datetime: new Date().toISOString(),
+      body_preview: bodyPreview,
+      body_content: bodyPreview,
+      body_content_type: 'text',
+      has_attachments: false,
+      is_read: true,
+      attachments: [],
+      is_quote_by_subject: true,
+      source: 'manual' as const,
+    };
+    addManualEmailToList(syntheticGraphEmail, result.analysis_result);
+    // Naviguer directement vers le résumé du devis créé
+    const emailMessage = graphEmailToEmailMessage(syntheticGraphEmail);
+    const processedQuote = {
+      email: emailMessage,
+      isQuote: true,
+      detection: { confidence: 'high' as const, matchedRules: ['Saisie manuelle'], sources: ['body'] as const },
+      pdfContents: [],
+      analysisResult: result.analysis_result,
+    };
+    setSelectedQuote(processedQuote as ProcessedEmail);
+    setCurrentView('summary');
+  };
+
   // Show account selection as first screen
   if (currentView === 'account-selection') {
     return <AccountSelection onSelectAccount={handleAccountSelect} />;
@@ -223,6 +289,15 @@ const Index = () => {
                   >
                     <RefreshCw className={`h-4 w-4 mr-1 ${liveLoading ? 'animate-spin' : ''}`} />
                     Actualiser
+                  </Button>
+                )}
+                {!isDemoMode && (
+                  <Button
+                    size="sm"
+                    onClick={() => setManualModalOpen(true)}
+                  >
+                    <Plus className="h-4 w-4 mr-1" />
+                    Nouvelle demande
                   </Button>
                 )}
               </div>
@@ -285,6 +360,13 @@ const Index = () => {
           )}
         </main>
       </div>
+      {!isDemoMode && (
+        <ManualQuoteModal
+          open={manualModalOpen}
+          onClose={() => setManualModalOpen(false)}
+          onCreated={handleManualCreated}
+        />
+      )}
     </div>
   );
 };

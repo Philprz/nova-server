@@ -3,6 +3,7 @@ import { ArrowLeft, CheckCircle, Calculator, FileText, TrendingUp, Building2, Pa
 import { ProcessedEmail } from '@/types/email';
 import { CreateItemDialog } from './CreateItemDialog';
 import { PriceEditorDialog } from './PriceEditorDialog';
+import { ShippingCalculatorPanel } from './ShippingCalculatorPanel';
 import { EmailSourceTab } from './EmailSourceTab';
 import { AttachmentsTab } from './AttachmentsTab';
 import { ExtractedDataTab } from './ExtractedDataTab';
@@ -37,6 +38,9 @@ interface SapClient {
   CardName: string;
   Phone1?: string;
   EmailAddress?: string;
+  City?: string;
+  Country?: string;
+  ZipCode?: string;
   similarity?: number;
 }
 
@@ -140,6 +144,7 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
     overrides: {[lineNum: number]: number},
     ignored: {[lineNum: number]: boolean},
     client: SapClient | null,
+    transportOverride?: number | null,
   ) => {
     if (saveDraftTimeout.current) clearTimeout(saveDraftTimeout.current);
     saveDraftTimeout.current = setTimeout(async () => {
@@ -154,6 +159,7 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
           ignored_line_nums: ignoredNums,
           selected_client_code: client?.CardCode ?? null,
           selected_client_name: client?.CardName ?? null,
+          transport_price_override: transportOverride ?? null,
         });
       } catch (e) {
         // Non bloquant
@@ -180,6 +186,9 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
         draftClientLoaded.current = true;
         setSelectedClient({ CardCode: draft.selected_client_code, CardName: draft.selected_client_name });
         setSearchPerformed(true);
+      }
+      if (draft.transport_price_override != null) {
+        setTransportPriceOverride(draft.transport_price_override);
       }
     }).catch(() => {});
 
@@ -272,7 +281,11 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
         const lineTotal = line.unit_price * effectiveQty;
         subtotal += lineTotal;
 
-        if (line.margin_applied) {
+        // Calculer la marge réelle depuis le prix actuel et le prix fournisseur
+        if (line.supplier_price > 0) {
+          totalMargin += ((line.unit_price - line.supplier_price) / line.supplier_price) * 100;
+          count++;
+        } else if (line.margin_applied) {
           totalMargin += line.margin_applied;
           count++;
         }
@@ -355,12 +368,24 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
   useEffect(() => {
     if (draftClientLoaded.current) return;
     if (doc?.businessPartner.CardCode) {
+      // Auto-sélection de base (sans adresse)
       setSelectedClient({
         CardCode: doc.businessPartner.CardCode,
         CardName: doc.businessPartner.CardName,
         EmailAddress: doc.businessPartner.ContactEmail,
       });
       setSearchPerformed(true);
+      // Enrichissement asynchrone avec City/Country depuis le cache SAP
+      fetch(`/api/clients/by-code?card_code=${encodeURIComponent(doc.businessPartner.CardCode)}`)
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.success && data.client) {
+            setSelectedClient((prev) =>
+              prev ? { ...prev, City: data.client.City, Country: data.client.Country, ZipCode: data.client.ZipCode } : prev
+            );
+          }
+        })
+        .catch(() => {});
     } else if (clientName && clientName !== 'Client inconnu') {
       setSearchQuery(clientName);
       searchClients(clientName);
@@ -490,6 +515,9 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
             CardName: client.CardName,
             EmailAddress: client.EmailAddress || client.Email,
             Phone1: client.Phone1,
+            City: client.City,
+            Country: client.Country,
+            ZipCode: client.ZipCode,
             similarity: client.similarity
           }));
           setSapClients(sapClients);
@@ -1071,10 +1099,13 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
                           onPriceUpdated={(newPrice) => {
                             // Mémoriser l'override manuel (protège contre Recalculer)
                             setManualPriceOverrides(prev => ({ ...prev, [line.ItemCode]: newPrice }));
+                            // Calculer la marge réelle depuis le prix fournisseur
+                            const sp = (line as any).supplier_price;
+                            const actualMargin = sp > 0 ? ((newPrice - sp) / sp) * 100 : undefined;
                             // Mettre à jour le state React (déclenche re-render)
                             setEnrichedArticles(prev => prev.map((a: any) =>
                               a.LineNum === line.LineNum
-                                ? { ...a, unit_price: newPrice, line_total: newPrice * (quantityOverrides[a.LineNum] ?? a.Quantity ?? 1), pricing_case: 'CAS_MANUAL' }
+                                ? { ...a, unit_price: newPrice, line_total: newPrice * (quantityOverrides[a.LineNum] ?? a.Quantity ?? 1), pricing_case: 'CAS_MANUAL', margin_applied: actualMargin ?? a.margin_applied }
                                 : a
                             ));
                           }}
@@ -1451,10 +1482,30 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
               <TableRow className="bg-muted/20">
                 <TableCell className="font-mono text-sm text-muted-foreground">A07042</TableCell>
                 <TableCell className="text-sm">
-                  Transport
-                  {transportPriceOverride === null && totals.totalWeight > 0 && (
-                    <span className="text-xs text-muted-foreground ml-1">({totals.totalWeight?.toFixed(3)} kg × 2)</span>
-                  )}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span>Transport</span>
+                    {transportPriceOverride === null && totals.totalWeight > 0 && (
+                      <span className="text-xs text-muted-foreground">({totals.totalWeight?.toFixed(3)} kg × 2)</span>
+                    )}
+                    {transportPriceOverride !== null && (
+                      <span className="text-xs text-blue-600 font-medium">DHL validé</span>
+                    )}
+                    <ShippingCalculatorPanel
+                      articles={enrichedArticles}
+                      quantityOverrides={quantityOverrides}
+                      ignoredItems={ignoredItems}
+                      totalWeight={totals.totalWeight ?? 0}
+                      currentTransportPrice={transportPrice}
+                      isDhlActive={transportPriceOverride !== null}
+                      onTransportPriceSet={(price) => {
+                        setTransportPriceOverride(price);
+                        triggerDraftSave(quantityOverrides, ignoredItems, selectedClient, price);
+                      }}
+                      defaultCity={selectedClient?.City}
+                      defaultCountry={selectedClient?.Country}
+                      defaultPostalCode={selectedClient?.ZipCode}
+                    />
+                  </div>
                 </TableCell>
                 <TableCell className="text-right text-sm">1</TableCell>
                 <TableCell className="text-right text-sm text-muted-foreground">—</TableCell>
@@ -1488,7 +1539,11 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
                       {transportPriceOverride !== null && (
                         <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-muted-foreground"
                           title="Réinitialiser (poids × 2)"
-                          onClick={() => { setTransportPriceOverride(null); setEditingFixedLine(null); }}>
+                          onClick={() => {
+                            setTransportPriceOverride(null);
+                            setEditingFixedLine(null);
+                            triggerDraftSave(quantityOverrides, ignoredItems, selectedClient, null);
+                          }}>
                           <RotateCcw className="w-3 h-3" />
                         </Button>
                       )}
@@ -1728,19 +1783,26 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
             const st = articleStatus[line.LineNum];
             return line.not_found_in_sap === true && !(st?.found === true);
           });
+          const hasUncalculatedPrices = articles.some((line: any) => {
+            if (ignoredItems[line.LineNum]) return false;
+            if (line.not_found_in_sap === true) return false; // déjà bloqué par hasUnresolved
+            return line.unit_price == null;
+          });
           const alreadySent = existingQuote?.found === true;
-          const isDisabled = !doc || articles.length === 0 || (!selectedClient && !createNewClient) || hasUnresolved || isPreviewing;
+          const isDisabled = !doc || articles.length === 0 || (!selectedClient && !createNewClient) || hasUnresolved || hasUncalculatedPrices || isPreviewing;
           const label = alreadySent
             ? `Recréer (N° ${existingQuote?.sap_doc_num ?? '?'})`
             : !selectedClient && !createNewClient
               ? 'Sélectionnez un client'
               : hasUnresolved
                 ? 'Résolvez les articles non trouvés'
-                : isPreviewing
-                  ? 'Préparation...'
-                  : articles.length > 0
-                    ? 'Créer le devis SAP'
-                    : 'Extraction incomplète';
+                : hasUncalculatedPrices
+                  ? 'Saisissez les prix manquants'
+                  : isPreviewing
+                    ? 'Préparation...'
+                    : articles.length > 0
+                      ? 'Créer le devis SAP'
+                      : 'Extraction incomplète';
           return (
             <Button
               onClick={handlePreviewQuote}

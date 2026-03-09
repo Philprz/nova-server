@@ -1,4 +1,4 @@
-import { Mail, Paperclip, FileText, Clock, Loader2, CheckCircle2, RefreshCw } from 'lucide-react';
+import { Mail, Paperclip, FileText, Clock, Loader2, CheckCircle2, RefreshCw, Phone } from 'lucide-react';
 import { ProcessedEmail } from '@/types/email';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -27,6 +27,7 @@ export function EmailList({ emails, onSelectQuote, analyzingEmailId, processedId
         {emails.map((item) => {
           const isProcessed = processedIds?.has(item.email.id) ?? false;
           const meta = processedMeta?.[item.email.id];
+          const isManual = item.email.id.startsWith('manual_');
           return (
           <Card
             key={item.email.id}
@@ -47,8 +48,11 @@ export function EmailList({ emails, onSelectQuote, analyzingEmailId, processedId
               </div>
             )}
             <div className="flex items-start gap-4 p-4">
-              <div className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center ${item.email.isRead ? 'bg-muted' : 'bg-primary/10'}`}>
-                <Mail className={`w-5 h-5 ${item.email.isRead ? 'text-muted-foreground' : 'text-primary'}`} />
+              <div className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center ${isManual ? 'bg-orange-100' : item.email.isRead ? 'bg-muted' : 'bg-primary/10'}`}>
+                {isManual
+                  ? <Phone className="w-5 h-5 text-orange-600" />
+                  : <Mail className={`w-5 h-5 ${item.email.isRead ? 'text-muted-foreground' : 'text-primary'}`} />
+                }
               </div>
               
               <div className="flex-1 min-w-0">
@@ -87,13 +91,19 @@ export function EmailList({ emails, onSelectQuote, analyzingEmailId, processedId
               <div className="flex flex-col items-end gap-2">
                 {item.isQuote ? (
                   <>
+                    {isManual && (
+                      <Badge variant="outline" className="border-orange-400 text-orange-600 text-xs">
+                        <Phone className="w-3 h-3 mr-1" />
+                        Source : Manuel
+                      </Badge>
+                    )}
                     {!isProcessed && (
                       <Badge className="status-badge-quote">
                         <FileText className="w-3 h-3 mr-1" />
                         Devis détecté
                       </Badge>
                     )}
-                    {!isProcessed && (
+                    {!isProcessed && !isManual && (
                       <Badge
                         variant="outline"
                         className={
@@ -126,7 +136,7 @@ export function EmailList({ emails, onSelectQuote, analyzingEmailId, processedId
                         </>
                       )}
                     </Button>
-                    {onReanalyze && item.analysisResult && (
+                    {onReanalyze && item.analysisResult && !isManual && (
                       <Button
                         size="sm"
                         variant="outline"

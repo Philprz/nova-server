@@ -274,6 +274,33 @@ CONTENU:
             analysis = self._parse_llm_response(llm_result)
             analysis.quick_filter_passed = quick_result["likely_quote"]
 
+            # Filtrer les produits non-ancrés dans le texte de l'email
+            # (élimine les produits hallucinés ou extraits d'un fil de discussion parasite)
+            if analysis.extracted_data and analysis.extracted_data.products:
+                # Inclure le contenu des PDFs dans le texte de référence pour le grounding
+                grounding_text = clean_body
+                if pdf_contents:
+                    grounding_text += " " + " ".join(pdf_contents)
+                body_norm_for_grounding = grounding_text.lower()
+                grounded = [
+                    p for p in analysis.extracted_data.products
+                    if self._is_product_grounded(p, body_norm_for_grounding)
+                ]
+                discarded_count = len(analysis.extracted_data.products) - len(grounded)
+                if grounded and discarded_count > 0:
+                    logger.info(
+                        "[GROUNDING] %d produit(s) non-ancrés supprimés (sur %d extraits par LLM)",
+                        discarded_count, len(analysis.extracted_data.products)
+                    )
+                    analysis.extracted_data.products = grounded
+                elif not grounded and discarded_count > 0:
+                    logger.info(
+                        "[GROUNDING] Filtre annulé : tous les %d produit(s) seraient supprimés "
+                        "(produits probablement dans pièce jointe uniquement)",
+                        len(analysis.extracted_data.products)
+                    )
+                    # Conserver les produits tels quels
+
             # Correctif faux négatifs : si le pré-filtrage détecte clairement une demande de devis
             # (sujet/corps avec "chiffrage", "devis", etc.) avec confiance medium ou high,
             # on priorise le pré-filtrage sur le LLM (qui peut se tromper sur transferts, bilingue, etc.)
@@ -546,6 +573,40 @@ CONTENU:
         for term in blacklist:
             if len(term) >= 4 and term in code_normalized:
                 return True
+
+        return False
+
+    def _is_product_grounded(self, product: "ExtractedProduct", body_norm: str) -> bool:
+        """
+        Vérifie qu'un produit extrait par le LLM est réellement ancré dans le texte de l'email.
+
+        Un produit est "ancré" si :
+        - Sa référence (nettoyée de la ponctuation) apparaît dans le corps, OU
+        - Au moins 2 de ses mots significatifs (≥5 chars) apparaissent dans le corps.
+
+        Objectif : éliminer les produits hallucinés ou extraits d'un fil de discussion
+        sans rapport avec la demande actuelle.
+        """
+        # Normalisation du corps (déjà normalisé, mais on s'assure)
+        body_lower = body_norm.lower()
+
+        # --- Vérification par référence ---
+        ref = product.reference or ""
+        if ref:
+            ref_clean = re.sub(r'[^a-z0-9]', '', ref.lower())
+            body_clean = re.sub(r'[^a-z0-9]', '', body_lower)
+            if len(ref_clean) >= 4 and ref_clean in body_clean:
+                return True
+
+        # --- Vérification par mots de la description ---
+        desc = product.description or ""
+        if desc:
+            sig_words = re.findall(r'\b\w{5,}\b', desc.lower())
+            if sig_words:
+                matches = sum(1 for w in sig_words if w in body_lower)
+                threshold = 1 if len(sig_words) <= 2 else 2
+                if matches >= threshold:
+                    return True
 
         return False
 

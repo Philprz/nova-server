@@ -7,6 +7,7 @@ import {
   analyzeGraphEmail,
   getGraphEmailAnalysis,
   graphEmailToEmailMessage,
+  fetchManualRequests,
   EmailAnalysisResult,
   GraphEmail,
 } from '@/lib/graphApi';
@@ -27,6 +28,7 @@ interface UseEmailsReturn {
   reanalyzeEmail: (emailId: string) => Promise<EmailAnalysisResult | null>;
   getEmailAnalysis: (emailId: string) => EmailAnalysisResult | undefined;
   getLatestEmail: (emailId: string) => ProcessedEmail | null;
+  addManualEmailToList: (graphEmail: GraphEmail, analysis: EmailAnalysisResult) => void;
 }
 
 export function useEmails(options: UseEmailsOptions = {}): UseEmailsReturn {
@@ -133,18 +135,32 @@ export function useEmails(options: UseEmailsOptions = {}): UseEmailsReturn {
     setError(null);
 
     try {
-      const result = await fetchGraphEmails({ top: 50 });
+      // Récupérer emails Graph ET demandes manuelles en parallèle
+      const [graphResult, manualResult] = await Promise.all([
+        fetchGraphEmails({ top: 50 }),
+        fetchManualRequests(),
+      ]);
 
-      if (!result.success || !result.data) {
-        throw new Error(result.error || 'Erreur lors de la récupération des emails');
+      if (!graphResult.success || !graphResult.data) {
+        throw new Error(graphResult.error || 'Erreur lors de la récupération des emails');
       }
 
       // Convertir les emails Graph en ProcessedEmail
-      const processedEmails = result.data.emails.map((graphEmail) => {
-        // Vérifier si on a déjà une analyse en cache
+      const graphEmails = graphResult.data.emails.map((graphEmail) => {
         const cachedAnalysis = analysisCache.get(graphEmail.id);
         return toProcessedEmail(graphEmail, cachedAnalysis);
       });
+
+      // Convertir les demandes manuelles (déjà analysées côté backend)
+      const manualEmails = (manualResult.success && manualResult.data)
+        ? manualResult.data.emails.map((graphEmail) => {
+            const cachedAnalysis = analysisCache.get(graphEmail.id);
+            return toProcessedEmail(graphEmail, cachedAnalysis);
+          })
+        : [];
+
+      // Fusionner : manuelles d'abord (les plus récentes), puis emails Graph
+      const processedEmails = [...manualEmails, ...graphEmails];
 
       setEmails(processedEmails);
       emailsRef.current = processedEmails; // Sync ref
@@ -343,6 +359,25 @@ export function useEmails(options: UseEmailsOptions = {}): UseEmailsReturn {
     [toProcessedEmail]
   );
 
+  // Ajouter immédiatement une demande manuelle créée dans la liste (avant le prochain refresh)
+  const addManualEmailToList = useCallback(
+    (graphEmail: GraphEmail, analysis: EmailAnalysisResult) => {
+      // Mettre en cache l'analyse pour éviter un re-fetch
+      setAnalysisCache((prev) => {
+        const next = new Map(prev);
+        next.set(graphEmail.id, analysis);
+        return next;
+      });
+      const processed = toProcessedEmail(graphEmail, analysis);
+      setEmails((prev) => {
+        const next = [processed, ...prev];
+        emailsRef.current = next;
+        return next;
+      });
+    },
+    [toProcessedEmail]
+  );
+
   // Récupérer l'analyse d'un email depuis le cache
   const getEmailAnalysis = useCallback(
     (emailId: string): EmailAnalysisResult | undefined => {
@@ -497,6 +532,7 @@ export function useEmails(options: UseEmailsOptions = {}): UseEmailsReturn {
     reanalyzeEmail,
     getEmailAnalysis,
     getLatestEmail,
+    addManualEmailToList,
   };
 }
 
