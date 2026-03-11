@@ -99,6 +99,78 @@ async def calculate_packing(request: PackingCalculateRequest) -> PackingResponse
     return result
 
 
+class CustomPackageShipRequest(BaseModel):
+    """Corps de requête pour /custom-and-ship"""
+    weight_kg: float = Field(gt=0, description="Poids total en kg")
+    length_cm: float = Field(gt=0, description="Longueur du colis en cm")
+    width_cm: float = Field(gt=0, description="Largeur du colis en cm")
+    height_cm: float = Field(gt=0, description="Hauteur du colis en cm")
+
+
+@router.post("/custom-and-ship", summary="Tarif DHL avec dimensions colis manuelles")
+async def custom_package_and_ship(
+    request: CustomPackageShipRequest,
+    destination_postal_code: str,
+    destination_city: str,
+    destination_country: str = "FR",
+    declared_value: float = 100.0,
+) -> Dict[str, Any]:
+    """
+    Calcule le tarif DHL pour un colis aux dimensions spécifiées manuellement.
+    Bypasse l'algorithme de colisage automatique.
+    """
+    from services.transport.transport_service import get_transport_service
+    from services.transport.carrier_interface import Destination
+
+    logger.info(
+        f"→ POST /api/packing/custom-and-ship — "
+        f"{request.length_cm}×{request.width_cm}×{request.height_cm} cm, "
+        f"{request.weight_kg} kg → {destination_city} ({destination_country})"
+    )
+
+    # Format attendu par _normalize_packages : {"weight": ..., "dimensions": {...}}
+    dhl_package = {
+        "weight": request.weight_kg,
+        "dimensions": {
+            "length": request.length_cm,
+            "width": request.width_cm,
+            "height": request.height_cm,
+        },
+    }
+
+    transport_service = get_transport_service()
+    destination = Destination(
+        postal_code=destination_postal_code,
+        city_name=destination_city.upper(),
+        country_code=destination_country.upper(),
+    )
+
+    shipping_result = await transport_service.calculate_shipping(
+        packages=[dhl_package],
+        destination=destination,
+        declared_value=declared_value,
+    )
+
+    volume_dm3 = (request.length_cm * request.width_cm * request.height_cm) / 1000
+
+    return {
+        "success": shipping_result.success,
+        "package": {
+            "weight_kg": request.weight_kg,
+            "length_cm": request.length_cm,
+            "width_cm": request.width_cm,
+            "height_cm": request.height_cm,
+            "volume_dm3": round(volume_dm3, 2),
+        },
+        "shipping": {
+            "success": shipping_result.success,
+            "rates": shipping_result.rates,
+            "best_rate": shipping_result.best_rate,
+            "errors": shipping_result.carrier_errors,
+        },
+    }
+
+
 @router.get("/box-types", summary="Catalogue des types de colis")
 async def list_box_types() -> Dict[str, Any]:
     """

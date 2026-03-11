@@ -696,6 +696,13 @@ CONTENU:
         # ÉTAPE 3: Supprimer les balises HTML (maintenant sans risque pour les emails)
         text = re.sub(r'<style[^>]*>[\s\S]*?</style>', '', text)
         text = re.sub(r'<script[^>]*>[\s\S]*?</script>', '', text)
+
+        # ÉTAPE 3b: Préserver la structure des tableaux et blocs
+        # Remplacer les fins de cellule/ligne par espace/newline pour garder la structure
+        # Ex: <tr><td>HST-117-01</td><td>Size 01</td><td>48</td></tr>
+        #  → "HST-117-01 Size 01 48\n"
+        text = re.sub(r'</td>|</th>', ' ', text, flags=re.IGNORECASE)
+        text = re.sub(r'</tr>|</p>|<br\s*/?>|</div>', '\n', text, flags=re.IGNORECASE)
         text = re.sub(r'<[^>]+>', ' ', text)
 
         # ÉTAPE 4: Réinjecter les emails (sans les angle brackets pour éviter confusion HTML)
@@ -703,10 +710,11 @@ CONTENU:
             placeholder = f"__EMAIL_{idx}__"
             text = text.replace(placeholder, email)  # Juste l'email, sans <>
 
-        # ÉTAPE 5: Nettoyer les espaces
-        text = re.sub(r'\s+', ' ', text)
+        # ÉTAPE 5: Nettoyer les espaces (par ligne, sans écraser les sauts de ligne)
+        lines = [re.sub(r'[ \t]+', ' ', line).strip() for line in text.split('\n')]
+        text = '\n'.join(line for line in lines if line)
 
-        return text.strip()
+        return text
 
 
 # Instance singleton

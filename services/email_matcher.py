@@ -428,8 +428,13 @@ class EmailMatcher:
         # 1. Extraire les domaines email du texte
         extracted_domains = self._extract_email_domains(full_text, sender_email)
 
+        # Domaine de l'expéditeur (prioritaire sur les domaines des destinataires)
+        sender_domain = sender_email.split("@")[-1].lower().strip() if "@" in sender_email else ""
+        if self._is_internal_domain(sender_domain):
+            sender_domain = ""
+
         # 2. Matcher les clients
-        matched_clients = self._match_clients(full_text, extracted_domains)
+        matched_clients = self._match_clients(full_text, extracted_domains, sender_domain=sender_domain)
 
         # Meilleur client (pour apprentissage produits)
         best_client = matched_clients[0] if matched_clients else None
@@ -503,7 +508,8 @@ class EmailMatcher:
     def _match_clients(
         self,
         text: str,
-        extracted_domains: List[str]
+        extracted_domains: List[str],
+        sender_domain: str = ""
     ) -> List[MatchedClient]:
         """Trouve les clients SAP qui matchent le texte de l'email (optimisé avec caches)."""
         matches: List[MatchedClient] = []
@@ -529,13 +535,15 @@ class EmailMatcher:
             has_domain_match = False
             has_name_match = False
 
-            # --- Stratégie 1 : Match par domaine email (score 95) ---
+            # --- Stratégie 1 : Match par domaine email (score 95/97) ---
+            # Score 97 si le domaine matche l'expéditeur, 95 si destinataire
             if email and "@" in email:
                 client_domain = email.split("@")[-1].lower().strip()
                 if client_domain in extracted_domains:
                     has_domain_match = True
-                    best_score = 95
-                    best_reason = f"Domaine email: {client_domain}"
+                    dom_score = 97 if (sender_domain and client_domain == sender_domain) else 95
+                    best_score = dom_score
+                    best_reason = f"Domaine email {'expéditeur' if dom_score == 97 else 'destinataire'}: {client_domain}"
 
             # --- Stratégie 1b : Match domaine extrait vs nom client (score 97) ---
             # Si un domaine dans le texte ressemble au nom du client (ex: marmaracam.com.tr vs MARMARA CAM)
@@ -546,6 +554,23 @@ class EmailMatcher:
                 for domain in extracted_domains:
                     # Extraire le nom de l'entreprise du domaine (avant le .com, .fr, etc.)
                     domain_base = domain.split('.')[0]  # marmaracam.com.tr → marmaracam
+                    # Domaine expéditeur = prioritaire, domaine destinataire = score réduit
+                    is_sender = (sender_domain and domain == sender_domain)
+
+                    # --- Stratégie 1b-acronyme : domaine court = initiales du nom client ---
+                    # Ex: meg.com.eg → MEG = M(iddle) E(ast) G(lass) Manufacturing...
+                    if 2 <= len(domain_base) <= 5:
+                        initials = ''.join(p[0] for p in name_parts if p)
+                        # Match exact ou début des initiales (ex: "meg" matche "megm" = MIDDLE EAST GLASS MANUFACTURING)
+                        if len(domain_base) >= 2 and (domain_base == initials or initials.startswith(domain_base)):
+                            # Score plus élevé si le domaine est celui de l'expéditeur (96 > 95 pour non-sender)
+                            acro_score = 96 if is_sender else 72
+                            logger.info(f"[Strategie 1b-acronyme] MATCH! {card_code}: initiales '{initials}' starts with '{domain_base}' ({card_name}) sender={is_sender} score={acro_score}")
+                            has_domain_match = True
+                            best_score = acro_score
+                            best_reason = f"Domaine {'expéditeur' if is_sender else 'destinataire'} = initiales client: {domain} ≈ {card_name}"
+                            break
+                        continue  # Domaine trop court pour matching textuel standard
 
                     if len(domain_base) < 6:
                         continue
@@ -555,12 +580,13 @@ class EmailMatcher:
                     for num_words in range(1, min(4, len(name_parts) + 1)):
                         compact_name = ''.join(name_parts[:num_words])
 
-                        # Match exact compact
+                        # Match exact compact — score réduit si le domaine vient d'un destinataire (pas expéditeur)
                         if compact_name == domain_base:
-                            logger.info(f"[Strategie 1b] MATCH! {card_code}: '{compact_name}' = '{domain_base}' -> score 97")
+                            compact_score = 97 if is_sender else 75
+                            logger.info(f"[Strategie 1b] MATCH! {card_code}: '{compact_name}' = '{domain_base}' sender={is_sender} -> score {compact_score}")
                             has_domain_match = True
-                            best_score = 97
-                            best_reason = f"Domaine match nom exact: {domain} = {' '.join(name_parts[:num_words])}"
+                            best_score = compact_score
+                            best_reason = f"Domaine {'expéditeur' if is_sender else 'destinataire'} match nom: {domain} = {' '.join(name_parts[:num_words])}"
                             break
 
                         # Fuzzy match domaine vs nom compact
@@ -568,10 +594,12 @@ class EmailMatcher:
                             ratio = SequenceMatcher(None, domain_base, compact_name).ratio()
                             if ratio > 0.90:  # Seuil plus strict pour éviter faux positifs
                                 score = int(92 + (ratio - 0.90) * 50)  # 92-97
+                                if not is_sender:
+                                    score = min(score, 73)  # Plafonner si non-expéditeur
                                 if score > best_score:
                                     has_domain_match = True
                                     best_score = min(score, 97)
-                                    best_reason = f"Domaine match nom fuzzy: {domain} ~ {' '.join(name_parts[:num_words])} ({ratio:.0%})"
+                                    best_reason = f"Domaine {'expéditeur' if is_sender else 'destinataire'} match nom fuzzy: {domain} ~ {' '.join(name_parts[:num_words])} ({ratio:.0%})"
 
                     if has_domain_match and best_score >= 97:
                         break
@@ -777,25 +805,11 @@ class EmailMatcher:
                 match_reason="Code exact SAP (cache)"
             )
 
-        # 1b. Fallback: Chercher dans le cache SQLite (TOUS les produits SAP)
-        try:
-            sap_cache_items = self._cache_db.search_items(code, limit=1)
-            if sap_cache_items:
-                item = sap_cache_items[0]  # Full dict avec weight_unit_value inclus
-                print(f"         ✅ Trouvé dans cache SQLite: {code} → {item['ItemName'][:40]}", flush=True)
-                logger.debug(f"   [OK] Found in SQLite cache: {code}")
-                return self._create_matched_product_from_sap(
-                    item=item,
-                    quantity=qty,
-                    score=100,
-                    match_reason="Code exact SAP (base locale)"
-                )
-        except Exception as e:
-            logger.debug(f"   [SQLite fallback] Error: {e}")
-
         # --- ÉTAPE 1d: Match par code normalisé (suppression de TOUTE ponctuation) ---
         # Permet P-0301L-SLT == P/0301L-SLT (slash et tiret distincts chez fournisseurs)
         # L'index _items_norm_code est pré-construit dans ensure_cache() sur le 1er token de ItemName
+        # IMPORTANT: Doit être testé AVANT le SQLite LIKE (étape 1b) car LIKE '%HST-117-01%'
+        # retourne aussi les variantes SSB/TN dans un ordre aléatoire.
         code_norm = normalize_code(code)
         logger.debug("[EXTRACTED_CODE_NORMALIZED] %s → %s", code, code_norm)
         if code_norm and len(code_norm) >= 4 and hasattr(self, '_items_norm_code'):
@@ -810,6 +824,32 @@ class EmailMatcher:
                     score=100,
                     match_reason=f"Code normalisé: {code} → {matched_sap_code}"
                 )
+
+        # 1b. Fallback: Chercher dans le cache SQLite (TOUS les produits SAP)
+        # Prioritise les articles dont le ItemName COMMENCE par le code (pas juste contient)
+        try:
+            # D'abord chercher les articles dont le nom commence par le code (plus précis)
+            sap_cache_items_prefix = self._cache_db.search_items(code + " ", limit=3)
+            sap_cache_items_all = self._cache_db.search_items(code, limit=5)
+            # Préférer un match avec espace après le code (ex: "HST-117-01 PUSHER" vs "HST-117-01-SSB")
+            sap_cache_items = sap_cache_items_prefix or sap_cache_items_all
+            if sap_cache_items:
+                # Trier : préférer les items dont le ItemName commence par le code exact
+                code_upper_space = (code + " ").upper()
+                sap_cache_items.sort(
+                    key=lambda i: (0 if i.get("ItemName", "").upper().startswith(code_upper_space) else 1)
+                )
+                item = sap_cache_items[0]
+                print(f"         ✅ Trouvé dans cache SQLite: {code} → {item['ItemName'][:40]}", flush=True)
+                logger.debug(f"   [OK] Found in SQLite cache: {code}")
+                return self._create_matched_product_from_sap(
+                    item=item,
+                    quantity=qty,
+                    score=100,
+                    match_reason="Code exact SAP (base locale)"
+                )
+        except Exception as e:
+            logger.debug(f"   [SQLite fallback] Error: {e}")
 
         # 1c. Fallback normalisé : chercher sans tirets/espaces (ex: C391-15-LM → C391-15LM-SPARE)
         # Note: ItemCode SAP est une ref interne (A13044), la ref fournisseur est dans ItemName
@@ -1201,7 +1241,10 @@ class EmailMatcher:
             # Mots courants anglais
             'ATTACHED', 'ATTACHMENT', 'SKETCH', 'SKETCHES',
             # Termes génériques
-            'PIECE', 'PIECES', 'PART', 'PARTS', 'ITEM', 'ITEMS', 'REF', 'REFERENCE'
+            'PIECE', 'PIECES', 'PART', 'PARTS', 'ITEM', 'ITEMS', 'REF', 'REFERENCE',
+            # Artifacts de mise en forme email (évite faux positifs comme "E-mail" → CREMAILLERE)
+            'E-MAIL', 'E-COMMERCE', 'WI-FI', 'E-LEARNING', 'E-SHOP',
+            'T-SHIRT', 'T-SHIRTS', 'V-NECK',
         }
         potential_codes = {
             code for code in potential_codes
@@ -1645,6 +1688,43 @@ class EmailMatcher:
             idx = text.lower().find(code.lower())
         if idx == -1:
             return 1  # Défaut
+
+        # --- Stratégie 0 : nombre sur la MÊME LIGNE que le code (format tableau) ---
+        # Ex: "HST-117-01\tSize 01 Pusher Pad\t48\n" → 48
+        line_start = text.rfind('\n', 0, idx) + 1  # Début de la ligne
+        line_end = text.find('\n', idx)
+        if line_end == -1:
+            line_end = len(text)
+        line = text[line_start:line_end]
+        # Portion de la ligne APRÈS le code (évite les chiffres dans le code lui-même)
+        code_pos_in_line = line.find(code)
+        if code_pos_in_line == -1:
+            code_pos_in_line = line.lower().find(code.lower())
+        after_code = line[code_pos_in_line + len(code):] if code_pos_in_line >= 0 else ""
+
+        def _is_valid_qty(n: int) -> bool:
+            """Vérifie que n est une quantité plausible (pas une année, pas trop grand)."""
+            return 0 < n < 10000 and not (1990 <= n <= 2050)
+
+        # 0a. Priorité : nombre précédé d'un \t (colonne QTY dans un tableau tab-séparé)
+        tab_qty = re.search(r'\t(\d+)\s*$', after_code.rstrip())
+        if tab_qty:
+            try:
+                qty = int(tab_qty.group(1))
+                if _is_valid_qty(qty):
+                    return qty
+            except (ValueError, IndexError):
+                pass
+
+        # 0b. Nombre seul en fin de ligne (séparé par espace ou tab, ex: "...Pad  48")
+        end_qty = re.search(r'[\t ]+(\d+)\s*$', after_code.rstrip())
+        if end_qty:
+            try:
+                qty = int(end_qty.group(1))
+                if _is_valid_qty(qty):
+                    return qty
+            except (ValueError, IndexError):
+                pass
 
         # Extraire le contexte autour du code (rayon élargi)
         start = max(0, idx - radius)
