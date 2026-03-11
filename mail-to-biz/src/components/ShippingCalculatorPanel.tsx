@@ -141,6 +141,7 @@ function boxTypeIcon(boxType: string): string {
     case 'M': return '📦';
     case 'L': return '🗳️';
     case 'PALLET': return '🏗️';
+    case 'CUSTOM': return '📐';
     default: return '📦';
   }
 }
@@ -191,6 +192,12 @@ export function ShippingCalculatorPanel({
   // Prix validé
   const [validatedPrice, setValidatedPrice] = useState<number | null>(null);
 
+  // Saisie manuelle des dimensions colis (mode "Recalculer")
+  const [showDimensionEdit, setShowDimensionEdit] = useState(false);
+  const [customLength, setCustomLength] = useState<string>('');
+  const [customWidth, setCustomWidth] = useState<string>('');
+  const [customHeight, setCustomHeight] = useState<string>('');
+
   // ─────────────────────────────────────────────────────
   // Construction du payload packing depuis les articles
   // ─────────────────────────────────────────────────────
@@ -229,6 +236,7 @@ export function ShippingCalculatorPanel({
     setPackingResult(null);
     setShippingResult(null);
     setSelectedRate(null);
+    setShowDimensionEdit(false);
 
     try {
       const params = new URLSearchParams({
@@ -292,9 +300,101 @@ export function ShippingCalculatorPanel({
   };
 
   const handleReset = () => {
-    setPackingResult(null);
+    // Pré-remplir avec les dimensions du 1er colis suggéré
+    if (packingResult && packingResult.packages.length > 0) {
+      const pkg = packingResult.packages[0];
+      setCustomLength(String(pkg.length_cm));
+      setCustomWidth(String(pkg.width_cm));
+      setCustomHeight(String(pkg.height_cm));
+    } else {
+      setCustomLength('');
+      setCustomWidth('');
+      setCustomHeight('');
+    }
+    setShowDimensionEdit(true);
+  };
+
+  const handleCustomCalculate = async () => {
+    const l = parseFloat(customLength);
+    const w = parseFloat(customWidth);
+    const h = parseFloat(customHeight);
+
+    if (!l || !w || !h || l <= 0 || w <= 0 || h <= 0) {
+      toast.error('Veuillez saisir des dimensions valides (L, l, H > 0)');
+      return;
+    }
+    if (!postalCode.trim() || !city.trim()) {
+      toast.error('Veuillez saisir le code postal et la ville de destination');
+      return;
+    }
+
+    setIsCalculating(true);
     setShippingResult(null);
     setSelectedRate(null);
+
+    try {
+      const params = new URLSearchParams({
+        destination_postal_code: postalCode.trim(),
+        destination_city: city.trim().toUpperCase(),
+        destination_country: country,
+        declared_value: '100',
+      });
+
+      const response = await fetch(
+        `/api/packing/custom-and-ship?${params.toString()}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            weight_kg: totalWeight > 0 ? totalWeight : 1,
+            length_cm: l,
+            width_cm: w,
+            height_cm: h,
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.detail || `Erreur ${response.status}`);
+      }
+
+      // Mettre à jour le packingResult avec les dimensions manuelles
+      if (data.package) {
+        const volume_m3 = (l * w * h) / 1_000_000;
+        setPackingResult({
+          packages: [{
+            box_type: 'CUSTOM',
+            label: 'Colis personnalisé',
+            length_cm: l,
+            width_cm: w,
+            height_cm: h,
+            weight_kg: data.package.weight_kg,
+            items_count: 1,
+          }],
+          total_weight_kg: data.package.weight_kg,
+          total_volume_m3: volume_m3,
+          box_count: 1,
+          summary: `1 colis ${l}×${w}×${h} cm — ${data.package.weight_kg} kg`,
+          warnings: [],
+        });
+      }
+
+      if (data.shipping) {
+        setShippingResult(data.shipping);
+        if (data.shipping.best_rate) {
+          setSelectedRate(data.shipping.best_rate);
+        }
+      }
+
+      setShowDimensionEdit(false);
+    } catch (err: any) {
+      console.error('Erreur custom-and-ship:', err);
+      toast.error(`Erreur : ${err.message || 'Impossible de contacter le serveur'}`);
+    } finally {
+      setIsCalculating(false);
+    }
   };
 
   // ─────────────────────────────────────────────────────
@@ -422,11 +522,95 @@ export function ShippingCalculatorPanel({
                       size="sm"
                       className="h-6 text-xs text-muted-foreground"
                       onClick={handleReset}
+                      disabled={isCalculating}
                     >
                       <X className="h-3 w-3 mr-1" />
                       Recalculer
                     </Button>
                   </div>
+
+                  {/* Formulaire dimensions manuelles */}
+                  {showDimensionEdit && (
+                    <div className="bg-blue-50 border border-blue-200 rounded-md p-3 space-y-2">
+                      <p className="text-xs font-medium text-blue-800">Dimensions du colis (cm)</p>
+                      <div className="grid grid-cols-3 gap-2">
+                        <div className="space-y-1">
+                          <Label htmlFor="dim-l" className="text-xs text-blue-700">Longueur</Label>
+                          <Input
+                            id="dim-l"
+                            type="number"
+                            min={1}
+                            placeholder="60"
+                            value={customLength}
+                            onChange={(e) => setCustomLength(e.target.value)}
+                            className="h-8 text-sm"
+                            disabled={isCalculating}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label htmlFor="dim-w" className="text-xs text-blue-700">Largeur</Label>
+                          <Input
+                            id="dim-w"
+                            type="number"
+                            min={1}
+                            placeholder="40"
+                            value={customWidth}
+                            onChange={(e) => setCustomWidth(e.target.value)}
+                            className="h-8 text-sm"
+                            disabled={isCalculating}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label htmlFor="dim-h" className="text-xs text-blue-700">Hauteur</Label>
+                          <Input
+                            id="dim-h"
+                            type="number"
+                            min={1}
+                            placeholder="40"
+                            value={customHeight}
+                            onChange={(e) => setCustomHeight(e.target.value)}
+                            className="h-8 text-sm"
+                            disabled={isCalculating}
+                          />
+                        </div>
+                      </div>
+                      {customLength && customWidth && customHeight && (() => {
+                        const l = parseFloat(customLength), w = parseFloat(customWidth), h = parseFloat(customHeight);
+                        if (!l || !w || !h) return null;
+                        const volDm3 = (l * w * h) / 1000;
+                        const volWeight = (l * w * h) / 5000;
+                        return (
+                          <p className="text-xs text-blue-600 flex gap-3">
+                            <span>Volume : <strong>{volDm3.toFixed(1)} dm³</strong></span>
+                            <span>· Poids vol. DHL : <strong>{volWeight.toFixed(2)} kg</strong></span>
+                          </p>
+                        );
+                      })()}
+                      <div className="flex gap-2 pt-1">
+                        <Button
+                          size="sm"
+                          className="h-8 text-xs flex-1"
+                          onClick={handleCustomCalculate}
+                          disabled={isCalculating || !customLength || !customWidth || !customHeight}
+                        >
+                          {isCalculating ? (
+                            <><Loader2 className="h-3 w-3 mr-1 animate-spin" />Calcul…</>
+                          ) : (
+                            <><Truck className="h-3 w-3 mr-1" />Recalculer DHL</>
+                          )}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 text-xs"
+                          onClick={() => setShowDimensionEdit(false)}
+                          disabled={isCalculating}
+                        >
+                          Annuler
+                        </Button>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Colis */}
                   <div className="grid grid-cols-2 gap-2">
