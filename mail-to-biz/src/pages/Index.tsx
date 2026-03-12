@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { AppHeader } from '@/components/AppHeader';
 import { Sidebar } from '@/components/Sidebar';
 import { WebhookStatusBadge } from '@/components/WebhookStatusBadge';
 import { EmailList } from '@/components/EmailList';
+import { EmailFilters, EmailFiltersState, DEFAULT_FILTERS } from '@/components/EmailFilters';
 import { QuoteValidation } from '@/components/QuoteValidation';
 import { QuoteSummary } from '@/components/QuoteSummary';
 import { ConfigPanel } from '@/components/ConfigPanel';
@@ -21,12 +22,20 @@ import { ManualQuoteResult, graphEmailToEmailMessage } from '@/lib/graphApi';
 
 type View = 'account-selection' | 'inbox' | 'quotes' | 'config' | 'connectors' | 'summary';
 
+// ----------------------------------------------------------------
+// Helpers
+// ----------------------------------------------------------------
+
+function normalizeStr(s: string) {
+  return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
 const Index = () => {
   const [currentView, setCurrentView] = useState<View>('account-selection');
   const [selectedQuote, setSelectedQuote] = useState<ProcessedEmail | null>(null);
   const [manualModalOpen, setManualModalOpen] = useState(false);
 
-  // Emails marqués comme traités (persisté en localStorage)
+  // ── Emails marqués comme traités ────────────────────────────────
   const [processedEmailIds, setProcessedEmailIds] = useState<Set<string>>(() => {
     try {
       const stored = localStorage.getItem('nova_processed_emails');
@@ -35,7 +44,6 @@ const Index = () => {
     return new Set<string>();
   });
 
-  // Métadonnées des emails traités (N° SAP, date)
   const [processedEmailsMeta, setProcessedEmailsMeta] = useState<Record<string, { sapDocNum?: number; createdAt: string }>>(() => {
     try {
       const stored = localStorage.getItem('nova_processed_emails_meta');
@@ -44,10 +52,26 @@ const Index = () => {
     return {};
   });
 
-  // Mode démo / live
+  // ── Statuts archive / étoile (serveur) ──────────────────────────
+  const [emailStatusMap, setEmailStatusMap] = useState<Record<string, { archived: boolean; starred: boolean; label?: string }>>({});
+
+  const archivedIds = new Set(
+    Object.entries(emailStatusMap)
+      .filter(([, s]) => s.archived)
+      .map(([id]) => id)
+  );
+  const starredIds = new Set(
+    Object.entries(emailStatusMap)
+      .filter(([, s]) => s.starred)
+      .map(([id]) => id)
+  );
+
+  // ── Filtres ──────────────────────────────────────────────────────
+  const [filters, setFilters] = useState<EmailFiltersState>(DEFAULT_FILTERS);
+
+  // ── Mode démo / live ────────────────────────────────────────────
   const { isDemoMode } = useEmailMode();
 
-  // Emails réels (Microsoft Graph)
   const {
     emails: liveEmails,
     loading: liveLoading,
@@ -60,43 +84,42 @@ const Index = () => {
     addManualEmailToList,
   } = useEmails({ enabled: !isDemoMode, autoFetch: !isDemoMode });
 
-  // Emails de démonstration (mock)
   const [mockEmails] = useState<ProcessedEmail[]>(() => processEmails(getMockEmails()));
 
-  // Sélectionner la source de données selon le mode
   const displayEmails = isDemoMode ? mockEmails : liveEmails;
   const isLoading = !isDemoMode && liveLoading;
 
   const quotes = displayEmails.filter((e) => e.isQuote);
 
-  // Notifications webhook pour emails traités automatiquement
   const webhookStatus = useWebhookNotifications({
     enabled: !isDemoMode && currentView === 'inbox',
     emails: quotes.map(q => ({
       id: q.email.id,
       subject: q.email.subject,
-      clientName: q.email.from.emailAddress.name
+      clientName: q.email.from.emailAddress.name,
     })),
-    pollInterval: 10000, // Vérification toutes les 10 secondes
+    pollInterval: 10000,
     onViewEmail: (emailId) => {
       const quote = quotes.find(q => q.email.id === emailId);
       if (quote) handleSelectQuote(quote);
-    }
+    },
   });
-  // Compter les devis non traités : pas de preSapDocument OU status pending
+
   const pendingCount = quotes.filter((q) => {
     const status = q.preSapDocument?.meta.validationStatus;
     return status !== 'validated' && status !== 'rejected';
   }).length;
 
-  // Rafraîchir les emails quand on passe en mode live
+  // ── Chargement du status-map depuis le serveur ───────────────────
   useEffect(() => {
-    if (!isDemoMode && currentView === 'inbox') {
-      refreshEmails();
-    }
-  }, [isDemoMode, currentView]);
+    if (isDemoMode) return;
+    fetch('/api/graph/emails/status-map')
+      .then(r => r.ok ? r.json() : {})
+      .then(data => setEmailStatusMap(data))
+      .catch(() => {});
+  }, [isDemoMode]);
 
-  // Synchroniser processedEmailsMeta depuis le backend quand les emails sont chargés
+  // ── Sync emails traités depuis le backend ────────────────────────
   useEffect(() => {
     if (isDemoMode || liveEmails.length === 0) return;
     const quoteIds = liveEmails.filter(e => e.isQuote).map(e => e.email.id);
@@ -110,35 +133,111 @@ const Index = () => {
       .then(r => r.json())
       .then((backendMeta: Record<string, { sapDocNum?: number; createdAt: string }>) => {
         if (!backendMeta || Object.keys(backendMeta).length === 0) return;
-        // Fusionner : backend prime sur localStorage
         setProcessedEmailsMeta(prev => ({ ...prev, ...backendMeta }));
-        // Marquer comme traités les IDs retournés par le backend
         setProcessedEmailIds(prev => {
           const next = new Set(prev);
           Object.keys(backendMeta).forEach(id => next.add(id));
           return next;
         });
       })
-      .catch(() => { /* silencieux */ });
+      .catch(() => {});
   }, [liveEmails, isDemoMode]);
 
-  // Filet de sécurité: sync selectedQuote si liveEmails est mis à jour (ex: pré-analyse)
+  useEffect(() => {
+    if (!isDemoMode && currentView === 'inbox') refreshEmails();
+  }, [isDemoMode, currentView]);
+
   useEffect(() => {
     if (selectedQuote && currentView === 'summary' && !isDemoMode) {
       const latestEmail = getLatestEmail(selectedQuote.email.id);
-      // Mettre à jour si l'email a maintenant une analysisResult et selectedQuote n'en a pas
       if (latestEmail?.analysisResult && !selectedQuote.analysisResult) {
         setSelectedQuote(latestEmail);
       }
     }
   }, [liveEmails, selectedQuote?.email.id, currentView, isDemoMode, getLatestEmail]);
 
+  // ── Logique de filtrage ──────────────────────────────────────────
+  const filteredEmails = displayEmails.filter((item) => {
+    const id = item.email.id;
+    const isProcessed = processedEmailIds.has(id);
+    const isArchived  = archivedIds.has(id);
+    const isManual    = id.startsWith('manual_');
+
+    // Statut
+    if (filters.status === 'archived'  && !isArchived)  return false;
+    if (filters.status === 'processed' && !isProcessed) return false;
+    if (filters.status === 'pending'   && (isProcessed || isArchived)) return false;
+    // Par défaut ('all') : on masque les archivés sauf si on filtre explicitement dessus
+    if (filters.status === 'all' && isArchived) return false;
+
+    // Type
+    if (filters.type === 'quote' && !item.isQuote)  return false;
+    if (filters.type === 'other' && item.isQuote)   return false;
+
+    // Source
+    if (filters.source === 'email'  && isManual)  return false;
+    if (filters.source === 'manual' && !isManual) return false;
+
+    // Confiance (uniquement sur les devis)
+    if (filters.confidence !== 'all' && item.isQuote) {
+      if (item.detection.confidence !== filters.confidence) return false;
+    }
+
+    // Étoilés
+    if (filters.starredOnly && !starredIds.has(id)) return false;
+
+    // Non lus
+    if (filters.unreadOnly && item.email.isRead) return false;
+
+    // Pièces jointes
+    if (filters.withAttachments && !item.email.hasAttachments) return false;
+
+    // Recherche texte (objet, expéditeur, aperçu)
+    if (filters.search.trim()) {
+      const q = normalizeStr(filters.search.trim());
+      const hay = normalizeStr(
+        [
+          item.email.subject,
+          item.email.from.emailAddress.name,
+          item.email.from.emailAddress.address,
+          item.email.bodyPreview,
+        ].join(' ')
+      );
+      if (!hay.includes(q)) return false;
+    }
+
+    return true;
+  });
+
+  // ── Handlers archive / étoile ────────────────────────────────────
+  const handleArchive = useCallback((emailId: string, archived: boolean) => {
+    setEmailStatusMap(prev => ({
+      ...prev,
+      [emailId]: { ...(prev[emailId] ?? { starred: false }), archived },
+    }));
+    fetch(`/api/graph/emails/${encodeURIComponent(emailId)}/set-status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ archived }),
+    }).catch(() => {});
+  }, []);
+
+  const handleStar = useCallback((emailId: string, starred: boolean) => {
+    setEmailStatusMap(prev => ({
+      ...prev,
+      [emailId]: { ...(prev[emailId] ?? { archived: false }), starred },
+    }));
+    fetch(`/api/graph/emails/${encodeURIComponent(emailId)}/set-status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ starred }),
+    }).catch(() => {});
+  }, []);
+
+  // ── Handlers navigation ──────────────────────────────────────────
   const handleSelectQuote = async (quote: ProcessedEmail) => {
-    // Si en mode live et pas encore analysé, lancer l'analyse IA
     if (!isDemoMode && !quote.analysisResult) {
       await analyzeEmail(quote.email.id);
-
-      // FIX: Utiliser getLatestEmail au lieu de liveEmails (évite stale closure)
       const updatedEmail = getLatestEmail(quote.email.id);
       if (updatedEmail) {
         setSelectedQuote(updatedEmail);
@@ -151,13 +250,10 @@ const Index = () => {
   };
 
   const handleValidate = (_updatedDoc: ProcessedEmail) => {
-    // En mode démo, mise à jour locale
-    // En mode live, le backend gère l'état
     setSelectedQuote(null);
   };
 
   const handleSummaryValidate = (sapDocNum?: number) => {
-    // Marquer l'email comme traité
     if (selectedQuote) {
       const emailId = selectedQuote.email.id;
       setProcessedEmailIds(prev => {
@@ -192,12 +288,9 @@ const Index = () => {
     }
   };
 
-  const handleAccountSelect = () => {
-    setCurrentView('inbox');
-  };
+  const handleAccountSelect = () => setCurrentView('inbox');
 
   const handleManualCreated = (result: ManualQuoteResult) => {
-    // Construire un GraphEmail synthétique à partir du résultat backend
     const clientName = result.analysis_result.extracted_data?.client_name ?? 'Client';
     const itemCount = result.analysis_result.product_matches?.length ?? 0;
     const bodyPreview = (result.analysis_result.product_matches ?? [])
@@ -219,12 +312,11 @@ const Index = () => {
       source: 'manual' as const,
     };
     addManualEmailToList(syntheticGraphEmail, result.analysis_result);
-    // Naviguer directement vers le résumé du devis créé
     const emailMessage = graphEmailToEmailMessage(syntheticGraphEmail);
     const processedQuote = {
       email: emailMessage,
       isQuote: true,
-      detection: { confidence: 'high' as const, matchedRules: ['Saisie manuelle'], sources: ['body'] as const },
+      detection: { confidence: 'high' as const, matchedRules: ['Saisie manuelle'], sources: ['body'] as ('body' | 'subject' | 'attachment')[] },
       pdfContents: [],
       analysisResult: result.analysis_result,
     };
@@ -232,7 +324,6 @@ const Index = () => {
     setCurrentView('summary');
   };
 
-  // Show account selection as first screen
   if (currentView === 'account-selection') {
     return <AccountSelection onSelectAccount={handleAccountSelect} />;
   }
@@ -250,7 +341,7 @@ const Index = () => {
         />
 
         <main className="flex-1 p-6 overflow-auto">
-          {/* Barre de contrôle du mode */}
+          {/* Barre de contrôle */}
           {currentView === 'inbox' && (
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
@@ -260,15 +351,9 @@ const Index = () => {
                   className="flex items-center gap-1"
                 >
                   {isDemoMode ? (
-                    <>
-                      <WifiOff className="h-3 w-3" />
-                      Mode Démo
-                    </>
+                    <><WifiOff className="h-3 w-3" />Mode Démo</>
                   ) : (
-                    <>
-                      <Wifi className="h-3 w-3" />
-                      Mode Live
-                    </>
+                    <><Wifi className="h-3 w-3" />Mode Live</>
                   )}
                 </Badge>
                 <WebhookStatusBadge
@@ -281,21 +366,13 @@ const Index = () => {
 
               <div className="flex items-center gap-2">
                 {!isDemoMode && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={refreshEmails}
-                    disabled={liveLoading}
-                  >
+                  <Button variant="outline" size="sm" onClick={refreshEmails} disabled={liveLoading}>
                     <RefreshCw className={`h-4 w-4 mr-1 ${liveLoading ? 'animate-spin' : ''}`} />
                     Actualiser
                   </Button>
                 )}
                 {!isDemoMode && (
-                  <Button
-                    size="sm"
-                    onClick={() => setManualModalOpen(true)}
-                  >
+                  <Button size="sm" onClick={() => setManualModalOpen(true)}>
                     <Plus className="h-4 w-4 mr-1" />
                     Nouvelle demande
                   </Button>
@@ -304,19 +381,16 @@ const Index = () => {
             </div>
           )}
 
-          {/* Affichage de l'erreur */}
+          {/* Erreur connexion */}
           {liveError && !isDemoMode && currentView === 'inbox' && (
             <div className="bg-destructive/10 border border-destructive/20 text-destructive px-4 py-3 rounded-md mb-4">
               <p className="font-medium">Erreur de connexion</p>
               <p className="text-sm">{liveError}</p>
-              <p className="text-sm mt-1">
-                Vérifiez la configuration Microsoft dans l'onglet Connecteurs.
-              </p>
+              <p className="text-sm mt-1">Vérifiez la configuration Microsoft dans l'onglet Connecteurs.</p>
             </div>
           )}
 
           {currentView === 'config' && <ConfigPanel />}
-
           {currentView === 'connectors' && <ConnectorsPanel />}
 
           {currentView === 'inbox' && (
@@ -327,14 +401,26 @@ const Index = () => {
                   <p>Chargement des emails...</p>
                 </div>
               ) : (
-                <EmailList
-                  emails={displayEmails}
-                  onSelectQuote={handleSelectQuote}
-                  analyzingEmailId={analyzingEmailId}
-                  processedIds={processedEmailIds}
-                  processedMeta={processedEmailsMeta}
-                  onReanalyze={!isDemoMode ? async (emailId) => { await reanalyzeEmail(emailId); } : undefined}
-                />
+                <>
+                  <EmailFilters
+                    filters={filters}
+                    onChange={setFilters}
+                    totalCount={displayEmails.filter(e => !archivedIds.has(e.email.id) || filters.status === 'archived').length}
+                    filteredCount={filteredEmails.length}
+                  />
+                  <EmailList
+                    emails={filteredEmails}
+                    onSelectQuote={handleSelectQuote}
+                    analyzingEmailId={analyzingEmailId}
+                    processedIds={processedEmailIds}
+                    processedMeta={processedEmailsMeta}
+                    onReanalyze={!isDemoMode ? async (emailId) => { await reanalyzeEmail(emailId); } : undefined}
+                    archivedIds={archivedIds}
+                    starredIds={starredIds}
+                    onArchive={!isDemoMode ? handleArchive : undefined}
+                    onStar={!isDemoMode ? handleStar : undefined}
+                  />
+                </>
               )}
             </>
           )}
@@ -360,6 +446,7 @@ const Index = () => {
           )}
         </main>
       </div>
+
       {!isDemoMode && (
         <ManualQuoteModal
           open={manualModalOpen}

@@ -596,6 +596,16 @@ async def get_corrections(email_id: str = Query(..., description="Microsoft Grap
     }
 
 
+@router.get("/emails/status-map")
+async def get_emails_status_map():
+    """
+    Retourne un dictionnaire {email_id: {archived, starred, label}} pour tous les emails connus.
+    Utilisé par le frontend au démarrage pour restaurer l'état archive/étoile.
+    """
+    from services.email_analysis_db import get_email_analysis_db
+    return get_email_analysis_db().get_status_map()
+
+
 # ============================================================
 
 @router.get("/emails/{message_id}")  # response_model retiré temporairement – évite la validation Pydantic post-retour
@@ -2308,3 +2318,29 @@ async def delete_correction(
     db = get_quote_corrections_db()
     db.delete_correction(email_id, field_type, field_name, field_index)
     return {"success": True, "message": f"Correction {field_type}/{field_name} supprimée"}
+
+
+# ------------------------------------------------------------------
+# Email status — archive, étoile, label
+# ------------------------------------------------------------------
+
+class EmailStatusUpdate(BaseModel):
+    archived: Optional[bool] = None
+    starred:  Optional[bool] = None
+    label:    Optional[str]  = None
+
+
+@router.post("/emails/{email_id}/set-status")
+async def set_email_status(email_id: str, update: EmailStatusUpdate):
+    """
+    Archive, étoile ou étiquette un email.
+    Seuls les champs fournis sont modifiés (PATCH sémantique).
+    """
+    from services.email_analysis_db import get_email_analysis_db
+    get_email_analysis_db().set_email_status(
+        email_id,
+        archived=update.archived,
+        starred=update.starred,
+        label=update.label,
+    )
+    return {"success": True, "email_id": email_id}

@@ -341,6 +341,72 @@ class EmailAnalysisDB:
         conn.close()
         return [dict(r) for r in rows]
 
+    # ----------------------------------------------------------
+    # Email status — archive, étoile, label
+    # ----------------------------------------------------------
+
+    def _init_status_table(self):
+        """Crée la table email_status si elle n'existe pas."""
+        conn = sqlite3.connect(self.db_path)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS email_status (
+                email_id TEXT PRIMARY KEY,
+                archived BOOLEAN DEFAULT 0,
+                starred  BOOLEAN DEFAULT 0,
+                label    TEXT,
+                updated_at TEXT NOT NULL
+            )
+        """)
+        conn.commit()
+        conn.close()
+
+    def set_email_status(
+        self,
+        email_id: str,
+        archived: Optional[bool] = None,
+        starred: Optional[bool] = None,
+        label: Optional[str] = None,
+    ):
+        """Met à jour le statut d'un email (archive, étoile, label). Seuls les champs fournis sont modifiés."""
+        self._init_status_table()
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT archived, starred, label FROM email_status WHERE email_id = ?", (email_id,))
+        row = cursor.fetchone()
+
+        new_archived = archived if archived is not None else (bool(row["archived"]) if row else False)
+        new_starred  = starred  if starred  is not None else (bool(row["starred"])  if row else False)
+        new_label    = label    if label    is not None else (row["label"]           if row else None)
+
+        cursor.execute("""
+            INSERT OR REPLACE INTO email_status (email_id, archived, starred, label, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+        """, (email_id, new_archived, new_starred, new_label, datetime.now().isoformat()))
+
+        conn.commit()
+        conn.close()
+        logger.info(f"Status updated for email {email_id}: archived={new_archived}, starred={new_starred}")
+
+    def get_status_map(self) -> Dict[str, Any]:
+        """Retourne tous les statuts connus sous forme {email_id: {archived, starred, label}}."""
+        self._init_status_table()
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT email_id, archived, starred, label FROM email_status")
+        rows = cursor.fetchall()
+        conn.close()
+        return {
+            r["email_id"]: {
+                "archived": bool(r["archived"]),
+                "starred":  bool(r["starred"]),
+                "label":    r["label"],
+            }
+            for r in rows
+        }
+
 
 # Singleton
 _email_analysis_db: Optional[EmailAnalysisDB] = None
