@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, CheckCircle, Calculator, FileText, TrendingUp, Building2, Package, Search, Loader2, UserCheck, UserPlus, AlertCircle, AlertTriangle, RefreshCw, Mail, Paperclip, RotateCcw, X, Pencil } from 'lucide-react';
+import { ArrowLeft, CheckCircle, Calculator, FileText, TrendingUp, Building2, Package, Search, Loader2, UserCheck, UserPlus, AlertCircle, AlertTriangle, RefreshCw, Mail, Paperclip, RotateCcw, X, Pencil, Plus } from 'lucide-react';
 import { ProcessedEmail } from '@/types/email';
 import { CreateItemDialog } from './CreateItemDialog';
 import { PriceEditorDialog } from './PriceEditorDialog';
@@ -12,6 +12,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Table,
@@ -122,6 +123,21 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
 
   // Prix manuellement fixés (protège contre Recalculer)
   const [manualPriceOverrides, setManualPriceOverrides] = useState<{[itemCode: string]: number}>({});
+
+  // Commentaires libres du devis (envoyés dans le champ Comments SAP)
+  const DEFAULT_DELIVERY_COMMENT = 'Délai de livraison : 6 SEMAINES A RECEPTION DE COMMANDE';
+  const [comments, setComments] = useState<string>(DEFAULT_DELIVERY_COMMENT);
+
+  // Lignes ajoutées manuellement (non issues de l'analyse email)
+  interface ManualLine {
+    id: number;
+    ItemCode: string;
+    ItemDescription: string;
+    Quantity: number;
+    UnitPrice: number | null;
+  }
+  const [manualLines, setManualLines] = useState<ManualLine[]>([]);
+  const manualLineCounter = useRef(0);
 
   // Lignes fixes : Emballage et Transport
   const [emballagePrice, setEmballagePrice] = useState<number>(20);
@@ -409,6 +425,17 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
         DiscountPercent: 0,
       }));
 
+    // Lignes ajoutées manuellement
+    const manualDocLines = manualLines
+      .filter((l) => l.ItemDescription.trim() !== '')
+      .map((l) => ({
+        ItemCode: l.ItemCode.trim() || undefined,
+        ItemDescription: l.ItemDescription,
+        Quantity: l.Quantity,
+        UnitPrice: l.UnitPrice ?? undefined,
+        DiscountPercent: 0,
+      }));
+
     // Lignes fixes toujours ajoutées
     const fixedLines = [
       { ItemCode: 'A06572', ItemDescription: 'Emballage', Quantity: 1, UnitPrice: emballagePrice, DiscountPercent: 0 },
@@ -420,11 +447,11 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
 
     return {
       CardCode: selectedClient!.CardCode,
-      Comments: `Devis suite email: ${quote.email.subject || ''}`,
+      Comments: comments || `Devis suite email: ${quote.email.subject || ''}`,
       NumAtCard: customerRef,
       email_id: quote.email.id,
       email_subject: quote.email.subject,
-      DocumentLines: [...activeLines, ...fixedLines],
+      DocumentLines: [...activeLines, ...manualDocLines, ...fixedLines],
     };
   };
 
@@ -1025,6 +1052,18 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
           <CardTitle className="flex items-center gap-2 text-lg">
             <Package className="w-5 h-5 text-primary" />
             Articles détectés
+            <Button
+              variant="outline"
+              size="sm"
+              className="ml-auto h-7 text-xs"
+              onClick={() => {
+                manualLineCounter.current += 1;
+                setManualLines(prev => [...prev, { id: manualLineCounter.current, ItemCode: '', ItemDescription: '', Quantity: 1, UnitPrice: null }]);
+              }}
+            >
+              <Plus className="w-3.5 h-3.5 mr-1" />
+              Ajouter une ligne
+            </Button>
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -1429,6 +1468,65 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
                 </TableRow>
               )}
 
+              {/* ── Lignes manuelles ── */}
+              {manualLines.map((ml) => (
+                <TableRow key={ml.id} className="bg-blue-50/40 dark:bg-blue-950/20">
+                  <TableCell>
+                    <Input
+                      value={ml.ItemCode}
+                      onChange={(e) => setManualLines(prev => prev.map(l => l.id === ml.id ? { ...l, ItemCode: e.target.value } : l))}
+                      placeholder="Code SAP"
+                      className="h-7 text-sm font-mono w-28 px-1"
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Input
+                      value={ml.ItemDescription}
+                      onChange={(e) => setManualLines(prev => prev.map(l => l.id === ml.id ? { ...l, ItemDescription: e.target.value } : l))}
+                      placeholder="Désignation"
+                      className="h-7 text-sm px-1 w-full"
+                    />
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Input
+                      type="number"
+                      min="1"
+                      value={ml.Quantity}
+                      onChange={(e) => setManualLines(prev => prev.map(l => l.id === ml.id ? { ...l, Quantity: Math.max(1, Number(e.target.value) || 1) } : l))}
+                      className="h-7 text-sm text-right w-16 px-1"
+                    />
+                  </TableCell>
+                  <TableCell className="text-right text-muted-foreground text-sm">—</TableCell>
+                  <TableCell className="text-right text-muted-foreground text-sm">—</TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex items-center justify-end gap-1">
+                      <Input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={ml.UnitPrice ?? ''}
+                        onChange={(e) => setManualLines(prev => prev.map(l => l.id === ml.id ? { ...l, UnitPrice: e.target.value === '' ? null : Number(e.target.value) } : l))}
+                        placeholder="0.00"
+                        className="h-7 text-sm text-right w-24 px-1"
+                      />
+                      <span className="text-xs text-muted-foreground">€</span>
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-center">
+                    <div className="flex flex-col items-center gap-1">
+                      <Badge variant="secondary" className="text-xs">Manuel</Badge>
+                      <button
+                        onClick={() => setManualLines(prev => prev.filter(l => l.id !== ml.id))}
+                        className="text-muted-foreground hover:text-destructive transition-colors"
+                        title="Supprimer cette ligne"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+
               {/* ── Ligne fixe : Emballage ── */}
               <TableRow className="bg-muted/20 border-t-2 border-dashed border-muted-foreground/20">
                 <TableCell className="font-mono text-sm text-muted-foreground">A06572</TableCell>
@@ -1753,6 +1851,32 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
           </div>
         </div>
       )}
+
+      {/* Commentaires du devis */}
+      <Card>
+        <CardContent className="pt-4">
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-medium">Commentaires du devis</label>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-xs text-muted-foreground h-auto py-0.5 px-2"
+                onClick={() => setComments(DEFAULT_DELIVERY_COMMENT)}
+              >
+                Réinitialiser
+              </Button>
+            </div>
+            <Textarea
+              value={comments}
+              onChange={(e) => setComments(e.target.value)}
+              placeholder="Commentaires transmis à SAP (délai livraison, conditions, remarques…)"
+              rows={3}
+              className="resize-y text-sm"
+            />
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Actions */}
       <div className="flex justify-between items-center pt-4">
