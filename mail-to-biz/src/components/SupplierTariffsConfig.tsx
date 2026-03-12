@@ -46,10 +46,16 @@ interface IndexationStatus {
   stats: IndexationStats;
 }
 
+interface SubfolderInfo {
+  total: number;
+  types: Record<string, number>;
+}
+
 interface FolderContents {
   folder_path: string;
   total_files: number;
   files_by_type: Record<string, number>;
+  files_by_subfolder: Record<string, SubfolderInfo>;
 }
 
 const API_BASE = '/api/supplier-tariffs';
@@ -310,11 +316,13 @@ export function SupplierTariffsConfig() {
 
           {/* Apercu du contenu du dossier */}
           {folderContents && (
-            <div className="p-4 rounded-lg bg-muted border border-border">
-              <h4 className="font-medium text-sm mb-2 flex items-center gap-2">
+            <div className="p-4 rounded-lg bg-muted border border-border space-y-3">
+              <h4 className="font-medium text-sm flex items-center gap-2">
                 <FileText className="w-4 h-4" />
                 Contenu du dossier
               </h4>
+
+              {/* Stats globales */}
               <div className="grid grid-cols-2 gap-2 text-sm">
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Total fichiers:</span>
@@ -327,6 +335,32 @@ export function SupplierTariffsConfig() {
                   </div>
                 ))}
               </div>
+
+              {/* Par fournisseur */}
+              {folderContents.files_by_subfolder && Object.keys(folderContents.files_by_subfolder).length > 0 && (
+                <div className="space-y-1">
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Par fournisseur</p>
+                  <div className="space-y-1 max-h-48 overflow-y-auto">
+                    {Object.entries(folderContents.files_by_subfolder)
+                      .sort(([a], [b]) => a.localeCompare(b))
+                      .map(([subfolder, info]) => (
+                        <div key={subfolder} className="flex items-center justify-between text-sm py-1 px-2 rounded bg-background">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <FolderOpen className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                            <span className="truncate font-medium">{subfolder}</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                            {Object.entries(info.types).map(([type, count]) => (
+                              <Badge key={type} variant="outline" className="text-xs px-1.5 py-0">
+                                {count} {type.toUpperCase()}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </CardContent>

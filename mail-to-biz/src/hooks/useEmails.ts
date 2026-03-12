@@ -56,11 +56,11 @@ export function useEmails(options: UseEmailsOptions = {}): UseEmailsReturn {
         []
       );
 
-      // Si pas d'analyse IA, utiliser uniquement le détecteur par règles
+      // Si pas d'analyse IA, utiliser le détecteur par règles + flag backend
       if (!analysis) {
         return {
           email: emailMessage,
-          isQuote: detection.isQuote,
+          isQuote: detection.isQuote || graphEmail.is_quote_by_subject === true,
           detection: {
             confidence: detection.confidence,
             matchedRules: detection.matchedRules,
