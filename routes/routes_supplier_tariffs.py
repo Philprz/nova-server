@@ -172,18 +172,30 @@ async def get_folder_contents():
         from services.file_parsers import scan_folder
 
         files = scan_folder(folder_path, recursive=True)
+        root = Path(folder_path)
 
         # Statistiques par type
         stats = {}
+        # Groupement par sous-dossier (fournisseur)
+        by_subfolder: dict = {}
         for f in files:
             ftype = f['type']
             stats[ftype] = stats.get(ftype, 0) + 1
+
+            # Déterminer le sous-dossier relatif (1er niveau sous la racine)
+            rel = Path(f['path']).relative_to(root)
+            subfolder = rel.parts[0] if len(rel.parts) > 1 else "(racine)"
+            if subfolder not in by_subfolder:
+                by_subfolder[subfolder] = {"total": 0, "types": {}}
+            by_subfolder[subfolder]["total"] += 1
+            by_subfolder[subfolder]["types"][ftype] = by_subfolder[subfolder]["types"].get(ftype, 0) + 1
 
         return {
             "folder_path": folder_path,
             "total_files": len(files),
             "files_by_type": stats,
-            "files": files[:100]  # Limiter à 100 fichiers pour l'affichage
+            "files_by_subfolder": by_subfolder,
+            "files": files[:100]
         }
 
     except Exception as e:
