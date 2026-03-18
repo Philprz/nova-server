@@ -1,3 +1,4 @@
+import { fetchWithAuth } from '@/lib/fetchWithAuth';
 import { useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -66,7 +67,7 @@ export function CreateItemDialog({
     setLoading(true);
 
     try {
-      const response = await fetch('/api/sap/items/create', {
+      const response = await fetchWithAuth('/api/sap/items/create', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

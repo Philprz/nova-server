@@ -1,5 +1,6 @@
 // API Service pour mail-to-biz
 // Appels vers le backend NOVA-SERVER
+import { fetchWithAuth } from './fetchWithAuth';
 
 const API_BASE = '/api/sap-rondot';
 
@@ -68,7 +69,7 @@ export interface PreviewResponse {
 // Test de connexion SAP
 export async function testSAPConnection(): Promise<{ success: boolean; message: string }> {
   try {
-    const response = await fetch(`${API_BASE}/test-connection`);
+    const response = await fetchWithAuth(`${API_BASE}/test-connection`);
     return await response.json();
   } catch (error) {
     return { success: false, message: `Erreur: ${error}` };
@@ -82,7 +83,7 @@ export async function getSAPClients(search?: string, limit = 50): Promise<ApiRes
     if (search) params.append('search', search);
     params.append('limit', limit.toString());
 
-    const response = await fetch(`${API_BASE}/clients?${params}`);
+    const response = await fetchWithAuth(`${API_BASE}/clients?${params}`);
     const data = await response.json();
 
     return {
@@ -98,7 +99,7 @@ export async function getSAPClients(search?: string, limit = 50): Promise<ApiRes
 // Récupérer un client par code
 export async function getSAPClient(cardCode: string): Promise<ApiResponse<SAPClient>> {
   try {
-    const response = await fetch(`${API_BASE}/clients/${encodeURIComponent(cardCode)}`);
+    const response = await fetchWithAuth(`${API_BASE}/clients/${encodeURIComponent(cardCode)}`);
     const data = await response.json();
 
     return {
@@ -118,7 +119,7 @@ export async function getSAPProducts(search?: string, limit = 50): Promise<ApiRe
     if (search) params.append('search', search);
     params.append('limit', limit.toString());
 
-    const response = await fetch(`${API_BASE}/products?${params}`);
+    const response = await fetchWithAuth(`${API_BASE}/products?${params}`);
     const data = await response.json();
 
     return {
@@ -134,7 +135,7 @@ export async function getSAPProducts(search?: string, limit = 50): Promise<ApiRe
 // Récupérer un produit par code
 export async function getSAPProduct(itemCode: string): Promise<ApiResponse<SAPProduct>> {
   try {
-    const response = await fetch(`${API_BASE}/products/${encodeURIComponent(itemCode)}`);
+    const response = await fetchWithAuth(`${API_BASE}/products/${encodeURIComponent(itemCode)}`);
     const data = await response.json();
 
     return {
@@ -157,7 +158,7 @@ export async function getSAPProductPrice(itemCode: string, cardCode?: string): P
     const params = new URLSearchParams();
     if (cardCode) params.append('card_code', cardCode);
 
-    const response = await fetch(`${API_BASE}/products/${encodeURIComponent(itemCode)}/price?${params}`);
+    const response = await fetchWithAuth(`${API_BASE}/products/${encodeURIComponent(itemCode)}/price?${params}`);
     const data = await response.json();
 
     return {
@@ -181,7 +182,7 @@ export async function getSAPQuotations(cardCode?: string, limit = 50): Promise<A
     if (cardCode) params.append('card_code', cardCode);
     params.append('limit', limit.toString());
 
-    const response = await fetch(`${API_BASE}/quotations?${params}`);
+    const response = await fetchWithAuth(`${API_BASE}/quotations?${params}`);
     const data = await response.json();
 
     return {
@@ -199,7 +200,7 @@ export async function previewSAPQuotation(
   request: CreateQuoteRequest
 ): Promise<ApiResponse<PreviewResponse>> {
   try {
-    const response = await fetch('/api/sap/quotation/preview', {
+    const response = await fetchWithAuth('/api/sap/quotation/preview', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(request),
@@ -225,7 +226,7 @@ export async function createSAPQuotation(request: CreateQuoteRequest): Promise<A
   retry_reason?: string;
 }>> {
   try {
-    const response = await fetch('/api/sap/quotation', {
+    const response = await fetchWithAuth('/api/sap/quotation', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(request),
@@ -257,7 +258,7 @@ export interface ExistingQuoteInfo {
 
 export async function getExistingQuoteForEmail(emailId: string): Promise<ExistingQuoteInfo> {
   try {
-    const response = await fetch(`/api/sap/quotation/by-email/${encodeURIComponent(emailId)}`);
+    const response = await fetchWithAuth(`/api/sap/quotation/by-email/${encodeURIComponent(emailId)}`);
     if (!response.ok) return { found: false };
     return response.json();
   } catch {
@@ -273,7 +274,7 @@ export async function getSAPStatus(): Promise<{
   session_expires?: string;
 }> {
   try {
-    const response = await fetch(`${API_BASE}/status`);
+    const response = await fetchWithAuth(`${API_BASE}/status`);
     return await response.json();
   } catch (error) {
     return { connected: false, company_db: '', user: '' };

@@ -9,6 +9,8 @@ import { QuoteSummary } from '@/components/QuoteSummary';
 import { ConfigPanel } from '@/components/ConfigPanel';
 import { ConnectorsPanel } from '@/components/ConnectorsPanel';
 import { AccountSelection } from '@/components/AccountSelection';
+import { useAuth } from '@/contexts/AuthContext';
+import { fetchWithAuth } from '@/lib/fetchWithAuth';
 import { getMockEmails, processEmails } from '@/hooks/useMockData';
 import { useEmails } from '@/hooks/useEmails';
 import { useEmailMode } from '@/hooks/useEmailMode';
@@ -20,7 +22,7 @@ import { Badge } from '@/components/ui/badge';
 import { ManualQuoteModal } from '@/components/ManualQuoteModal';
 import { ManualQuoteResult, graphEmailToEmailMessage } from '@/lib/graphApi';
 
-type View = 'account-selection' | 'inbox' | 'quotes' | 'config' | 'connectors' | 'summary';
+type View = 'inbox' | 'quotes' | 'config' | 'connectors' | 'summary';
 
 // ----------------------------------------------------------------
 // Helpers
@@ -31,7 +33,8 @@ function normalizeStr(s: string) {
 }
 
 const Index = () => {
-  const [currentView, setCurrentView] = useState<View>('account-selection');
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const [currentView, setCurrentView] = useState<View>('inbox');
   const [selectedQuote, setSelectedQuote] = useState<ProcessedEmail | null>(null);
   const [manualModalOpen, setManualModalOpen] = useState(false);
 
@@ -82,7 +85,7 @@ const Index = () => {
     reanalyzeEmail,
     getLatestEmail,
     addManualEmailToList,
-  } = useEmails({ enabled: !isDemoMode, autoFetch: !isDemoMode });
+  } = useEmails({ enabled: !isDemoMode && isAuthenticated, autoFetch: !isDemoMode && isAuthenticated });
 
   const [mockEmails] = useState<ProcessedEmail[]>(() => processEmails(getMockEmails()));
 
@@ -105,19 +108,18 @@ const Index = () => {
     },
   });
 
-  const pendingCount = quotes.filter((q) => {
-    const status = q.preSapDocument?.meta.validationStatus;
-    return status !== 'validated' && status !== 'rejected';
-  }).length;
+  const pendingCount = quotes.filter((q) =>
+    !processedEmailIds.has(q.email.id) && !archivedIds.has(q.email.id)
+  ).length;
 
   // ── Chargement du status-map depuis le serveur ───────────────────
   useEffect(() => {
-    if (isDemoMode) return;
-    fetch('/api/graph/emails/status-map')
+    if (isDemoMode || !isAuthenticated) return;
+    fetchWithAuth('/api/graph/emails/status-map')
       .then(r => r.ok ? r.json() : {})
       .then(data => setEmailStatusMap(data))
       .catch(() => {});
-  }, [isDemoMode]);
+  }, [isDemoMode, isAuthenticated]);
 
   // ── Sync emails traités depuis le backend ────────────────────────
   useEffect(() => {
@@ -125,7 +127,7 @@ const Index = () => {
     const quoteIds = liveEmails.filter(e => e.isQuote).map(e => e.email.id);
     if (quoteIds.length === 0) return;
 
-    fetch('/api/sap/quotation/batch-by-emails', {
+    fetchWithAuth('/api/sap/quotation/batch-by-emails', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(quoteIds),
@@ -215,7 +217,7 @@ const Index = () => {
       ...prev,
       [emailId]: { ...(prev[emailId] ?? { starred: false }), archived },
     }));
-    fetch(`/api/graph/emails/${encodeURIComponent(emailId)}/set-status`, {
+    fetchWithAuth(`/api/graph/emails/${encodeURIComponent(emailId)}/set-status`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ archived }),
@@ -227,7 +229,7 @@ const Index = () => {
       ...prev,
       [emailId]: { ...(prev[emailId] ?? { archived: false }), starred },
     }));
-    fetch(`/api/graph/emails/${encodeURIComponent(emailId)}/set-status`, {
+    fetchWithAuth(`/api/graph/emails/${encodeURIComponent(emailId)}/set-status`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ starred }),
@@ -288,7 +290,17 @@ const Index = () => {
     }
   };
 
-  const handleAccountSelect = () => setCurrentView('inbox');
+  // Analyse forcée d'un email classé "Non pertinent"
+  const handleAnalyzeNonQuote = async (item: ProcessedEmail) => {
+    if (isDemoMode) return;
+    await reanalyzeEmail(item.email.id);
+    const updated = getLatestEmail(item.email.id);
+    if (updated?.isQuote) {
+      setSelectedQuote(updated);
+      setCurrentView('summary');
+    }
+  };
+
 
   const handleManualCreated = (result: ManualQuoteResult) => {
     const clientName = result.analysis_result.extracted_data?.client_name ?? 'Client';
@@ -324,8 +336,16 @@ const Index = () => {
     setCurrentView('summary');
   };
 
-  if (currentView === 'account-selection') {
-    return <AccountSelection onSelectAccount={handleAccountSelect} />;
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <AccountSelection />;
   }
 
   return (
@@ -411,6 +431,7 @@ const Index = () => {
                   <EmailList
                     emails={filteredEmails}
                     onSelectQuote={handleSelectQuote}
+                    onAnalyze={!isDemoMode ? handleAnalyzeNonQuote : undefined}
                     analyzingEmailId={analyzingEmailId}
                     processedIds={processedEmailIds}
                     processedMeta={processedEmailsMeta}
@@ -439,7 +460,7 @@ const Index = () => {
               quote={selectedQuote}
               onValidate={handleSummaryValidate}
               onBack={handleSummaryBack}
-              onReanalyze={!isDemoMode ? handleReanalyze : undefined}
+              onReanalyze={!isDemoMode && !processedEmailIds.has(selectedQuote.email.id) ? handleReanalyze : undefined}
               isReanalyzing={analyzingEmailId === selectedQuote.email.id}
               isProcessed={processedEmailIds.has(selectedQuote.email.id)}
             />

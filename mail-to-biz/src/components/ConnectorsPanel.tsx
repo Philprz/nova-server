@@ -3,6 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { CheckCircle, XCircle, Loader2, Cloud, Database, Users } from 'lucide-react';
+import { fetchWithAuth } from '@/lib/fetchWithAuth';
 
 interface ConnectorStatus {
   isConnected: boolean;
@@ -61,7 +62,7 @@ export const ConnectorsPanel = () => {
     try {
       if (connectorId === 'sap') {
         // Appel réel à l'API SAP Rondot
-        const response = await fetch('/api/sap-rondot/test-connection');
+        const response = await fetchWithAuth('/api/sap-rondot/test-connection');
         const data = await response.json();
 
         setStatuses(prev => ({
@@ -78,7 +79,7 @@ export const ConnectorsPanel = () => {
 
       if (connectorId === 'microsoft') {
         // Appel réel à l'API Microsoft Graph
-        const response = await fetch('/api/graph/test-connection');
+        const response = await fetchWithAuth('/api/graph/test-connection');
         const data = await response.json();
 
         const message = data.success

@@ -3,16 +3,17 @@ Routes API pour SAP Business One - mail-to-biz
 Gère les articles, prix et création de devis
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import logging
 
+from auth.dependencies import get_current_user
 from services.sap_business_service import get_sap_business_service
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/sap", tags=["SAP Business"])
+router = APIRouter(prefix="/api/sap", tags=["SAP Business"], dependencies=[Depends(get_current_user)])
 
 
 # ===== MODÈLES DE REQUÊTE/RÉPONSE =====

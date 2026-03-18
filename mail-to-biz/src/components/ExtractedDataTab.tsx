@@ -1,3 +1,4 @@
+import { fetchWithAuth } from '@/lib/fetchWithAuth';
 /**
  * ExtractedDataTab.tsx
  * Onglet "Données extraites" dans la synthèse de devis.
@@ -239,7 +240,7 @@ export function ExtractedDataTab({ emailId, analysisResult }: ExtractedDataTabPr
         field_name: row.fieldName,
       });
       if (row.fieldIndex != null) delParams.set('field_index', String(row.fieldIndex));
-      await fetch(`/api/graph/emails/corrections?${delParams.toString()}`, { method: 'DELETE' });
+      await fetchWithAuth(`/api/graph/emails/corrections?${delParams.toString()}`, { method: 'DELETE' });
       setCorrections((prev) => {
         const next = new Map(prev);
         next.delete(key);

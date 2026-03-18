@@ -1,3 +1,4 @@
+import { fetchWithAuth } from '@/lib/fetchWithAuth';
 import { useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -85,7 +86,7 @@ export function ConfigPanel() {
     setTestResult(null);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/graph/test-connection`);
+      const response = await fetchWithAuth(`${API_BASE_URL}/api/graph/test-connection`);
       const data = await response.json();
 
       if (!response.ok && !data.details) {

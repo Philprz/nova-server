@@ -1,3 +1,4 @@
+import { fetchWithAuth } from '@/lib/fetchWithAuth';
 import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -93,7 +94,7 @@ export function SupplierTariffsConfig() {
 
   const loadFolderConfig = async () => {
     try {
-      const response = await fetch(`${API_BASE}/folder`);
+      const response = await fetchWithAuth(`${API_BASE}/folder`);
       const data = await response.json();
       setFolderConfig(data);
       setFolderPath(data.folder_path || '');
@@ -111,7 +112,7 @@ export function SupplierTariffsConfig() {
 
   const loadIndexationStatus = async () => {
     try {
-      const response = await fetch(`${API_BASE}/status`);
+      const response = await fetchWithAuth(`${API_BASE}/status`);
       const data = await response.json();
       setIndexationStatus(data);
 
@@ -127,7 +128,7 @@ export function SupplierTariffsConfig() {
 
   const loadFolderContents = async () => {
     try {
-      const response = await fetch(`${API_BASE}/folder/contents`);
+      const response = await fetchWithAuth(`${API_BASE}/folder/contents`);
       if (response.ok) {
         const data = await response.json();
         setFolderContents(data);
@@ -140,7 +141,7 @@ export function SupplierTariffsConfig() {
   const handleBrowseFolder = async () => {
     setIsBrowsing(true);
     try {
-      const response = await fetch(`${API_BASE}/browse?start_path=${encodeURIComponent(folderPath || 'C:\\')}`);
+      const response = await fetchWithAuth(`${API_BASE}/browse?start_path=${encodeURIComponent(folderPath || 'C:\\')}`);
       const data = await response.json();
 
       if (data.success && data.folder_path) {
@@ -165,7 +166,7 @@ export function SupplierTariffsConfig() {
 
     setIsSaving(true);
     try {
-      const response = await fetch(`${API_BASE}/folder`, {
+      const response = await fetchWithAuth(`${API_BASE}/folder`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ folder_path: folderPath.trim() })
@@ -191,7 +192,7 @@ export function SupplierTariffsConfig() {
   const handleStartIndexation = async (clearExisting: boolean = false) => {
     setIsIndexing(true);
     try {
-      const response = await fetch(`${API_BASE}/index`, {
+      const response = await fetchWithAuth(`${API_BASE}/index`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -217,7 +218,7 @@ export function SupplierTariffsConfig() {
 
   const handleStopIndexation = async () => {
     try {
-      const response = await fetch(`${API_BASE}/index/stop`, { method: 'POST' });
+      const response = await fetchWithAuth(`${API_BASE}/index/stop`, { method: 'POST' });
       const data = await response.json();
 
       if (data.success) {

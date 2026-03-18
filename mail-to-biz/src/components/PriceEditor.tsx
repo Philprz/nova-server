@@ -101,22 +101,30 @@ export function PriceEditor({
   isReadOnly = false
 }: PriceEditorProps) {
   const [editedPrice, setEditedPrice] = useState<number>(currentPrice);
+  // String state pour l'input (évite le reformatage à chaque frappe)
+  const [priceInput, setPriceInput] = useState<string>(currentPrice.toFixed(2));
   const [marginSlider, setMarginSlider] = useState<number>(targetMargin);
   const [modificationReason, setModificationReason] = useState<string>('');
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
+  // Prix de revient : supplier si dispo, sinon saisissable par l'utilisateur
+  const [costPrice, setCostPrice] = useState<number>(supplierPrice > 0 ? supplierPrice : 0);
+  const [costInput, setCostInput] = useState<string>(supplierPrice > 0 ? supplierPrice.toFixed(2) : '');
+
+  const effectiveCost = costPrice > 0 ? costPrice : 0;
+
   // Calculer les prix min/max basés sur la variance
-  const priceMin = supplierPrice * (1 + minMargin / 100);
-  const priceMax = supplierPrice * (1 + maxMargin / 100);
+  const priceMin = effectiveCost * (1 + minMargin / 100);
+  const priceMax = effectiveCost * (1 + maxMargin / 100);
 
   // Calculer la marge actuelle (sur le prix édité manuellement)
-  const currentMargin = supplierPrice > 0
-    ? ((editedPrice - supplierPrice) / supplierPrice) * 100
+  const currentMargin = effectiveCost > 0
+    ? ((editedPrice - effectiveCost) / effectiveCost) * 100
     : 0;
 
   // Calculer la position sur la barre de progression (0-100)
-  const progressValue = supplierPrice > 0
+  const progressValue = effectiveCost > 0
     ? Math.min(100, Math.max(0, ((editedPrice - priceMin) / (priceMax - priceMin)) * 100))
     : 0;
 
@@ -130,9 +138,10 @@ export function PriceEditor({
   // Quand le slider marge change → recalculer le prix
   const handleMarginSliderChange = (value: number) => {
     setMarginSlider(value);
-    if (supplierPrice > 0) {
-      const newPrice = parseFloat((supplierPrice * (1 + value / 100)).toFixed(2));
+    if (effectiveCost > 0) {
+      const newPrice = parseFloat((effectiveCost * (1 + value / 100)).toFixed(2));
       setEditedPrice(newPrice);
+      setPriceInput(newPrice.toFixed(2));
     }
   };
 
@@ -142,10 +151,13 @@ export function PriceEditor({
   // Mettre à jour le prix édité quand le prix courant change
   useEffect(() => {
     setEditedPrice(currentPrice);
+    setPriceInput(currentPrice.toFixed(2));
     // Synchroniser slider avec la marge actuelle
     if (supplierPrice > 0 && currentPrice > 0) {
       const currentMarg = ((currentPrice - supplierPrice) / supplierPrice) * 100;
       setMarginSlider(Math.round(currentMarg));
+      setCostPrice(supplierPrice);
+      setCostInput(supplierPrice.toFixed(2));
     }
   }, [currentPrice, supplierPrice]);
 
@@ -183,9 +195,28 @@ export function PriceEditor({
   };
 
   const handlePriceChange = (value: string) => {
-    const numValue = parseFloat(value);
+    setPriceInput(value);
+    const numValue = parseFloat(value.replace(',', '.'));
     if (!isNaN(numValue) && numValue >= 0) {
       setEditedPrice(numValue);
+      // Synchroniser slider si prix de revient connu
+      if (effectiveCost > 0) {
+        const marg = ((numValue - effectiveCost) / effectiveCost) * 100;
+        setMarginSlider(Math.round(marg * 10) / 10);
+      }
+    }
+  };
+
+  const handleCostChange = (value: string) => {
+    setCostInput(value);
+    const numValue = parseFloat(value.replace(',', '.'));
+    if (!isNaN(numValue) && numValue >= 0) {
+      setCostPrice(numValue);
+      // Recalculer le slider avec le nouveau prix de revient
+      if (numValue > 0 && editedPrice > 0) {
+        const marg = ((editedPrice - numValue) / numValue) * 100;
+        setMarginSlider(Math.round(marg * 10) / 10);
+      }
     }
   };
 
@@ -214,17 +245,36 @@ export function PriceEditor({
         </div>
 
         <div className="divide-y">
-          {/* Prix fournisseur */}
+          {/* Prix de revient (fournisseur ou saisie manuelle) */}
           <div className="flex items-center justify-between px-4 py-3">
             <div className="flex items-center gap-2">
               <DollarSign className="w-4 h-4 text-muted-foreground" />
-              <span className="text-sm font-medium">Prix fournisseur (tarif indexé)</span>
+              <span className="text-sm font-medium">
+                Prix de revient
+                {supplierPrice > 0 ? ' (tarif indexé)' : ' (à saisir)'}
+              </span>
             </div>
-            <span className="text-base font-bold">{supplierPrice > 0 ? `${supplierPrice.toFixed(2)} ${currency}` : 'Non disponible'}</span>
+            {supplierPrice > 0 ? (
+              <span className="text-base font-bold">{supplierPrice.toFixed(2)} {currency}</span>
+            ) : (
+              <div className="flex items-center gap-2">
+                <Input
+                  type="text"
+                  inputMode="decimal"
+                  value={costInput}
+                  onChange={e => handleCostChange(e.target.value)}
+                  onBlur={() => costPrice > 0 && setCostInput(costPrice.toFixed(2))}
+                  placeholder="0.00"
+                  className="w-28 text-right font-semibold"
+                  disabled={isReadOnly}
+                />
+                <span className="text-sm text-muted-foreground">{currency}</span>
+              </div>
+            )}
           </div>
 
           {/* Séparateur calculs */}
-          {supplierPrice > 0 && (
+          {effectiveCost > 0 && (
             <>
               <div className="flex items-center justify-between px-4 py-2 bg-red-50/50 dark:bg-red-950/20">
                 <div className="flex items-center gap-2">
@@ -233,14 +283,14 @@ export function PriceEditor({
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="font-semibold text-red-700 dark:text-red-400">
-                    {(supplierPrice * (1 + minMargin / 100)).toFixed(2)} {currency}
+                    {(effectiveCost * (1 + minMargin / 100)).toFixed(2)} {currency}
                   </span>
                   {!isReadOnly && (
                     <Button
                       variant="outline"
                       size="sm"
                       className="h-6 text-xs px-2"
-                      onClick={() => setEditedPrice(parseFloat((supplierPrice * (1 + minMargin / 100)).toFixed(2)))}
+                      onClick={() => { const p = parseFloat((effectiveCost * (1 + minMargin / 100)).toFixed(2)); setEditedPrice(p); setPriceInput(p.toFixed(2)); setMarginSlider(minMargin); }}
                     >
                       Utiliser
                     </Button>
@@ -257,13 +307,13 @@ export function PriceEditor({
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="font-bold text-green-700 dark:text-green-400 text-base">
-                    {(supplierPrice * (1 + targetMargin / 100)).toFixed(2)} {currency}
+                    {(effectiveCost * (1 + targetMargin / 100)).toFixed(2)} {currency}
                   </span>
                   {!isReadOnly && (
                     <Button
                       size="sm"
                       className="h-6 text-xs px-2 bg-green-600 hover:bg-green-700"
-                      onClick={() => setEditedPrice(parseFloat((supplierPrice * (1 + targetMargin / 100)).toFixed(2)))}
+                      onClick={() => { const p = parseFloat((effectiveCost * (1 + targetMargin / 100)).toFixed(2)); setEditedPrice(p); setPriceInput(p.toFixed(2)); setMarginSlider(targetMargin); }}
                     >
                       Utiliser
                     </Button>
@@ -278,14 +328,14 @@ export function PriceEditor({
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="font-semibold text-orange-700 dark:text-orange-400">
-                    {(supplierPrice * (1 + maxMargin / 100)).toFixed(2)} {currency}
+                    {(effectiveCost * (1 + maxMargin / 100)).toFixed(2)} {currency}
                   </span>
                   {!isReadOnly && (
                     <Button
                       variant="outline"
                       size="sm"
                       className="h-6 text-xs px-2"
-                      onClick={() => setEditedPrice(parseFloat((supplierPrice * (1 + maxMargin / 100)).toFixed(2)))}
+                      onClick={() => { const p = parseFloat((effectiveCost * (1 + maxMargin / 100)).toFixed(2)); setEditedPrice(p); setPriceInput(p.toFixed(2)); setMarginSlider(maxMargin); }}
                     >
                       Utiliser
                     </Button>
@@ -333,19 +383,19 @@ export function PriceEditor({
 
         <div className="flex items-center gap-2">
           <Input
-            type="number"
-            step="0.01"
-            min="0"
-            value={editedPrice.toFixed(2)}
+            type="text"
+            inputMode="decimal"
+            value={priceInput}
             onChange={(e) => handlePriceChange(e.target.value)}
+            onBlur={() => setPriceInput(editedPrice.toFixed(2))}
             disabled={isReadOnly || isSaving}
             className="text-2xl font-bold h-14"
           />
           <span className="text-2xl font-semibold text-muted-foreground">{currency}</span>
         </div>
 
-        {/* Slider de marge (si prix fournisseur disponible) */}
-        {supplierPrice > 0 && (
+        {/* Slider de marge (si prix de revient disponible) */}
+        {effectiveCost > 0 && (
           <div className="space-y-2 p-3 bg-muted/30 rounded-md border">
             <div className="flex items-center justify-between">
               <label className="text-sm font-medium">Ajuster la marge</label>
@@ -367,7 +417,7 @@ export function PriceEditor({
 
             <div className="flex justify-between text-xs text-muted-foreground">
               <span className="text-red-500">Min {minMargin}%: {priceMin.toFixed(2)} €</span>
-              <span className="text-green-600 font-semibold">Cible {targetMargin}%: {(supplierPrice * (1 + targetMargin / 100)).toFixed(2)} €</span>
+              <span className="text-green-600 font-semibold">Cible {targetMargin}%: {(effectiveCost * (1 + targetMargin / 100)).toFixed(2)} €</span>
               <span className="text-orange-500">Max {maxMargin}%: {priceMax.toFixed(2)} €</span>
             </div>
 

@@ -1,45 +1,36 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { useState } from 'react';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Building2, CheckCircle, Circle } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { AlertCircle, ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
 
-interface Account {
-  id: string;
-  name: string;
-  type: 'Production' | 'Démo' | 'Test';
-  connectors: {
-    sap: boolean;
-    microsoft: boolean;
-    salesforce: boolean;
+export const AccountSelection = () => {
+  const { login } = useAuth();
+  const [username, setUsername]     = useState('');
+  const [password, setPassword]     = useState('');
+  const [companyDb, setCompanyDb]   = useState('RON_20260109');
+  const [showCompany, setShowCompany] = useState(false);
+  const [isLoading, setIsLoading]   = useState(false);
+  const [error, setError]           = useState('');
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setIsLoading(true);
+    const result = await login({
+      sap_username:   username,
+      sap_password:   password,
+      sap_company_db: companyDb,
+    });
+    setIsLoading(false);
+    if (!result.success) {
+      setError(result.error ?? 'Erreur de connexion');
+    }
+    // On success, AuthContext state changes → Index.tsx re-renders to show inbox
   };
-}
 
-const mockAccounts: Account[] = [
-  {
-    id: '1',
-    name: 'RONDOT – Production',
-    type: 'Production',
-    connectors: { sap: true, microsoft: true, salesforce: false }
-  },
-  {
-    id: '2',
-    name: 'RONDOT – Démo',
-    type: 'Démo',
-    connectors: { sap: true, microsoft: true, salesforce: true }
-  },
-  {
-    id: '3',
-    name: 'Compte Test',
-    type: 'Test',
-    connectors: { sap: false, microsoft: true, salesforce: false }
-  }
-];
-
-interface AccountSelectionProps {
-  onSelectAccount: (account: Account) => void;
-}
-
-export const AccountSelection = ({ onSelectAccount }: AccountSelectionProps) => {
   return (
     <div className="min-h-screen bg-background flex flex-col">
       {/* Header */}
@@ -49,100 +40,87 @@ export const AccountSelection = ({ onSelectAccount }: AccountSelectionProps) => 
             <span className="text-primary-foreground font-bold text-sm">N</span>
           </div>
           <span className="font-semibold text-lg">NOVA</span>
-          <Badge variant="outline" className="ml-2">RONDOT</Badge>
         </div>
       </header>
 
-      {/* Main Content */}
+      {/* Login form */}
       <main className="flex-1 flex items-center justify-center p-6">
-        <div className="w-full max-w-2xl">
-          <div className="text-center mb-8">
-            <h1 className="text-3xl font-bold text-foreground mb-2">
-              Sélection du compte
-            </h1>
-            <p className="text-muted-foreground">
-              Choisissez l'environnement sur lequel travailler
-            </p>
-          </div>
+        <Card className="w-full max-w-sm">
+          <CardHeader className="text-center">
+            <CardTitle className="text-2xl">Connexion</CardTitle>
+            <CardDescription>Entrez vos identifiants SAP pour accéder à NOVA</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="username">Identifiant SAP</Label>
+                <Input
+                  id="username"
+                  type="text"
+                  value={username}
+                  onChange={e => setUsername(e.target.value)}
+                  placeholder="manager"
+                  required
+                  disabled={isLoading}
+                  autoComplete="username"
+                />
+              </div>
 
-          <div className="space-y-4">
-            {mockAccounts.map((account) => (
-              <Card 
-                key={account.id} 
-                className="cursor-pointer hover:border-primary/50 hover:shadow-md transition-all"
-                onClick={() => onSelectAccount(account)}
+              <div className="space-y-2">
+                <Label htmlFor="password">Mot de passe SAP</Label>
+                <Input
+                  id="password"
+                  type="password"
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  required
+                  disabled={isLoading}
+                  autoComplete="current-password"
+                />
+              </div>
+
+              {/* Société collapsible */}
+              <button
+                type="button"
+                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                onClick={() => setShowCompany(v => !v)}
               >
-                <CardHeader className="pb-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="h-10 w-10 rounded-lg bg-muted flex items-center justify-center">
-                        <Building2 className="h-5 w-5 text-muted-foreground" />
-                      </div>
-                      <div>
-                        <CardTitle className="text-lg">{account.name}</CardTitle>
-                        <CardDescription>
-                          {account.type === 'Production' && 'Environnement de production'}
-                          {account.type === 'Démo' && 'Environnement de démonstration'}
-                          {account.type === 'Test' && 'Environnement de test'}
-                        </CardDescription>
-                      </div>
-                    </div>
-                    <Badge 
-                      variant={account.type === 'Production' ? 'default' : 'secondary'}
-                    >
-                      {account.type}
-                    </Badge>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex items-center gap-2 mb-4">
-                    <span className="text-sm text-muted-foreground mr-2">Connecteurs :</span>
-                    
-                    <Badge 
-                      variant={account.connectors.sap ? 'default' : 'outline'} 
-                      className={!account.connectors.sap ? 'opacity-40' : ''}
-                    >
-                      {account.connectors.sap ? (
-                        <CheckCircle className="h-3 w-3 mr-1" />
-                      ) : (
-                        <Circle className="h-3 w-3 mr-1" />
-                      )}
-                      SAP
-                    </Badge>
-                    
-                    <Badge 
-                      variant={account.connectors.microsoft ? 'default' : 'outline'}
-                      className={!account.connectors.microsoft ? 'opacity-40' : ''}
-                    >
-                      {account.connectors.microsoft ? (
-                        <CheckCircle className="h-3 w-3 mr-1" />
-                      ) : (
-                        <Circle className="h-3 w-3 mr-1" />
-                      )}
-                      Microsoft
-                    </Badge>
-                    
-                    <Badge 
-                      variant={account.connectors.salesforce ? 'default' : 'outline'}
-                      className={!account.connectors.salesforce ? 'opacity-40' : ''}
-                    >
-                      {account.connectors.salesforce ? (
-                        <CheckCircle className="h-3 w-3 mr-1" />
-                      ) : (
-                        <Circle className="h-3 w-3 mr-1" />
-                      )}
-                      Salesforce
-                    </Badge>
-                  </div>
-                  
-                  <Button className="w-full" onClick={() => onSelectAccount(account)}>
-                    Entrer dans ce compte
-                  </Button>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </div>
+                {showCompany ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                Société SAP
+              </button>
+
+              {showCompany && (
+                <div className="space-y-2">
+                  <Label htmlFor="companyDb">Base de données SAP</Label>
+                  <Input
+                    id="companyDb"
+                    type="text"
+                    value={companyDb}
+                    onChange={e => setCompanyDb(e.target.value)}
+                    placeholder="RON_20260109"
+                    disabled={isLoading}
+                  />
+                </div>
+              )}
+
+              {error && (
+                <div className="flex items-center gap-2 text-sm text-destructive bg-destructive/10 px-3 py-2 rounded-md">
+                  <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                  {error}
+                </div>
+              )}
+
+              <Button type="submit" className="w-full" disabled={isLoading}>
+                {isLoading ? (
+                  <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Connexion en cours...</>
+                ) : (
+                  'Se connecter'
+                )}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
       </main>
     </div>
   );

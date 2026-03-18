@@ -33,6 +33,8 @@ from routes.routes_webhooks import router as webhooks_router
 from routes.routes_mail import router as mail_router
 from routes.routes_packing import router as packing_router
 from routes.routes_shipping import router as shipping_router
+from routes.routes_auth import router as auth_router
+from routes.routes_admin import router as admin_router
 from services.webhook_scheduler import start_webhook_scheduler, stop_webhook_scheduler
 
 if sys.platform == "win32":
@@ -69,6 +71,11 @@ async def lifespan(app: FastAPI):
         logger.info("=" * 50)
         logger.info("DEMARRAGE DE NOVA - Assistant IA pour Devis")
         logger.info("=" * 50)
+
+        # Initialisation de la base auth NOVA
+        from auth.auth_db import _init_db as init_auth_db
+        init_auth_db()
+        logger.info("nova_auth.db initialisee")
 
         # CORRECTION: Import et utilisation de la bonne classe
         from services.health_checker import HealthChecker
@@ -194,6 +201,11 @@ app.include_router(export_json_router)  # API export JSON pre-sap-quote avec mat
 app.include_router(export_json_v2_router)  # API export JSON v2 (réutilise analyse existante)
 app.include_router(packing_router)   # POST /api/packing/calculate — Colisage FFD
 app.include_router(shipping_router)  # POST /api/shipping/quote — Transport DHL Express
+app.include_router(auth_router)      # POST /api/auth/login|refresh|logout  GET /api/auth/me
+app.include_router(admin_router)     # GET/POST/PATCH/DELETE /api/admin/*
+
+from routes.routes_risk import router as risk_router
+app.include_router(risk_router)      # GET /api/risk-check
 # Route WebSocket pour l'assistant intelligent manquante
 @app.websocket("/ws/assistant/{task_id}")
 async def websocket_assistant_endpoint(websocket: WebSocket, task_id: str):
