@@ -27,26 +27,32 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
 
 # Mots-clés pour la détection rapide (pré-filtrage sans LLM)
 QUOTE_KEYWORDS_SUBJECT = [
-    'devis', 'quotation', 'quote', 'prix', 'price',
-    'rfq', 'request for quotation', 'demande de prix',
-    'offre de prix', 'chiffrage', 'tarif'
+    # Français
+    'devis', 'prix', 'rfq', 'demande de prix', 'offre de prix', 'chiffrage', 'tarif',
+    # Anglais
+    'quotation', 'quote', 'price', 'request for quotation', 'request for quote',
+    'spare parts', 'spare part', 'parts request', 'price request',
 ]
 
 QUOTE_KEYWORDS_BODY = [
-    'merci de nous faire un devis',
-    'please quote', 'please provide a quote',
-    'we would like a quotation',
-    'please send the offer', 'send the offer to',
-    'demande de prix', 'demande de devis',
-    'demande de chiffrage', 'demande chiffrage',
-    'pouvez-vous nous faire une offre',
-    'nous souhaitons recevoir une offre',
-    'could you quote', 'request for price',
-    'veuillez nous communiquer vos prix',
-    'souhaitons obtenir un devis',
-    'veuillez nous faire un chiffrage',
+    # Français
+    'merci de nous faire un devis', 'demande de prix', 'demande de devis',
+    'demande de chiffrage', 'demande chiffrage', 'pouvez-vous nous faire une offre',
+    'nous souhaitons recevoir une offre', 'veuillez nous communiquer vos prix',
+    'souhaitons obtenir un devis', 'veuillez nous faire un chiffrage',
     'pouvez-vous chiffrer', 'merci de chiffrer',
-    'veuillez trouver ci-joint', 'find attached', 'ci-joint la demande'
+    'veuillez trouver ci-joint', 'ci-joint la demande',
+    # Anglais — patterns courants dans les mails B2B industriels
+    'please quote', 'please provide a quote', 'could you quote',
+    'we would like a quotation', 'please send the offer', 'send the offer to',
+    'request for price', 'find attached', 'please find attached',
+    'could you please send us a quotation', 'send us a quotation',
+    'please send us a quotation', 'could you share a price quote',
+    'share a price quote', 'price quote for', 'quotation for the',
+    'kindly quote', 'kindly provide a quotation', 'kindly send a quotation',
+    'we need a quote', 'we need pricing', 'requesting a quote',
+    'please provide pricing', 'can you provide a quote',
+    'attached you will find', 'attached please find',
 ]
 
 QUANTITY_PATTERNS = [
@@ -79,7 +85,7 @@ class ExtractedQuoteData(BaseModel):
 
 
 class EmailAnalysisResult(BaseModel):
-    classification: str  # QUOTE_REQUEST, INFORMATION, OTHER
+    classification: str  # QUOTE_REQUEST, PROBABLE_QUOTE, INFORMATION, OTHER
     confidence: str  # high, medium, low
     is_quote_request: bool
     reasoning: str
@@ -104,9 +110,12 @@ class EmailAnalysisResult(BaseModel):
     # Référence commande client (Form No, PO No, etc.) → utilisée dans NumAtCard SAP
     customer_reference: Optional[str] = None
 
+    # Risque client (vérification Pappers — non bloquant)
+    client_risk: Optional[dict] = None  # {status, reason, source, raw}
+
 
 # Prompt LLM pour l'analyse des emails
-EMAIL_CLASSIFICATION_PROMPT = """Tu es un assistant spécialisé dans la classification des emails commerciaux pour une entreprise industrielle.
+EMAIL_CLASSIFICATION_PROMPT = """Tu es un assistant spécialisé dans la classification des emails commerciaux pour une entreprise industrielle (RONDOT-SAS, fabricant de pièces industrielles).
 
 Analyse cet email et détermine:
 1. S'il s'agit d'une DEMANDE DE DEVIS (quote request) - un client qui demande des prix pour des produits/services
@@ -114,15 +123,22 @@ Analyse cet email et détermine:
 3. Les informations extraites si c'est une demande de devis
 
 TYPES DE CLASSIFICATION:
-- "QUOTE_REQUEST": Demande de devis, RFQ, demande de prix, demande de chiffrage
+- "QUOTE_REQUEST": Demande de devis explicite, RFQ, demande de prix, demande de chiffrage (confiance haute)
+- "PROBABLE_QUOTE": Email qui ressemble fortement à une demande de devis sans formulation explicite : pièces jointes techniques avec liste de pièces, forward d'un client demandant des prix, références produits industrielles + expéditeur professionnel, email en langue étrangère avec contexte commercial (confiance moyenne)
 - "INFORMATION": Email informatif, confirmation de meeting, newsletter, notification
 - "OTHER": Facture, commande confirmée, réclamation, autre type d'email
 
-INDICES D'UNE DEMANDE DE DEVIS:
-- Phrases comme "merci de nous faire un devis", "please quote", "demande de prix"
-- Liste de produits avec quantités
-- Demande de délai de livraison
-- Mention de références produits ou spécifications techniques
+INDICES D'UNE DEMANDE DE DEVIS (toutes langues acceptées — français, anglais, allemand, turc, etc.) :
+- Phrases explicites : "merci de nous faire un devis", "please quote", "demande de prix", "could you send us a quotation", "please share a price quote", "kindly provide pricing"
+- Email forwardé (Fwd:/FW:) d'un client industriel avec liste de pièces ou références
+- Corps contenant une liste de références produits / pièces détachées avec quantités
+- Demande de délai de livraison ou de disponibilité stock
+- Pièces jointes mentionnées (Excel, PDF) avec liste d'articles à chiffrer
+
+ATTENTION :
+- Un sujet technique (ex: numéro de commande, référence longue) ne disqualifie PAS un email : analyser LE CORPS
+- Les emails en anglais ou dans d'autres langues doivent être traités comme les emails en français
+- Un email forwardé doit être analysé sur le contenu forwardé, pas sur l'en-tête de transfert
 
 EXTRACTION DES INFORMATIONS CLIENT (important pour validation):
 - Nom entreprise: chercher dans la signature ou le corps de l'email
@@ -150,7 +166,7 @@ RÈGLES CRITIQUES POUR LES QUANTITÉS:
 
 Réponds UNIQUEMENT en JSON valide (pas de texte avant ou après):
 {
-  "classification": "QUOTE_REQUEST|INFORMATION|OTHER",
+  "classification": "QUOTE_REQUEST|PROBABLE_QUOTE|INFORMATION|OTHER",
   "confidence": "high|medium|low",
   "is_quote_request": true|false,
   "reasoning": "Explication courte de la classification",
@@ -309,15 +325,16 @@ CONTENU:
                 and quick_result["confidence"] in ("high", "medium")
                 and not analysis.is_quote_request
             ):
+                # Pré-filtrage détecte un devis mais LLM dit non → PROBABLE_QUOTE (pas forçage direct)
                 logger.info(
                     f"Override LLM: pre-filter detected quote (score={quick_result['score']}, "
-                    f"rules={quick_result['matched_rules'][:3]}) -> forcing QUOTE_REQUEST"
+                    f"rules={quick_result['matched_rules'][:3]}) -> upgrading to PROBABLE_QUOTE"
                 )
-                analysis.classification = "QUOTE_REQUEST"
+                analysis.classification = "PROBABLE_QUOTE"
                 analysis.is_quote_request = True
-                analysis.confidence = "high"  # afficher confiance élevée pour le bouton Traiter
+                analysis.confidence = "medium"
                 analysis.reasoning = (
-                    f"Règle métier: {', '.join(quick_result['matched_rules'][:3])}. "
+                    f"Probable devis (règles métier): {', '.join(quick_result['matched_rules'][:3])}. "
                     f"{analysis.reasoning or ''}"
                 )[:500]
 
@@ -439,10 +456,14 @@ CONTENU:
                 notes=ed.get("notes")
             )
 
+        classification = data.get("classification", "OTHER")
+        # PROBABLE_QUOTE → traité comme un devis (pipeline complet) mais conserve la classification
+        is_quote_request = data.get("is_quote_request", False) or classification == "PROBABLE_QUOTE"
+
         return EmailAnalysisResult(
-            classification=data.get("classification", "OTHER"),
+            classification=classification,
             confidence=data.get("confidence", "low"),
-            is_quote_request=data.get("is_quote_request", False),
+            is_quote_request=is_quote_request,
             reasoning=data.get("reasoning", ""),
             extracted_data=extracted_data
         )

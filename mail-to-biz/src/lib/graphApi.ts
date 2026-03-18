@@ -1,4 +1,5 @@
 // API Client pour Microsoft Graph (via backend NOVA-SERVER)
+import { fetchWithAuth } from './fetchWithAuth';
 
 const GRAPH_API_BASE = '/api/graph';
 
@@ -95,8 +96,19 @@ export interface ProductMatch {
   // TODO: volume — champ SAP non identifié (SVolume1 potentiel, à valider)
 }
 
+export type ClientRiskStatus = 'OK' | 'WARNING' | 'BLOCKED' | 'UNKNOWN';
+
+export interface ClientRisk {
+  status: ClientRiskStatus;
+  label: string;
+  reason?: string;
+  source?: string;
+  checked_at?: string;
+  country: 'FR' | 'OTHER';
+}
+
 export interface EmailAnalysisResult {
-  classification: 'QUOTE_REQUEST' | 'INFORMATION' | 'OTHER';
+  classification: 'QUOTE_REQUEST' | 'PROBABLE_QUOTE' | 'INFORMATION' | 'OTHER';
   confidence: 'high' | 'medium' | 'low';
   is_quote_request: boolean;
   reasoning: string;
@@ -110,6 +122,7 @@ export interface EmailAnalysisResult {
   requires_user_choice?: boolean;
   user_choice_reason?: string;
   customer_reference?: string;  // Référence commande client (Form No, PO No…) → NumAtCard SAP
+  client_risk?: ClientRisk;     // Vérification solvabilité Pappers
 }
 
 export interface ApiResponse<T> {
@@ -137,7 +150,7 @@ export async function testGraphConnection(): Promise<{
   };
 }> {
   try {
-    const response = await fetch(`${GRAPH_API_BASE}/test-connection`);
+    const response = await fetchWithAuth(`${GRAPH_API_BASE}/test-connection`);
     return await response.json();
   } catch (error) {
     return {
@@ -168,7 +181,7 @@ export async function fetchGraphEmails(options?: {
     if (options?.skip) params.append('skip', options.skip.toString());
     if (options?.unreadOnly) params.append('unread_only', 'true');
 
-    const response = await fetch(`${GRAPH_API_BASE}/emails?${params}`);
+    const response = await fetchWithAuth(`${GRAPH_API_BASE}/emails?${params}`);
 
     if (!response.ok) {
       const error = await response.json();
@@ -185,7 +198,7 @@ export async function fetchGraphEmails(options?: {
 // Récupérer un email complet
 export async function fetchGraphEmail(messageId: string): Promise<ApiResponse<GraphEmail>> {
   try {
-    const response = await fetch(`${GRAPH_API_BASE}/emails/${encodeURIComponent(messageId)}`);
+    const response = await fetchWithAuth(`${GRAPH_API_BASE}/emails/${encodeURIComponent(messageId)}`);
 
     if (!response.ok) {
       const error = await response.json();
@@ -204,7 +217,7 @@ export async function fetchGraphAttachments(
   messageId: string
 ): Promise<ApiResponse<GraphAttachment[]>> {
   try {
-    const response = await fetch(
+    const response = await fetchWithAuth(
       `${GRAPH_API_BASE}/emails/${encodeURIComponent(messageId)}/attachments`
     );
 
@@ -226,7 +239,7 @@ export async function fetchAttachmentContent(
   attachmentId: string
 ): Promise<ApiResponse<{ content_base64: string; content_type: string; filename: string; size: number }>> {
   try {
-    const response = await fetch(
+    const response = await fetchWithAuth(
       `${GRAPH_API_BASE}/emails/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}/content`
     );
 
@@ -249,7 +262,7 @@ export async function analyzeGraphEmail(
 ): Promise<ApiResponse<EmailAnalysisResult>> {
   try {
     const params = force ? '?force=true' : '';
-    const response = await fetch(
+    const response = await fetchWithAuth(
       `${GRAPH_API_BASE}/emails/${encodeURIComponent(messageId)}/analyze${params}`,
       { method: 'POST' }
     );
@@ -271,7 +284,7 @@ export async function getGraphEmailAnalysis(
   messageId: string
 ): Promise<ApiResponse<EmailAnalysisResult | null>> {
   try {
-    const response = await fetch(
+    const response = await fetchWithAuth(
       `${GRAPH_API_BASE}/emails/${encodeURIComponent(messageId)}/analysis`
     );
 
@@ -290,7 +303,7 @@ export async function getGraphEmailAnalysis(
 // Marquer un email comme lu
 export async function markGraphEmailAsRead(messageId: string): Promise<ApiResponse<boolean>> {
   try {
-    const response = await fetch(
+    const response = await fetchWithAuth(
       `${GRAPH_API_BASE}/emails/${encodeURIComponent(messageId)}/mark-read`,
       { method: 'POST' }
     );
@@ -365,7 +378,7 @@ export async function updateDecisionPrice(
   reason?: string,
   modifiedBy?: string
 ): Promise<PriceUpdateResult> {
-  const response = await fetch(`/api/validations/decisions/${decisionId}/update-price`, {
+  const response = await fetchWithAuth(`/api/validations/decisions/${decisionId}/update-price`, {
     method: 'PATCH',
     headers: {
       'Content-Type': 'application/json',
@@ -400,7 +413,7 @@ export interface RecalculatePricingResult {
  * Utile pour les emails analysés avant l'implémentation de la Phase 5
  */
 export async function recalculatePricing(emailId: string): Promise<RecalculatePricingResult> {
-  const response = await fetch(`${GRAPH_API_BASE}/emails/${emailId}/recalculate-pricing`, {
+  const response = await fetchWithAuth(`${GRAPH_API_BASE}/emails/${emailId}/recalculate-pricing`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -442,7 +455,7 @@ export interface StoredAttachmentsResponse {
 export async function fetchStoredAttachments(
   emailId: string
 ): Promise<StoredAttachmentsResponse> {
-  const response = await fetch(
+  const response = await fetchWithAuth(
     `${GRAPH_API_BASE}/emails/stored-attachments?email_id=${encodeURIComponent(emailId)}`
   );
   if (!response.ok) throw new Error(`Erreur ${response.status}`);
@@ -453,7 +466,7 @@ export async function fetchStoredAttachments(
 export async function triggerAttachmentStorage(
   emailId: string
 ): Promise<StoredAttachmentsResponse> {
-  const response = await fetch(
+  const response = await fetchWithAuth(
     `${GRAPH_API_BASE}/emails/store-attachments?email_id=${encodeURIComponent(emailId)}`,
     { method: 'POST' }
   );
@@ -491,7 +504,7 @@ export interface CorrectionsResponse {
 
 /** Récupère les corrections manuelles pour un email. */
 export async function fetchCorrections(emailId: string): Promise<CorrectionsResponse> {
-  const response = await fetch(
+  const response = await fetchWithAuth(
     `${GRAPH_API_BASE}/emails/corrections?email_id=${encodeURIComponent(emailId)}`
   );
   if (!response.ok) throw new Error(`Erreur ${response.status}`);
@@ -503,7 +516,7 @@ export async function saveCorrections(
   emailId: string,
   corrections: Omit<QuoteCorrection, 'id' | 'email_id' | 'corrected_at'>[]
 ): Promise<CorrectionsResponse> {
-  const response = await fetch(
+  const response = await fetchWithAuth(
     `${GRAPH_API_BASE}/emails/corrections?email_id=${encodeURIComponent(emailId)}`,
     {
       method: 'PUT',
@@ -561,7 +574,7 @@ export async function excludeProduct(
   itemCode: string,
   reason?: string
 ): Promise<ExcludeProductResult> {
-  const response = await fetch(
+  const response = await fetchWithAuth(
     `${GRAPH_API_BASE}/emails/${encodeURIComponent(emailId)}/products/${encodeURIComponent(itemCode)}/exclude`,
     {
       method: 'POST',
@@ -582,7 +595,7 @@ export async function setManualCode(
   itemCode: string,
   rondotCode: string
 ): Promise<ManualCodeResult> {
-  const response = await fetch(
+  const response = await fetchWithAuth(
     `${GRAPH_API_BASE}/emails/${encodeURIComponent(emailId)}/products/${encodeURIComponent(itemCode)}/manual-code`,
     {
       method: 'POST',
@@ -603,7 +616,7 @@ export async function updateProductQuantity(
   itemCode: string,
   quantity: number
 ): Promise<{ status: string; item_code: string; quantity: number }> {
-  const response = await fetch(
+  const response = await fetchWithAuth(
     `${GRAPH_API_BASE}/emails/${encodeURIComponent(emailId)}/products/${encodeURIComponent(itemCode)}/quantity`,
     {
       method: 'PATCH',
@@ -632,7 +645,7 @@ export interface DraftState {
 
 /** Charge l'état UI sauvegardé pour un devis. */
 export async function loadDraftState(emailId: string): Promise<DraftState> {
-  const response = await fetch(
+  const response = await fetchWithAuth(
     `${GRAPH_API_BASE}/emails/${encodeURIComponent(emailId)}/draft-state`
   );
   if (!response.ok) return { found: false };
@@ -650,7 +663,7 @@ export async function saveDraftState(
     transport_price_override?: number | null;
   }
 ): Promise<void> {
-  await fetch(
+  await fetchWithAuth(
     `${GRAPH_API_BASE}/emails/${encodeURIComponent(emailId)}/draft-state`,
     {
       method: 'PATCH',
@@ -674,10 +687,11 @@ export interface ManualQuoteItem {
 
 export interface ManualQuotePayload {
   source: 'manual';
-  client: string; // card_code SAP
+  client?: string; // card_code SAP (optionnel si body_text fourni)
   client_name?: string;
-  items: ManualQuoteItem[];
+  items?: ManualQuoteItem[];
   notes?: string;
+  body_text?: string; // Texte libre → analyse LLM
 }
 
 export interface ManualQuoteResult {
@@ -689,7 +703,7 @@ export interface ManualQuoteResult {
 export async function createManualQuoteRequest(
   payload: ManualQuotePayload
 ): Promise<ManualQuoteResult> {
-  const response = await fetch(`${GRAPH_API_BASE}/emails/manual-request`, {
+  const response = await fetchWithAuth(`${GRAPH_API_BASE}/emails/manual-request`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -704,7 +718,7 @@ export async function createManualQuoteRequest(
 /** Récupère la liste des demandes manuelles (format GraphEmail). */
 export async function fetchManualRequests(): Promise<ApiResponse<GraphEmailsResponse>> {
   try {
-    const response = await fetch(`${GRAPH_API_BASE}/emails/manual-list`);
+    const response = await fetchWithAuth(`${GRAPH_API_BASE}/emails/manual-list`);
     if (!response.ok) {
       const error = await response.json();
       return { success: false, error: error.detail || `Erreur ${response.status}` };
@@ -722,7 +736,7 @@ export async function retrySearchProduct(
   itemCode: string,
   searchQuery?: string
 ): Promise<RetrySearchResult> {
-  const response = await fetch(
+  const response = await fetchWithAuth(
     `${GRAPH_API_BASE}/emails/${encodeURIComponent(emailId)}/products/${encodeURIComponent(itemCode)}/retry-search`,
     {
       method: 'POST',

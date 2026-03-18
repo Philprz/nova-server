@@ -1,3 +1,4 @@
+import { fetchWithAuth } from '@/lib/fetchWithAuth';
 /**
  * ShippingCalculatorPanel
  * ─────────────────────────────────────────────────────────────────────────────
@@ -246,7 +247,7 @@ export function ShippingCalculatorPanel({
         declared_value: '100',
       });
 
-      const response = await fetch(
+      const response = await fetchWithAuth(
         `/api/packing/calculate-and-ship?${params.toString()}`,
         {
           method: 'POST',
@@ -340,7 +341,7 @@ export function ShippingCalculatorPanel({
         declared_value: '100',
       });
 
-      const response = await fetch(
+      const response = await fetchWithAuth(
         `/api/packing/custom-and-ship?${params.toString()}`,
         {
           method: 'POST',

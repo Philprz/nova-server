@@ -1,5 +1,7 @@
+import { fetchWithAuth } from '@/lib/fetchWithAuth';
 import { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, CheckCircle, Calculator, FileText, TrendingUp, Building2, Package, Search, Loader2, UserCheck, UserPlus, AlertCircle, AlertTriangle, RefreshCw, Mail, Paperclip, RotateCcw, X, Pencil, Plus } from 'lucide-react';
+import { ArrowLeft, CheckCircle, Calculator, FileText, TrendingUp, Building2, Package, Search, Loader2, UserCheck, UserPlus, AlertCircle, AlertTriangle, RefreshCw, Mail, Paperclip, RotateCcw, X, Pencil, Plus, XCircle } from 'lucide-react';
+import { ClientRiskBadge } from './ClientRiskBadge';
 import { ProcessedEmail } from '@/types/email';
 import { CreateItemDialog } from './CreateItemDialog';
 import { PriceEditorDialog } from './PriceEditorDialog';
@@ -151,6 +153,10 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
 
   // Articles extraits avec enrichissement automatique des prix
   const [enrichedArticles, setEnrichedArticles] = useState<any[]>([]);
+
+  // État pour le blocage client en liquidation judiciaire
+  const [forceBlocked, setForceBlocked] = useState(false);
+  const [showBlockedConfirm, setShowBlockedConfirm] = useState(false);
 
   // Marge par défaut RONDOT-SAS (min 35%, cible 40%, max 45%)
   const margin = 40;
@@ -530,7 +536,7 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
     setSearchPerformed(true);
 
     try {
-      const response = await fetch(`/api/clients/search_clients?q=${encodeURIComponent(query)}&source=sap&limit=10`);
+      const response = await fetchWithAuth(`/api/clients/search_clients?q=${encodeURIComponent(query)}&source=sap&limit=10`);
 
       if (response.ok) {
         const data = await response.json();
@@ -787,7 +793,7 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
 
     try {
       // Rechercher l'article dans SAP par ItemCode
-      const response = await fetch(`/api/sap/items?search=${encodeURIComponent(itemCode)}&limit=1`);
+      const response = await fetchWithAuth(`/api/sap/items?search=${encodeURIComponent(itemCode)}&limit=1`);
 
       if (response.ok) {
         const data = await response.json();
@@ -935,6 +941,8 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
               {clientStatus.label}
             </Badge>
           </CardTitle>
+          {/* Vérification solvabilité */}
+          <ClientRiskBadge risk={(quote.analysisResult as any)?.client_risk} />
         </CardHeader>
         <CardContent className="space-y-4">
           {/* Informations client détectées */}
@@ -1913,36 +1921,79 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
             return line.unit_price == null;
           });
           const alreadySent = existingQuote?.found === true;
-          const isDisabled = !doc || articles.length === 0 || (!selectedClient && !createNewClient) || hasUnresolved || hasUncalculatedPrices || isPreviewing;
-          const label = alreadySent
-            ? `Recréer (N° ${existingQuote?.sap_doc_num ?? '?'})`
-            : !selectedClient && !createNewClient
-              ? 'Sélectionnez un client'
-              : hasUnresolved
-                ? 'Résolvez les articles non trouvés'
-                : hasUncalculatedPrices
-                  ? 'Saisissez les prix manquants'
-                  : isPreviewing
-                    ? 'Préparation...'
-                    : articles.length > 0
-                      ? 'Créer le devis SAP'
-                      : 'Extraction incomplète';
+          const clientRisk = (quote.analysisResult as any)?.client_risk;
+          const isClientBlocked = clientRisk?.status === 'BLOCKED';
+          const isDisabled = !doc || articles.length === 0 || (!selectedClient && !createNewClient) || hasUnresolved || hasUncalculatedPrices || isPreviewing || (isClientBlocked && !forceBlocked);
+          const label = isClientBlocked && !forceBlocked
+            ? 'Client en liquidation – création bloquée'
+            : alreadySent
+              ? `Recréer (N° ${existingQuote?.sap_doc_num ?? '?'})`
+              : !selectedClient && !createNewClient
+                ? 'Sélectionnez un client'
+                : hasUnresolved
+                  ? 'Résolvez les articles non trouvés'
+                  : hasUncalculatedPrices
+                    ? 'Saisissez les prix manquants'
+                    : isPreviewing
+                      ? 'Préparation...'
+                      : articles.length > 0
+                        ? 'Créer le devis SAP'
+                        : 'Extraction incomplète';
           return (
-            <Button
-              onClick={handlePreviewQuote}
-              size="lg"
-              disabled={isDisabled}
-              variant={alreadySent ? 'outline' : 'default'}
-              className={alreadySent ? 'border-yellow-500 text-yellow-700 hover:bg-yellow-50' : ''}
-            >
-              {isPreviewing
-                ? <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                : alreadySent
-                  ? <AlertTriangle className="w-4 h-4 mr-2 text-yellow-600" />
-                  : <CheckCircle className="w-4 h-4 mr-2" />
-              }
-              {label}
-            </Button>
+            <div className="flex flex-col items-end gap-2">
+              {isClientBlocked && !forceBlocked && (
+                <button
+                  type="button"
+                  className="text-xs text-muted-foreground underline underline-offset-2 hover:text-destructive transition-colors"
+                  onClick={() => setShowBlockedConfirm(true)}
+                >
+                  Forcer la création malgré la liquidation
+                </button>
+              )}
+              <Button
+                onClick={handlePreviewQuote}
+                size="lg"
+                disabled={isDisabled}
+                variant={isClientBlocked && !forceBlocked ? 'destructive' : alreadySent ? 'outline' : 'default'}
+                className={alreadySent && !(isClientBlocked && !forceBlocked) ? 'border-yellow-500 text-yellow-700 hover:bg-yellow-50' : ''}
+              >
+                {isPreviewing
+                  ? <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  : isClientBlocked && !forceBlocked
+                    ? <XCircle className="w-4 h-4 mr-2" />
+                    : alreadySent
+                      ? <AlertTriangle className="w-4 h-4 mr-2 text-yellow-600" />
+                      : <CheckCircle className="w-4 h-4 mr-2" />
+                }
+                {label}
+              </Button>
+              {/* Modale de confirmation forçage */}
+              <Dialog open={showBlockedConfirm} onOpenChange={setShowBlockedConfirm}>
+                <DialogContent className="max-w-sm">
+                  <DialogHeader>
+                    <DialogTitle className="flex items-center gap-2 text-destructive">
+                      <AlertTriangle className="w-5 h-5" />
+                      Confirmation requise
+                    </DialogTitle>
+                    <DialogDescription>
+                      Ce client est en <strong>liquidation judiciaire</strong> selon Pappers.
+                      Créer un devis présente un risque financier élevé.
+                      <br /><br />
+                      Confirmez-vous la création malgré ce risque ?
+                    </DialogDescription>
+                  </DialogHeader>
+                  <DialogFooter className="gap-2">
+                    <Button variant="outline" onClick={() => setShowBlockedConfirm(false)}>Annuler</Button>
+                    <Button
+                      variant="destructive"
+                      onClick={() => { setForceBlocked(true); setShowBlockedConfirm(false); }}
+                    >
+                      Forcer la création
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+            </div>
           );
         })()}
       </div>

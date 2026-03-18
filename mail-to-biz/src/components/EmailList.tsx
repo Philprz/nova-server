@@ -9,6 +9,7 @@ import { fr } from 'date-fns/locale';
 interface EmailListProps {
   emails: ProcessedEmail[];
   onSelectQuote: (quote: ProcessedEmail) => void;
+  onAnalyze?: (item: ProcessedEmail) => Promise<void>;
   analyzingEmailId?: string | null;
   processedIds?: Set<string>;
   processedMeta?: Record<string, { sapDocNum?: number; createdAt: string }>;
@@ -20,7 +21,7 @@ interface EmailListProps {
 }
 
 export function EmailList({
-  emails, onSelectQuote, analyzingEmailId, processedIds, processedMeta, onReanalyze,
+  emails, onSelectQuote, onAnalyze, analyzingEmailId, processedIds, processedMeta, onReanalyze,
   archivedIds, starredIds, onArchive, onStar,
 }: EmailListProps) {
   return (
@@ -80,6 +81,7 @@ export function EmailList({
                 {/* Contenu email */}
                 <div className="flex-1 min-w-0" onClick={() => {
                   if (item.isQuote) onSelectQuote(item);
+                  else if (onAnalyze) onAnalyze(item);
                 }}>
                   <div className="flex items-center gap-2 mb-1">
                     <span className={`font-medium ${item.email.isRead ? 'text-muted-foreground' : 'text-foreground'}`}>
@@ -124,10 +126,17 @@ export function EmailList({
                         </Badge>
                       )}
                       {!isProcessed && (
-                        <Badge className="status-badge-quote">
-                          <FileText className="w-3 h-3 mr-1" />
-                          Devis détecté
-                        </Badge>
+                        item.analysisResult?.classification === 'PROBABLE_QUOTE' ? (
+                          <Badge className="bg-amber-100 text-amber-700 border border-amber-300">
+                            <FileText className="w-3 h-3 mr-1" />
+                            Probable devis
+                          </Badge>
+                        ) : (
+                          <Badge className="status-badge-quote">
+                            <FileText className="w-3 h-3 mr-1" />
+                            Devis détecté
+                          </Badge>
+                        )
                       )}
                       {!isProcessed && !isManual && (
                         <Badge
@@ -182,7 +191,23 @@ export function EmailList({
                       )}
                     </>
                   ) : (
-                    <Badge variant="secondary">Non pertinent</Badge>
+                    <>
+                      <Badge variant="secondary">Non pertinent</Badge>
+                      {onAnalyze && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={analyzingEmailId === item.email.id}
+                          onClick={(e) => { e.stopPropagation(); onAnalyze(item); }}
+                        >
+                          {analyzingEmailId === item.email.id ? (
+                            <><Loader2 className="w-3 h-3 mr-1 animate-spin" />Analyse...</>
+                          ) : (
+                            <><RefreshCw className="w-3 h-3 mr-1" />Analyser</>
+                          )}
+                        </Button>
+                      )}
+                    </>
                   )}
 
                   {/* Ligne d'actions rapides : étoile + archive */}

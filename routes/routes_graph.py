@@ -10,11 +10,12 @@ import httpx
 import asyncio
 import time
 from datetime import datetime
-from fastapi import APIRouter, HTTPException, Query, Body
+from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from pydantic import BaseModel
 from typing import Optional, List
 from dotenv import load_dotenv
 
+from auth.dependencies import get_current_user
 from services.graph_service import get_graph_service, GraphEmail, GraphAttachment, GraphEmailsResponse, GraphAPIError
 from services.email_analyzer import get_email_analyzer, extract_pdf_text, EmailAnalysisResult, ExtractedQuoteData, ExtractedProduct
 from services.email_matcher import get_email_matcher
@@ -23,7 +24,7 @@ from services.duplicate_detector import get_duplicate_detector, DuplicateType, Q
 load_dotenv()
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 # Cache simple pour les résultats d'analyse (en production, utiliser Redis)
 _analysis_cache: dict = {}
@@ -425,17 +426,19 @@ class ManualQuoteItem(BaseModel):
 
 class ManualQuotePayload(BaseModel):
     source: str = "manual"
-    client: str  # card_code SAP
+    client: Optional[str] = None  # card_code SAP (optionnel si body_text fourni)
     client_name: Optional[str] = None
-    items: List[ManualQuoteItem]
+    items: List[ManualQuoteItem] = []
     notes: Optional[str] = None
+    body_text: Optional[str] = None  # Texte libre → passe par le LLM
 
 
 @router.post("/emails/manual-request")
 async def create_manual_quote_request(payload: ManualQuotePayload):
     """
     Crée une demande de devis manuelle (saisie téléphonique / oral).
-    Passe dans le même pipeline que les emails (matching SAP + pricing).
+    - Si body_text fourni : passe par le LLM (même pipeline que les emails).
+    - Sinon : construction directe depuis client + items (saisie guidée).
     Retourne { email_id, analysis_result }.
     """
     import uuid
@@ -443,13 +446,90 @@ async def create_manual_quote_request(payload: ManualQuotePayload):
     from services.email_analysis_db import get_email_analysis_db
     from services.sap_cache_db import SAPCacheDB
 
+    if not payload.body_text and not payload.client:
+        raise HTTPException(status_code=400, detail="body_text ou client requis")
+
     # Générer un ID unique préfixé "manual_"
     ts = dt.now().strftime("%Y%m%d_%H%M%S")
     short_id = uuid.uuid4().hex[:8]
     email_id = f"manual_{ts}_{short_id}"
 
-    # Résoudre les noms depuis le cache SAP si absents
+    db = get_email_analysis_db()
     cache = SAPCacheDB()
+
+    # ── Mode texte libre → LLM ──────────────────────────────────────────────────
+    if payload.body_text:
+        from services.email_analyzer import get_email_analyzer
+        from services.email_matcher import get_email_matcher
+
+        body_text = payload.body_text.strip()
+        subject = body_text[:80].replace("\n", " ") + ("…" if len(body_text) > 80 else "")
+        subject = f"Demande manuelle — {subject}"
+
+        email_analyzer = get_email_analyzer()
+        matcher = get_email_matcher()
+
+        import asyncio as _asyncio
+        llm_task = email_analyzer.analyze_email(
+            subject=subject,
+            body=body_text,
+            sender_email="saisie.manuelle@rondot.fr",
+            sender_name=payload.client_name or "Saisie manuelle",
+            pdf_contents=[],
+        )
+        clean_text = email_analyzer._clean_html(body_text)
+        match_task = matcher.match_email(
+            body=clean_text,
+            sender_email="saisie.manuelle@rondot.fr",
+        )
+        llm_result, match_result = await _asyncio.gather(llm_task, match_task, return_exceptions=True)
+
+        if isinstance(llm_result, Exception):
+            raise HTTPException(status_code=500, detail=f"Erreur analyse LLM : {llm_result}")
+
+        analysis_result = llm_result if isinstance(llm_result, dict) else llm_result.__dict__
+
+        # Fusionner le matching SAP si disponible
+        if not isinstance(match_result, Exception) and match_result:
+            product_matches = match_result if isinstance(match_result, list) else analysis_result.get("product_matches", [])
+        else:
+            product_matches = analysis_result.get("product_matches", [])
+
+        analysis_result["product_matches"] = product_matches
+
+        # Forcer le client si explicitement fourni dans le formulaire
+        if payload.client:
+            client_name = payload.client_name or cache.get_client_by_code(payload.client) or payload.client
+            if isinstance(client_name, dict):
+                client_name = client_name.get("CardName", payload.client)
+            if "extracted_data" not in analysis_result or not analysis_result["extracted_data"]:
+                analysis_result["extracted_data"] = {}
+            analysis_result["extracted_data"]["client_card_code"] = payload.client
+            analysis_result["extracted_data"]["client_name"] = client_name
+            if "client_matches" not in analysis_result:
+                analysis_result["client_matches"] = []
+            analysis_result["client_matches"].insert(0, {
+                "card_code": payload.client,
+                "card_name": client_name,
+                "score": 100,
+                "match_reason": "Saisie manuelle",
+            })
+            analysis_result["client_auto_validated"] = True
+
+        body_preview = body_text[:200]
+        client_for_db = payload.client or (analysis_result.get("extracted_data") or {}).get("client_card_code") or ""
+        client_name_for_db = payload.client_name or (analysis_result.get("extracted_data") or {}).get("client_name") or "Non identifié"
+
+        db.save_analysis(email_id=email_id, subject=subject,
+                         from_address="saisie.manuelle@rondot.fr", analysis_result=analysis_result)
+        db.save_manual_request(email_id=email_id, subject=subject, from_name="Saisie manuelle",
+                               body_preview=body_preview, client_card_code=client_for_db,
+                               client_name=client_name_for_db)
+
+        logger.info(f"Manual quote (free-text) created: {email_id}")
+        return {"email_id": email_id, "analysis_result": analysis_result}
+
+    # ── Mode saisie guidée (client + items explicites) ──────────────────────────
     client_name = payload.client_name
     if not client_name:
         sap_client = cache.get_client_by_code(payload.client)
@@ -1062,6 +1142,27 @@ async def analyze_email(message_id: str, force: bool = False):
             logger.warning(f"SAP matching/enrichment failed (non-blocking): {e}")
 
         logger.info(f"⚡ Phase 4 - Enrichissement: {(time.time()-t_phase)*1000:.0f}ms")
+
+        # === PHASE 4.5 : VÉRIFICATION RISQUE CLIENT (non bloquant) ===
+        t_phase = time.time()
+        try:
+            from services.risk_check_service import get_company_risk
+            _client_name = result.extracted_data.client_name if result.extracted_data else None
+            _client_siren = None
+            if result.extracted_data and hasattr(result.extracted_data, "client_siren"):
+                _client_siren = result.extracted_data.client_siren
+            if _client_name or _client_siren:
+                result.client_risk = await get_company_risk(
+                    company_name=_client_name,
+                    siren=_client_siren,
+                )
+                logger.info(
+                    "event=client_risk_check client=%s siren=%s risk_status=%s",
+                    _client_name, _client_siren, result.client_risk.get("status")
+                )
+        except Exception as _risk_err:
+            logger.warning(f"Phase 4.5 risk check failed (non-blocking): {_risk_err}")
+        logger.info(f"⚡ Phase 4.5 - Risk check: {(time.time()-t_phase)*1000:.0f}ms")
 
         # === NOUVELLE PHASE 5 : CALCUL AUTOMATIQUE DES PRIX ===
         t_phase = time.time()
