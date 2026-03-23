@@ -8,7 +8,8 @@
  * Si les PJ ne sont pas encore stockées localement, propose de les télécharger.
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { fetchWithAuth } from '@/lib/fetchWithAuth';
 import {
   File, FileText, Image, Download, Eye, Loader2,
   AlertCircle, RefreshCw, Paperclip
@@ -29,6 +30,15 @@ import {
   getStoredAttachmentUrl,
   StoredAttachment,
 } from '@/lib/graphApi';
+
+/** Télécharge une PJ via fetchWithAuth et crée un Blob URL temporaire. */
+async function fetchAttachmentBlob(emailId: string, attachmentId: string, download = false): Promise<string> {
+  const url = getStoredAttachmentUrl(emailId, attachmentId, download);
+  const r = await fetchWithAuth(url);
+  if (!r.ok) throw new Error(`Erreur ${r.status}`);
+  const blob = await r.blob();
+  return URL.createObjectURL(blob);
+}
 
 interface AttachmentsTabProps {
   emailId: string;
@@ -76,6 +86,30 @@ export function AttachmentsTab({ emailId, hasAttachments = true }: AttachmentsTa
   const [storing, setStoring] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [viewingAtt, setViewingAtt] = useState<StoredAttachment | null>(null);
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [blobLoading, setBlobLoading] = useState(false);
+  const prevBlobUrl = useRef<string | null>(null);
+
+  // Charge le blob quand on ouvre la visionneuse
+  useEffect(() => {
+    if (prevBlobUrl.current) { URL.revokeObjectURL(prevBlobUrl.current); prevBlobUrl.current = null; }
+    setBlobUrl(null);
+    if (!viewingAtt) return;
+    setBlobLoading(true);
+    fetchAttachmentBlob(emailId, viewingAtt.attachment_id)
+      .then(url => { prevBlobUrl.current = url; setBlobUrl(url); })
+      .catch(() => setBlobUrl(null))
+      .finally(() => setBlobLoading(false));
+  }, [viewingAtt]);
+
+  const handleDownload = async (att: StoredAttachment) => {
+    try {
+      const url = await fetchAttachmentBlob(emailId, att.attachment_id, true);
+      const a = document.createElement('a');
+      a.href = url; a.download = att.filename; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    } catch { /* silently fail */ }
+  };
 
   const loadAttachments = async () => {
     setLoading(true);
@@ -180,8 +214,6 @@ export function AttachmentsTab({ emailId, hasAttachments = true }: AttachmentsTa
           {/* Liste des PJ */}
           <div className="space-y-2">
             {attachments.map((att) => {
-              const serveUrl = getStoredAttachmentUrl(emailId, att.attachment_id);
-              const downloadUrl = getStoredAttachmentUrl(emailId, att.attachment_id, true);
 
               return (
                 <Card key={att.attachment_id} className="overflow-hidden">
@@ -218,12 +250,10 @@ export function AttachmentsTab({ emailId, hasAttachments = true }: AttachmentsTa
                             Visualiser
                           </Button>
                         )}
-                        <a href={downloadUrl} download={att.filename}>
-                          <Button variant="ghost" size="sm">
-                            <Download className="h-3.5 w-3.5 mr-1.5" />
-                            Télécharger
-                          </Button>
-                        </a>
+                        <Button variant="ghost" size="sm" onClick={() => handleDownload(att)}>
+                          <Download className="h-3.5 w-3.5 mr-1.5" />
+                          Télécharger
+                        </Button>
                       </div>
                     </div>
                   </CardContent>
@@ -246,31 +276,23 @@ export function AttachmentsTab({ emailId, hasAttachments = true }: AttachmentsTa
                 <DialogTitle className="truncate text-sm font-semibold">
                   {viewingAtt.filename}
                 </DialogTitle>
-                <a
-                  href={getStoredAttachmentUrl(emailId, viewingAtt.attachment_id, true)}
-                  download={viewingAtt.filename}
-                  className="shrink-0"
-                >
-                  <Button variant="ghost" size="sm">
-                    <Download className="h-4 w-4 mr-1.5" />
-                    Télécharger
-                  </Button>
-                </a>
+                <Button variant="ghost" size="sm" className="shrink-0" onClick={() => handleDownload(viewingAtt)}>
+                  <Download className="h-4 w-4 mr-1.5" />
+                  Télécharger
+                </Button>
               </div>
             </DialogHeader>
-            <div className="flex-1 overflow-hidden rounded-md border">
-              {viewingAtt.content_type?.startsWith('image/') ? (
-                <img
-                  src={getStoredAttachmentUrl(emailId, viewingAtt.attachment_id)}
-                  alt={viewingAtt.filename}
-                  className="w-full h-full object-contain"
-                />
+            <div className="flex-1 overflow-hidden rounded-md border flex items-center justify-center">
+              {blobLoading ? (
+                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+              ) : blobUrl ? (
+                viewingAtt.content_type?.startsWith('image/') ? (
+                  <img src={blobUrl} alt={viewingAtt.filename} className="w-full h-full object-contain" />
+                ) : (
+                  <iframe src={blobUrl} className="w-full h-full border-0" title={viewingAtt.filename} />
+                )
               ) : (
-                <iframe
-                  src={getStoredAttachmentUrl(emailId, viewingAtt.attachment_id)}
-                  className="w-full h-full border-0"
-                  title={viewingAtt.filename}
-                />
+                <p className="text-sm text-muted-foreground">Impossible de charger le fichier.</p>
               )}
             </div>
           </DialogContent>

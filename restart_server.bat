@@ -1,23 +1,14 @@
 @echo off
-echo Arret du serveur NOVA...
+echo Arret du serveur NOVA (port 8001)...
 
-REM Trouver uniquement le PID de NOVA (.venv\Scripts\python.exe main.py)
-REM ATTENTION : Ne PAS tuer C:\Python\python.exe qui appartient a BIOFORCE (port 8000)
-for /f "tokens=2 delims=," %%i in ('wmic process where "ExecutablePath like '%%NOVA-SERVER\%%venv%%' and CommandLine like '%%main.py%%'" get ProcessId /format:csv 2^>nul ^| findstr /r "[0-9]"') do (
-    echo Arret PID %%i (NOVA)...
-    taskkill /F /PID %%i 2>nul
+REM Tuer le process sur le port 8001
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":8001 " ^| findstr "LISTENING"') do (
+    echo Arret PID %%a
+    taskkill /F /PID %%a >nul 2>&1
 )
 
 timeout /t 2 /nobreak >nul
 
-echo Demarrage du serveur NOVA...
-cd C:\Users\PPZ\NOVA-SERVER
-start "NOVA Server" .venv\Scripts\python.exe main.py
-
-echo Serveur redemarre ! Attendre 5 secondes...
-timeout /t 5 /nobreak >nul
-
-echo Test de l'endpoint...
-curl http://localhost:8001/health | python -m json.tool | findstr "status"
-
-pause
+echo Demarrage NOVA...
+cd /d C:\Users\PPZ\NOVA-SERVER
+.venv\Scripts\python.exe main.py

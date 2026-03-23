@@ -85,7 +85,16 @@ async def login(body: LoginRequest) -> TokenResponse:
             detail="Utilisateur non enregistré dans NOVA",
         )
 
-    # 3. Validation SAP (stateless — session discardée immédiatement)
+    # 3. S'assurer que la session SAP du serveur est active (lazy init).
+    # Cela permet à _nova_session_covers() dans sap_validator de la détecter
+    # et de valider les credentials sans second appel SAP (qui timeout).
+    try:
+        from services.sap_business_service import get_sap_business_service
+        await get_sap_business_service().ensure_session()
+    except Exception as _e:
+        logger.warning("ensure_session() avant login échoué : %s", _e)
+
+    # 4. Validation SAP
     sap_ok = await validate_sap_credentials(
         sap_base_url=society["sap_base_url"],
         company_db=body.sap_company_db,
@@ -205,3 +214,27 @@ async def me(user: AuthenticatedUser = Depends(get_current_user)) -> dict:
             for p in permissions
         ],
     }
+
+
+# ── Debug temporaire — à supprimer en production ──────────────────────────────
+
+@router.post("/debug-sap")
+async def debug_sap_login(body: LoginRequest):
+    """Endpoint debug : montre la réponse SAP brute sans valider dans NOVA."""
+    import httpx as _httpx
+    society = get_society_by_sap_company(body.sap_company_db)
+    if not society:
+        return {"error": "société inconnue"}
+    try:
+        login_data = {"CompanyDB": body.sap_company_db, "UserName": body.sap_username, "Password": body.sap_password}
+        async with _httpx.AsyncClient(verify=False, timeout=20.0) as client:
+            r = await client.post(f"{society['sap_base_url']}/Login", json=login_data)
+        try:
+            body_json = r.json()
+        except Exception:
+            body_json = r.text[:500]
+        return {"http_status": r.status_code, "sap_response": body_json}
+    except _httpx.TimeoutException:
+        return {"error": "timeout", "url": society['sap_base_url']}
+    except Exception as e:
+        return {"error": str(e)}

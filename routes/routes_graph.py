@@ -1083,6 +1083,54 @@ async def analyze_email(message_id: str, force: bool = False):
             result.client_matches = [c.dict() for c in match_result.clients]  # Convertir en dict pour JSON
             result.product_matches = [p.dict() for p in match_result.products]
 
+            # ── Consolidation reconnaissance client multi-niveaux ──────────────
+            try:
+                from services.client_recognition_engine import get_client_recognition_engine
+                recognition_engine = get_client_recognition_engine()
+                matcher_obj = matcher  # EmailMatcher instance (has _clients_cache)
+                _clients_cache = getattr(matcher_obj, '_clients_cache', None)
+
+                _llm_name = result.extracted_data.client_name if result.extracted_data else None
+                _llm_email = result.extracted_data.client_email if result.extracted_data else None
+
+                # Enrichir le corps avec le contenu des PDFs pour la reconnaissance :
+                # les PDFs contiennent souvent l'email/société du vrai client
+                # (en-tête de bon de commande, signature de document, etc.)
+                _body_for_recognition = clean_text
+                if pdf_contents:
+                    _body_for_recognition = clean_text + "\n\n" + "\n\n".join(pdf_contents[:3])
+
+                recognition = recognition_engine.recognize_client(
+                    body=_body_for_recognition,
+                    sender_email=email.from_address,
+                    subject=email.subject,
+                    llm_client_name=_llm_name,
+                    llm_client_email=_llm_email,
+                    existing_candidates=match_result.clients,
+                    clients_cache=_clients_cache,
+                )
+
+                # Enrichir client_matches avec les scores de confiance
+                cand_map = {c.card_code: c for c in recognition.candidates}
+                for cm in result.client_matches:
+                    cand = cand_map.get(cm.get('card_code', ''))
+                    if cand:
+                        cm['confidence_score'] = cand.confidence_score
+                        cm['matched_signals'] = cand.matched_signals
+
+                logger.info(
+                    "recognition_engine matched=%s client=%s conf=%.2f ambiguous=%s signals=%s",
+                    recognition.matched,
+                    recognition.client_code,
+                    recognition.confidence_score,
+                    recognition.is_ambiguous,
+                    recognition.matched_signals,
+                )
+
+            except Exception as _rec_err:
+                logger.warning("ClientRecognitionEngine failed (non-blocking): %s", _rec_err)
+            # ─────────────────────────────────────────────────────────────────
+
             # Référence commande client (Form No, PO, etc.) → transmis au frontend pour NumAtCard
             if match_result.customer_reference:
                 result.customer_reference = match_result.customer_reference
@@ -1479,6 +1527,52 @@ async def clear_email_cache(message_id: str):
         "message_id": message_id,
         "cleared_memory": cleared_memory,
         "cleared_db": cleared_db
+    }
+
+
+@router.get("/emails/{message_id}/debug-analysis")
+async def debug_email_analysis(message_id: str):
+    """
+    Debug : montre les données brutes reçues par l'analyseur pour un email.
+    Utile pour diagnostiquer les problèmes d'extraction client/produits.
+    """
+    graph_service = get_graph_service()
+    email_analyzer = get_email_analyzer()
+
+    email = await graph_service.get_email(message_id, include_attachments=True)
+    from services.email_analyzer import extract_pdf_text
+    import asyncio
+
+    clean_body = email_analyzer._clean_html(email.body_content or "")
+    forward_info = email_analyzer._extract_forward_info(clean_body)
+
+    pdf_contents = []
+    for att in email.attachments:
+        if att.content_type == "application/pdf" and att.size < 5 * 1024 * 1024:
+            try:
+                content_bytes = await asyncio.wait_for(
+                    graph_service.get_attachment_content(message_id, att.id), timeout=15
+                )
+                text = await asyncio.wait_for(extract_pdf_text(content_bytes), timeout=15)
+                if text:
+                    pdf_contents.append({"name": att.name, "chars": len(text), "preview": text[:300]})
+            except Exception as e:
+                pdf_contents.append({"name": att.name, "error": str(e)})
+
+    return {
+        "email_id": message_id,
+        "subject": email.subject,
+        "sender_name": email.from_name,
+        "sender_email": email.from_email,
+        "body_type": email.body_content_type,
+        "body_length": len(email.body_content or ""),
+        "clean_body_length": len(clean_body),
+        "clean_body_preview": clean_body[:600],
+        "attachment_count": len(email.attachments),
+        "attachments": [{"name": a.name, "type": a.content_type, "size": a.size} for a in email.attachments],
+        "forward_info_detected": forward_info,
+        "override_would_trigger": bool(forward_info and forward_info.get("email","").lower() != (email.from_email or "").lower()),
+        "pdf_contents": pdf_contents,
     }
 
 

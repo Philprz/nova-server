@@ -8,6 +8,7 @@
  */
 
 import { useState, useEffect } from 'react';
+import { fetchWithAuth } from '@/lib/fetchWithAuth';
 import DOMPurify from 'dompurify';
 import { Mail, Loader2, AlertCircle, User, Calendar, FileText } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -41,7 +42,7 @@ export function EmailSourceTab({
     setLoading(true);
     setError(null);
 
-    fetch(`/api/graph/emails/body?id=${encodeURIComponent(emailId)}`)
+    fetchWithAuth(`/api/graph/emails/body?id=${encodeURIComponent(emailId)}`)
       .then((r) => {
         if (!r.ok) throw new Error(`Erreur ${r.status}: impossible de charger le mail`);
         return r.text();

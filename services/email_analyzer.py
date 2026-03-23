@@ -141,10 +141,13 @@ ATTENTION :
 - Un email forwardé doit être analysé sur le contenu forwardé, pas sur l'en-tête de transfert
 
 EXTRACTION DES INFORMATIONS CLIENT (important pour validation):
-- Nom entreprise: chercher dans la signature ou le corps de l'email
+- Nom entreprise: chercher dans la SIGNATURE DU VRAI EXPÉDITEUR (la personne qui demande le devis)
+  * Si email forwardé (Fwd/FW) : l'expéditeur réel est dans le bloc "From:" du corps — extraire son nom ET son entreprise depuis sa signature
+  * Ne pas prendre une entreprise mentionnée dans un fil de discussion antérieur ou dans un autre contexte
+  * Prioriser : signature de l'expéditeur réel > domaine email expéditeur > en-tête From: dans le corps forwardé
 - SIRET: chercher le numéro SIRET (14 chiffres) si présent dans la signature ou pièce jointe
-- Téléphone: extraire si présent dans la signature
-- Adresse: extraire l'adresse complète si présente
+- Téléphone: extraire si présent dans la signature de l'expéditeur réel
+- Adresse: extraire l'adresse complète si présente dans la signature du vrai expéditeur
 
 EXTRACTION DES PRODUITS:
 - Description: description complète du produit
@@ -163,6 +166,12 @@ RÈGLES CRITIQUES POUR LES QUANTITÉS:
   * Numéros de téléphone ou fax
   * Numéros d'identification (SIRET, TVA, etc.)
   * Tout nombre qui n'est PAS sur la même ligne que la description ou référence d'un produit
+
+RÈGLES CRITIQUES POUR LES PRODUITS:
+- N'extraire QUE des produits/articles physiques réels (pièces, composants, matériaux)
+- NE JAMAIS extraire comme produit : des mots communs d'une langue (ex: "e-posta" = email en turc, "e-postanın", "Anlık"), des adresses email, des URLs, des mentions de pièces jointes ("attached", "ci-joint"), des formules de politesse
+- Si la liste de produits est dans une pièce jointe mentionnée mais pas dans le corps : laisser products = [] et indiquer dans notes que les produits sont en pièce jointe
+- Une référence de commande (ex: "Bid Request No: 6000199732") est une NOTE, pas un produit
 
 Réponds UNIQUEMENT en JSON valide (pas de texte avant ou après):
 {
@@ -269,10 +278,41 @@ class EmailAnalyzer:
         # Pré-filtrage rapide
         quick_result = self.quick_classify(subject, clean_body[:500])
 
+        # Détecter si c'est un forward et extraire l'expéditeur réel
+        # Pour les expéditeurs internes (RONDOT IT), passer le sender_email pour
+        # utiliser le DERNIER "De:" dans la chaîne (expéditeur original = le client)
+        forward_info = self._extract_forward_info(clean_body, sender_email=sender_email)
+        # Si pas de forward info depuis le corps, essayer depuis le sujet (cas SAP PO)
+        if not forward_info or forward_info.get('email', '') == sender_email:
+            subject_info = self._extract_client_from_subject(subject, sender_email)
+            if subject_info:
+                forward_info = subject_info
+                logger.info("subject_client_extracted: subject=%r → company=%r", subject, subject_info['company'])
+        forward_note = ""
+        _fi_email = forward_info.get('email', '') if forward_info else ''
+        if forward_info and _fi_email.lower() != sender_email.lower():
+            parts = []
+            if forward_info['name']:
+                parts.append(f"nom={forward_info['name']}")
+            if _fi_email:
+                parts.append(f"email={_fi_email}")
+            company_hint = forward_info['company']
+            forward_note = (
+                f"\n⚠️ CLIENT IDENTIFIÉ — société : {company_hint}"
+                + (f" ({', '.join(parts)})" if parts else "")
+                + f"\n→ NE PAS utiliser '{sender_name} <{sender_email}>' comme client — c'est le transitaire interne.\n"
+            )
+            logger.info(
+                "forward_detected sender=%s real_client_email=%s company=%s",
+                sender_email, _fi_email, company_hint
+            )
+        else:
+            logger.info("no_forward_detected sender=%s forward_info=%s", sender_email, forward_info)
+
         # Construire le contexte pour le LLM
         email_context = f"""SUJET: {subject}
 
-EXPÉDITEUR: {sender_name} <{sender_email}>
+EXPÉDITEUR (boîte de réception RONDOT): {sender_name} <{sender_email}>{forward_note}
 
 CONTENU:
 {clean_body[:3000]}"""
@@ -289,6 +329,25 @@ CONTENU:
             # Parser la réponse JSON
             analysis = self._parse_llm_response(llm_result)
             analysis.quick_filter_passed = quick_result["likely_quote"]
+
+            # ── Correction déterministe du client sur emails forwardés ─────────
+            # Si on a détecté un client réel (forward ou sujet SAP) différent de l'expéditeur,
+            # on force le client_name indépendamment de ce que le LLM a dit.
+            _fi_email_override = forward_info.get('email', '') if forward_info else ''
+            if forward_info and _fi_email_override.lower() != sender_email.lower():
+                detected_company = forward_info['company']
+                if analysis.extracted_data is None:
+                    analysis.extracted_data = ExtractedQuoteData()
+                llm_client = (analysis.extracted_data.client_name or "").strip()
+                if llm_client.lower() != detected_company.lower():
+                    logger.info(
+                        "client_override: LLM=%r → forced=%r (forward/subject detected)",
+                        llm_client, detected_company
+                    )
+                    analysis.extracted_data.client_name = detected_company
+                    if _fi_email_override:
+                        analysis.extracted_data.client_email = _fi_email_override
+            # ─────────────────────────────────────────────────────────────────
 
             # Filtrer les produits non-ancrés dans le texte de l'email
             # (élimine les produits hallucinés ou extraits d'un fil de discussion parasite)
@@ -502,31 +561,133 @@ CONTENU:
             quick_filter_passed=is_quote
         )
 
-    def _extract_original_sender(self, body: str) -> Optional[str]:
-        """Extrait l'expéditeur original d'un email forwardé/redirigé."""
+    # Domaines internes RONDOT à ignorer lors de la détection de forward
+    _RONDOT_DOMAINS = {
+        'rondot-poc.itspirit.ovh', 'rondot-sas.fr', 'rondot-sa.com',
+        'it-spirit.com',  # prestataire IT
+    }
+
+    def _extract_forward_info(self, body: str, sender_email: str = "") -> Optional[dict]:
+        """
+        Détecte un email forwardé et extrait les infos de l'expéditeur réel.
+        Travaille sur le texte NETTOYÉ (sans balises HTML, sans <> autour des emails).
+        Retourne {'name': str, 'email': str, 'company': str} ou None.
+
+        Pour les expéditeurs INTERNES (RONDOT IT), on prend le DERNIER "De:" trouvé
+        dans la chaîne (= l'expéditeur original du fil, i.e. le vrai client).
+        Pour les expéditeurs EXTERNES, on prend le PREMIER "De:" (direct forwarder).
+        """
         if not body:
             return None
 
-        # Patterns pour détecter l'expéditeur original
-        patterns = [
-            r'De\s*:\s*[^<]*<([^>]+@([^>]+))>',  # De : Nom <email@domain.com>
-            r'From\s*:\s*[^<]*<([^>]+@([^>]+))>',  # From : Nom <email@domain.com>
-            r'De\s*:\s*(\S+@(\S+\.\w+))',  # De : email@domain.com
-            r'From\s*:\s*(\S+@(\S+\.\w+))',  # From : email@domain.com
-        ]
+        # Email regex réutilisable
+        EMAIL_RE = r'[\w\.\-\+]+@[\w\.\-]+\.\w+'
 
-        for pattern in patterns:
-            match = re.search(pattern, body, re.IGNORECASE)
-            if match:
-                # Extraire le domaine de l'email original
-                email = match.group(1)
-                domain = email.split("@")[-1] if "@" in email else ""
-                if domain and domain not in ['rondot-poc.itspirit.ovh', 'rondot-sas.fr']:
-                    # C'est probablement l'expéditeur original (client)
-                    company = domain.split(".")[0].upper()
-                    return company
+        # Expéditeur interne = RONDOT IT ou prestataire → prend le DERNIER "De:" dans le fil
+        sender_domain = sender_email.split("@")[-1].lower() if "@" in sender_email else ""
+        is_internal_sender = sender_domain in self._RONDOT_DOMAINS
+
+        # --- Patterns sur texte nettoyé (les <> ont été retirés par _clean_html) ---
+
+        # 1. "From: NOM PRENOM email@domain.com"  ou  "De: NOM email@domain.com"
+        p_from_name_email = re.compile(
+            r'(?:From|De)\s*:\s*(.{2,60}?)\s+(' + EMAIL_RE + r')',
+            re.IGNORECASE
+        )
+
+        # 2. "From: email@domain.com" (sans nom)
+        p_from_email_only = re.compile(
+            r'(?:From|De)\s*:\s*(' + EMAIL_RE + r')',
+            re.IGNORECASE
+        )
+
+        # 3. Gmail / style "NOM email@domain.com a écrit :" (sans "From:")
+        p_gmail = re.compile(
+            r'(.{2,60}?)\s+(' + EMAIL_RE + r')\s+(?:a[\u00a0\s]écrit|wrote|schrieb|ha scritto)',
+            re.IGNORECASE
+        )
+
+        # 4. Format Outlook Exchange : première ligne = "NOM PRENOM email@domain.com >"
+        # (l'angle bracket de fermeture > est préservé après _clean_html — l'ouvrant < est retiré)
+        # Ex: "KADIR TERCAN KATERCAN@sisecam.com >"
+        p_outlook_header = re.compile(
+            r'^(.{2,60}?)\s+(' + EMAIL_RE + r')\s*>\s*$',
+            re.IGNORECASE | re.MULTILINE
+        )
+
+        def _result(name: str, email_addr: str) -> Optional[dict]:
+            domain = email_addr.split("@")[-1].lower()
+            if domain not in self._RONDOT_DOMAINS:
+                company = domain.split(".")[0].upper()
+                return {'name': name.strip(), 'email': email_addr, 'company': company}
+            return None
+
+        # Collecter TOUS les matches "De:" (patterns 1 et 2)
+        all_from_matches = []
+        for m in p_from_name_email.finditer(body):
+            res = _result(m.group(1), m.group(2))
+            if res:
+                all_from_matches.append(res)
+
+        # Pattern 2 en fallback : "De: email" sans nom
+        if not all_from_matches:
+            for m in p_from_email_only.finditer(body):
+                res = _result('', m.group(1))
+                if res:
+                    all_from_matches.append(res)
+
+        if all_from_matches:
+            # Expéditeur interne : le DERNIER "De:" = expéditeur original du fil (le vrai client)
+            # Expéditeur externe : le PREMIER "De:" = le forwarder direct (le client)
+            return all_from_matches[-1] if is_internal_sender else all_from_matches[0]
+
+        # Pattern Gmail
+        m = p_gmail.search(body)
+        if m:
+            res = _result(m.group(1), m.group(2))
+            if res:
+                return res
+
+        # Pattern Outlook Exchange (en-tête de forward sans De:/From:)
+        for m in p_outlook_header.finditer(body):
+            res = _result(m.group(1), m.group(2))
+            if res:
+                # Pour expéditeur interne : prend le premier (= l'expéditeur réel du fil)
+                # Pour expéditeur externe : même logique (premier forward = le client)
+                return res
 
         return None
+
+    def _extract_client_from_subject(self, subject: str, sender_email: str) -> Optional[dict]:
+        """
+        Extrait le nom client depuis le sujet d'un email interne (RONDOT IT).
+        Sert de fallback quand aucun forward header n'est trouvé dans le corps.
+        Format SAP courant : "[N°] NOM_CLIENT USINE VILLE FABRI--SAP_REF"
+        Ex: "76 SISECAM CAM AMBALAJ ESKISEHIR FABRI--1000354990" → SISECAM
+        """
+        sender_domain = sender_email.split("@")[-1].lower() if "@" in sender_email else ""
+        if sender_domain not in self._RONDOT_DOMAINS:
+            return None  # Seulement pour les expéditeurs internes
+
+        # Nettoyer les préfixes Re:/Fw: etc.
+        subj = re.sub(r'^(?:Re|Fw|Fwd|Tr|TR|RE|FW)\s*:\s*', '', subject.strip(), flags=re.IGNORECASE).strip()
+
+        # Format SAP : numéro puis nom en majuscules
+        # "76 SISECAM ..." → groupe 1 = "SISECAM"
+        m = re.match(r'^[0-9]+\s+([A-Z][A-Z0-9\-]{2,})', subj.upper())
+        if m:
+            company = m.group(1)
+            blocklist = {'THE', 'FOR', 'FROM', 'NEW', 'OLD', 'REF', 'RFQ', 'CMD', 'PO', 'SPARE', 'PARTS'}
+            if company not in blocklist:
+                logger.info("subject_client: subject=%r → company=%r", subject, company)
+                return {'name': '', 'email': '', 'company': company}
+
+        return None
+
+    def _extract_original_sender(self, body: str) -> Optional[str]:
+        """Rétrocompatibilité — retourne juste le nom société."""
+        info = self._extract_forward_info(body)
+        return info['company'] if info else None
 
     def _is_phone_number(self, code: str) -> bool:
         """Détecte si un code ressemble à un numéro de téléphone ou fax."""
