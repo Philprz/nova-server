@@ -119,9 +119,28 @@ class SAPQuotationService:
     # ----------------------------------------------------------
 
     async def ensure_session(self) -> bool:
-        """Vérifie la session active ou en obtient une nouvelle."""
+        """Vérifie la session active ou en obtient une nouvelle.
+        Priorité : réutiliser la session de SAPBusinessService pour éviter
+        un double login SAP (qui timeout quand une session est déjà active)."""
         if self.session_id and self.session_timeout and datetime.now() < self.session_timeout:
             return True
+        # Essayer de réutiliser la session du service principal
+        try:
+            from services.sap_business_service import get_sap_business_service
+            biz = get_sap_business_service()
+            if biz.session_id and biz.session_timeout and datetime.now() < biz.session_timeout:
+                self.session_id = biz.session_id
+                self.session_timeout = biz.session_timeout
+                logger.info("Session SAP réutilisée depuis SAPBusinessService")
+                return True
+            # Forcer SAPBusinessService à se connecter, puis emprunter sa session
+            if await biz.ensure_session():
+                self.session_id = biz.session_id
+                self.session_timeout = biz.session_timeout
+                logger.info("Session SAP obtenue via SAPBusinessService")
+                return True
+        except Exception as _e:
+            logger.debug("Emprunt session SAPBusinessService échoué : %s", _e)
         return await self.login()
 
     async def login(self) -> bool:

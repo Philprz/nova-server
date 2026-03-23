@@ -6,6 +6,7 @@ Utilise du fuzzy matching pour éviter la non-reconnaissance.
 """
 
 import re
+import json
 import logging
 import unicodedata
 from difflib import SequenceMatcher
@@ -257,13 +258,27 @@ class EmailMatcher:
                 card_name = client.get("CardName", "")
                 email = client.get("EmailAddress", "") or ""
 
-                # Index par domaine email
+                # Index par domaine email (fiche principale)
                 if email and "@" in email:
                     domain = email.split("@")[-1].lower().strip()
                     if domain:
                         if domain not in self._client_domains:
                             self._client_domains[domain] = []
                         self._client_domains[domain].append(client)
+
+                # Index par domaine des emails ContactEmployees
+                contact_emails_raw = client.get("contact_emails") or ""
+                if contact_emails_raw:
+                    try:
+                        for ce in json.loads(contact_emails_raw):
+                            if ce and "@" in ce:
+                                ce_domain = ce.split("@")[-1].lower().strip()
+                                if ce_domain and ce_domain not in self._client_domains:
+                                    self._client_domains[ce_domain] = []
+                                if ce_domain and client not in self._client_domains[ce_domain]:
+                                    self._client_domains[ce_domain].append(client)
+                    except (ValueError, TypeError):
+                        pass
 
                 # Pré-normaliser le nom (cache)
                 if card_name:
@@ -457,14 +472,15 @@ class EmailMatcher:
     # --- Extraction des domaines email ---
 
     def _extract_email_domains(self, text: str, sender_email: str = "") -> List[str]:
-        """Extrait tous les domaines email uniques du texte."""
+        """Extrait tous les domaines email uniques du texte (hors domaines génériques et internes)."""
+        from services.client_recognition_engine import is_generic_domain as _is_generic
         domains = set()
 
         # Domaine de l'expéditeur
         if "@" in sender_email:
             domain = sender_email.split("@")[-1].lower().strip()
-            # Ignorer les domaines internes RONDOT
-            if not self._is_internal_domain(domain):
+            # Ignorer les domaines internes RONDOT et les domaines génériques (gmail, outlook…)
+            if not self._is_internal_domain(domain) and not _is_generic(domain):
                 domains.add(domain)
 
         # Chercher tous les emails dans le texte (y compris dans les headers De:/From:)
@@ -482,7 +498,7 @@ class EmailMatcher:
                         domain = g.lower().strip()
                         if "@" in domain:
                             domain = domain.split("@")[-1]
-                        if not self._is_internal_domain(domain):
+                        if not self._is_internal_domain(domain) and not _is_generic(domain):
                             domains.add(domain)
 
         return list(domains)
@@ -537,13 +553,33 @@ class EmailMatcher:
 
             # --- Stratégie 1 : Match par domaine email (score 95/97) ---
             # Score 97 si le domaine matche l'expéditeur, 95 si destinataire
+            # Les domaines génériques (gmail, hotmail…) sont exclus — non fiables pour identifier une société
+            from services.client_recognition_engine import is_generic_domain as _is_generic_dom
             if email and "@" in email:
                 client_domain = email.split("@")[-1].lower().strip()
-                if client_domain in extracted_domains:
+                if client_domain in extracted_domains and not _is_generic_dom(client_domain):
                     has_domain_match = True
                     dom_score = 97 if (sender_domain and client_domain == sender_domain) else 95
                     best_score = dom_score
                     best_reason = f"Domaine email {'expéditeur' if dom_score == 97 else 'destinataire'}: {client_domain}"
+
+            # --- Stratégie 1a : Domaines emails ContactEmployees SAP ---
+            # Permet de matcher même quand EmailAddress de la fiche est vide
+            if not has_domain_match:
+                contact_emails_raw = client.get("contact_emails") or ""
+                if contact_emails_raw:
+                    try:
+                        for ce in json.loads(contact_emails_raw):
+                            if ce and "@" in ce:
+                                ce_domain = ce.split("@")[-1].lower().strip()
+                                if ce_domain in extracted_domains and not _is_generic_dom(ce_domain):
+                                    has_domain_match = True
+                                    ce_score = 96 if (sender_domain and ce_domain == sender_domain) else 94
+                                    best_score = ce_score
+                                    best_reason = f"Domaine email contact {'expéditeur' if ce_score == 96 else 'destinataire'}: {ce_domain}"
+                                    break
+                    except (ValueError, TypeError):
+                        pass
 
             # --- Stratégie 1b : Match domaine extrait vs nom client (score 97) ---
             # Si un domaine dans le texte ressemble au nom du client (ex: marmaracam.com.tr vs MARMARA CAM)
@@ -559,17 +595,17 @@ class EmailMatcher:
 
                     # --- Stratégie 1b-acronyme : domaine court = initiales du nom client ---
                     # Ex: meg.com.eg → MEG = M(iddle) E(ast) G(lass) Manufacturing...
+                    # IMPORTANT : activé UNIQUEMENT pour l'expéditeur réel (is_sender=True)
+                    # Les domaines destinataires sont trop courts pour être discriminants → faux positifs
                     if 2 <= len(domain_base) <= 5:
-                        initials = ''.join(p[0] for p in name_parts if p)
-                        # Match exact ou début des initiales (ex: "meg" matche "megm" = MIDDLE EAST GLASS MANUFACTURING)
-                        if len(domain_base) >= 2 and (domain_base == initials or initials.startswith(domain_base)):
-                            # Score plus élevé si le domaine est celui de l'expéditeur (96 > 95 pour non-sender)
-                            acro_score = 96 if is_sender else 72
-                            logger.info(f"[Strategie 1b-acronyme] MATCH! {card_code}: initiales '{initials}' starts with '{domain_base}' ({card_name}) sender={is_sender} score={acro_score}")
-                            has_domain_match = True
-                            best_score = acro_score
-                            best_reason = f"Domaine {'expéditeur' if is_sender else 'destinataire'} = initiales client: {domain} ≈ {card_name}"
-                            break
+                        if is_sender:
+                            initials = ''.join(p[0] for p in name_parts if p)
+                            if len(domain_base) >= 2 and (domain_base == initials or initials.startswith(domain_base)):
+                                logger.info(f"[Strategie 1b-acronyme] MATCH! {card_code}: initiales '{initials}' starts with '{domain_base}' ({card_name}) score=96")
+                                has_domain_match = True
+                                best_score = 96
+                                best_reason = f"Domaine expéditeur = initiales client: {domain} ≈ {card_name}"
+                                break
                         continue  # Domaine trop court pour matching textuel standard
 
                     if len(domain_base) < 6:
@@ -644,6 +680,16 @@ class EmailMatcher:
                                 has_name_match = True
                     if best_score == 88:
                         break
+
+            # --- Stratégie 2c : Match avec suffixe légal retiré ---
+            if best_score < 90 and card_name:
+                name_no_suffix = self._normalize_company_name(card_name)
+                if len(name_no_suffix) >= 3 and name_no_suffix != name_normalized:
+                    if name_no_suffix in text_normalized:
+                        has_name_match = True
+                        if best_score < 88:
+                            best_score = 88
+                            best_reason = f"Nom sans suffixe légal trouvé dans le texte: {card_name}"
 
             # --- Bonus combo : Domaine + Nom = 98 (prioritaire) ---
             if has_domain_match and has_name_match:
@@ -1802,6 +1848,16 @@ class EmailMatcher:
         # Espaces multiples
         text = re.sub(r'\s+', ' ', text).strip()
         return text
+
+    @staticmethod
+    def _normalize_company_name(name: str) -> str:
+        """
+        Normalise un nom d'entreprise pour la comparaison, en supprimant
+        les suffixes légaux (SARL, SAS, GMBH, LTD…) avant normalisation.
+        Utilisé pour le matching CardName dans _match_clients().
+        """
+        from services.client_recognition_engine import normalize_company
+        return normalize_company(name)
 
 
 # --- Singleton ---

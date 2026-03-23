@@ -4,6 +4,7 @@ Synchronisation quotidienne automatique au démarrage
 """
 
 import os
+import json
 import sqlite3
 import logging
 import asyncio
@@ -52,6 +53,13 @@ class SAPCacheDB:
         # Migration : ajouter ZipCode si absent (DB existante)
         try:
             cursor.execute("ALTER TABLE sap_clients ADD COLUMN ZipCode TEXT")
+        except Exception:
+            pass  # Colonne déjà présente
+
+        # Migration : ajouter contact_emails si absent (DB existante)
+        # Stocke les emails de ContactEmployees SAP (JSON list) pour le matching domaine
+        try:
+            cursor.execute("ALTER TABLE sap_clients ADD COLUMN contact_emails TEXT")
         except Exception:
             pass  # Colonne déjà présente
 
@@ -192,6 +200,8 @@ class SAPCacheDB:
             batch_size = 20
 
             while True:
+                # Note: SAP B1 SL ne supporte pas $expand=ContactEmployees sur les requêtes liste.
+                # Les contact_emails sont alimentés via sync individuel ou PATCH direct (cf. C1226).
                 clients_batch = await sap_service._call_sap("/BusinessPartners", params={
                     "$select": "CardCode,CardName,EmailAddress,Phone1,City,Country,ZipCode",
                     "$filter": "CardType eq 'cCustomer'",  # Seulement les clients (pas les fournisseurs)
@@ -210,27 +220,48 @@ class SAPCacheDB:
                 if len(batch) < batch_size:
                     break
 
-            # Insérer/mettre à jour dans la base locale
-            cursor.execute("DELETE FROM sap_clients")  # Nettoyage complet
+            # ── Insertion atomique : SAVEPOINT garantit que si une erreur
+            # survient en cours de boucle, l'ancienne table reste intacte ───────
+            cursor.execute("SAVEPOINT sync_clients_sp")
+            try:
+                cursor.execute("DELETE FROM sap_clients")
 
-            for client in all_clients:
-                # Gérer les CardName NULL en utilisant CardCode comme fallback
-                card_name = client.get("CardName") or client.get("CardCode") or "Unknown"
+                now_iso = datetime.now().isoformat()
+                for client in all_clients:
+                    card_name = client.get("CardName") or client.get("CardCode") or "Unknown"
 
-                cursor.execute("""
-                    INSERT INTO sap_clients
-                    (CardCode, CardName, EmailAddress, Phone1, City, Country, ZipCode, last_updated)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    client.get("CardCode"),
-                    card_name,
-                    client.get("EmailAddress"),
-                    client.get("Phone1"),
-                    client.get("City"),
-                    client.get("Country"),
-                    client.get("ZipCode"),
-                    datetime.now().isoformat()
-                ))
+                    # Extraire les emails des contacts SAP (ContactEmployees)
+                    contacts = client.get("ContactEmployees") or []
+                    contact_email_list = []
+                    seen_ce = set()
+                    for contact in contacts:
+                        ce = (contact.get("E_Mail") or "").strip().lower()
+                        if ce and "@" in ce and ce not in seen_ce:
+                            contact_email_list.append(ce)
+                            seen_ce.add(ce)
+                    contact_emails_json = json.dumps(contact_email_list) if contact_email_list else None
+
+                    cursor.execute("""
+                        INSERT INTO sap_clients
+                        (CardCode, CardName, EmailAddress, Phone1, City, Country, ZipCode,
+                         contact_emails, last_updated)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        client.get("CardCode"),
+                        card_name,
+                        client.get("EmailAddress"),
+                        client.get("Phone1"),
+                        client.get("City"),
+                        client.get("Country"),
+                        client.get("ZipCode"),
+                        contact_emails_json,
+                        now_iso,
+                    ))
+
+                cursor.execute("RELEASE SAVEPOINT sync_clients_sp")
+            except Exception:
+                cursor.execute("ROLLBACK TO SAVEPOINT sync_clients_sp")
+                raise
 
             # Marquer la fin de la sync
             cursor.execute("""
