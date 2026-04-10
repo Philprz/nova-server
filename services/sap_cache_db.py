@@ -44,6 +44,7 @@ class SAPCacheDB:
                 CardName TEXT NOT NULL,
                 EmailAddress TEXT,
                 Phone1 TEXT,
+                Street TEXT,
                 City TEXT,
                 Country TEXT,
                 ZipCode TEXT,
@@ -53,6 +54,16 @@ class SAPCacheDB:
         # Migration : ajouter ZipCode si absent (DB existante)
         try:
             cursor.execute("ALTER TABLE sap_clients ADD COLUMN ZipCode TEXT")
+        except Exception:
+            pass  # Colonne déjà présente
+        # Migration : ajouter Street si absent (DB existante)
+        try:
+            cursor.execute("ALTER TABLE sap_clients ADD COLUMN Street TEXT")
+        except Exception:
+            pass  # Colonne déjà présente
+        # Migration : ajouter CardType si absent ('C'=client, 'S'=fournisseur)
+        try:
+            cursor.execute("ALTER TABLE sap_clients ADD COLUMN CardType TEXT DEFAULT 'C'")
         except Exception:
             pass  # Colonne déjà présente
 
@@ -191,92 +202,93 @@ class SAPCacheDB:
             """, (sync_type, datetime.now().isoformat()))
             conn.commit()
 
-            logger.info("🔄 Synchronisation clients SAP → SQLite...")
+            logger.info("🔄 Synchronisation clients + fournisseurs SAP → SQLite...")
 
-            # Récupérer tous les clients SAP (avec pagination)
-            # IMPORTANT: SAP B1 limite à 20 résultats max par requête (testé avec $top=20/50/100/200)
-            all_clients = []
-            skip = 0
-            batch_size = 20
+            async def _fetch_all(card_filter: str) -> list:
+                """Récupère tous les BP d'un type donné avec pagination."""
+                records, skip, batch_count = [], 0, 0
+                while True:
+                    if batch_count > 0 and batch_count % 2 == 0:
+                        await sap_service.login()
+                    batch_data = await sap_service._call_sap("/BusinessPartners", params={
+                        "$select": "CardCode,CardName,EmailAddress,Phone1,Address,City,Country,ZipCode",
+                        "$filter": card_filter,
+                        "$top": 20,
+                        "$skip": skip,
+                        "$orderby": "CardCode"
+                    })
+                    batch = batch_data.get("value", [])
+                    if not batch:
+                        break
+                    records.extend(batch)
+                    skip += 20
+                    batch_count += 1
+                    await asyncio.sleep(0.3)
+                    if len(batch) < 20:
+                        break
+                return records
 
-            while True:
-                # Note: SAP B1 SL ne supporte pas $expand=ContactEmployees sur les requêtes liste.
-                # Les contact_emails sont alimentés via sync individuel ou PATCH direct (cf. C1226).
-                clients_batch = await sap_service._call_sap("/BusinessPartners", params={
-                    "$select": "CardCode,CardName,EmailAddress,Phone1,City,Country,ZipCode",
-                    "$filter": "CardType eq 'cCustomer'",  # Seulement les clients (pas les fournisseurs)
-                    "$top": batch_size,
-                    "$skip": skip,
-                    "$orderby": "CardCode"
-                })
+            all_customers = await _fetch_all("CardType eq 'cCustomer'")
+            logger.info(f"  → {len(all_customers)} clients récupérés")
+            all_suppliers = await _fetch_all("CardType eq 'cSupplier'")
+            logger.info(f"  → {len(all_suppliers)} fournisseurs récupérés")
 
-                batch = clients_batch.get("value", [])
-                if not batch:
-                    break
-
-                all_clients.extend(batch)
-                skip += batch_size
-
-                if len(batch) < batch_size:
-                    break
-
-            # ── Insertion atomique : SAVEPOINT garantit que si une erreur
-            # survient en cours de boucle, l'ancienne table reste intacte ───────
+            # ── Insertion atomique ────────────────────────────────────────────
             cursor.execute("SAVEPOINT sync_clients_sp")
             try:
                 cursor.execute("DELETE FROM sap_clients")
-
                 now_iso = datetime.now().isoformat()
-                for client in all_clients:
-                    card_name = client.get("CardName") or client.get("CardCode") or "Unknown"
 
-                    # Extraire les emails des contacts SAP (ContactEmployees)
+                def _insert(client: dict, card_type: str):
+                    card_name = client.get("CardName") or client.get("CardCode") or "Unknown"
                     contacts = client.get("ContactEmployees") or []
+                    seen_ce: set = set()
                     contact_email_list = []
-                    seen_ce = set()
                     for contact in contacts:
                         ce = (contact.get("E_Mail") or "").strip().lower()
                         if ce and "@" in ce and ce not in seen_ce:
                             contact_email_list.append(ce)
                             seen_ce.add(ce)
-                    contact_emails_json = json.dumps(contact_email_list) if contact_email_list else None
-
                     cursor.execute("""
                         INSERT INTO sap_clients
-                        (CardCode, CardName, EmailAddress, Phone1, City, Country, ZipCode,
-                         contact_emails, last_updated)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        (CardCode, CardName, EmailAddress, Phone1, Street, City, Country, ZipCode,
+                         CardType, contact_emails, last_updated)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
-                        client.get("CardCode"),
-                        card_name,
-                        client.get("EmailAddress"),
-                        client.get("Phone1"),
-                        client.get("City"),
-                        client.get("Country"),
-                        client.get("ZipCode"),
-                        contact_emails_json,
+                        client.get("CardCode"), card_name,
+                        client.get("EmailAddress"), client.get("Phone1"),
+                        client.get("Address"), client.get("City"),
+                        client.get("Country"), client.get("ZipCode"),
+                        card_type,
+                        json.dumps(contact_email_list) if contact_email_list else None,
                         now_iso,
                     ))
+
+                for c in all_customers:
+                    _insert(c, 'C')
+                for s in all_suppliers:
+                    _insert(s, 'S')
 
                 cursor.execute("RELEASE SAVEPOINT sync_clients_sp")
             except Exception:
                 cursor.execute("ROLLBACK TO SAVEPOINT sync_clients_sp")
                 raise
 
-            # Marquer la fin de la sync
+            total = len(all_customers) + len(all_suppliers)
             cursor.execute("""
                 UPDATE sap_sync_metadata
                 SET last_sync = ?, status = 'success', total_records = ?
                 WHERE sync_type = ?
-            """, (datetime.now().isoformat(), len(all_clients), sync_type))
-
+            """, (datetime.now().isoformat(), total, sync_type))
             conn.commit()
 
-            logger.info(f"✅ Sync clients terminée : {len(all_clients)} clients importés")
+            logger.info(f"✅ Sync terminée : {len(all_customers)} clients + {len(all_suppliers)} fournisseurs")
 
             return {
                 "success": True,
-                "total_records": len(all_clients),
+                "total_records": total,
+                "customers": len(all_customers),
+                "suppliers": len(all_suppliers),
                 "sync_time": datetime.now().isoformat()
             }
 
@@ -329,33 +341,67 @@ class SAPCacheDB:
             all_items = []
             skip = 0
             batch_size = 20
+            batch_count = 0
+            sync_complete = False  # Flag : sync complète ou partielle
 
             while True:
-                items_batch = await sap_service._call_sap("/Items", params={
-                    "$select": "ItemCode,ItemName,ItemsGroupCode,AvgStdPrice,SalesUnitWeight",
-                    "$filter": "Valid eq 'Y' and Frozen eq 'N'",  # Seulement articles actifs
-                    "$top": batch_size,
-                    "$skip": skip,
-                    "$orderby": "ItemCode"
-                })
+                # Reconnexion proactive toutes les 2 requêtes (même raison que sync clients)
+                if batch_count > 0 and batch_count % 2 == 0:
+                    await sap_service.login()
+
+                # Retry jusqu'à 3 fois en cas d'erreur transitoire (500 SAP au démarrage)
+                items_batch = None
+                for attempt in range(3):
+                    try:
+                        items_batch = await sap_service._call_sap("/Items", params={
+                            "$select": "ItemCode,ItemName,ItemsGroupCode,AvgStdPrice,SalesUnitWeight",
+                            "$filter": "Valid eq 'Y' and Frozen eq 'N'",  # Seulement articles actifs
+                            "$top": batch_size,
+                            "$skip": skip,
+                            "$orderby": "ItemCode"
+                        })
+                        break  # Succès
+                    except Exception as e:
+                        if attempt < 2:
+                            logger.warning(f"Erreur batch items skip={skip} (tentative {attempt+1}/3) : {e} — retry dans 5s")
+                            await asyncio.sleep(5)
+                            await sap_service.login()
+                        else:
+                            logger.error(f"Échec batch items skip={skip} après 3 tentatives : {e} — sync partielle avec {len(all_items)} articles")
+                            items_batch = None
+
+                if items_batch is None:
+                    break  # Sync partielle : stopper sans supprimer le cache existant
 
                 batch = items_batch.get("value", [])
                 if not batch:
+                    sync_complete = True
                     break
 
                 all_items.extend(batch)
                 skip += batch_size
+                batch_count += 1
 
-                # Pause toutes les 50 requêtes pour ne pas bloquer l'event loop
-                if skip % 1000 == 0:
+                await asyncio.sleep(0.3)
+
+                if len(all_items) % 1000 == 0:
                     logger.info(f"   Progress: {len(all_items)} articles récupérés...")
-                    await asyncio.sleep(0)  # Yield control to event loop
 
                 if len(batch) < batch_size:
+                    sync_complete = True
                     break
 
-            # Insérer/mettre à jour dans la base locale
-            cursor.execute("DELETE FROM sap_items")  # Nettoyage complet
+            if not all_items:
+                logger.warning("Aucun article récupéré — conservation du cache existant")
+                return {"success": False, "total_records": 0, "error": "Aucun article récupéré depuis SAP"}
+
+            # Sync complète : remplacer entièrement le cache
+            # Sync partielle : upsert uniquement les articles récupérés (préserver le reste)
+            if sync_complete:
+                logger.info(f"Sync complète ({len(all_items)} articles) — remplacement du cache")
+                cursor.execute("DELETE FROM sap_items")
+            else:
+                logger.warning(f"Sync partielle ({len(all_items)} articles) — upsert sans supprimer le cache existant")
 
             for item in all_items:
                 # Gérer les ItemName NULL en utilisant ItemCode comme fallback
@@ -370,7 +416,7 @@ class SAPCacheDB:
                 weight = weight if weight and weight > 0 else None
 
                 cursor.execute("""
-                    INSERT INTO sap_items
+                    INSERT OR REPLACE INTO sap_items
                     (ItemCode, ItemName, ItemGroup, Price, Currency, weight_unit_value, last_updated)
                     VALUES (?, ?, ?, ?, ?, ?, ?)
                 """, (
@@ -457,10 +503,11 @@ class SAPCacheDB:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
 
-        # Recherche LIKE sur CardName ou EmailAddress
+        # Recherche LIKE sur CardName ou EmailAddress — clients uniquement (CardType='C' ou NULL héritage)
         cursor.execute("""
             SELECT * FROM sap_clients
-            WHERE CardName LIKE ? OR EmailAddress LIKE ?
+            WHERE (CardName LIKE ? OR EmailAddress LIKE ?)
+              AND (CardType = 'C' OR CardType IS NULL)
             LIMIT ?
         """, (f"%{query}%", f"%{query}%", limit))
 
@@ -469,13 +516,29 @@ class SAPCacheDB:
 
         return [dict(row) for row in rows]
 
+    def search_ship_to(self, query: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """Recherche adresse de livraison : clients ET fournisseurs SAP."""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT CardCode, CardName, Street, City, Country, ZipCode, CardType
+            FROM sap_clients
+            WHERE CardName LIKE ?
+            ORDER BY CardType, CardName
+            LIMIT ?
+        """, (f"%{query}%", limit))
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
     def get_client_by_code(self, card_code: str) -> Optional[Dict[str, Any]]:
         """Récupère un client par son CardCode exact (avec adresse complète)."""
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT CardCode, CardName, EmailAddress, Phone1, City, Country, ZipCode FROM sap_clients WHERE CardCode = ?",
+            "SELECT CardCode, CardName, EmailAddress, Phone1, Street, City, Country, ZipCode FROM sap_clients WHERE CardCode = ?",
             (card_code,)
         )
         row = cursor.fetchone()
@@ -593,10 +656,11 @@ class SAPCacheDB:
         query_normalized = query.replace('-', '').replace(' ', '').upper()
 
         # Cherche dans ItemCode ET ItemName normalisés (les refs fournisseur sont souvent dans ItemName)
+        # Note: on supprime aussi les parenthèses pour matcher "523-5135 (2-3)" depuis "523-5135-2-3"
         cursor.execute("""
             SELECT * FROM sap_items
-            WHERE REPLACE(REPLACE(UPPER(ItemCode), '-', ''), ' ', '') LIKE ?
-               OR REPLACE(REPLACE(UPPER(ItemName), '-', ''), ' ', '') LIKE ?
+            WHERE REPLACE(REPLACE(REPLACE(REPLACE(UPPER(ItemCode), '-', ''), ' ', ''), '(', ''), ')', '') LIKE ?
+               OR REPLACE(REPLACE(REPLACE(REPLACE(UPPER(ItemName), '-', ''), ' ', ''), '(', ''), ')', '') LIKE ?
             LIMIT ?
         """, (f"%{query_normalized}%", f"%{query_normalized}%", limit))
 

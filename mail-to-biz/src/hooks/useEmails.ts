@@ -106,6 +106,7 @@ export function useEmails(options: UseEmailsOptions = {}): UseEmailsReturn {
               deliveryLeadTimeDays: analysis.extracted_data.delivery_requirement
                 ? parseInt(analysis.extracted_data.delivery_requirement) || null
                 : null,
+              shipTo: analysis.extracted_data.ship_to || undefined,
               meta: {
                 source: 'office365' as const,
                 emailId: emailMessage.id,
@@ -414,8 +415,9 @@ export function useEmails(options: UseEmailsOptions = {}): UseEmailsReturn {
           if (existingResult.success && existingResult.data) {
             console.log(`[Pre-analysis] ✅ ${quote.email.subject} déjà analysé (DB)`);
 
-            // Mettre en cache et update UI
+            // Ne pas écraser un résultat déjà en cache (ex: résultat d'un force re-analyze)
             setAnalysisCache((prev) => {
+              if (prev.has(quote.email.id)) return prev; // déjà en cache, ne pas écraser
               const newCache = new Map(prev);
               newCache.set(quote.email.id, existingResult.data!);
               return newCache;

@@ -52,6 +52,7 @@ export interface CreateQuoteRequest {
   DocDueDate?: string;
   Comments?: string;
   NumAtCard?: string;
+  ship_to?: string;
   email_id?: string;
   email_subject?: string;
   DocumentLines: CreateQuoteLine[];

@@ -22,6 +22,55 @@ class SAPHistoryService:
     def __init__(self, sap_service: SAPBusinessService):
         self.sap_service = sap_service
 
+    async def _get_invoice_headers(self, filter_str: str, top: int = 50) -> List[dict]:
+        """
+        Récupère les headers de factures sans $expand (compatible toutes versions SAP B1).
+        Le $expand=DocumentLines sur collection n'est pas supporté par certaines versions.
+        """
+        params = {
+            "$filter": filter_str,
+            "$orderby": "DocDate desc",
+            "$top": top,
+            "$select": "DocEntry,DocNum,DocDate,CardCode,CardName"
+        }
+        result = await self.sap_service._call_sap("/Invoices", params=params)
+        return result.get("value", [])
+
+    async def _get_invoice_lines(self, doc_entry: int) -> List[dict]:
+        """
+        Récupère les lignes d'une facture individuelle.
+        GET /Invoices({DocEntry}) sans paramètre retourne déjà DocumentLines dans le body SAP B1.
+        """
+        try:
+            detail = await self.sap_service._call_sap(f"/Invoices({doc_entry})")
+            return detail.get("DocumentLines", [])
+        except Exception as e:
+            logger.warning(f"Impossible de récupérer les lignes facture {doc_entry} : {e}")
+            return []
+
+    async def _get_purchase_invoice_headers(self, filter_str: str, top: int = 20) -> List[dict]:
+        """Récupère les headers de factures achat sans $expand."""
+        params = {
+            "$filter": filter_str,
+            "$orderby": "DocDate desc",
+            "$top": top,
+            "$select": "DocEntry,DocNum,DocDate,CardCode"
+        }
+        result = await self.sap_service._call_sap("/PurchaseInvoices", params=params)
+        return result.get("value", [])
+
+    async def _get_purchase_invoice_lines(self, doc_entry: int) -> List[dict]:
+        """
+        Récupère les lignes d'une facture achat individuelle.
+        GET /PurchaseInvoices({DocEntry}) sans paramètre retourne déjà DocumentLines dans le body SAP B1.
+        """
+        try:
+            detail = await self.sap_service._call_sap(f"/PurchaseInvoices({doc_entry})")
+            return detail.get("DocumentLines", [])
+        except Exception as e:
+            logger.warning(f"Impossible de récupérer les lignes facture achat {doc_entry} : {e}")
+            return []
+
     async def get_last_sale_to_client(
         self,
         item_code: str,
@@ -29,42 +78,25 @@ class SAPHistoryService:
         lookback_days: int = 365
     ) -> Optional[SalesHistoryEntry]:
         """
-        Récupère la dernière vente d'un article à un client (CAS 1/2)
-
-        Endpoint SAP : GET /Invoices
-        Filtre : CardCode eq '{card_code}' AND DocumentLines/any(line: line/ItemCode eq '{item_code}')
-
-        Args:
-            item_code: Code article
-            card_code: Code client
-            lookback_days: Période de recherche (défaut 365j)
-
-        Returns:
-            Dernière vente ou None si jamais vendu
+        Récupère la dernière vente d'un article à un client (CAS 1/2).
+        Approche 2 étapes : headers d'abord, puis lignes par facture.
         """
         try:
             cutoff_date = (date.today() - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
+            filter_str = f"CardCode eq '{card_code}' and DocDate ge '{cutoff_date}'"
 
-            # Requête SAP avec filtre OData
-            params = {
-                "$filter": f"CardCode eq '{card_code}' and DocDate ge '{cutoff_date}'",
-                "$expand": "DocumentLines",
-                "$orderby": "DocDate desc",
-                "$top": 50  # Limite pour performance
-            }
+            headers = await self._get_invoice_headers(filter_str, top=50)
 
-            result = await self.sap_service._call_sap("/Invoices", params=params)
-
-            # Parcourir les factures pour trouver l'article
-            for invoice in result.get("value", []):
-                for line in invoice.get("DocumentLines", []):
+            for header in headers:
+                doc_entry = header.get("DocEntry")
+                lines = await self._get_invoice_lines(doc_entry)
+                for line in lines:
                     if line.get("ItemCode") == item_code:
-                        # Première occurrence = dernière vente
                         return SalesHistoryEntry(
-                            doc_entry=invoice.get("DocEntry"),
-                            doc_num=invoice.get("DocNum"),
-                            doc_date=datetime.strptime(invoice.get("DocDate"), "%Y-%m-%d").date(),
-                            card_code=invoice.get("CardCode"),
+                            doc_entry=header.get("DocEntry"),
+                            doc_num=header.get("DocNum"),
+                            doc_date=datetime.strptime(header.get("DocDate"), "%Y-%m-%d").date(),
+                            card_code=header.get("CardCode"),
                             item_code=line.get("ItemCode"),
                             quantity=line.get("Quantity", 0),
                             unit_price=line.get("UnitPrice", 0),
@@ -87,50 +119,35 @@ class SAPHistoryService:
         lookback_days: int = 365
     ) -> List[SalesHistoryEntry]:
         """
-        Récupère les N dernières ventes d'un article à un client (pour affichage historique)
-
-        Args:
-            item_code: Code article
-            card_code: Code client
-            limit: Nombre de ventes à récupérer (défaut 3)
-            lookback_days: Période de recherche (défaut 365j)
-
-        Returns:
-            Liste des dernières ventes (max N), triée par date décroissante
+        Récupère les N dernières ventes d'un article à un client.
+        Approche 2 étapes : headers d'abord, puis lignes par facture.
         """
         try:
             cutoff_date = (date.today() - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
+            filter_str = f"CardCode eq '{card_code}' and DocDate ge '{cutoff_date}'"
 
-            # Requête SAP avec filtre OData
-            params = {
-                "$filter": f"CardCode eq '{card_code}' and DocDate ge '{cutoff_date}'",
-                "$expand": "DocumentLines",
-                "$orderby": "DocDate desc",
-                "$top": 50  # Limite pour performance
-            }
+            headers = await self._get_invoice_headers(filter_str, top=50)
 
-            result = await self.sap_service._call_sap("/Invoices", params=params)
-
-            # Parcourir les factures pour trouver toutes les occurrences de l'article
             sales = []
-            for invoice in result.get("value", []):
+            for header in headers:
                 if len(sales) >= limit:
-                    break  # On a assez de ventes
-
-                for line in invoice.get("DocumentLines", []):
+                    break
+                doc_entry = header.get("DocEntry")
+                lines = await self._get_invoice_lines(doc_entry)
+                for line in lines:
                     if line.get("ItemCode") == item_code:
                         sales.append(SalesHistoryEntry(
-                            doc_entry=invoice.get("DocEntry"),
-                            doc_num=invoice.get("DocNum"),
-                            doc_date=datetime.strptime(invoice.get("DocDate"), "%Y-%m-%d").date(),
-                            card_code=invoice.get("CardCode"),
+                            doc_entry=header.get("DocEntry"),
+                            doc_num=header.get("DocNum"),
+                            doc_date=datetime.strptime(header.get("DocDate"), "%Y-%m-%d").date(),
+                            card_code=header.get("CardCode"),
                             item_code=line.get("ItemCode"),
                             quantity=line.get("Quantity", 0),
                             unit_price=line.get("UnitPrice", 0),
                             line_total=line.get("LineTotal", 0),
                             discount_percent=line.get("DiscountPercent", 0)
                         ))
-                        break  # Une seule ligne par facture suffit
+                        break  # Une ligne par facture
 
             logger.info(f"✓ {len(sales)} vente(s) trouvée(s) pour {item_code} au client {card_code}")
             return sales
@@ -147,45 +164,33 @@ class SAPHistoryService:
         limit: int = 50
     ) -> List[WeightedSaleData]:
         """
-        Récupère les ventes d'un article à AUTRES clients (CAS 3)
-
-        Args:
-            item_code: Code article
-            exclude_card_code: Client à exclure (client actuel)
-            lookback_days: Période de recherche
-            limit: Nombre max de ventes
-
-        Returns:
-            Liste des ventes avec pondération
+        Récupère les ventes d'un article à AUTRES clients (CAS 3).
+        Approche 2 étapes : headers d'abord, puis lignes par facture.
         """
         try:
             cutoff_date = (date.today() - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
-
-            # Filtre : exclure le client actuel
             filter_parts = [f"DocDate ge '{cutoff_date}'"]
             if exclude_card_code:
                 filter_parts.append(f"CardCode ne '{exclude_card_code}'")
+            filter_str = " and ".join(filter_parts)
 
-            params = {
-                "$filter": " and ".join(filter_parts),
-                "$expand": "DocumentLines",
-                "$orderby": "DocDate desc",
-                "$top": limit
-            }
-
-            result = await self.sap_service._call_sap("/Invoices", params=params)
+            # Limiter à 30 headers max pour éviter trop d'appels individuels
+            headers = await self._get_invoice_headers(filter_str, top=min(limit, 30))
 
             sales = []
-            for invoice in result.get("value", []):
-                for line in invoice.get("DocumentLines", []):
+            for header in headers:
+                doc_entry = header.get("DocEntry")
+                lines = await self._get_invoice_lines(doc_entry)
+                for line in lines:
                     if line.get("ItemCode") == item_code:
                         sales.append(WeightedSaleData(
-                            card_code=invoice.get("CardCode"),
-                            card_name=invoice.get("CardName"),
+                            card_code=header.get("CardCode"),
+                            card_name=header.get("CardName", ""),
                             unit_price=line.get("UnitPrice", 0),
                             quantity=line.get("Quantity", 0),
-                            sale_date=datetime.strptime(invoice.get("DocDate"), "%Y-%m-%d").date()
+                            sale_date=datetime.strptime(header.get("DocDate"), "%Y-%m-%d").date()
                         ))
+                        break  # Une ligne par facture
 
             logger.info(f"✓ Trouvé {len(sales)} ventes de {item_code} à autres clients")
             return sales
@@ -236,40 +241,26 @@ class SAPHistoryService:
         lookback_days: int = 180
     ) -> Optional[SupplierPriceVariation]:
         """
-        Détecte la variation du prix fournisseur (CAS 1 vs CAS 2)
-
-        Endpoint : GET /PurchaseInvoices
-        Seuil stabilité : 5%
-
-        Args:
-            item_code: Code article
-            current_supplier_price: Prix fournisseur actuel
-            lookback_days: Période de recherche
-
-        Returns:
-            Variation ou None
+        Détecte la variation du prix fournisseur (CAS 1 vs CAS 2).
+        Approche 2 étapes : headers achat, puis lignes par facture.
         """
         try:
             cutoff_date = (date.today() - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
+            filter_str = f"DocDate ge '{cutoff_date}'"
 
-            params = {
-                "$filter": f"DocDate ge '{cutoff_date}'",
-                "$expand": "DocumentLines",
-                "$orderby": "DocDate desc",
-                "$top": 20
-            }
-
-            result = await self.sap_service._call_sap("/PurchaseInvoices", params=params)
+            headers = await self._get_purchase_invoice_headers(filter_str, top=20)
 
             # Trouver le dernier achat de cet article
             previous_price = None
             last_date = None
 
-            for invoice in result.get("value", []):
-                for line in invoice.get("DocumentLines", []):
+            for header in headers:
+                doc_entry = header.get("DocEntry")
+                lines = await self._get_purchase_invoice_lines(doc_entry)
+                for line in lines:
                     if line.get("ItemCode") == item_code:
                         previous_price = line.get("UnitPrice", 0)
-                        last_date = datetime.strptime(invoice.get("DocDate"), "%Y-%m-%d").date()
+                        last_date = datetime.strptime(header.get("DocDate"), "%Y-%m-%d").date()
                         break
                 if previous_price:
                     break

@@ -288,6 +288,16 @@ export function AttachmentsTab({ emailId, hasAttachments = true }: AttachmentsTa
               ) : blobUrl ? (
                 viewingAtt.content_type?.startsWith('image/') ? (
                   <img src={blobUrl} alt={viewingAtt.filename} className="w-full h-full object-contain" />
+                ) : viewingAtt.content_type === 'application/pdf' ? (
+                  <object data={blobUrl} type="application/pdf" className="w-full h-full">
+                    <div className="flex flex-col items-center gap-3 text-sm text-muted-foreground p-6">
+                      <p>Affichage PDF non supporté par ce navigateur.</p>
+                      <Button variant="outline" size="sm" onClick={() => handleDownload(viewingAtt)}>
+                        <Download className="h-4 w-4 mr-1.5" />
+                        Télécharger
+                      </Button>
+                    </div>
+                  </object>
                 ) : (
                   <iframe src={blobUrl} className="w-full h-full border-0" title={viewingAtt.filename} />
                 )

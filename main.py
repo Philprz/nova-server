@@ -8,9 +8,10 @@ import sys
 import asyncio
 from datetime import datetime
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import JSONResponse, HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from routes.routes_intelligent_assistant import router as assistant_router
 from routes.routes_clients import router as clients_router
@@ -166,13 +167,45 @@ async def lifespan(app: FastAPI):
 
         logger.info("Arrêt de NOVA")
 
+# Middleware de sécurité : injecte les headers HTTP de sécurité sur toutes les réponses
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        response.headers["X-Frame-Options"] = "SAMEORIGIN"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data: blob:; "
+            "connect-src 'self' wss: https:; "
+            "font-src 'self' data:; "
+            "frame-ancestors 'self'"
+        )
+        return response
+
+
+# Désactivation de la doc OpenAPI en production (mettre DISABLE_DOCS=true dans .env)
+_disable_docs = os.getenv("DISABLE_DOCS", "false").lower() == "true"
+_openapi_url = None if _disable_docs else "/openapi.json"
+_docs_url = None if _disable_docs else "/docs"
+_redoc_url = None if _disable_docs else "/redoc"
+
 # Création de l'application FastAPI
 app = FastAPI(
     title="NOVA - Assistant IA pour Devis",
     description="Système intelligent de génération de devis avec intégration SAP et Salesforce",
     version="2.1.0",
-    lifespan=lifespan
+    lifespan=lifespan,
+    openapi_url=_openapi_url,
+    docs_url=_docs_url,
+    redoc_url=_redoc_url,
 )
+
+app.add_middleware(SecurityHeadersMiddleware)
 
 # Configuration des routes statiques pour l'interface
 app.mount("/static", StaticFiles(directory="static"), name="static")

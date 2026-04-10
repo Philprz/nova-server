@@ -1,6 +1,6 @@
 import { fetchWithAuth } from '@/lib/fetchWithAuth';
 import { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, CheckCircle, Calculator, FileText, TrendingUp, Building2, Package, Search, Loader2, UserCheck, UserPlus, AlertCircle, AlertTriangle, RefreshCw, Mail, Paperclip, RotateCcw, X, Pencil, Plus, XCircle } from 'lucide-react';
+import { ArrowLeft, CheckCircle, Calculator, FileText, TrendingUp, Building2, Package, Search, Loader2, UserCheck, UserPlus, AlertCircle, AlertTriangle, RefreshCw, Mail, Paperclip, RotateCcw, X, Pencil, Plus, XCircle, MapPin } from 'lucide-react';
 import { ClientRiskBadge } from './ClientRiskBadge';
 import { ProcessedEmail } from '@/types/email';
 import { CreateItemDialog } from './CreateItemDialog';
@@ -24,7 +24,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { recalculatePricing, excludeProduct, setManualCode, retrySearchProduct, updateProductQuantity, loadDraftState, saveDraftState } from '@/lib/graphApi';
+import { recalculatePricing, excludeProduct, setManualCode, retrySearchProduct, updateProductQuantity, loadDraftState, saveDraftState, resolveProductAmbiguity } from '@/lib/graphApi';
 import { previewSAPQuotation, createSAPQuotation, PreviewResponse, CreateQuoteRequest, getExistingQuoteForEmail, ExistingQuoteInfo } from '@/lib/api';
 import {
   Dialog,
@@ -41,10 +41,49 @@ interface SapClient {
   CardName: string;
   Phone1?: string;
   EmailAddress?: string;
+  Street?: string;
   City?: string;
   Country?: string;
   ZipCode?: string;
   similarity?: number;
+}
+
+interface ShipToAddress {
+  street?: string;
+  city?: string;
+  zipCode?: string;
+  country?: string;
+}
+
+function isAddressComplete(addr: ShipToAddress): boolean {
+  return !!(addr.city && addr.country);
+}
+
+function ShipToAddressBlock({ addr, className = '' }: { addr: ShipToAddress; className?: string }) {
+  if (!addr.street && !addr.city && !addr.zipCode && !addr.country) {
+    return (
+      <p className={`text-xs text-warning flex items-center gap-1 ${className}`}>
+        Adresse non structurée — vérification requise
+      </p>
+    );
+  }
+  return (
+    <div className={`text-xs text-muted-foreground leading-relaxed ${className}`}>
+      {addr.street && <div>{addr.street}</div>}
+      {(addr.zipCode || addr.city) && (
+        <div>{[addr.zipCode, addr.city].filter(Boolean).join(' ')}</div>
+      )}
+      {addr.country && <div>{addr.country}</div>}
+    </div>
+  );
+}
+
+interface ShipToState {
+  text: string;
+  sapCode?: string;
+  address?: ShipToAddress;
+  source: 'client' | 'supplier' | 'llm' | 'sap' | 'user' | 'manual';
+  validated: boolean;
 }
 
 interface ClientSearchResult {
@@ -59,12 +98,24 @@ interface QuoteSummaryProps {
   quote: ProcessedEmail;
   onValidate: (sapDocNum?: number) => void;
   onBack: () => void;
-  onReanalyze?: () => Promise<void>;
+  onReanalyze?: () => Promise<any>;
   isReanalyzing?: boolean;
   isProcessed?: boolean;
 }
 
 export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanalyzing = false, isProcessed = false }: QuoteSummaryProps) {
+  // State local pour l'analysisResult — mis à jour directement après re-analyse
+  const [localAnalysisResult, setLocalAnalysisResult] = useState<any>(quote.analysisResult);
+
+  // Synchroniser si le parent change (ex: premier chargement)
+  useEffect(() => { setLocalAnalysisResult(quote.analysisResult); }, [quote.email.id]);
+
+  const handleReanalyzeLocal = async () => {
+    if (!onReanalyze) return;
+    const result = await onReanalyze();
+    if (result) setLocalAnalysisResult(result);
+  };
+
   const doc = quote.preSapDocument;
 
   // État pour la recherche de clients SAP
@@ -123,6 +174,21 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [articleToCreate, setArticleToCreate] = useState<{lineNum: number, itemCode: string, itemDescription: string} | null>(null);
 
+  // État structuré pour l'adresse de livraison
+  const [shipToState, setShipToState] = useState<ShipToState>({
+    text: '',
+    source: 'client',
+    validated: false,
+  });
+  const [shipToSearchQuery, setShipToSearchQuery] = useState('');
+  const [shipToSearching, setShipToSearching] = useState(false);
+  const [shipToResults, setShipToResults] = useState<SapClient[]>([]);
+  // Proposition automatique (1 seul résultat SAP) — en attente de confirmation utilisateur
+  const [shipToProposal, setShipToProposal] = useState<SapClient | null>(null);
+  // Formulaire de saisie manuelle (affiché si aucun résultat SAP)
+  const [showManualShipTo, setShowManualShipTo] = useState(false);
+  const [manualShipTo, setManualShipTo] = useState({ name: '', street: '', zip: '', city: '', country: '' });
+
   // Prix manuellement fixés (protège contre Recalculer)
   const [manualPriceOverrides, setManualPriceOverrides] = useState<{[itemCode: string]: number}>({});
 
@@ -153,6 +219,22 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
 
   // Articles extraits avec enrichissement automatique des prix
   const [enrichedArticles, setEnrichedArticles] = useState<any[]>([]);
+
+  const [resolveLoading, setResolveLoading] = useState<{[key: string]: boolean}>({});
+
+  // Map directe originalCode/itemCode → candidats (source unique : analysisResult)
+  const pendingByCode = new Map<string, any[]>();
+  const _allPm = (localAnalysisResult?.product_matches as any[]) || [];
+  console.log('[DIAG] product_matches count:', _allPm.length, '| pending:', _allPm.filter((p:any) => p.status === 'pending_selection').length);
+  console.log('[DIAG] product_matches:', JSON.stringify(_allPm.map((p:any) => ({ code: p.item_code, status: p.status, candidates: p.candidates?.length }))));
+  _allPm.forEach((pm: any) => {
+    if (pm.status === 'pending_selection' && pm.candidates?.length > 0) {
+      pendingByCode.set(pm.item_code, pm.candidates);
+      if (pm.original_code) pendingByCode.set(pm.original_code, pm.candidates);
+    }
+  });
+  console.log('[DIAG] enrichedArticles ItemCodes:', enrichedArticles.map((a:any) => a.ItemCode));
+  console.log('[DIAG] pendingByCode keys:', [...pendingByCode.keys()]);
 
   // État pour le blocage client en liquidation judiciaire
   const [forceBlocked, setForceBlocked] = useState(false);
@@ -208,6 +290,17 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
         draftClientLoaded.current = true;
         setSelectedClient({ CardCode: draft.selected_client_code, CardName: draft.selected_client_name });
         setSearchPerformed(true);
+        // Enrichir depuis le cache SAP pour corriger CardName/adresse si le draft a un nom obsolète
+        fetchWithAuth(`/api/clients/by-code?card_code=${encodeURIComponent(draft.selected_client_code)}`)
+          .then((r) => r.json())
+          .then((data) => {
+            if (data.success && data.client) {
+              setSelectedClient((prev) =>
+                prev ? { ...prev, CardName: data.client.CardName || prev.CardName, Street: data.client.Street, City: data.client.City, Country: data.client.Country, ZipCode: data.client.ZipCode } : prev
+              );
+            }
+          })
+          .catch(() => {});
       }
       if (draft.transport_price_override != null) {
         setTransportPriceOverride(draft.transport_price_override);
@@ -224,7 +317,7 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
   // ✨ NOUVEAUTÉ : Enrichir automatiquement les articles avec les prix depuis product_matches
   useEffect(() => {
     const baseArticles = doc?.documentLines || [];
-    const productMatches = (quote.analysisResult?.product_matches as any[]) || [];
+    const productMatches = (localAnalysisResult?.product_matches as any[]) || [];
 
     if (productMatches.length > 0) {
       // Créer une map des prix par item_code
@@ -256,11 +349,18 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
           not_found_in_sap: pm.not_found_in_sap,
           item_name: pm.item_name,
           match_reason: pm.match_reason,
+          // Désambiguïsation
+          pending_candidates: pm.status === 'pending_selection' ? (pm.candidates || []) : undefined,
+          original_code: pm.original_code,
         };
         priceMap.set(pm.item_code, entry);
         // Fallback sur le code externe original (si le code a été corrigé manuellement)
         if (pm.original_item_code && pm.original_item_code !== pm.item_code) {
           priceMap.set(pm.original_item_code, entry);
+        }
+        // Fallback sur original_code (désambiguïsation — item_code = code non résolu)
+        if (pm.original_code && pm.original_code !== pm.item_code) {
+          priceMap.set(pm.original_code, entry);
         }
       });
 
@@ -268,9 +368,12 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
       const enriched = baseArticles.map((article: any) => {
         const pricing = priceMap.get(article.ItemCode);
         if (pricing) {
+          // Si le code SAP a changé (ambiguïté résolue), mettre à jour la description aussi
+          const codeChanged = pricing.ItemCode && pricing.ItemCode !== article.ItemCode;
           return {
             ...article,
             ...pricing,  // Copie TOUS les champs pricing + le code SAP corrigé via ItemCode
+            ItemDescription: (codeChanged && pricing.item_name) ? pricing.item_name : article.ItemDescription,
           };
         }
         return article;
@@ -280,7 +383,7 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
     } else {
       setEnrichedArticles(baseArticles);
     }
-  }, [doc?.documentLines, quote.analysisResult?.product_matches]);
+  }, [doc?.documentLines, localAnalysisResult?.product_matches]);
 
   // Utiliser les articles enrichis
   const articles = enrichedArticles;
@@ -350,7 +453,7 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
 
   // ✨ NOUVEAUTÉ : Pré-initialiser articleStatus pour les produits déjà trouvés
   useEffect(() => {
-    const productMatches = (quote.analysisResult?.product_matches as any[]) || [];
+    const productMatches = (localAnalysisResult?.product_matches as any[]) || [];
     const baseArticles = doc?.documentLines || [];
 
     if (productMatches.length > 0 && baseArticles.length > 0) {
@@ -359,7 +462,7 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
       // Créer une map des product_matches par item_code (SAP) ET par original_item_code (code externe)
       const matchMap = new Map();
       productMatches.forEach((pm: any) => {
-        if (pm.item_code && !pm.not_found_in_sap) {
+        if (pm.item_code && !pm.not_found_in_sap && pm.status !== 'pending_selection') {
           const wasManuallyValidated = pm.match_reason === 'Code RONDOT saisi manuellement' && pm.original_item_code;
           const status = {
             found: true,
@@ -370,6 +473,10 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
           // Fallback : aussi indexer par le code externe original
           if (pm.original_item_code && pm.original_item_code !== pm.item_code) {
             matchMap.set(pm.original_item_code, status);
+          }
+          // Fallback : désambiguïsation — original_code est l'ancien code fournisseur
+          if (pm.original_code && pm.original_code !== pm.item_code) {
+            matchMap.set(pm.original_code, status);
           }
         }
       });
@@ -383,36 +490,115 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
 
       setArticleStatus(initialStatus);
     }
-  }, [quote.analysisResult?.product_matches, doc?.documentLines]);
+  }, [localAnalysisResult?.product_matches, doc?.documentLines]);
 
   // Auto-sélection si le client SAP est déjà identifié par le matching backend
   // Ignoré si le draft a déjà chargé un client (draftClientLoaded)
   useEffect(() => {
     if (draftClientLoaded.current) return;
     if (doc?.businessPartner.CardCode) {
-      // Auto-sélection de base (sans adresse)
+      // Auto-sélection de base (sans adresse) — le backend a validé un candidat unique et fiable
       setSelectedClient({
         CardCode: doc.businessPartner.CardCode,
         CardName: doc.businessPartner.CardName,
         EmailAddress: doc.businessPartner.ContactEmail,
       });
       setSearchPerformed(true);
-      // Enrichissement asynchrone avec City/Country depuis le cache SAP
-      fetch(`/api/clients/by-code?card_code=${encodeURIComponent(doc.businessPartner.CardCode)}`)
+      // Enrichissement asynchrone avec CardName/City/Country depuis le cache SAP
+      fetchWithAuth(`/api/clients/by-code?card_code=${encodeURIComponent(doc.businessPartner.CardCode)}`)
         .then((r) => r.json())
         .then((data) => {
           if (data.success && data.client) {
             setSelectedClient((prev) =>
-              prev ? { ...prev, City: data.client.City, Country: data.client.Country, ZipCode: data.client.ZipCode } : prev
+              prev ? { ...prev, CardName: data.client.CardName || prev.CardName, Street: data.client.Street, City: data.client.City, Country: data.client.Country, ZipCode: data.client.ZipCode } : prev
             );
           }
         })
         .catch(() => {});
-    } else if (clientName && clientName !== 'Client inconnu') {
-      setSearchQuery(clientName);
-      searchClients(clientName);
+    } else {
+      // Pas d'auto-sélection backend : pré-peupler avec les candidats du matching si disponibles
+      const candidates = localAnalysisResult?.client_matches;
+      if (candidates && candidates.length > 0) {
+        // Afficher directement les candidats triés par score — l'utilisateur choisit
+        const candidateSapClients = candidates.map((c: any) => ({
+          CardCode: c.card_code,
+          CardName: c.card_name,
+          EmailAddress: c.email_address,
+          Country: c.country,
+          City: c.city,
+          similarity: c.score,
+          _matchReason: c.match_reason,
+          strong_signal_score: c.strong_signal_score ?? 0,
+          nominal_score: c.nominal_score ?? c.score,
+        }));
+        setSapClients(candidateSapClients);
+        setSearchPerformed(true);
+        if (candidates[0]?.card_name) setSearchQuery(candidates[0].card_name);
+      } else if (clientName && clientName !== 'Client inconnu') {
+        setSearchQuery(clientName);
+        searchClients(clientName);
+      }
     }
-  }, [clientName, doc?.businessPartner.CardCode]);
+  }, [clientName, doc?.businessPartner.CardCode, localAnalysisResult?.client_auto_validated]);
+
+  // ── Sync ship_to par défaut depuis le client sélectionné ────────
+  // Quand le client change (enrichissement inclus) et qu'aucune source LLM/SAP/user n'est active,
+  // utiliser son adresse comme destination par défaut.
+  useEffect(() => {
+    if (shipToState.source !== 'client') return; // ne pas écraser une valeur déjà définie par l'utilisateur
+    if (!selectedClient) return;
+    setShipToState({
+      text: selectedClient.CardName,
+      sapCode: selectedClient.CardCode,
+      address: {
+        street: selectedClient.Street,
+        city: selectedClient.City,
+        zipCode: selectedClient.ZipCode,
+        country: selectedClient.Country,
+      },
+      source: 'client',
+      validated: false,
+    });
+  }, [selectedClient?.CardCode, selectedClient?.Street, selectedClient?.City, selectedClient?.Country]);
+
+  // ── Auto-search SAP quand le LLM a extrait un ship_to ────────────
+  const shipToLlmText = doc?.shipTo;
+  useEffect(() => {
+    if (!shipToLlmText) return;
+    // Indiquer immédiatement qu'on a un texte LLM (non résolu)
+    setShipToState({ text: shipToLlmText, source: 'llm', validated: false });
+    setShipToProposal(null);
+    setShipToResults([]);
+
+    // Lancer la recherche SAP automatiquement
+    setShipToSearching(true);
+    fetchWithAuth(`/api/clients/search_ship_to?q=${encodeURIComponent(shipToLlmText)}&limit=10`)
+      .then((r) => r.json())
+      .then((data) => {
+        const results: SapClient[] = (data.success && data.results?.length > 0)
+          ? data.results.map((c: any) => ({ CardCode: c.CardCode, CardName: c.CardName, Street: c.Street, City: c.City, Country: c.Country, ZipCode: c.ZipCode }))
+          : [];
+
+        if (results.length === 1) {
+          // 1 résultat : proposer sans valider
+          setShipToProposal(results[0]);
+          setShipToResults([]);
+        } else if (results.length > 1) {
+          // Plusieurs : afficher la liste
+          setShipToResults(results);
+          setShipToProposal(null);
+        } else {
+          // Aucun : garder texte libre LLM
+          setShipToResults([]);
+          setShipToProposal(null);
+        }
+      })
+      .catch(() => {
+        setShipToResults([]);
+        setShipToProposal(null);
+      })
+      .finally(() => setShipToSearching(false));
+  }, [shipToLlmText]);
 
   // ──────────────────────────────────────────────────────────────
   // Création devis SAP — Prévisualisation + Confirmation
@@ -449,12 +635,16 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
     ];
 
     // Référence commande client (Form No, PO, etc.) → NumAtCard SAP
-    const customerRef = quote.analysisResult?.customer_reference ?? undefined;
+    const customerRef = localAnalysisResult?.customer_reference ?? undefined;
+
+    const baseComments = comments || `Devis suite email: ${quote.email.subject || ''}`;
+    const shipToNote = shipToState.text.trim() ? `\nLivraison : ${shipToState.text.trim()}` : '';
 
     return {
       CardCode: selectedClient!.CardCode,
-      Comments: comments || `Devis suite email: ${quote.email.subject || ''}`,
+      Comments: baseComments + shipToNote,
       NumAtCard: customerRef,
+      ship_to: shipToState.text.trim() || undefined,
       email_id: quote.email.id,
       email_subject: quote.email.subject,
       DocumentLines: [...activeLines, ...manualDocLines, ...fixedLines],
@@ -566,6 +756,82 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
     } finally {
       setSearching(false);
     }
+  };
+
+  // Recherche SAP ship_to (clients + fournisseurs)
+  const searchShipTo = async (query: string) => {
+    if (!query || query.length < 2) return;
+    setShipToSearching(true);
+    setShipToProposal(null);
+    setShowManualShipTo(false);
+    try {
+      const response = await fetchWithAuth(`/api/clients/search_ship_to?q=${encodeURIComponent(query)}&limit=10`);
+      if (response.ok) {
+        const data = await response.json();
+        const results: SapClient[] = (data.success && data.results?.length > 0)
+          ? data.results.map((c: any) => ({
+              CardCode: c.CardCode, CardName: c.CardName,
+              Street: c.Street, City: c.City, Country: c.Country, ZipCode: c.ZipCode,
+              // stocker CardType dans similarity pour ne pas modifier l'interface SapClient
+              _cardType: c.CardType,
+            } as any))
+          : [];
+        if (results.length === 1) {
+          setShipToProposal(results[0]);
+          setShipToResults([]);
+        } else if (results.length > 1) {
+          setShipToResults(results);
+        } else {
+          // Aucun résultat → proposer saisie manuelle
+          setShipToResults([]);
+          setShowManualShipTo(true);
+          setManualShipTo({ name: query, street: '', zip: '', city: '', country: '' });
+        }
+      } else {
+        setShipToResults([]);
+        setShowManualShipTo(true);
+        setManualShipTo({ name: query, street: '', zip: '', city: '', country: '' });
+      }
+    } catch {
+      setShipToResults([]);
+    } finally {
+      setShipToSearching(false);
+    }
+  };
+
+  // Confirmer une proposition SAP (1 résultat ou sélection dans la liste)
+  const handleConfirmShipTo = (client: SapClient & { _cardType?: string }) => {
+    const source = client._cardType === 'S' ? 'supplier' : 'sap';
+    setShipToState({
+      text: client.CardName,
+      sapCode: client.CardCode,
+      address: { street: client.Street, city: client.City, zipCode: client.ZipCode, country: client.Country },
+      source,
+      validated: true,
+    });
+    setShipToProposal(null);
+    setShipToResults([]);
+    setShipToSearchQuery('');
+    setShowManualShipTo(false);
+  };
+
+  // Valider la saisie manuelle
+  const handleManualShipTo = () => {
+    setShipToState({
+      text: manualShipTo.name || 'Destination manuelle',
+      address: { street: manualShipTo.street, city: manualShipTo.city, zipCode: manualShipTo.zip, country: manualShipTo.country },
+      source: 'manual',
+      validated: true,
+    });
+    setShowManualShipTo(false);
+    setShipToResults([]);
+  };
+
+  // L'utilisateur modifie manuellement le texte → source devient 'user', adresse perdue
+  const handleShipToTextChange = (text: string) => {
+    setShipToState({ text, source: 'user', validated: false });
+    setShipToProposal(null);
+    setShipToResults([]);
   };
 
   // Sélectionner un client existant
@@ -699,6 +965,25 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
       toast.success('Article ignoré et exclu du devis');
     } catch (error: any) {
       toast.error(error.message || "Erreur lors de l'exclusion");
+    }
+  };
+
+  // Résoudre une ambiguïté : l'utilisateur choisit un candidat parmi plusieurs
+  const handleResolveAmbiguity = async (originalCode: string, chosenItemCode: string, chosenItemName: string) => {
+    setResolveLoading(prev => ({ ...prev, [originalCode]: true }));
+    try {
+      const apiResult = await resolveProductAmbiguity(quote.email.id, originalCode, chosenItemCode);
+      // Utiliser les product_matches retournés par l'API (contiennent poids + prix enrichis)
+      const updatedPm = apiResult.product_matches || [];
+      setLocalAnalysisResult((prev: any) => {
+        if (!prev) return prev;
+        return { ...prev, product_matches: updatedPm };
+      });
+      toast.success(`Article sélectionné : ${chosenItemCode} — ${chosenItemName}`);
+    } catch (err: any) {
+      toast.error(err.message || 'Erreur lors de la sélection');
+    } finally {
+      setResolveLoading(prev => ({ ...prev, [originalCode]: false }));
     }
   };
 
@@ -873,7 +1158,7 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
   const clientStatus = getClientStatus();
 
   return (
-    <div className="space-y-6 animate-fade-in max-w-4xl mx-auto">
+    <div className="space-y-6 animate-fade-in w-full max-w-none">
       {/* Header */}
       <div className="space-y-1">
         <h1 className="text-2xl font-bold text-foreground">Synthèse du devis</h1>
@@ -942,7 +1227,7 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
             </Badge>
           </CardTitle>
           {/* Vérification solvabilité */}
-          <ClientRiskBadge risk={(quote.analysisResult as any)?.client_risk} />
+          <ClientRiskBadge risk={(localAnalysisResult as any)?.client_risk} />
         </CardHeader>
         <CardContent className="space-y-4">
           {/* Informations client détectées */}
@@ -978,6 +1263,30 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
             </Button>
           </div>
 
+          {/* Bannière ambiguïté : plusieurs candidats détectés, sélection requise */}
+          {searchPerformed && !selectedClient && sapClients.length > 1 && !localAnalysisResult?.client_auto_validated && (
+            <div className="flex items-start gap-2 p-3 rounded-lg border border-amber-400 bg-amber-50 dark:bg-amber-950/20 text-sm">
+              <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="font-semibold text-amber-800 dark:text-amber-300">
+                  {sapClients.length} clients candidats détectés — sélection requise
+                </p>
+                <p className="text-amber-700 dark:text-amber-400 text-xs mt-0.5">
+                  Le système ne peut pas choisir automatiquement. Sélectionnez le bon client ci-dessous.
+                </p>
+                {/* Signaux géographiques disponibles mais insuffisants pour trancher */}
+                {(localAnalysisResult?.detected_country || localAnalysisResult?.detected_city) && (
+                  <p className="text-amber-600 dark:text-amber-500 text-xs mt-1">
+                    Signal géo détecté :
+                    {localAnalysisResult.detected_city && ` ville=${localAnalysisResult.detected_city}`}
+                    {localAnalysisResult.detected_country && ` pays=${localAnalysisResult.detected_country}`}
+                    {' '}— vérifiez le pays du client dans la liste.
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Résultats de recherche SAP */}
           {searchPerformed && (
             <div className="border rounded-lg overflow-hidden">
@@ -1005,16 +1314,43 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
                       }`}
                       onClick={() => handleSelectClient(client)}
                     >
-                      <div>
+                      <div className="flex-1 min-w-0">
                         <p className="font-medium">{client.CardName}</p>
                         <p className="text-xs text-muted-foreground">
                           Code: {client.CardCode}
+                          {client.City && ` • ${client.City}`}
+                          {client.Country && ` (${client.Country})`}
                           {client.EmailAddress && ` • ${client.EmailAddress}`}
                         </p>
+                        {/* Raisons de matching (explicabilité) */}
+                        {(client as any)._matchReason && (
+                          <p className="text-xs text-muted-foreground/70 mt-0.5 italic truncate">
+                            {(client as any)._matchReason}
+                          </p>
+                        )}
+                        {/* Badge signal géographique fort */}
+                        {(client as any).strong_signal_score > 0 && (
+                          <span className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 mt-0.5">
+                            Signal géo +{(client as any).strong_signal_score}
+                          </span>
+                        )}
                       </div>
-                      {selectedClient?.CardCode === client.CardCode && (
-                        <CheckCircle className="w-5 h-5 text-primary" />
-                      )}
+                      <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                        {(client as any).similarity != null && (
+                          <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${
+                            (client as any).similarity >= 90
+                              ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                              : (client as any).similarity >= 70
+                              ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+                              : 'bg-muted text-muted-foreground'
+                          }`}>
+                            {(client as any).similarity}%
+                          </span>
+                        )}
+                        {selectedClient?.CardCode === client.CardCode && (
+                          <CheckCircle className="w-5 h-5 text-primary" />
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1045,12 +1381,228 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
             <div className="p-3 bg-success/10 border border-success/20 rounded-lg">
               <p className="text-sm font-medium text-success flex items-center gap-2">
                 <UserCheck className="w-4 h-4" />
-                Client SAP sélectionné
+                {localAnalysisResult?.client_auto_validated
+                  ? 'Client auto-sélectionné'
+                  : 'Client SAP sélectionné'}
               </p>
               <p className="font-medium mt-1">{selectedClient.CardName}</p>
               <p className="text-xs text-muted-foreground">Code: {selectedClient.CardCode}</p>
+              {/* Raison de l'auto-sélection (explicabilité) */}
+              {localAnalysisResult?.client_auto_validated && localAnalysisResult?.auto_select_reason && (
+                <p className="text-xs text-success/80 mt-1 italic">
+                  {localAnalysisResult.auto_select_reason}
+                </p>
+              )}
+              {/* Signaux géographiques détectés */}
+              {(localAnalysisResult?.detected_country || localAnalysisResult?.detected_city) && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  Signal géo :
+                  {localAnalysisResult.detected_city && ` ville=${localAnalysisResult.detected_city}`}
+                  {localAnalysisResult.detected_country && ` pays=${localAnalysisResult.detected_country}`}
+                </p>
+              )}
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      {/* Adresse de livraison */}
+      <Card className="card-elevated">
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-lg">
+            <MapPin className="w-5 h-5 text-primary" />
+            Adresse de livraison
+            {shipToState.validated && (
+              <Badge variant="outline" className="ml-auto text-xs border-success text-success">Confirmée</Badge>
+            )}
+            {!shipToState.validated && shipToState.source === 'client' && (
+              <Badge variant="outline" className="ml-auto text-xs text-muted-foreground">Adresse client par défaut</Badge>
+            )}
+            {!shipToState.validated && shipToState.source === 'llm' && (
+              <Badge variant="outline" className="ml-auto text-xs border-warning text-warning">Extrait — à confirmer</Badge>
+            )}
+          </CardTitle>
+          <p className="text-xs text-muted-foreground">Toujours vérifier avant envoi. Utilisé pour le calcul DHL.</p>
+        </CardHeader>
+        <CardContent className="space-y-3">
+
+          {/* Champ texte éditable */}
+          <div className="relative">
+            <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <Input
+              placeholder="Destination (ex: BDF, Site Lyon…)"
+              value={shipToState.text}
+              onChange={(e) => handleShipToTextChange(e.target.value)}
+              className="pl-10"
+            />
+          </div>
+
+          {/* Adresse résolue (SAP) */}
+          {shipToState.address && (
+            <div className="p-3 bg-success/10 border border-success/20 rounded-lg flex items-start justify-between gap-2">
+              <div className="space-y-1">
+                <p className="text-xs font-medium text-success">
+                  {shipToState.source === 'client' ? 'Adresse client (par défaut)' : 'Adresse de livraison confirmée'}
+                </p>
+                <p className="text-sm font-medium">{shipToState.text}</p>
+                <ShipToAddressBlock addr={shipToState.address} />
+                {!isAddressComplete(shipToState.address) && (
+                  <p className="text-xs text-warning flex items-center gap-1 mt-1">
+                    <AlertTriangle className="w-3 h-3" />
+                    Adresse incomplète — calcul DHL bloqué
+                  </p>
+                )}
+                {shipToState.sapCode && (
+                  <p className="text-xs text-muted-foreground opacity-60">{shipToState.sapCode}</p>
+                )}
+              </div>
+              <button
+                className="text-muted-foreground hover:text-destructive flex-shrink-0 mt-1"
+                onClick={() => setShipToState((s) => ({ ...s, address: undefined, sapCode: undefined, source: 'user', validated: false }))}
+                title="Effacer l'adresse"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          )}
+
+          {/* Avertissement : adresse manquante → DHL bloqué */}
+          {!shipToState.address && (
+            <p className="text-xs text-warning flex items-center gap-1">
+              <AlertTriangle className="w-3 h-3" />
+              Adresse non structurée — vérification requise. Calcul DHL désactivé.
+            </p>
+          )}
+
+          {/* Recherche dans SAP */}
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <Input
+                placeholder="Rechercher une adresse (client / fournisseur)…"
+                value={shipToSearchQuery}
+                onChange={(e) => setShipToSearchQuery(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && searchShipTo(shipToSearchQuery)}
+                className="pl-10"
+              />
+            </div>
+            <Button
+              variant="outline"
+              onClick={() => searchShipTo(shipToSearchQuery)}
+              disabled={shipToSearching || shipToSearchQuery.length < 2}
+            >
+              {shipToSearching ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Rechercher'}
+            </Button>
+          </div>
+
+          {/* Recherche auto en cours */}
+          {shipToSearching && !shipToSearchQuery && (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Loader2 className="w-3 h-3 animate-spin" />
+              Recherche SAP automatique en cours…
+            </div>
+          )}
+
+          {/* Proposition automatique (1 résultat) */}
+          {shipToProposal && (
+            <div className="border border-primary/30 rounded-lg p-3 bg-primary/5 space-y-2">
+              <div className="flex items-center gap-2">
+                <p className="text-xs font-medium text-primary">Suggestion SAP automatique</p>
+                {(shipToProposal as any)?._cardType === 'S' && (
+                  <Badge variant="outline" className="text-xs">Fournisseur</Badge>
+                )}
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-medium text-sm">{shipToProposal.CardName}</p>
+                  <ShipToAddressBlock
+                    addr={{ street: shipToProposal.Street, city: shipToProposal.City, zipCode: shipToProposal.ZipCode, country: shipToProposal.Country }}
+                    className="mt-1"
+                  />
+                  <p className="text-xs text-muted-foreground opacity-60 mt-1">{shipToProposal.CardCode}</p>
+                </div>
+                <div className="flex gap-2">
+                  <Button size="sm" onClick={() => handleConfirmShipTo(shipToProposal)}>
+                    <CheckCircle className="w-3 h-3 mr-1" /> Confirmer
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => setShipToProposal(null)}>
+                    <X className="w-3 h-3" />
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Liste de suggestions (plusieurs résultats) */}
+          {shipToResults.length > 0 && (
+            <div className="border rounded-lg overflow-hidden">
+              <div className="bg-muted/50 px-3 py-2 text-sm font-medium">
+                {shipToResults.length} résultat{shipToResults.length > 1 ? 's' : ''} SAP — sélectionnez
+              </div>
+              <div className="divide-y max-h-48 overflow-y-auto">
+                {shipToResults.map((c) => (
+                  <div
+                    key={c.CardCode}
+                    className="p-3 cursor-pointer hover:bg-muted/50 transition-colors flex items-center justify-between"
+                    onClick={() => handleConfirmShipTo(c)}
+                  >
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <p className="font-medium text-sm">{c.CardName}</p>
+                        {(c as any)._cardType === 'S' && (
+                          <Badge variant="outline" className="text-xs">Fournisseur</Badge>
+                        )}
+                      </div>
+                      <ShipToAddressBlock
+                        addr={{ street: c.Street, city: c.City, zipCode: c.ZipCode, country: c.Country }}
+                        className="mt-1"
+                      />
+                      <p className="text-xs text-muted-foreground opacity-60 mt-1">{c.CardCode}</p>
+                    </div>
+                    <CheckCircle className="w-4 h-4 text-muted-foreground" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Formulaire saisie manuelle (aucun résultat SAP) */}
+          {showManualShipTo && (
+            <div className="border border-dashed rounded-lg p-3 space-y-2 bg-muted/20">
+              <p className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+                <AlertTriangle className="w-3 h-3 text-warning" />
+                Aucun résultat SAP — saisie manuelle
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="col-span-2">
+                  <Input placeholder="Nom / société" value={manualShipTo.name}
+                    onChange={(e) => setManualShipTo((p) => ({ ...p, name: e.target.value }))} className="text-sm" />
+                </div>
+                <div className="col-span-2">
+                  <Input placeholder="Rue" value={manualShipTo.street}
+                    onChange={(e) => setManualShipTo((p) => ({ ...p, street: e.target.value }))} className="text-sm" />
+                </div>
+                <Input placeholder="Code postal" value={manualShipTo.zip}
+                  onChange={(e) => setManualShipTo((p) => ({ ...p, zip: e.target.value }))} className="text-sm" />
+                <Input placeholder="Ville" value={manualShipTo.city}
+                  onChange={(e) => setManualShipTo((p) => ({ ...p, city: e.target.value }))} className="text-sm" />
+                <div className="col-span-2">
+                  <Input placeholder="Pays (ex: FR, DE, IT…)" value={manualShipTo.country}
+                    onChange={(e) => setManualShipTo((p) => ({ ...p, country: e.target.value }))} className="text-sm" />
+                </div>
+              </div>
+              <div className="flex gap-2 pt-1">
+                <Button size="sm" onClick={handleManualShipTo}
+                  disabled={!manualShipTo.city || !manualShipTo.country}>
+                  <CheckCircle className="w-3 h-3 mr-1" /> Valider
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setShowManualShipTo(false)}>
+                  <X className="w-3 h-3" />
+                </Button>
+              </div>
+            </div>
+          )}
+
         </CardContent>
       </Card>
 
@@ -1162,6 +1714,8 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
                         {(() => {
                           const isIgnored = !!ignoredItems[line.LineNum];
                           const isNotFound = line.not_found_in_sap === true || (status && !status.found);
+                          const candidates = pendingByCode.get(line.ItemCode) || pendingByCode.get(line.original_code);
+                          const isPendingSelection = !!candidates && candidates.length > 0;
 
                           if (isIgnored) {
                             return (
@@ -1178,6 +1732,36 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
                                   <RotateCcw className="w-3 h-3 mr-1" />
                                   Restaurer
                                 </Button>
+                              </div>
+                            );
+                          }
+
+                          // Désambiguïsation : priorité absolue sur "Trouvé"
+                          if (isPendingSelection) {
+                            return (
+                              <div className="space-y-1.5">
+                                <Badge variant="outline" className="text-amber-600 border-amber-400 bg-amber-50">
+                                  <AlertCircle className="w-3 h-3 mr-1" />
+                                  {candidates!.length} candidats
+                                </Badge>
+                                <div className="space-y-1 text-left max-w-[200px]">
+                                  {candidates!.map((c: any) => (
+                                    <button
+                                      key={c.item_code}
+                                      disabled={!!resolveLoading[line.original_code || line.ItemCode]}
+                                      onClick={() => handleResolveAmbiguity(line.original_code || line.ItemCode, c.item_code, c.item_name)}
+                                      className="flex flex-col w-full text-left px-1.5 py-1 rounded border border-transparent hover:border-amber-400 hover:bg-amber-50 transition-colors text-xs disabled:opacity-50"
+                                    >
+                                      <span className="font-mono font-semibold text-primary">{c.item_code}</span>
+                                      <span className="text-muted-foreground truncate">{c.item_name}</span>
+                                    </button>
+                                  ))}
+                                  {resolveLoading[line.original_code || line.ItemCode] && (
+                                    <div className="flex items-center gap-1 text-xs text-muted-foreground px-1">
+                                      <Loader2 className="w-3 h-3 animate-spin" /> Sélection...
+                                    </div>
+                                  )}
+                                </div>
                               </div>
                             );
                           }
@@ -1607,9 +2191,10 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
                         setTransportPriceOverride(price);
                         triggerDraftSave(quantityOverrides, ignoredItems, selectedClient, price);
                       }}
-                      defaultCity={selectedClient?.City}
-                      defaultCountry={selectedClient?.Country}
-                      defaultPostalCode={selectedClient?.ZipCode}
+                      defaultCity={shipToState.address?.city ?? selectedClient?.City}
+                      defaultCountry={shipToState.address?.country ?? selectedClient?.Country}
+                      defaultPostalCode={shipToState.address?.zipCode ?? selectedClient?.ZipCode}
+                      disabled={!shipToState.address || !isAddressComplete(shipToState.address)}
                     />
                   </div>
                 </TableCell>
@@ -1835,7 +2420,7 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
         <TabsContent value="donnees" className="mt-4">
           <ExtractedDataTab
             emailId={quote.email.id}
-            analysisResult={quote.analysisResult as any}
+            analysisResult={localAnalysisResult as any}
           />
         </TabsContent>
       </Tabs>
@@ -1896,7 +2481,7 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
           {onReanalyze && (
             <Button
               variant="outline"
-              onClick={onReanalyze}
+              onClick={handleReanalyzeLocal}
               disabled={isReanalyzing}
               title="Relancer l'analyse complète de cet email (données fraîches)"
             >
@@ -1921,7 +2506,7 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
             return line.unit_price == null;
           });
           const alreadySent = existingQuote?.found === true;
-          const clientRisk = (quote.analysisResult as any)?.client_risk;
+          const clientRisk = (localAnalysisResult as any)?.client_risk;
           const isClientBlocked = clientRisk?.status === 'BLOCKED';
           const isDisabled = !doc || articles.length === 0 || (!selectedClient && !createNewClient) || hasUnresolved || hasUncalculatedPrices || isPreviewing || (isClientBlocked && !forceBlocked);
           const label = isClientBlocked && !forceBlocked
@@ -2018,9 +2603,9 @@ export function QuoteSummary({ quote, onValidate, onBack, onReanalyze, isReanaly
                 <Building2 className="w-4 h-4 text-muted-foreground" />
                 <span className="font-medium">{selectedClient?.CardName}</span>
                 <Badge variant="outline">{selectedClient?.CardCode}</Badge>
-                {quote.analysisResult?.customer_reference && (
+                {localAnalysisResult?.customer_reference && (
                   <Badge variant="secondary" className="ml-auto font-mono text-xs">
-                    Réf. client : {quote.analysisResult.customer_reference}
+                    Réf. client : {localAnalysisResult.customer_reference}
                   </Badge>
                 )}
               </div>

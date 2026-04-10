@@ -16,6 +16,10 @@ async def sync_sap_data_if_needed():
     Synchronise les données SAP si nécessaire (données > 24h).
     Appelé automatiquement au démarrage du backend.
     """
+    # Attendre que le HealthChecker ait terminé sa connexion SAP pour éviter
+    # le conflit de session 305 au démarrage
+    await asyncio.sleep(5)
+
     cache_db = get_sap_cache_db()
     sap_service = get_sap_business_service()
 

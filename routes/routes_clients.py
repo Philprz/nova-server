@@ -327,6 +327,32 @@ async def refresh_clients_cache():
     except Exception as e:
         return {"success": False, "error": str(e)}
 
+@router.get("/search_ship_to")
+async def search_ship_to(q: str, limit: int = 10):
+    """Recherche adresse de livraison dans SAP : clients ET fournisseurs."""
+    try:
+        from services.sap_cache_db import get_sap_cache_db
+        cache_db = get_sap_cache_db()
+        results = cache_db.search_ship_to(q, limit=limit)
+        return {
+            "success": True,
+            "results": [
+                {
+                    "CardCode": r["CardCode"],
+                    "CardName": r["CardName"],
+                    "Street": r.get("Street"),
+                    "City": r.get("City"),
+                    "Country": r.get("Country"),
+                    "ZipCode": r.get("ZipCode"),
+                    "CardType": r.get("CardType", "C"),
+                }
+                for r in results
+            ]
+        }
+    except Exception as e:
+        return {"success": False, "results": [], "error": str(e)}
+
+
 @router.get("/by-code")
 async def get_client_by_code(card_code: str):
     """Retourne un client SAP par son CardCode exact (pour pré-remplir les adresses)."""
@@ -342,6 +368,7 @@ async def get_client_by_code(card_code: str):
                     "CardName": client["CardName"],
                     "EmailAddress": client.get("EmailAddress"),
                     "Phone1": client.get("Phone1"),
+                    "Street": client.get("Street"),
                     "City": client.get("City"),
                     "Country": client.get("Country"),
                     "ZipCode": client.get("ZipCode"),
@@ -388,6 +415,7 @@ async def search_clients(q: str, source: str = "both", limit: int = 10):
                     "CardName": client["CardName"],
                     "EmailAddress": client.get("EmailAddress"),
                     "Phone1": client.get("Phone1"),
+                    "Street": client.get("Street"),
                     "City": client.get("City"),
                     "Country": client.get("Country"),
                     "ZipCode": client.get("ZipCode"),

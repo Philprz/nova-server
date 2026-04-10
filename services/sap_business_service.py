@@ -4,6 +4,7 @@ Gère les articles, prix, clients et création de devis
 """
 
 import os
+import asyncio
 import httpx
 import logging
 from typing import Optional, List, Dict, Any
@@ -152,10 +153,17 @@ class SAPBusinessService:
                         logger.warning("Switch company error (305), réinitialisation session et reconnexion...")
                         self.session_id = None
                         self.session_timeout = None
+                        await asyncio.sleep(1.0)  # Laisser SAP stabiliser sa session
                         if await self.login():
                             return await self._call_sap(endpoint, method, payload, params)
                 except Exception:
                     pass
+
+            elif e.response.status_code == 502:
+                # SAP proxy temporairement surchargé — réessayer après délai
+                logger.warning("Erreur 502 SAP (proxy), retry dans 3s...")
+                await asyncio.sleep(3.0)
+                return await self._call_sap(endpoint, method, payload, params)
 
             logger.error(f"Erreur SAP {e.response.status_code}: {e.response.text}")
             raise
