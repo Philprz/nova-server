@@ -1136,23 +1136,38 @@ async def analyze_email(message_id: str, force: bool = False):
                 result.customer_reference = match_result.customer_reference
                 logger.info(f"📋 Référence client extraite : {match_result.customer_reference}")
 
+            # Signaux géographiques → transmis au frontend pour explicabilité
+            result.detected_country = match_result.detected_country
+            result.detected_city = match_result.detected_city
+            result.auto_select_reason = match_result.auto_select_reason
+
             # --- AUTO-VALIDATION CLIENT ---
-            if match_result.clients:
-                # Si 1 seul client ET score ≥ 95 → AUTO-VALIDÉ
-                if len(match_result.clients) == 1 and match_result.clients[0].score >= 95:
-                    result.client_auto_validated = True
-                    logger.info(f"✅ Client AUTO-VALIDÉ: {match_result.clients[0].card_name} (score={match_result.clients[0].score})")
-
-                # Si plusieurs clients OU score < 95 → CHOIX REQUIS
-                elif len(match_result.clients) > 1:
-                    result.requires_user_choice = True
-                    result.user_choice_reason = f"{len(match_result.clients)} clients possibles - Choix requis"
-                    logger.info(f"⚠️ CHOIX UTILISATEUR requis: {len(match_result.clients)} clients matchés")
-
-                elif match_result.clients[0].score < 95:
-                    result.requires_user_choice = True
-                    result.user_choice_reason = f"Client score < 95 ({match_result.clients[0].score}) - Confirmation requise"
-                    logger.info(f"⚠️ CONFIRMATION requise: Client score={match_result.clients[0].score} < 95")
+            # Délègue entièrement aux règles de email_matcher (auto_selected=True uniquement si
+            # 1 candidat OU score≥90 + écart≥10 avec le 2e). Pas de sélection silencieuse.
+            if match_result.auto_selected and match_result.best_client:
+                result.client_auto_validated = True
+                logger.info(
+                    "✅ Client AUTO-VALIDÉ: %s (%s) score=%d",
+                    match_result.best_client.card_name,
+                    match_result.best_client.card_code,
+                    match_result.best_client.score,
+                )
+            elif match_result.clients:
+                result.requires_user_choice = True
+                n = len(match_result.clients)
+                top = match_result.clients[0]
+                if n > 1:
+                    second = match_result.clients[1]
+                    gap = top.score - second.score
+                    result.user_choice_reason = (
+                        f"{n} clients candidats — sélectionnez le bon "
+                        f"(score 1er={top.score}, écart={gap})"
+                    )
+                else:
+                    result.user_choice_reason = (
+                        f"Score insuffisant ({top.score}/100) — Confirmation requise"
+                    )
+                logger.info("⚠️ CHOIX UTILISATEUR requis: %s", result.user_choice_reason)
 
             # --- AUTO-VALIDATION PRODUITS ---
             if match_result.products:
@@ -1237,8 +1252,8 @@ async def analyze_email(message_id: str, force: bool = False):
                 # Préparer contextes pricing pour tous les produits
                 pricing_contexts = []
                 for product in match_result.products:
-                    # Skip si produit non trouvé dans SAP
-                    if product.not_found_in_sap:
+                    # Skip si produit non trouvé dans SAP ou en attente de sélection
+                    if product.not_found_in_sap or product.status == "pending_selection":
                         continue
 
                     context = PricingContext(
@@ -1347,9 +1362,9 @@ async def analyze_email(message_id: str, force: bool = False):
                         # Fallback: garder produit sans pricing
                         enriched_products.append(product)
 
-                # Ajouter produits non trouvés dans SAP (sans pricing)
+                # Ajouter produits non trouvés dans SAP ET en attente de sélection (sans pricing)
                 for product in match_result.products:
-                    if product.not_found_in_sap:
+                    if product.not_found_in_sap or product.status == "pending_selection":
                         enriched_products.append(product)
 
                 # Remplacer produits par versions enrichies
@@ -1754,6 +1769,129 @@ async def confirm_products_choice(message_id: str, choice: ProductChoiceRequest)
 
     except Exception as e:
         logger.error(f"Error confirming products choice: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/emails/{message_id}/resolve-product")
+async def resolve_product_ambiguity(
+    message_id: str,
+    body: dict = Body(...)
+):
+    """
+    L'utilisateur choisit un candidat parmi les articles SAP en ambiguïté (status=pending_selection).
+
+    Body JSON:
+        original_code: str  — le code source ambigu (ex: "523-5135")
+        chosen_item_code: str  — l'ItemCode SAP choisi parmi les candidats (ex: "A02820")
+
+    Returns:
+        L'analyse mise à jour avec le produit résolu.
+    """
+    original_code = body.get("original_code")
+    chosen_item_code = body.get("chosen_item_code")
+
+    if not original_code or not chosen_item_code:
+        raise HTTPException(status_code=422, detail="original_code et chosen_item_code sont requis")
+
+    try:
+        result = _load_analysis(message_id)
+        product_matches = list(result.product_matches or [])
+
+        # Trouver le placeholder pending_selection correspondant
+        resolved = False
+        updated_matches = []
+        for pm in product_matches:
+            pm_dict = pm if isinstance(pm, dict) else (pm.dict() if hasattr(pm, 'dict') else dict(pm))
+            if (pm_dict.get("status") == "pending_selection"
+                    and pm_dict.get("original_code") == original_code):
+                # Chercher le candidat choisi dans la liste
+                candidates = pm_dict.get("candidates", [])
+                chosen = next(
+                    (c for c in candidates if c.get("item_code") == chosen_item_code),
+                    None
+                )
+                if chosen is None:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"L'article {chosen_item_code} ne fait pas partie des candidats pour {original_code}"
+                    )
+                # Remplacer le placeholder par le candidat choisi (status=None, candidates=[])
+                chosen["status"] = None
+                chosen["candidates"] = []
+                chosen["original_code"] = original_code  # traçabilité
+                chosen["not_found_in_sap"] = False
+                chosen["quantity"] = pm_dict.get("quantity", 1)
+
+                # Enrichir avec poids depuis le cache SAP
+                try:
+                    from services.sap_cache_db import get_sap_cache_db
+                    cached_item = get_sap_cache_db().get_item_by_code(chosen_item_code)
+                    if cached_item and cached_item.get("weight_unit_value"):
+                        w = cached_item["weight_unit_value"]
+                        chosen["weight_unit_value"] = w
+                        chosen["weight_unit"] = "kg"
+                        chosen["weight_total"] = round(w * chosen["quantity"], 4)
+                except Exception as e:
+                    logger.warning(f"Poids non récupéré pour {chosen_item_code}: {e}")
+
+                # Calcul pricing
+                try:
+                    from services.pricing_engine import get_pricing_engine
+                    from services.pricing_models import PricingContext
+                    pricing_engine = get_pricing_engine()
+                    card_code = result.extracted_data.client_card_code if result.extracted_data else "UNKNOWN"
+                    pricing_result = await pricing_engine.calculate_price(
+                        PricingContext(
+                            item_code=chosen_item_code,
+                            card_code=card_code,
+                            quantity=chosen["quantity"]
+                        )
+                    )
+                    if pricing_result.success and pricing_result.decision:
+                        chosen["unit_price"] = pricing_result.decision.calculated_price
+                        chosen["line_total"] = pricing_result.decision.line_total
+                        chosen["pricing_case"] = pricing_result.decision.case_type.value
+                        chosen["pricing_justification"] = pricing_result.decision.justification
+                except Exception as e:
+                    logger.warning(f"Pricing non calculé pour {chosen_item_code}: {e}")
+
+                updated_matches.append(chosen)
+                resolved = True
+                logger.info(f"Ambiguïté résolue : {original_code} → {chosen_item_code}")
+            else:
+                updated_matches.append(pm_dict)
+
+        if not resolved:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Aucun produit pending_selection trouvé pour le code {original_code}"
+            )
+
+        result.product_matches = updated_matches
+
+        # Vérifier s'il reste des pending_selection
+        still_pending = any(
+            (pm.get("status") if isinstance(pm, dict) else getattr(pm, "status", None)) == "pending_selection"
+            for pm in updated_matches
+        )
+        if not still_pending:
+            result.requires_user_choice = False
+
+        _persist_analysis(message_id, result)
+
+        return {
+            "success": True,
+            "action": "product_resolved",
+            "original_code": original_code,
+            "chosen_item_code": chosen_item_code,
+            "still_pending": still_pending,
+            "product_matches": updated_matches,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur resolve_product_ambiguity: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -2450,6 +2588,8 @@ async def serve_stored_attachment(
         headers={
             "Content-Disposition": f'{disposition}; filename="{safe_name}"',
             "Cache-Control": "private, max-age=3600",  # Cache 1h (fichier local stable)
+            "X-Frame-Options": "SAMEORIGIN",
+            "Content-Security-Policy": "frame-ancestors 'self'",
         }
     )
 

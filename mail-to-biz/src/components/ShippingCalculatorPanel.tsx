@@ -106,6 +106,8 @@ interface ShippingCalculatorPanelProps {
   defaultCity?: string;
   defaultCountry?: string;
   defaultPostalCode?: string;
+  /** Désactiver le calcul DHL si aucune adresse de livraison résolue */
+  disabled?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -162,6 +164,7 @@ export function ShippingCalculatorPanel({
   defaultCity,
   defaultCountry,
   defaultPostalCode,
+  disabled = false,
 }: ShippingCalculatorPanelProps) {
   const [dialogOpen, setDialogOpen] = useState(false);
 
@@ -408,8 +411,10 @@ export function ShippingCalculatorPanel({
       <Button
         variant="outline"
         size="sm"
-        className="h-7 text-xs gap-1 border-blue-200 text-blue-700 hover:bg-blue-50"
-        onClick={() => setDialogOpen(true)}
+        className="h-7 text-xs gap-1 border-blue-200 text-blue-700 hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed"
+        onClick={() => !disabled && setDialogOpen(true)}
+        disabled={disabled}
+        title={disabled ? "Confirmez d'abord l'adresse de livraison" : undefined}
       >
         <Truck className="h-3 w-3" />
         {(isDhlActive || validatedPrice !== null) ? 'Recalculer DHL' : 'Calculer avec DHL Express'}

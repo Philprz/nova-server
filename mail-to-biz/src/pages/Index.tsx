@@ -281,13 +281,10 @@ const Index = () => {
     setCurrentView('inbox');
   };
 
-  const handleReanalyze = async () => {
-    if (!selectedQuote || isDemoMode) return;
+  const handleReanalyze = async (): Promise<any> => {
+    if (!selectedQuote || isDemoMode) return null;
     const analysis = await reanalyzeEmail(selectedQuote.email.id);
-    if (analysis) {
-      const updated = getLatestEmail(selectedQuote.email.id);
-      if (updated) setSelectedQuote(updated);
-    }
+    return analysis;
   };
 
   // Analyse forcée d'un email classé "Non pertinent"
@@ -460,7 +457,7 @@ const Index = () => {
               quote={selectedQuote}
               onValidate={handleSummaryValidate}
               onBack={handleSummaryBack}
-              onReanalyze={!isDemoMode && !processedEmailIds.has(selectedQuote.email.id) ? handleReanalyze : undefined}
+              onReanalyze={!isDemoMode ? handleReanalyze : undefined}
               isReanalyzing={analyzingEmailId === selectedQuote.email.id}
               isProcessed={processedEmailIds.has(selectedQuote.email.id)}
             />

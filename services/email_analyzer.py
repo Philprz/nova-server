@@ -29,9 +29,11 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
 QUOTE_KEYWORDS_SUBJECT = [
     # Français
     'devis', 'prix', 'rfq', 'demande de prix', 'offre de prix', 'chiffrage', 'tarif',
+    'offre',  # "TR: INFO / OFFRE", "demande d'offre" etc.
     # Anglais
     'quotation', 'quote', 'price', 'request for quotation', 'request for quote',
     'spare parts', 'spare part', 'parts request', 'price request',
+    'inquiry', 'enquiry',  # sujets RFQ courants en B2B industriel
 ]
 
 QUOTE_KEYWORDS_BODY = [
@@ -41,6 +43,9 @@ QUOTE_KEYWORDS_BODY = [
     'nous souhaitons recevoir une offre', 'veuillez nous communiquer vos prix',
     'souhaitons obtenir un devis', 'veuillez nous faire un chiffrage',
     'pouvez-vous chiffrer', 'merci de chiffrer',
+    'faire chiffrer', 'à chiffrer', 'le chiffrage', 'un chiffrage',
+    'retourner le chiffrage', 'retourner un chiffrage', 'nous faire parvenir un chiffrage',
+    'disponible chez vous', 'dispo chez vous', 'pièces dispo',
     'veuillez trouver ci-joint', 'ci-joint la demande',
     # Anglais — patterns courants dans les mails B2B industriels
     'please quote', 'please provide a quote', 'could you quote',
@@ -53,6 +58,8 @@ QUOTE_KEYWORDS_BODY = [
     'we need a quote', 'we need pricing', 'requesting a quote',
     'please provide pricing', 'can you provide a quote',
     'attached you will find', 'attached please find',
+    'quotation for', 'prepare a quotation', 'prepare the quotation',
+    'would like a quote', 'would like to receive a quote',
 ]
 
 QUANTITY_PATTERNS = [
@@ -82,6 +89,7 @@ class ExtractedQuoteData(BaseModel):
     delivery_requirement: Optional[str] = None
     urgency: str = "normal"
     notes: Optional[str] = None
+    ship_to: Optional[str] = None  # Lieu/site de livraison distinct du client (ex: "BDF")
 
 
 class EmailAnalysisResult(BaseModel):
@@ -109,6 +117,11 @@ class EmailAnalysisResult(BaseModel):
 
     # Référence commande client (Form No, PO No, etc.) → utilisée dans NumAtCard SAP
     customer_reference: Optional[str] = None
+
+    # Signaux géographiques extraits du texte email (depuis email_matcher)
+    detected_country: Optional[str] = None   # Code ISO pays détecté (ex: "BG", "GR")
+    detected_city: Optional[str] = None      # Ville détectée (ex: "Plovdiv")
+    auto_select_reason: Optional[str] = None  # Raison de l'auto-sélection ou de son absence
 
     # Risque client (vérification Pappers — non bloquant)
     client_risk: Optional[dict] = None  # {status, reason, source, raw}
@@ -170,6 +183,7 @@ RÈGLES CRITIQUES POUR LES QUANTITÉS:
 RÈGLES CRITIQUES POUR LES PRODUITS:
 - N'extraire QUE des produits/articles physiques réels (pièces, composants, matériaux)
 - NE JAMAIS extraire comme produit : des mots communs d'une langue (ex: "e-posta" = email en turc, "e-postanın", "Anlık"), des adresses email, des URLs, des mentions de pièces jointes ("attached", "ci-joint"), des formules de politesse
+- NE JAMAIS extraire comme produit : des éléments d'adresse postale (noms de rues, numéros de rue, fragments de ville/pays, codes postaux), des numéros de TVA/VAT/USt-IdNr (ex: "DE813794940", "FR12345678901"), des numéros d'enregistrement de société, des noms de rues ou fragments d'adresse (ex: "von-Siemens-Str", "au-Mont-d'Or", "Werner-von-Siemens"), des informations de pied de page/signature d'entreprise
 - Si la liste de produits est dans une pièce jointe mentionnée mais pas dans le corps : laisser products = [] et indiquer dans notes que les produits sont en pièce jointe
 - Une référence de commande (ex: "Bid Request No: 6000199732") est une NOTE, pas un produit
 
@@ -349,6 +363,22 @@ CONTENU:
                         analysis.extracted_data.client_email = _fi_email_override
             # ─────────────────────────────────────────────────────────────────
 
+            # Grounding check : rejeter client_email halluciné si absent du corps
+            if analysis.extracted_data and analysis.extracted_data.client_email:
+                grounding_text_for_email = (clean_body + " " + " ".join(pdf_contents or [])).lower()
+                extracted_emails = [
+                    e.strip().lower()
+                    for e in analysis.extracted_data.client_email.replace(';', ',').split(',')
+                    if e.strip()
+                ]
+                grounded_emails = [e for e in extracted_emails if e in grounding_text_for_email]
+                if not grounded_emails:
+                    logger.info(
+                        "[GROUNDING] client_email '%s' non trouvé dans le corps — supprimé (hallucination LLM)",
+                        analysis.extracted_data.client_email
+                    )
+                    analysis.extracted_data.client_email = None
+
             # Filtrer les produits non-ancrés dans le texte de l'email
             # (élimine les produits hallucinés ou extraits d'un fil de discussion parasite)
             if analysis.extracted_data and analysis.extracted_data.products:
@@ -376,6 +406,20 @@ CONTENU:
                     )
                     # Conserver les produits tels quels
 
+                # Filtrer les faux-positifs adresses/TVA que le LLM a quand même extrait
+                if analysis.extracted_data.products:
+                    before_fp = len(analysis.extracted_data.products)
+                    analysis.extracted_data.products = [
+                        p for p in analysis.extracted_data.products
+                        if not self._is_false_positive_product(p.reference or "")
+                    ]
+                    fp_removed = before_fp - len(analysis.extracted_data.products)
+                    if fp_removed > 0:
+                        logger.info(
+                            "[FALSE_POSITIVE] %d produit(s) adresse/TVA supprimés post-LLM",
+                            fp_removed
+                        )
+
             # Correctif faux négatifs : si le pré-filtrage détecte clairement une demande de devis
             # (sujet/corps avec "chiffrage", "devis", etc.) avec confiance medium ou high,
             # on priorise le pré-filtrage sur le LLM (qui peut se tromper sur transferts, bilingue, etc.)
@@ -397,12 +441,130 @@ CONTENU:
                     f"{analysis.reasoning or ''}"
                 )[:500]
 
+            # ── Extraction ship_to (moteur strict séparé) ────────────────────
+            if analysis.is_quote_request or analysis.quick_filter_passed:
+                try:
+                    ship_to_text = clean_body
+                    if pdf_contents:
+                        ship_to_text = clean_body + "\n\n" + "\n\n".join(pdf_contents[:3])
+                    ship_to = await self._extract_ship_to(ship_to_text)
+                    if ship_to and analysis.extracted_data:
+                        analysis.extracted_data.ship_to = ship_to
+                        logger.info("ship_to extracted: %r", ship_to)
+                except Exception as _st_err:
+                    logger.warning("_extract_ship_to failed (non-blocking): %s", _st_err)
+            # ─────────────────────────────────────────────────────────────────
+
             return analysis
 
         except Exception as e:
             logger.error(f"LLM analysis failed: {e}")
             # Fallback sur le pré-filtrage seul avec extraction regex
             return self._fallback_analysis(quick_result, sender_email, sender_name, clean_body)
+
+    async def _extract_ship_to(self, text: str) -> Optional[str]:
+        """
+        Moteur d'extraction strict : retourne le lieu de livraison UNIQUEMENT si
+        un pattern explicite est présent dans le texte. Jamais d'inférence.
+        """
+        SHIP_TO_SYSTEM = """Tu es un moteur d'extraction strict.
+
+Objectif : extraire UNIQUEMENT une destination de livraison (ship_to) si elle est explicitement mentionnée et différente du client.
+
+Règles OBLIGATOIRES :
+
+1. Tu extrais UNIQUEMENT si un pattern explicite est présent :
+- "deliver to"
+- "ship to"
+- "to destination"
+- "livrer chez"
+- "expédier à"
+- "delivery address"
+
+2. Tu n'infères JAMAIS.
+3. Tu ne devines JAMAIS.
+4. Si doute → retourner null.
+
+5. Tu NE DOIS PAS confondre avec :
+- client
+- société émettrice
+- adresse de facturation
+
+6. Tu retournes STRICTEMENT un JSON valide :
+{"ship_to": string | null}
+
+7. Si aucune mention claire → {"ship_to": null}
+
+FEW SHOTS (CRITIQUES)
+Exemple 1 — positif
+Email: Please deliver to BDF site in Lyon
+Output: {"ship_to": "BDF site in Lyon"}
+
+Exemple 2 — positif
+Email: Livraison à effectuer chez BDF
+Output: {"ship_to": "BDF"}
+
+Exemple 3 — négatif
+Email: Client: BDF
+Output: {"ship_to": null}
+
+Exemple 4 — négatif
+Email: Send quotation to BDF
+Output: {"ship_to": null}
+
+Exemple 5 — négatif ambigu
+Email: BDF mentioned in footer
+Output: {"ship_to": null}
+
+GUARDRAIL FINAL : Si tu n'es pas certain à 100% → retourne null."""
+
+        if ANTHROPIC_API_KEY:
+            try:
+                headers = {
+                    "x-api-key": ANTHROPIC_API_KEY,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json"
+                }
+                payload = {
+                    "model": ANTHROPIC_MODEL,
+                    "max_tokens": 64,
+                    "system": SHIP_TO_SYSTEM,
+                    "messages": [{"role": "user", "content": text[:3000]}],
+                    "temperature": 0.0
+                }
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    response = await client.post(
+                        "https://api.anthropic.com/v1/messages",
+                        headers=headers,
+                        json=payload
+                    )
+                    response.raise_for_status()
+                    raw = response.json()["content"][0]["text"].strip()
+                    data = json.loads(raw)
+                    return data.get("ship_to") or None
+            except Exception as e:
+                logger.debug("_extract_ship_to claude error: %s", e)
+
+        if OPENAI_API_KEY:
+            try:
+                import openai
+                client = openai.AsyncOpenAI(api_key=OPENAI_API_KEY)
+                resp = await client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    max_tokens=64,
+                    temperature=0.0,
+                    messages=[
+                        {"role": "system", "content": SHIP_TO_SYSTEM},
+                        {"role": "user", "content": text[:3000]},
+                    ]
+                )
+                raw = resp.choices[0].message.content.strip()
+                data = json.loads(raw)
+                return data.get("ship_to") or None
+            except Exception as e:
+                logger.debug("_extract_ship_to openai error: %s", e)
+
+        return None
 
     async def _call_llm(self, email_context: str) -> str:
         """Appelle le LLM (Claude en priorité, OpenAI en fallback)."""
@@ -719,9 +881,40 @@ CONTENU:
 
         return False
 
+    # Préfixes/termes caractéristiques d'adresses et de données administratives
+    # (TVA européenne, rue, info société) qui ne peuvent PAS être des références produit
+    _ADDRESS_PREFIXES = re.compile(
+        r'^(UST|UST-ID|USTIDNR|USTID|VAT|TVA|SIRET|SIREN|'
+        r'STRNR|STEUERNR|HRB|HRNR|'          # registre commercial allemand
+        r'VONSIEMENS|WERNERVON|'              # noms de rues allemands courants
+        r'AUMONTD|PARC|ALLEE|AVENUE|'        # fragments d'adresse français
+        r'GEWERBE|INDUSTRIESTR|GEWERBERING|' # zones industrielles
+        r'POSTFACH|POBOX)',                   # boîtes postales
+        re.IGNORECASE
+    )
+    # Motif : code fiscal/TVA européen (2 lettres pays + 8-12 chiffres)
+    _VAT_PATTERN = re.compile(r'^[A-Z]{2}\d{8,12}$')
+
     def _is_false_positive_product(self, code: str) -> bool:
         """Détecte les faux positifs courants dans l'extraction de produits."""
-        code_normalized = code.upper().replace('-', '').replace('_', '')
+        code_normalized = code.upper().replace('-', '').replace('_', '').replace(' ', '')
+
+        # Numéros de TVA européens (ex: DE813794940, FR12345678901)
+        if self._VAT_PATTERN.match(code_normalized):
+            return True
+
+        # Préfixes d'adresse / données administratives
+        if self._ADDRESS_PREFIXES.match(code_normalized):
+            return True
+
+        # Termes explicites d'adresse (fragments de noms de rue courants)
+        address_fragments = {
+            'STR', 'STRASSE', 'STRAßE', 'STREET', 'AVENUE', 'BOULEVARD',
+            'AUMONTD',  # "au-Mont-d'Or"
+        }
+        for frag in address_fragments:
+            if code_normalized.endswith(frag) and len(code_normalized) > len(frag) + 2:
+                return True
 
         # Liste noire de termes à exclure
         blacklist = {
@@ -745,6 +938,9 @@ CONTENU:
             # Termes génériques
             'PIECE', 'PIECES', 'PART', 'PARTS',
             'ITEM', 'ITEMS', 'REF', 'REFERENCE',
+
+            # Données administratives
+            'USTIDNR', 'USTID',
         }
 
         # Vérifier si le code est dans la blacklist

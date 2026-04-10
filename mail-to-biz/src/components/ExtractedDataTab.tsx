@@ -9,7 +9,7 @@ import { fetchWithAuth } from '@/lib/fetchWithAuth';
  */
 
 import { useState, useEffect } from 'react';
-import { Pencil, Check, X, Loader2, AlertCircle, RotateCcw } from 'lucide-react';
+import { Pencil, Check, X, Loader2, AlertCircle, RotateCcw, HelpCircle } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -19,7 +19,9 @@ import { useToast } from '@/hooks/use-toast';
 import {
   fetchCorrections,
   saveCorrections,
+  resolveProductAmbiguity,
   QuoteCorrection,
+  ProductMatch,
 } from '@/lib/graphApi';
 import { EmailAnalysisResult } from '@/lib/graphApi';
 
@@ -69,7 +71,7 @@ function buildFieldRows(analysis?: EmailAnalysisResult): FieldRow[] {
   }
 
   // --- Produits ---
-  const products = analysis.product_matches ?? [];
+  const products = (analysis.product_matches ?? []).filter((p) => p.status !== 'pending_selection');
   products.forEach((p, idx) => {
     const num = idx + 1;
 
@@ -153,6 +155,12 @@ export function ExtractedDataTab({ emailId, analysisResult }: ExtractedDataTabPr
   const [error, setError] = useState<string | null>(null);
 
   const fieldRows = buildFieldRows(analysisResult);
+  const [resolvingCode, setResolvingCode] = useState<string | null>(null);
+
+  // Produits en attente de sélection
+  const pendingProducts = (analysisResult?.product_matches ?? []).filter(
+    (p) => p.status === 'pending_selection'
+  );
 
   // Charger les corrections existantes depuis le backend
   useEffect(() => {
@@ -271,12 +279,70 @@ export function ExtractedDataTab({ emailId, analysisResult }: ExtractedDataTabPr
 
   const correctionCount = corrections.size;
 
+  const handleResolveProduct = async (originalCode: string, chosenItemCode: string) => {
+    setResolvingCode(originalCode);
+    try {
+      await resolveProductAmbiguity(emailId, originalCode, chosenItemCode);
+      toast({
+        title: 'Article sélectionné',
+        description: `${originalCode} → ${chosenItemCode}`,
+      });
+      // Recharger la page pour refléter le choix
+      window.location.reload();
+    } catch (err) {
+      toast({
+        variant: 'destructive',
+        title: 'Erreur',
+        description: err instanceof Error ? err.message : 'Erreur lors de la sélection',
+      });
+    } finally {
+      setResolvingCode(null);
+    }
+  };
+
   return (
     <div className="space-y-4">
       {error && (
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+
+      {/* Bloc disambiguation — produits en attente de sélection */}
+      {pendingProducts.length > 0 && (
+        <Alert className="border-amber-400 bg-amber-50 dark:bg-amber-950/20">
+          <HelpCircle className="h-4 w-4 text-amber-600" />
+          <AlertDescription>
+            <p className="font-semibold text-amber-800 dark:text-amber-300 mb-3">
+              {pendingProducts.length} article{pendingProducts.length > 1 ? 's' : ''} nécessite{pendingProducts.length > 1 ? 'nt' : ''} votre choix
+            </p>
+            <div className="space-y-4">
+              {pendingProducts.map((p) => (
+                <div key={p.original_code} className="rounded-md border border-amber-300 bg-white dark:bg-zinc-900 p-3">
+                  <p className="text-xs font-medium text-muted-foreground mb-2">
+                    Code <span className="font-mono font-bold text-foreground">{p.original_code}</span> — {p.candidates?.length} articles SAP correspondent :
+                  </p>
+                  <div className="space-y-1.5">
+                    {(p.candidates ?? []).map((c: ProductMatch) => (
+                      <button
+                        key={c.item_code}
+                        disabled={resolvingCode === p.original_code}
+                        onClick={() => handleResolveProduct(p.original_code!, c.item_code)}
+                        className="w-full text-left rounded border border-transparent hover:border-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/30 px-3 py-2 text-sm transition-colors disabled:opacity-50"
+                      >
+                        <span className="font-mono font-semibold text-xs text-primary mr-2">{c.item_code}</span>
+                        <span className="text-muted-foreground">{c.item_name}</span>
+                        {resolvingCode === p.original_code && (
+                          <Loader2 className="inline h-3 w-3 animate-spin ml-2" />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </AlertDescription>
         </Alert>
       )}
 

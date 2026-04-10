@@ -57,6 +57,7 @@ export interface ExtractedQuoteData {
   delivery_requirement?: string;
   urgency: string;
   notes?: string;
+  ship_to?: string; // Lieu/site de livraison distinct du client
 }
 
 // Types pour le matching SAP (backend)
@@ -66,6 +67,14 @@ export interface ClientMatch {
   email_address?: string;
   score: number;
   match_reason: string;
+  match_reasons?: string[];       // Raisons détaillées décomposées (explicabilité)
+  nominal_score?: number;         // Score nom/domaine avant bonus géographique
+  strong_signal_score?: number;   // Bonus pays/ville détectés dans l'email (0 = pas de signal)
+  country?: string;  // Code pays SAP (ex: "BG", "GR", "FR")
+  city?: string;     // Ville depuis SAP
+  // Champs enrichis par ClientRecognitionEngine (optionnels)
+  confidence_score?: number;
+  matched_signals?: string[];
 }
 
 export interface ProductMatch {
@@ -94,6 +103,11 @@ export interface ProductMatch {
   weight_unit?: string;         // Unité (toujours 'kg')
   weight_total?: number;        // Poids total = weight_unit_value × quantity
   // TODO: volume — champ SAP non identifié (SVolume1 potentiel, à valider)
+
+  // ✨ Ambiguïté — plusieurs articles SAP correspondent au même code
+  status?: 'pending_selection' | null;  // null = résolu, 'pending_selection' = choix requis
+  candidates?: ProductMatch[];          // Candidats possibles si status='pending_selection'
+  original_code?: string;               // Code source ayant généré l'ambiguïté
 }
 
 export type ClientRiskStatus = 'OK' | 'WARNING' | 'BLOCKED' | 'UNKNOWN';
@@ -123,6 +137,10 @@ export interface EmailAnalysisResult {
   user_choice_reason?: string;
   customer_reference?: string;  // Référence commande client (Form No, PO No…) → NumAtCard SAP
   client_risk?: ClientRisk;     // Vérification solvabilité Pappers
+  // Signaux géographiques extraits du texte email
+  detected_country?: string;    // Code ISO pays détecté (ex: "BG", "GR")
+  detected_city?: string;       // Ville détectée (ex: "Plovdiv")
+  auto_select_reason?: string;  // Raison de l'auto-sélection (ou de son absence)
 }
 
 export interface ApiResponse<T> {
@@ -742,6 +760,26 @@ export async function retrySearchProduct(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ search_query: searchQuery }),
+    }
+  );
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ detail: 'Erreur inconnue' }));
+    throw new Error(err.detail || `Erreur ${response.status}`);
+  }
+  return response.json();
+}
+
+export async function resolveProductAmbiguity(
+  emailId: string,
+  originalCode: string,
+  chosenItemCode: string
+): Promise<{ success: boolean; product_matches: ProductMatch[]; still_pending: boolean }> {
+  const response = await fetchWithAuth(
+    `${GRAPH_API_BASE}/emails/${encodeURIComponent(emailId)}/resolve-product`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ original_code: originalCode, chosen_item_code: chosenItemCode }),
     }
   );
   if (!response.ok) {

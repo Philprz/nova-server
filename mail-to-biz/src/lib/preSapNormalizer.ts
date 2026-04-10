@@ -42,6 +42,7 @@ export interface PreSapDocument {
   documentLines: SapDocumentLine[];
   requestedDeliveryDate: string | null;
   deliveryLeadTimeDays: number | null;
+  shipTo?: string; // Lieu/site de livraison distinct du client
   meta: SapDocumentMeta;
 }
 
@@ -173,11 +174,13 @@ export function normalizeFromBackendAnalysis(
   receivedDate: string,
   analysis: EmailAnalysisResult
 ): PreSapDocument {
-  // Utiliser le meilleur client matché par le backend
-  const bestClient = analysis.client_matches?.[0]; // Le premier est le meilleur (score le plus élevé)
+  // Utiliser le meilleur client matché uniquement si le backend a validé l'auto-sélection.
+  // Si client_auto_validated=false (ambiguïté), ne pas pré-sélectionner — l'utilisateur choisit.
+  const autoValidated = analysis.client_auto_validated !== false;
+  const bestClient = autoValidated ? analysis.client_matches?.[0] : undefined;
 
   const businessPartner: SapBusinessPartner = {
-    CardCode: bestClient?.card_code || analysis.extracted_data?.client_card_code || null,
+    CardCode: bestClient?.card_code || (autoValidated ? analysis.extracted_data?.client_card_code : null) || null,
     CardName: bestClient?.card_name || analysis.extracted_data?.client_name || 'Unknown',
     ContactEmail: bestClient?.email_address || analysis.extracted_data?.client_email || '',
     ToBeCreated: !bestClient?.card_code, // Créer seulement si pas de CardCode
