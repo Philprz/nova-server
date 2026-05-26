@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1")
 
 
 # Mots-clés pour la détection rapide (pré-filtrage sans LLM)
@@ -550,7 +550,7 @@ GUARDRAIL FINAL : Si tu n'es pas certain à 100% → retourne null."""
                 import openai
                 client = openai.AsyncOpenAI(api_key=OPENAI_API_KEY)
                 resp = await client.chat.completions.create(
-                    model="gpt-4o-mini",
+                    model=os.getenv("OPENAI_MODEL", "gpt-4.1"),
                     max_tokens=64,
                     temperature=0.0,
                     messages=[
