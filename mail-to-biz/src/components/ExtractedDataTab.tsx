@@ -9,7 +9,7 @@ import { fetchWithAuth } from '@/lib/fetchWithAuth';
  */
 
 import { useState, useEffect } from 'react';
-import { Pencil, Check, X, Loader2, AlertCircle, RotateCcw, HelpCircle } from 'lucide-react';
+import { Pencil, Check, X, Loader2, AlertCircle, RotateCcw, HelpCircle, FileSpreadsheet } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -74,10 +74,14 @@ function buildFieldRows(analysis?: EmailAnalysisResult): FieldRow[] {
   const products = (analysis.product_matches ?? []).filter((p) => p.status !== 'pending_selection');
   products.forEach((p, idx) => {
     const num = idx + 1;
+    const isUnmatched = p.match_status === 'unmatched' || p.not_found_in_sap;
+    const sourceLabel = p.source_file ? ` [${p.source_file}]` : '';
 
     if (p.item_code) {
       rows.push({
-        label: `Produit ${num} — Référence SAP`,
+        label: isUnmatched
+          ? `Produit ${num} — Réf. source${sourceLabel}`
+          : `Produit ${num} — Référence SAP`,
         value: p.item_code,
         fieldType: 'product',
         fieldName: 'item_code',
@@ -160,6 +164,11 @@ export function ExtractedDataTab({ emailId, analysisResult }: ExtractedDataTabPr
   // Produits en attente de sélection
   const pendingProducts = (analysisResult?.product_matches ?? []).filter(
     (p) => p.status === 'pending_selection'
+  );
+
+  // Produits extraits d'Excel mais non trouvés dans SAP
+  const unmatchedExcelProducts = (analysisResult?.product_matches ?? []).filter(
+    (p) => p.match_status === 'unmatched' && p.source_file
   );
 
   // Charger les corrections existantes depuis le backend
@@ -342,6 +351,32 @@ export function ExtractedDataTab({ emailId, analysisResult }: ExtractedDataTabPr
                 </div>
               ))}
             </div>
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {/* Bloc produits Excel non-matchés */}
+      {unmatchedExcelProducts.length > 0 && (
+        <Alert className="border-orange-400 bg-orange-50 dark:bg-orange-950/20">
+          <FileSpreadsheet className="h-4 w-4 text-orange-600" />
+          <AlertDescription>
+            <p className="font-semibold text-orange-800 dark:text-orange-300 mb-2">
+              {unmatchedExcelProducts.length} article{unmatchedExcelProducts.length > 1 ? 's' : ''} extrait{unmatchedExcelProducts.length > 1 ? 's' : ''} de l'Excel — non trouvé{unmatchedExcelProducts.length > 1 ? 's' : ''} dans SAP
+            </p>
+            <div className="space-y-1">
+              {unmatchedExcelProducts.map((p, i) => (
+                <div key={i} className="flex items-start gap-2 text-xs text-orange-700 dark:text-orange-400">
+                  <span className="font-mono font-bold">{p.item_code || '—'}</span>
+                  <span className="text-muted-foreground">{p.item_name}</span>
+                  <span className="ml-auto shrink-0 text-[10px] text-orange-500">
+                    {p.source_file}{p.source_sheet ? ` / ${p.source_sheet}` : ''}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <p className="mt-2 text-[11px] text-orange-600 dark:text-orange-400">
+              Ces articles doivent être créés dans SAP ou leur référence doit être corrigée manuellement.
+            </p>
           </AlertDescription>
         </Alert>
       )}

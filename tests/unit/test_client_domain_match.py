@@ -438,3 +438,135 @@ class TestNonRegression:
         assert matcher._is_internal_domain("rondot-sa.com") is True
         assert matcher._is_internal_domain("meg.com.eg") is False
         assert matcher._is_internal_domain("gmail.com") is False
+
+
+# ─── Tests _extract_forwarded_sender ─────────────────────────────────────────
+
+class TestExtractForwardedSender:
+    """
+    Tests pour l'extraction du vrai expéditeur dans un email transféré.
+    Couvre les formats HTML nettoyé (après _clean_html) et HTML brut.
+    """
+
+    def test_clean_html_format_with_display_name(self):
+        """
+        CAS RÉEL CRITIQUE : après _clean_html, le format est
+        "De : MARIE NADER marie.nader@meg.com.eg" (sans chevrons).
+        Pattern 2 doit capturer l'email APRÈS le nom d'affichage.
+        """
+        text = (
+            "Voici le message transféré :\n"
+            "De : MARIE NADER marie.nader@meg.com.eg\n"
+            "À : R Clarkson Rclarkson@sheppee.com\n"
+            "Objet : RFQ Stacker Panel\n"
+            "\n"
+            "Middle East Glass Manufacturing and Affiliates\n"
+        )
+        result = EmailMatcher._extract_forwarded_sender(text)
+        assert result == "marie.nader@meg.com.eg", (
+            f"Doit extraire marie.nader@meg.com.eg, obtenu: {result}"
+        )
+
+    def test_raw_html_angle_brackets_format(self):
+        """
+        Format HTML brut : "De : Prénom NOM <email@domain.com>" (avec chevrons).
+        Pattern 1 doit fonctionner.
+        """
+        text = (
+            "\nDe : MARIE NADER <marie.nader@meg.com.eg>\n"
+            "Objet : Test\n"
+        )
+        result = EmailMatcher._extract_forwarded_sender(text)
+        assert result == "marie.nader@meg.com.eg"
+
+    def test_internal_sender_skipped(self):
+        """
+        Si le champ "De :" contient uniquement une adresse interne Rondot
+        et que le champ suivant est "À :" (destinataire externe), la fenêtre
+        est coupée avant "À :" → None (on ne confond pas destinataire et expéditeur).
+        """
+        # Format réel Outlook : "De : Elodie\nEnvoyé :\nÀ : Rclarkson@sheppee.com"
+        # La fenêtre est coupée à "Envoyé :" → seul rondot-sa.com dans la fenêtre → skippé → None
+        text = (
+            "De : Elodie Bourges elodie.bourges@rondot-sa.com\n"
+            "Envoyé : lundi 7 avril 2026 10:00\n"
+            "À : Rclarkson@sheppee.com\n"
+        )
+        result = EmailMatcher._extract_forwarded_sender(text)
+        assert result is None, (
+            "Expéditeur Rondot + fenêtre coupée avant 'À :' → None (pas de faux positif)"
+        )
+
+    def test_english_from_format(self):
+        """
+        Format anglais "From: Name <email>" doit aussi être reconnu.
+        """
+        text = "\nFrom: John Smith john.smith@externalcorp.com\nSubject: test\n"
+        result = EmailMatcher._extract_forwarded_sender(text)
+        assert result == "john.smith@externalcorp.com"
+
+    def test_no_forwarded_header_returns_none(self):
+        """
+        Email direct sans en-tête de transfert → None.
+        """
+        text = "Dear Rondot, please send us a quote for product XYZ."
+        result = EmailMatcher._extract_forwarded_sender(text)
+        assert result is None
+
+
+class TestForwardedEmailFullFlow:
+    """
+    Tests bout-en-bout : email transféré par un collègue Rondot.
+    Le vrai client est identifié via l'en-tête "De :" dans le corps.
+    """
+
+    def _run(self, coro):
+        return asyncio.get_event_loop().run_until_complete(coro)
+
+    def _build_full_matcher(self, clients: list) -> EmailMatcher:
+        matcher = _build_matcher(clients)
+        matcher._match_products = lambda text, card_code: []
+        return matcher
+
+    def test_meg_forwarded_email_identifies_c0240(self):
+        """
+        CAS RÉEL : email transféré par elodie.bourges@rondot-sa.com.
+        Le corps contient "De : MARIE NADER marie.nader@meg.com.eg".
+        Attendu : C0240 identifié via PRE-MATCH (acronyme "meg").
+        """
+        clients = [
+            _make_client("C0240", "MIDDLE EAST GLASS MANUFACTURING CO.",
+                         email=None, card_type="C", country="EG"),
+            _make_client("C0100", "SHEPPEE INTERNATIONAL", email="info@sheppee.com", card_type="C"),
+            _make_client("C0101", "SAID TEX", email="info@saidtex.com", card_type="C"),
+        ]
+        matcher = self._build_full_matcher(clients)
+
+        forwarded_body = (
+            "Bonjour,\n"
+            "Veuillez trouver ci-dessous la demande reçue.\n"
+            "\n"
+            "De : MARIE NADER marie.nader@meg.com.eg\n"
+            "À : R Clarkson Rclarkson@sheppee.com\n"
+            "Cc : hussein@saidtex.com\n"
+            "Objet : RFQ dd 07/04/2026- Stacker Panel Upgrade L31\n"
+            "\n"
+            "Dear Sir,\n"
+            "Please provide quotation for Stacker Panel Upgrade.\n"
+            "\n"
+            "Middle East Glass Manufacturing and Affiliates\n"
+            "Moustorod, Egypt\n"
+        )
+
+        result = self._run(matcher.match_email(
+            body=forwarded_body,
+            sender_email="elodie.bourges@rondot-sa.com",
+            subject="RFQ dd 07/04/2026- Stacker Panel Upgrade L31",
+        ))
+
+        assert result.auto_selected is True, "C0240 doit être auto-sélectionné"
+        assert result.best_client is not None
+        assert result.best_client.card_code == "C0240", (
+            f"Attendu C0240, obtenu {result.best_client.card_code if result.best_client else None}. "
+            f"Clients: {[(c.card_code, c.score) for c in result.clients]}"
+        )

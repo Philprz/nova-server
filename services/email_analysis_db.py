@@ -125,15 +125,17 @@ class EmailAnalysisDB:
 
         logger.info(f"Analysis saved for email {email_id} (pricing: {has_pricing})")
 
-    def get_analysis(self, email_id: str) -> Optional[Dict[str, Any]]:
+    def get_analysis(self, email_id: str, min_timestamp: datetime = None) -> Optional[Dict[str, Any]]:
         """
         Récupère le résultat d'analyse depuis la base.
 
         Args:
             email_id: ID unique de l'email
+            min_timestamp: Si fourni, ignore les entrées analysées AVANT cette date
+                           (utile pour invalider le cache après un redémarrage du serveur)
 
         Returns:
-            Dict avec le résultat d'analyse ou None si non trouvé
+            Dict avec le résultat d'analyse ou None si non trouvé / périmé
         """
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
@@ -149,6 +151,18 @@ class EmailAnalysisDB:
         conn.close()
 
         if row:
+            if min_timestamp is not None:
+                try:
+                    analyzed_at = datetime.fromisoformat(row['analyzed_at'])
+                    if analyzed_at < min_timestamp:
+                        logger.info(
+                            "Cache DB périmé pour %s (analyzed_at=%s < backend_start=%s) — ré-analyse",
+                            email_id, analyzed_at, min_timestamp
+                        )
+                        return None
+                except Exception:
+                    pass  # Si le timestamp est illisible, on ignore et on retourne quand même
+
             analysis = json.loads(row['analysis_result'])
             logger.info(f"Analysis retrieved from DB for email {email_id}")
             return analysis
