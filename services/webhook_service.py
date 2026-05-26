@@ -5,6 +5,7 @@ Permet de créer, renouveler et supprimer des subscriptions
 
 import os
 import json
+import hmac
 import sqlite3
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
@@ -306,8 +307,10 @@ class WebhookService:
         Returns:
             True si valide
         """
-        expected_state = os.getenv("WEBHOOK_CLIENT_STATE", "NOVA_WEBHOOK_SECRET_2026")
-        return client_state == expected_state
+        expected_state = os.getenv("WEBHOOK_CLIENT_STATE")
+        if not expected_state:
+            raise RuntimeError("WEBHOOK_CLIENT_STATE must be set in environment")
+        return hmac.compare_digest(client_state or "", expected_state)
 
 
 # Singleton

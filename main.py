@@ -48,11 +48,18 @@ if sys.platform == "win32":
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
+# Niveau de log conditionnel : DEBUG en dev, INFO en prod.
+# Rotation pour éviter la croissance illimitée de nova.log.
+from logging.handlers import RotatingFileHandler as _RotatingFileHandler
+
+_nova_mode = os.getenv("NOVA_MODE", "development").lower()
+_log_level = logging.INFO if _nova_mode == "production" else logging.DEBUG
+
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=_log_level,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('nova.log', encoding='utf-8'),
+        _RotatingFileHandler('nova.log', maxBytes=10_000_000, backupCount=5, encoding='utf-8'),
         logging.StreamHandler(sys.stdout)
     ]
 )
@@ -164,6 +171,13 @@ async def lifespan(app: FastAPI):
             logger.info("✅ Webhook auto-renewal system stopped")
         except Exception as e:
             logger.error(f"❌ Error stopping webhook scheduler: {e}")
+
+        # Logout SAP pour libérer le quota sessions (P4-C3)
+        try:
+            from services.sap_business_service import get_sap_business_service
+            await get_sap_business_service().logout()
+        except Exception as e:
+            logger.warning("SAP logout failed: %s", e)
 
         logger.info("Arrêt de NOVA")
 
@@ -316,24 +330,33 @@ async def get_assistant_prompt():
 @app.get("/edit-quote/{quote_id}")
 async def edit_quote_page(quote_id: str):
     """Page d'édition de devis"""
+    # Validation stricte du format pour défense en profondeur (avant injection
+    # dans le HTML servi). json.dumps() ci-dessous échappe les caractères
+    # dangereux ; cette regex empêche en plus toute valeur exotique.
+    import re as _re
+    if not _re.match(r"^[A-Za-z0-9_\-]{1,64}$", quote_id):
+        raise HTTPException(status_code=404, detail="Identifiant de devis invalide")
     try:
         file_path = Path("templates") / "nova_interface_final.html"
         with file_path.open("r", encoding="utf-8") as f:
             html_content = f.read()
-        # Injection du quote_id dans le HTML
+        # Injection du quote_id dans le HTML — json.dumps garantit un
+        # littéral JS safe (échappement des quotes, backslashes, etc.).
+        import json as _json
+        injected_script = f"<script>window.EDIT_QUOTE_ID = {_json.dumps(quote_id)};</script>"
         replaced = html_content.replace(
             "<!-- QUOTE_ID_PLACEHOLDER -->",
-            f"<script>window.EDIT_QUOTE_ID = '{quote_id}';</script>"
+            injected_script
         )
         if replaced == html_content:
             # Fallback si le placeholder est absent : insérer avant </body> ou en fin
             if "</body>" in html_content:
                 html_content = html_content.replace(
                     "</body>",
-                    f"<script>window.EDIT_QUOTE_ID = '{quote_id}';</script></body>"
+                    f"{injected_script}</body>"
                 )
             else:
-                html_content = html_content + f"<script>window.EDIT_QUOTE_ID = '{quote_id}';</script>"
+                html_content = html_content + injected_script
         else:
             html_content = replaced
         return HTMLResponse(content=html_content, media_type="text/html; charset=utf-8")

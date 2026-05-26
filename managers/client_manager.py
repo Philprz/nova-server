@@ -285,8 +285,8 @@ class ClientManager:
             if sap_result.get("found"):
                 sap_result["needs_salesforce_sync"] = True
                 return sap_result
-        except:
-            pass
+        except Exception as e:
+            logger.warning("Erreur client_manager: %s", e, exc_info=True)
         
         # Générer suggestions si aucun résultat
         return {
