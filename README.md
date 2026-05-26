@@ -1925,8 +1925,8 @@ SALESFORCE_PASSWORD=***
 SALESFORCE_SECURITY_TOKEN=***
 SALESFORCE_DOMAIN=orgfarm-***-dev-ed.develop.my.salesforce.com
 SALESFORCE_URL=https://orgfarm-***-dev-ed.develop.my.salesforce.com
-SALESFORCE_Cleconsommateur=***
-SALESFORCE_Secretconsommateur=***
+SALESFORCE_CONSUMER_KEY=***
+SALESFORCE_CONSUMER_SECRET=***
 ```
 
 #### Microsoft Graph (Office 365)
