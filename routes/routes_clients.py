@@ -403,10 +403,58 @@ async def search_clients(q: str, source: str = "both", limit: int = 10):
                 results["salesforce"] = sf_result.get("records", [])
         
         if source in ["both", "sap"]:
+            import re as _re
+            import unicodedata as _ud
+
             # Recherche SAP depuis cache SQLite local (ultra-rapide)
             from services.sap_cache_db import get_sap_cache_db
             cache_db = get_sap_cache_db()
-            sap_clients = cache_db.search_clients(q, limit=limit)
+            raw_clients = cache_db.search_clients(q, limit=limit * 3)  # sur-fetch pour filtrer
+
+            q_upper = q.upper().strip()
+            q_len = len(q_upper)
+
+            def _word_boundary_match(name: str, term: str) -> bool:
+                """Vérifie que `term` apparaît comme mot entier dans `name` (pas dans OMEGA quand on cherche MEG)."""
+                return bool(_re.search(r'(?<![A-Z])' + _re.escape(term) + r'(?![A-Z])', name.upper()))
+
+            def _acronym_match(name: str, term: str) -> bool:
+                """Vérifie que `term` correspond aux initiales du nom (ex: MEG → Middle East Glass)."""
+                def _norm(t):
+                    t = _ud.normalize('NFD', t)
+                    t = ''.join(c for c in t if _ud.category(c) != 'Mn')
+                    t = _re.sub(r'[^\w\s]', ' ', t.lower())
+                    return _re.sub(r'\s+', ' ', t).strip()
+                parts = _norm(name).split()
+                initials = ''.join(p[0] for p in parts if p)
+                term_lower = term.lower()
+                return initials == term_lower or initials.startswith(term_lower)
+
+            # Étape 1 : filtrer les faux positifs par vérification word-boundary
+            filtered_clients = []
+            seen_codes = set()
+            for client in raw_clients:
+                name = client.get("CardName") or ""
+                email = client.get("EmailAddress") or ""
+                # Garder uniquement si le terme est un MOT entier dans le nom, ou dans l'email
+                if _word_boundary_match(name, q_upper) or q_upper.lower() in email.lower():
+                    if client["CardCode"] not in seen_codes:
+                        filtered_clients.append(client)
+                        seen_codes.add(client["CardCode"])
+
+            # Étape 2 : recherche par acronyme pour requêtes courtes (2-5 chars)
+            if q_len >= 2 and q_len <= 5:
+                all_clients = cache_db.get_all_clients()
+                for client in all_clients:
+                    if client["CardCode"] in seen_codes:
+                        continue
+                    if client.get("CardType", "C") == "S":
+                        continue
+                    if _acronym_match(client.get("CardName", ""), q_upper):
+                        filtered_clients.append(client)
+                        seen_codes.add(client["CardCode"])
+
+            sap_clients = filtered_clients[:limit]
 
             # Formater les résultats pour correspondre au format attendu
             results["sap"] = [
@@ -419,7 +467,7 @@ async def search_clients(q: str, source: str = "both", limit: int = 10):
                     "City": client.get("City"),
                     "Country": client.get("Country"),
                     "ZipCode": client.get("ZipCode"),
-                    "similarity": 100  # Score par défaut (TODO: implémenter scoring fuzzy)
+                    "similarity": 100
                 }
                 for client in sap_clients
             ]

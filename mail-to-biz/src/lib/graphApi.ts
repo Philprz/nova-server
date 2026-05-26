@@ -105,9 +105,17 @@ export interface ProductMatch {
   // TODO: volume — champ SAP non identifié (SVolume1 potentiel, à valider)
 
   // ✨ Ambiguïté — plusieurs articles SAP correspondent au même code
-  status?: 'pending_selection' | null;  // null = résolu, 'pending_selection' = choix requis
-  candidates?: ProductMatch[];          // Candidats possibles si status='pending_selection'
-  original_code?: string;               // Code source ayant généré l'ambiguïté
+  status?: 'pending_selection' | 'unmatched' | null;
+  candidates?: ProductMatch[];
+  original_code?: string;
+
+  // ✨ Traçabilité source (pièce jointe Excel)
+  source_file?: string;
+  source_sheet?: string;
+  source_row_index?: number;
+  raw_label?: string;
+  match_status?: 'matched' | 'unmatched' | 'manual_review_required';
+  discard_reason?: string;
 }
 
 export type ClientRiskStatus = 'OK' | 'WARNING' | 'BLOCKED' | 'UNKNOWN';

@@ -898,7 +898,7 @@ async def analyze_email(message_id: str, force: bool = False):
         from services.email_analysis_db import get_email_analysis_db
         analysis_db = get_email_analysis_db()
 
-        existing_analysis = analysis_db.get_analysis(message_id)
+        existing_analysis = analysis_db.get_analysis(message_id, min_timestamp=_backend_start_time)
         if existing_analysis:
             # Vérifier si c'est une vraie analyse LLM+SAP (contient client_matches ou classification)
             # ou juste une notification webhook (format simplifié sans matching SAP complet)
@@ -1002,6 +1002,91 @@ async def analyze_email(message_id: str, force: bool = False):
 
         logger.info(f"⚡ Phase 2 - PDF extraction: {(time.time()-t_phase)*1000:.0f}ms")
 
+        # Phase 2b: Extraire les lignes produits des pièces jointes Excel si présentes
+        t_phase = time.time()
+        excel_rows = []
+        _EXCEL_MIME_TYPES = {
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "application/vnd.ms-excel",
+        }
+        _MAX_EXCEL_SIZE = 10 * 1024 * 1024  # 10 MB
+
+        for attachment in email.attachments:
+            _name_lower = (attachment.name or "").lower()
+            _is_excel = (
+                attachment.content_type in _EXCEL_MIME_TYPES
+                or _name_lower.endswith(".xlsx")
+                or _name_lower.endswith(".xls")
+            )
+            if not _is_excel:
+                continue
+
+            logger.info(
+                "event=attachment_detected type=excel file=%s size=%d content_type=%s",
+                attachment.name, attachment.size, attachment.content_type,
+            )
+
+            if attachment.size and attachment.size > _MAX_EXCEL_SIZE:
+                logger.warning(
+                    "event=attachment_type_supported file=%s status=skipped reason=too_large size_mb=%.1f",
+                    attachment.name, attachment.size / 1024 / 1024,
+                )
+                continue
+
+            logger.info("event=attachment_type_supported file=%s status=accepted", attachment.name)
+
+            try:
+                import tempfile
+                from services.file_parsers import ExcelParser
+
+                _excel_bytes = await asyncio.wait_for(
+                    graph_service.get_attachment_content(message_id, attachment.id),
+                    timeout=30,
+                )
+                _suffix = ".xlsx" if _name_lower.endswith(".xlsx") else ".xls"
+                with tempfile.NamedTemporaryFile(delete=False, suffix=_suffix) as _tmp:
+                    _tmp.write(_excel_bytes)
+                    _tmp_path = _tmp.name
+
+                logger.info("event=excel_parser_started file=%s bytes=%d", attachment.name, len(_excel_bytes))
+                _raw_rows = ExcelParser.parse(_tmp_path)
+                try:
+                    os.unlink(_tmp_path)
+                except Exception:
+                    pass
+
+                _sheets_seen = set()
+                for _idx, _row in enumerate(_raw_rows):
+                    _sheet = _row.get("additional_data", {}).get("sheet_name", "")
+                    if _sheet not in _sheets_seen:
+                        logger.info(
+                            "event=excel_sheet_detected file=%s sheet=%s",
+                            attachment.name, _sheet,
+                        )
+                        _sheets_seen.add(_sheet)
+                    excel_rows.append({
+                        **_row,
+                        "_source_file": attachment.name,
+                        "_source_sheet": _sheet,
+                        "_source_row_index": _idx,
+                    })
+
+                logger.info(
+                    "event=excel_rows_extracted file=%s rows_count=%d",
+                    attachment.name, len(_raw_rows),
+                )
+
+            except asyncio.TimeoutError:
+                logger.warning("event=excel_parser_error file=%s reason=timeout", attachment.name)
+            except Exception as _exc:
+                logger.warning("event=excel_parser_error file=%s reason=%s", attachment.name, _exc)
+
+        logger.info(
+            "event=product_rows_normalized total_excel_rows=%d",
+            len(excel_rows),
+        )
+        logger.info(f"⚡ Phase 2b - Excel extraction: {(time.time()-t_phase)*1000:.0f}ms")
+
         # Phase 3: LLM analysis + SAP matching EN PARALLÈLE
         t_phase = time.time()
 
@@ -1009,6 +1094,25 @@ async def analyze_email(message_id: str, force: bool = False):
         clean_text = email_analyzer._clean_html(body_text)
         if pdf_contents:
             clean_text += " " + " ".join(pdf_contents)
+
+        # Résoudre le vrai expéditeur AVANT le lancement parallèle.
+        # Pour les emails transférés par un collègue Rondot, on extrait le vrai
+        # expéditeur client depuis le corps (premier "De:" non-interne trouvé).
+        # On utilise EmailMatcher._extract_forwarded_sender() qui prend le PREMIER
+        # "De:" non-interne — c'est le client direct qui a contacté Rondot.
+        # (Contrairement à _extract_forward_info() qui prend le DERNIER et peut
+        #  confondre un email imbriqué dans la chaîne avec le vrai expéditeur.)
+        _raw_sender_domain = email.from_address.split("@")[-1].lower() if "@" in email.from_address else ""
+        _effective_sender = email.from_address
+        if matcher._is_internal_domain(_raw_sender_domain):
+            from services.email_matcher import EmailMatcher as _EM
+            _fwd_email = _EM._extract_forwarded_sender(clean_text)
+            if _fwd_email and _fwd_email.lower() != email.from_address.lower():
+                _effective_sender = _fwd_email
+                logger.info(
+                    "[ROUTE] Email transféré — expéditeur réel: %s (FROM: %s)",
+                    _effective_sender, email.from_address,
+                )
 
         # Lancer LLM et matching en parallèle (les 2 opérations sont indépendantes)
         llm_task = email_analyzer.analyze_email(
@@ -1020,7 +1124,7 @@ async def analyze_email(message_id: str, force: bool = False):
         )
         match_task = matcher.match_email(
             body=clean_text,
-            sender_email=email.from_address,
+            sender_email=_effective_sender,   # vrai expéditeur si transféré, sinon FROM original
             subject=email.subject
         )
 
@@ -1227,6 +1331,146 @@ async def analyze_email(message_id: str, force: bool = False):
             logger.warning(f"Phase 4.5 risk check failed (non-blocking): {_risk_err}")
         logger.info(f"⚡ Phase 4.5 - Risk check: {(time.time()-t_phase)*1000:.0f}ms")
 
+        # === PHASE 4.6 : INJECTION PRODUITS EXCEL (priorité absolue sur corps/LLM) ===
+        t_phase = time.time()
+        _excel_products: list = []  # initialisé ici pour être visible par Phase 5
+        if excel_rows:
+            try:
+                from services.email_matcher import MatchedProduct as _MP
+
+                # Filtrer les lignes sans aucune information utile
+                _useful_rows = [
+                    r for r in excel_rows
+                    if (r.get("supplier_reference") or "").strip()
+                    or (r.get("designation") or "").strip()
+                ]
+
+                logger.info(
+                    "event=product_rows_sent_to_matching "
+                    "excel_rows_total=%d excel_rows_useful=%d",
+                    len(excel_rows), len(_useful_rows),
+                )
+
+                for _row in _useful_rows:
+                    _ref = (_row.get("supplier_reference") or "").strip()
+                    _designation = (_row.get("designation") or "").strip()
+                    # Quantité réelle depuis l'Excel (jamais hardcodée à 1)
+                    _qty_raw = _row.get("quantity")
+                    _qty: int = int(_qty_raw) if _qty_raw and str(_qty_raw).strip() != '' else 1
+
+                    _src_file = _row.get("_source_file", "")
+                    _src_sheet = _row.get("_source_sheet", "")
+                    # Préférer le row_index réel de la feuille Excel
+                    _src_idx = (
+                        _row.get("additional_data", {}).get("row_index")
+                        or _row.get("_source_row_index", 0)
+                    )
+
+                    _sap_matches: list = []
+                    if _ref:
+                        try:
+                            _sap_matches = matcher.match_product_strict(
+                                _ref, quantity=_qty
+                            )
+                        except Exception as _me:
+                            logger.warning(
+                                "event=excel_match_error ref=%s reason=%s", _ref, _me
+                            )
+
+                    if _sap_matches:
+                        for _mp in _sap_matches:
+                            # Appliquer la quantité réelle de l'Excel
+                            _mp.quantity = _qty
+                            # Recalculer line_total avec la vraie quantité Excel
+                            if _mp.unit_price is not None:
+                                _mp.line_total = round(_mp.unit_price * _qty, 2)
+                            _mp.source_file = _src_file
+                            _mp.source_sheet = _src_sheet
+                            _mp.source_row_index = _src_idx
+                            _mp.raw_label = _designation
+                            _mp.match_status = "matched"
+                            _excel_products.append(_mp)
+                            logger.info(
+                                "event=product_rows_after_matching "
+                                "ref=%s status=matched sap_code=%s qty=%d",
+                                _ref, _mp.item_code, _qty,
+                            )
+                    else:
+                        _unmatched = _MP(
+                            item_code=_ref if _ref else "",
+                            item_name=_designation if _designation else _ref,
+                            quantity=_qty,
+                            score=0,
+                            match_reason="Extrait depuis pièce jointe Excel — non trouvé dans SAP",
+                            not_found_in_sap=True,
+                            match_status="unmatched",
+                            source_file=_src_file,
+                            source_sheet=_src_sheet,
+                            source_row_index=_src_idx,
+                            raw_label=_designation,
+                            discard_reason=(
+                                f"Aucune correspondance SAP pour '{_ref}'"
+                                if _ref
+                                else "Référence manquante dans l'Excel"
+                            ),
+                        )
+                        _excel_products.append(_unmatched)
+                        logger.info(
+                            "event=product_rows_after_matching "
+                            "ref=%s status=unmatched designation=%s qty=%d",
+                            _ref, _designation, _qty,
+                        )
+
+                if _excel_products:
+                    _n_matched = sum(1 for p in _excel_products if p.match_status == "matched")
+                    _n_unmatched = sum(1 for p in _excel_products if p.match_status != "matched")
+                    logger.info(
+                        "event=product_rows_exposed_to_api "
+                        "total=%d matched=%d unmatched=%d source=excel",
+                        len(_excel_products), _n_matched, _n_unmatched,
+                    )
+
+                    # Priorité absolue : Excel structuré écrase corps mail ET résumé LLM
+                    result.product_matches = [p.dict() for p in _excel_products]
+
+                    # Mettre à jour extracted_data.products (cohérence frontend)
+                    if result.extracted_data is None:
+                        result.extracted_data = ExtractedQuoteData()
+                    # Conserver les notes LLM mais écraser la liste produits
+                    result.extracted_data.products = [
+                        ExtractedProduct(
+                            description=p.item_name,
+                            quantity=p.quantity,
+                            reference=p.item_code if p.item_code else None,
+                        )
+                        for p in _excel_products
+                    ]
+
+                    if not result.is_quote_request:
+                        result.is_quote_request = True
+                        result.classification = "QUOTE_REQUEST"
+
+                    if _n_unmatched > 0:
+                        result.products_auto_validated = False
+                        result.requires_user_choice = True
+                        result.user_choice_reason = (
+                            (result.user_choice_reason or "")
+                            + f" | {_n_unmatched} produit(s) Excel non trouvé(s) dans SAP"
+                        )
+                    elif _n_matched > 0:
+                        _all_exact = all(
+                            p.score == 100
+                            for p in _excel_products
+                            if p.match_status == "matched"
+                        )
+                        result.products_auto_validated = _all_exact
+
+            except Exception as _exc_excel:
+                logger.warning(
+                    "Phase 4.6 Excel injection failed (non-blocking): %s", _exc_excel
+                )
+        logger.info(f"Phase 4.6 - Excel injection: {(time.time()-t_phase)*1000:.0f}ms")
+
         # === NOUVELLE PHASE 5 : CALCUL AUTOMATIQUE DES PRIX ===
         t_phase = time.time()
 
@@ -1234,8 +1478,13 @@ async def analyze_email(message_id: str, force: bool = False):
             # Vérifier si pricing engine est activé
             pricing_enabled = os.getenv("PRICING_ENGINE_ENABLED", "false").lower() == "true"
 
-            if pricing_enabled and match_result and match_result.products:
-                logger.info(f"💰 Calcul pricing pour {len(match_result.products)} produits...")
+            # Source de produits : Excel (priorité) ou corps mail
+            _products_to_price = _excel_products if _excel_products else (
+                match_result.products if match_result and match_result.products else []
+            )
+
+            if pricing_enabled and _products_to_price:
+                logger.info(f"💰 Calcul pricing pour {len(_products_to_price)} produits (source={'excel' if _excel_products else 'body'})...")
 
                 from services.pricing_engine import get_pricing_engine
                 from services.pricing_models import PricingContext
@@ -1244,14 +1493,14 @@ async def analyze_email(message_id: str, force: bool = False):
 
                 # Récupérer CardCode client (nécessaire pour pricing)
                 card_code = "UNKNOWN"
-                if match_result.best_client:
+                if match_result and match_result.best_client:
                     card_code = match_result.best_client.card_code
                 elif result.extracted_data and result.extracted_data.client_card_code:
                     card_code = result.extracted_data.client_card_code
 
                 # Préparer contextes pricing pour tous les produits
                 pricing_contexts = []
-                for product in match_result.products:
+                for product in _products_to_price:
                     # Skip si produit non trouvé dans SAP ou en attente de sélection
                     if product.not_found_in_sap or product.status == "pending_selection":
                         continue
@@ -1359,20 +1608,22 @@ async def analyze_email(message_id: str, force: bool = False):
                             f"{decision.calculated_price:.2f} EUR (marge {decision.margin_applied:.0f}%)"
                         )
                     else:
-                        # Fallback: garder produit sans pricing
+                        # Fallback : pricing indisponible → conserver prix SAP cache + recalculer line_total
+                        if product.unit_price is not None and product.quantity:
+                            product.line_total = round(product.unit_price * product.quantity, 2)
                         enriched_products.append(product)
 
                 # Ajouter produits non trouvés dans SAP ET en attente de sélection (sans pricing)
-                for product in match_result.products:
+                for product in _products_to_price:
                     if product.not_found_in_sap or product.status == "pending_selection":
                         enriched_products.append(product)
 
-                # Remplacer produits par versions enrichies
+                # Remplacer produits par versions enrichies (Excel ou corps)
                 result.product_matches = [p.dict() for p in enriched_products]
 
                 logger.info(
                     f"⚡ Phase 5 - Pricing: {(time.time()-t_phase)*1000:.0f}ms "
-                    f"({pricing_success_count}/{len(match_result.products)} succès)"
+                    f"({pricing_success_count}/{len(_products_to_price)} succès)"
                 )
 
         except Exception as e:
@@ -2417,7 +2668,9 @@ async def recalculate_pricing(message_id: str):
                     f"{decision.calculated_price:.2f} EUR (marge {decision.margin_applied:.0f}%)"
                 )
             else:
-                # Fallback: garder produit sans pricing
+                # Fallback : pricing indisponible → conserver le prix SAP cache + recalculer line_total
+                if product.unit_price is not None and product.quantity:
+                    product.line_total = round(product.unit_price * product.quantity, 2)
                 enriched_products.append(product)
 
         # 9. Ajouter produits non trouvés dans SAP (sans pricing)

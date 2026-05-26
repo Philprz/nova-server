@@ -92,6 +92,206 @@ def normalize_code(code: str) -> str:
         return ""
     return re.sub(r'[^a-z0-9]', '', code.lower())
 
+
+def normalize_product_code(code: str) -> str:
+    """
+    Normalise un code fournisseur pour la comparaison stricte.
+
+    Alias explicite de normalize_code() — supprime tirets, slashes, espaces.
+    Utilisé par extract_products_deterministic() et match_product_strict().
+
+    Exemples :
+      C892-001       → c892001
+      C893-007-XY    → c893007xy
+      C814-RS-265-0859 → c814rs2650859
+    """
+    return normalize_code(code)
+
+
+# Regex pour détecter une ligne contenant un code fournisseur en début de ligne
+# Format : 1-6 lettres, puis 2+ chiffres, puis suffixes optionnels (tirets, lettres, chiffres)
+_DETERMINISTIC_CODE_RE = re.compile(
+    r'^([A-Z]{1,6}\d{2,}(?:[-/][A-Z0-9]+)*)',
+    re.IGNORECASE,
+)
+
+# Patterns de quantité pour l'extraction déterministe (du plus spécifique au plus général)
+_DET_QTY_PATTERNS = [
+    re.compile(r'(?:qty|qté|quantit[eé]|quantity|qte)\s*[:\s]\s*(\d+)', re.IGNORECASE),
+    re.compile(r'(\d+)\s*(?:pcs?|pi[eè]ces?|unit[eé]s?|adet|stk|st[üu]ck|ea|each)', re.IGNORECASE),
+    re.compile(r'\t(\d+)\s*$'),                       # colonne tabulation
+    re.compile(r'(?:^|\s{2,})(\d+)\s*$'),             # nombre seul en fin de ligne (après 2+ espaces)
+    re.compile(r'[\s,;|]\s*(\d{1,4})\s*$'),           # nombre seul après séparateur
+]
+
+
+def _qty_valid(n: int) -> bool:
+    """Quantité plausible : positif, <10 000, pas une année."""
+    return 0 < n < 10000 and not (1990 <= n <= 2050)
+
+
+def _extract_qty_from_text(text: str) -> Optional[int]:
+    """
+    Extrait une quantité depuis un fragment de texte (portion de ligne ou ligne isolée).
+
+    Ordre de priorité :
+    1. Mot-clé qty/quantité explicite
+    2. Nombre + unité (pcs, units, ea…)
+    3. Nombre précédé d'un onglet (colonne TSV)
+    4. Nombre seul en fin de ligne (après 2+ espaces)
+    5. Nombre seul après séparateur espace/virgule/pipe
+    6. Nombre en début de texte (ligne dédiée à la qty)
+    7. Nombre seul immédiatement après le code + espace(s)
+
+    Retourne None si aucune quantité valide trouvée.
+    """
+    for qty_re in _DET_QTY_PATTERNS:
+        qm = qty_re.search(text)
+        if qm:
+            try:
+                q = int(qm.group(1))
+                if _qty_valid(q):
+                    return q
+            except (ValueError, IndexError):
+                pass
+
+    # Nombre seul en début (ligne dédiée qty : "2" ou "2 pcs")
+    m = re.match(r'^\s*(\d{1,4})\s*(?:pcs?|pi[eè]ces?|unit[eé]s?|adet|stk|st[üu]ck|ea|each)?\s*$',
+                 text, re.IGNORECASE)
+    if m:
+        try:
+            q = int(m.group(1))
+            if _qty_valid(q):
+                return q
+        except (ValueError, IndexError):
+            pass
+
+    # Nombre en tout début, suivi d'espaces
+    m = re.match(r'^\s*(\d{1,4})\b', text)
+    if m:
+        try:
+            q = int(m.group(1))
+            if _qty_valid(q):
+                return q
+        except (ValueError, IndexError):
+            pass
+
+    return None
+
+
+# Ligne "quantité seule" : ne contient que des chiffres (+ unité optionnelle)
+_QTY_ONLY_LINE_RE = re.compile(
+    r'^\d{1,4}\s*(?:pcs?|pi[eè]ces?|unit[eé]s?|adet|stk|st[üu]ck|ea|each)?\s*$',
+    re.IGNORECASE,
+)
+
+
+def extract_products_deterministic(text: str) -> List[Dict[str, Any]]:
+    """
+    Extraction déterministe de produits depuis un texte structuré.
+
+    Gère DEUX formats :
+
+    Format A — tout sur une ligne (TSV ou espaces) :
+      "C892-001\\tServo Drive\\t2"
+      "C892-001   Servo Drive   2 pcs"
+      "C892-001   qty: 2"
+
+    Format B — table HTML rendue multi-lignes (chaque cellule sur sa ligne) :
+      "C892-001"
+      "Servo Drive"
+      "2"
+
+    ALGORITHME :
+    1. Passer les lignes une par une.
+    2. Si une ligne commence par un code fournisseur → extraire code.
+    3. Chercher la quantité sur la même ligne (Format A).
+    4. Si non trouvée, chercher dans une fenêtre de lookahead (Format B) :
+       - Parcourir les lignes suivantes (jusqu'à 6 lignes maximum).
+       - Accepter une ligne "qty seule" (uniquement des chiffres ± unité).
+       - Accepter un mot-clé qty dans une ligne suivante.
+       - Arrêter dès que la ligne suivante commence par un autre code produit.
+    5. Chaque code n'est traité qu'une seule fois (dedup par code normalisé).
+
+    RÈGLES CRITIQUES :
+    - Quantité issue du texte uniquement (None si absente, jamais forcé à 1).
+    - Codes sans chiffre ignorés. Longueur minimale 4 chars.
+    - Faux positifs filtrés (téléphones, années, TVA).
+
+    Returns:
+        Liste ordonnée de {code: str, quantity: int | None, line: str}
+        None = quantité absente du texte (à valider par l'utilisateur).
+    """
+    lines = [raw.strip() for raw in text.splitlines()]
+    n = len(lines)
+    results: List[Dict[str, Any]] = []
+    seen_codes: set = set()
+
+    for i, line in enumerate(lines):
+        if not line or len(line) < 4:
+            continue
+
+        m = _DETERMINISTIC_CODE_RE.match(line)
+        if not m:
+            continue
+
+        code = m.group(1).strip()
+
+        # Validations basiques
+        if not any(c.isdigit() for c in code):
+            continue
+        if len(code) < 4:
+            continue
+        if re.match(r'^0\d{9}$', code):  # numéro de téléphone
+            continue
+
+        code_upper = code.upper()
+        if code_upper in seen_codes:
+            continue
+
+        # --- Format A : quantité sur la même ligne ---
+        after_code = line[m.end():]
+        quantity = _extract_qty_from_text(after_code)
+
+        # --- Format B : quantité dans les lignes suivantes (lookahead) ---
+        if quantity is None:
+            # Fenêtre : jusqu'à 6 lignes après le code (description peut être longue)
+            for j in range(i + 1, min(i + 7, n)):
+                next_line = lines[j]
+                if not next_line:
+                    continue  # ligne vide → continuer (séparateurs HTML fréquents)
+
+                # Si la ligne suivante commence par un autre code produit → stop
+                if _DETERMINISTIC_CODE_RE.match(next_line):
+                    break
+
+                # Ligne "qty seule" : uniquement des chiffres (± unité)
+                if _QTY_ONLY_LINE_RE.match(next_line):
+                    q = _extract_qty_from_text(next_line)
+                    if q is not None:
+                        quantity = q
+                        break
+
+                # Mot-clé qty explicite dans la ligne suivante
+                for qty_re in _DET_QTY_PATTERNS[:2]:
+                    qm = qty_re.search(next_line)
+                    if qm:
+                        try:
+                            q = int(qm.group(1))
+                            if _qty_valid(q):
+                                quantity = q
+                                break
+                        except (ValueError, IndexError):
+                            pass
+                if quantity is not None:
+                    break
+
+        results.append({'code': code, 'quantity': quantity, 'line': line})
+        seen_codes.add(code_upper)
+
+    return results
+
+
 # --- Regex pré-compilés pour performance ---
 WORD_PATTERN_4PLUS = re.compile(r'\b\w{4,}\b')  # Mots 4+ caractères
 WORD_PATTERN_6PLUS = re.compile(r'\b\w{6,}\b')  # Mots 6+ caractères
@@ -329,6 +529,14 @@ class MatchedProduct(BaseModel):
 
     # TODO: volume — champ SAP non identifié pour ce projet.
     # Candidat probable : SVolume1 (à valider avec équipe SAP Rondot avant implémentation).
+
+    # ✨ CHAMPS TRAÇABILITÉ SOURCE (pièce jointe Excel/PDF structurée)
+    source_file: Optional[str] = None       # Nom du fichier source (ex: "liste_pieces.xlsx")
+    source_sheet: Optional[str] = None      # Nom de la feuille Excel
+    source_row_index: Optional[int] = None  # Index de la ligne dans la source
+    raw_label: Optional[str] = None         # Libellé brut extrait (avant normalisation)
+    match_status: str = "matched"           # "matched" | "unmatched" | "manual_review_required"
+    discard_reason: Optional[str] = None    # Raison si non trouvé dans SAP
 
 
 class MatchResult(BaseModel):
@@ -591,10 +799,34 @@ class EmailMatcher:
 
         # 1c. PRE-MATCH : domaine FROM → match direct non-destructif (surcouche prioritaire)
         #
-        # Si le domaine de l'expéditeur correspond UNIQUEMENT à un client non-fournisseur
-        # dans notre index, on court-circuite le scoring complet.
-        # Condition : match UNIQUE (ambiguïté → retour au matching standard).
-        _domain_override = self._try_match_by_from_domain(sender_email)
+        # Cas standard : le FROM est directement le client (sender_email non-interne).
+        # Cas email transféré : le FROM est un collègue Rondot ; le vrai expéditeur client
+        #   est dans le corps (en-tête "De : X <client@domain>" ou "From: X <client@domain>").
+        #   On extrait cet email et on l'utilise comme sender effectif pour le PRE-MATCH.
+        _effective_sender = sender_email
+        if self._is_internal_domain(raw_sender_domain):
+            # Log des 600 premiers chars du texte pour diagnostic
+            _preview = full_text[:600].replace('\n', '\\n').replace('\r', '')
+            logger.info("[PRE-MATCH DEBUG] full_text[:600] = %r", _preview)
+            _forwarded = self._extract_forwarded_sender(full_text)
+            logger.info("[PRE-MATCH DEBUG] _extract_forwarded_sender => %r", _forwarded)
+            if _forwarded:
+                logger.info(
+                    "[PRE-MATCH] Email transféré — expéditeur réel extrait du corps: %s (FROM Graph: %s)",
+                    _forwarded, sender_email,
+                )
+                _effective_sender = _forwarded
+            else:
+                logger.warning(
+                    "[PRE-MATCH] FROM interne (%s) mais expéditeur non trouvé dans le corps. "
+                    "extracted_domains=%s",
+                    sender_email, extracted_domains,
+                )
+
+        _domain_override = self._try_match_by_from_domain(_effective_sender)
+        logger.info("[PRE-MATCH DEBUG] _try_match_by_from_domain(%r) => %r",
+                    _effective_sender,
+                    _domain_override.card_code if _domain_override else None)
         if _domain_override is not None:
             logger.info(
                 "[CLIENT] FROM_DOMAIN_OVERRIDE: %s (%s) via domaine %s — court-circuit scoring",
@@ -878,6 +1110,68 @@ class EmailMatcher:
         return domain in internal
 
     # --- PRE-MATCH : domaine FROM email (surcouche prioritaire non-destructive) ---
+
+    @staticmethod
+    def _extract_forwarded_sender(text: str) -> Optional[str]:
+        """
+        Extrait l'adresse email du vrai expéditeur dans un email transféré.
+
+        Approche robuste en deux temps :
+          1. Localiser le marqueur "De :" / "From :" (n'importe où dans le texte)
+          2. Scanner les 300 caractères suivants pour trouver le premier email
+             non-interne non-générique
+
+        Gère tous les formats Outlook (HTML nettoyé ou brut, email sur même
+        ligne ou ligne suivante, chevrons, crochets, lien mailto…).
+
+        Retourne la première adresse non-interne non-générique trouvée.
+        Retourne None si aucun marqueur n'est présent ou si aucun email externe
+        n'est trouvé dans la fenêtre de contexte.
+        """
+        from services.client_recognition_engine import is_generic_domain as _is_generic
+
+        internal_domains = {
+            'rondot-sa.com', 'rondot-sas.fr', 'rondot-sas.com',
+            'rondot.fr', 'rondot-germany.com',
+            'rondot-poc.itspirit.ovh', 'itspirit.ovh',
+        }
+
+        # Marqueur "De :" / "From :" au début d'une ligne
+        _HEADER_RE = re.compile(
+            r'(?:^|\n)\s*(?:De\s*:|From\s*:|Expéditeur\s*:|Sender\s*:)',
+            re.IGNORECASE | re.MULTILINE,
+        )
+        # Prochain champ d'en-tête (stoppe la fenêtre avant "À :", "Envoyé :", "To :", etc.)
+        _NEXT_FIELD_RE = re.compile(
+            r'\n\s*(?:À\s*:|To\s*:|Envoyé\s*:|Sent\s*:|Cc\s*:|CC\s*:|Date\s*:|Objet\s*:|Subject\s*:)',
+            re.IGNORECASE,
+        )
+        # Pattern email complet
+        _EMAIL_RE = re.compile(r'[\w.%+-]+@[\w.-]+\.\w{2,}', re.IGNORECASE)
+
+        for header_match in _HEADER_RE.finditer(text):
+            # Fenêtre : du marqueur jusqu'au prochain champ (ou 250 chars max)
+            # Cela couvre "De : NOM email" sur 1 ligne OU sur 2 lignes (NOM puis email)
+            # sans déborder sur "À :" (qui contiendrait les destinataires, pas l'expéditeur)
+            window_start = header_match.start()
+            raw_window = text[window_start: window_start + 250]
+            stop = _NEXT_FIELD_RE.search(raw_window)
+            window = raw_window[: stop.start()] if stop else raw_window
+
+            for email_match in _EMAIL_RE.finditer(window):
+                email_found = email_match.group(0).strip().lower()
+                if '@' not in email_found:
+                    continue
+                domain = email_found.split('@')[-1]
+                if domain in internal_domains or _is_generic(domain):
+                    continue
+                logger.debug(
+                    "[FWD_SENDER] Trouvé: %s (marqueur: %r)",
+                    email_found, header_match.group(0).strip(),
+                )
+                return email_found
+
+        return None
 
     def _try_match_by_from_domain(self, sender_email: str) -> Optional[MatchedClient]:
         """
@@ -1340,6 +1634,13 @@ class EmailMatcher:
             else None
         )
 
+        _unit_price = item.get("Price")
+        _line_total = (
+            round(_unit_price * quantity, 2)
+            if _unit_price is not None and quantity
+            else None
+        )
+
         return MatchedProduct(
             item_code=item.get("ItemCode", ""),
             item_name=item.get("ItemName", ""),
@@ -1347,9 +1648,10 @@ class EmailMatcher:
             score=score,
             match_reason=match_reason,
             not_found_in_sap=not_found_in_sap,
-            # Prix depuis SAP (sera utilisé par pricing engine si disponible)
-            unit_price=item.get("Price"),  # Prix SAP de base
-            supplier_price=item.get("SupplierPrice"),  # Prix fournisseur si disponible
+            # Prix depuis SAP cache — unit_price × quantity calculé immédiatement
+            unit_price=_unit_price,
+            line_total=_line_total,
+            supplier_price=item.get("SupplierPrice"),
             # Poids depuis cache SAP (SWeight1)
             weight_unit_value=weight_unit_value,
             weight_unit='kg',
@@ -1363,13 +1665,19 @@ class EmailMatcher:
         text: str,
         supplier_card_code: Optional[str] = None,
         original_code_in_text: Optional[str] = None,
+        skip_fuzzy: bool = False,
     ) -> List[MatchedProduct]:
         """
         Matching intelligent d'un produit avec stratégie en cascade:
         1. Match exact par ItemCode dans SAP
         2. Recherche dans product_mapping_db (apprentissage)
-        3. Fuzzy match sur ItemName
+        3. Fuzzy match sur ItemName  ← sauté si skip_fuzzy=True
         4. Enregistrement comme PENDING si non trouvé
+
+        Args:
+            skip_fuzzy: Si True, l'étape 3 (fuzzy sur description) est sautée.
+                        Utilisé quand un code fournisseur explicite est présent :
+                        interdit d'inventer un produit par similarité de description.
 
         Args:
             code: Code produit normalisé (ex: "523-5135-2-3")
@@ -1569,11 +1877,14 @@ class EmailMatcher:
             logger.warning(f"   [WARNING] Mapping found but item {matched_code} NOT found anywhere!")
 
         # --- ÉTAPE 3: Fuzzy match sur ItemName avec description ---
+        # INTERDIT si skip_fuzzy=True (un code fournisseur explicite était présent).
         # Stratégie en 2 passes :
         #   3a. SQL multi-token (pré-filtre rapide, ≤50 candidats)
         #   3b. Scoring token_set_ratio (thefuzz) sur les candidats SQL
         #   3c. Fallback sur l'itération mémoire si SQL retourne rien
-        if description and len(description) >= 4:
+        if skip_fuzzy:
+            logger.debug("[MATCH] skip_fuzzy=True → étape 3 ignorée pour code=%s", code)
+        if not skip_fuzzy and description and len(description) >= 4:
             desc_normalized = normalize_text(description)
             desc_words = set(WORD_PATTERN_4PLUS.findall(desc_normalized))
 
@@ -1786,6 +2097,100 @@ class EmailMatcher:
 
         return False
 
+    def match_product_strict(
+        self,
+        code: str,
+        quantity: Optional[int] = None,
+    ) -> List[MatchedProduct]:
+        """
+        Matching STRICT par code fournisseur — aucun fuzzy sur description.
+
+        Stratégie en cascade (code only) :
+          1. Exact match ItemCode (SAP interne) dans cache mémoire
+          2. Match normalisé (_items_norm_code) — ignore tirets/slashes
+          3. Recherche SQLite LIKE sur ItemCode et ItemName
+          4. Retourne liste vide si aucun match
+
+        RÈGLES :
+        - Si un seul résultat → retourner [MatchedProduct] score=100
+        - Si plusieurs → retourner tous (auto_selected=False, status=pending_selection)
+        - Si aucun → retourner [] (not_found_in_sap, aucun fuzzy)
+        - Quantité : TOUJOURS issue du paramètre quantity (None si inconnue)
+
+        Args:
+            code:     Code fournisseur (ex: "C892-001", "C893-007-XY")
+            quantity: Quantité extraite de la ligne (None si absente)
+
+        Returns:
+            Liste de MatchedProduct (vide = non trouvé)
+        """
+        code_upper = code.upper()
+        qty = quantity if quantity is not None else 1
+
+        # --- Étape 1 : exact match ItemCode ---
+        for key in (code_upper, code):
+            if key in self._items_cache:
+                item = self._items_cache[key]
+                return [self._create_matched_product_from_sap(
+                    item=item, quantity=qty, score=100,
+                    match_reason=f"Code exact SAP: {key}"
+                )]
+
+        # --- Étape 2 : match normalisé (ignore tirets/slashes) ---
+        # Note : _items_norm_code ne stocke que le PREMIER article indexé pour un code normalisé.
+        # On vérifie toujours via SQLite (étape 3) si plusieurs articles existent pour ce code.
+        code_norm = normalize_product_code(code)
+        _norm_candidate: Optional[str] = None  # Code SAP trouvé par normalisation
+        if code_norm and len(code_norm) >= 4 and hasattr(self, '_items_norm_code'):
+            _norm_candidate = self._items_norm_code.get(code_norm)
+
+        # --- Étape 3 : SQLite LIKE sur ItemCode et ItemName ---
+        # Toujours exécutée pour détecter les ambiguïtés (plusieurs articles pour un même code).
+        try:
+            cache_db = self._get_cache_db()
+            # Chercher d'abord avec espace après le code (le code est un préfixe exact de ItemName)
+            sap_items = cache_db.search_items(code + " ", limit=10)
+            if not sap_items:
+                sap_items = cache_db.search_items(code, limit=10)
+
+            if sap_items:
+                # Dédupliquer
+                seen: set = set()
+                unique: List[Dict] = []
+                for i in sap_items:
+                    ic = i.get("ItemCode", "")
+                    if ic and ic not in seen:
+                        seen.add(ic)
+                        unique.append(i)
+
+                # Trier : ItemName qui commence exactement par le code en premier
+                code_upper_space = (code + " ").upper()
+                unique.sort(
+                    key=lambda i: (0 if i.get("ItemName", "").upper().startswith(code_upper_space) else 1)
+                )
+
+                results = [
+                    self._create_matched_product_from_sap(
+                        item=item, quantity=qty, score=100,
+                        match_reason=f"Code dans ItemName SAP: {code}"
+                    )
+                    for item in unique
+                ]
+                return results
+        except Exception as e:
+            logger.debug(f"[match_product_strict] SQLite error for {code}: {e}")
+
+        # Fallback étape 2 : utiliser le candidat normalisé trouvé plus tôt (si SQLite a échoué)
+        if _norm_candidate and _norm_candidate in self._items_cache:
+            item = self._items_cache[_norm_candidate]
+            return [self._create_matched_product_from_sap(
+                item=item, quantity=qty, score=100,
+                match_reason=f"Code normalisé: {code} → {_norm_candidate}"
+            )]
+
+        # --- Aucun match trouvé ---
+        return []
+
     def _match_products(self, text: str, supplier_card_code: Optional[str] = None) -> List[MatchedProduct]:
         """
         Trouve les produits SAP par code OU par nom (intelligent matching).
@@ -1866,6 +2271,95 @@ class EmailMatcher:
             print(f"✅ OFFER REQUEST: {len(offer_matches)} produits, triés par Row No", flush=True)
             return offer_matches
 
+        # ===== PHASE 0C : EXTRACTION DÉTERMINISTE (liste structurée de produits) =====
+        # Si l'email contient des lignes structurées (code en début de ligne + quantité),
+        # on utilise ce chemin prioritaire : extraction déterministe, matching strict (sans fuzzy),
+        # quantités issues des lignes uniquement.
+        #
+        # RÈGLES :
+        #   - Codes détectés par regex déterministe (pas le LLM)
+        #   - Matching par code uniquement (match_product_strict, aucun fuzzy sur description)
+        #   - Ambiguïté → pending_selection (aucun choix automatique)
+        #   - Non trouvé → not_found_in_sap (aucune invention)
+        #   - Quantité : issue de la ligne, None si absente (jamais forcé à 1 depuis le texte)
+        #
+        # DÉCLENCHEMENT : ≥ 3 lignes structurées (code + éventuellement quantité) détectées.
+        det_rows = extract_products_deterministic(text)
+        if len(det_rows) >= 3:
+            print(f"📋 EXTRACTION DÉTERMINISTE — {len(det_rows)} lignes produits détectées", flush=True)
+            logger.info("[DETERMINISTIC] Chemin déterministe activé (%d lignes)", len(det_rows))
+            det_matches: List[MatchedProduct] = []
+            det_matched_codes: set = set()
+
+            for row in det_rows:
+                code = row['code']
+                code_upper = code.upper()
+                if code_upper in det_matched_codes:
+                    continue
+
+                qty = row['quantity']  # peut être None
+                qty_for_model = qty if qty is not None else 1  # modèle Pydantic exige int
+
+                candidates = self.match_product_strict(code=code, quantity=qty_for_model)
+
+                if not candidates:
+                    # Non trouvé dans SAP → entrée non-SAP, aucun fuzzy
+                    det_matches.append(MatchedProduct(
+                        item_code=code,
+                        item_name=f"Produit externe {code}",
+                        quantity=qty_for_model,
+                        score=0,
+                        match_reason="Code non trouvé dans SAP (matching strict)",
+                        not_found_in_sap=True,
+                    ))
+                    logger.info("[DETERMINISTIC] %s → NON TROUVÉ SAP", code)
+                elif len(candidates) == 1:
+                    # Match unique → retourner avec la quantité de la ligne
+                    matched = candidates[0].model_copy(update={'quantity': qty_for_model})
+                    det_matches.append(matched)
+                    logger.info(
+                        "[DETERMINISTIC] %s → %s | %s (qty=%s)",
+                        code, matched.item_code, matched.item_name[:40], qty
+                    )
+                    print(
+                        f"   ✅ DET: {code} → {matched.item_code} | {matched.item_name[:40]} (qty={qty})",
+                        flush=True
+                    )
+                else:
+                    # Ambiguïté : plusieurs articles SAP → pending_selection, aucun auto-choix
+                    candidates_with_qty = [
+                        p.model_copy(update={'quantity': qty_for_model})
+                        for p in candidates
+                    ]
+                    placeholder = MatchedProduct(
+                        item_code=code,
+                        item_name=f"{code} — {len(candidates)} candidats",
+                        quantity=qty_for_model,
+                        score=0,
+                        match_reason=f"Ambiguïté : {len(candidates)} articles SAP correspondent",
+                        status="pending_selection",
+                        candidates=[p.model_dump() for p in candidates_with_qty],
+                        original_code=code,
+                    )
+                    det_matches.append(placeholder)
+                    logger.info(
+                        "[DETERMINISTIC] %s → AMBIGU (%d candidats, pending_selection)",
+                        code, len(candidates)
+                    )
+                    print(
+                        f"   ⚠️ DET AMBIGUÏTÉ: {code} → {len(candidates)} candidats (pending_selection)",
+                        flush=True
+                    )
+
+                det_matched_codes.add(code_upper)
+
+            print(
+                f"✅ DÉTERMINISTE: {len(det_matches)} produits "
+                f"({sum(1 for m in det_matches if not m.not_found_in_sap)} SAP matchés)",
+                flush=True
+            )
+            return det_matches
+
         # ===== PHASE 1 : MATCHING PAR CODE (ItemCode) avec apprentissage =====
 
         # Extraire tous les tokens potentiels (codes produits)
@@ -1942,11 +2436,32 @@ class EmailMatcher:
         }
 
         # Filtrer les doublons en gardant la version la plus longue
-        # Ex: si "C315" et "C315-6305RS" existent, garder "C315-6305RS"
+        # RÈGLE CRITIQUE : ne supprimer un code court que s'il est sous-chaîne d'un code plus long
+        # ET qu'il n'apparaît pas de manière autonome dans le texte (non suivi de caractères code).
+        #
+        # Ex. CORRECT : "C315" supprimé si "C315-6305RS" existe et "C315" n'est jamais seul.
+        # Ex. INCORRECT (BUG) : "C893-007" supprimé car sous-chaîne de "C893-007-XY"
+        #   alors que "C893-007" est un produit distinct (→ A14265) qui apparaît seul dans le texte.
+        #
+        # Solution : vérifier si le code apparaît en position autonome dans le texte
+        # (non immédiatement suivi d'un tiret/lettre/chiffre).
+        def _appears_standalone(c: str, t: str) -> bool:
+            """Retourne True si c apparaît dans t sans être suivi de caractères code [-A-Z0-9]."""
+            pattern = re.escape(c) + r'(?![-A-Z0-9])'
+            return bool(re.search(pattern, t, re.IGNORECASE))
+
         filtered_codes = set()
         for code in sorted(potential_codes, key=len, reverse=True):
-            # Vérifier si ce code n'est pas un préfixe d'un code déjà ajouté
-            if not any(code in longer_code and code != longer_code for longer_code in filtered_codes):
+            is_subset_of_longer = any(
+                code in longer_code and code != longer_code
+                for longer_code in filtered_codes
+            )
+            if is_subset_of_longer:
+                # Conserver quand même le code court s'il apparaît autonome dans le texte
+                if _appears_standalone(code, text):
+                    filtered_codes.add(code)
+                # Sinon, c'est vraiment un préfixe → ignorer
+            else:
                 filtered_codes.add(code)
 
         potential_codes = filtered_codes
@@ -1979,12 +2494,15 @@ class EmailMatcher:
             # Si ce code est une version normalisée (zéros supprimés), aussi chercher la quantité
             # avec le code original (tel qu'il apparaît dans le texte, ex: "0523-05135-2-3")
             original_code_in_text = _stripped_to_original.get(code)
+            # skip_fuzzy=True : si on a un code fournisseur explicite, on n'autorise pas
+            # le matching flou sur la description (évite d'inventer un produit par similarité).
             matched_products = self._match_single_product_intelligent(
                 code=code,
                 description=description,
                 text=text,
                 supplier_card_code=supplier_card_code,
                 original_code_in_text=original_code_in_text,
+                skip_fuzzy=True,
             )
 
             if matched_products:

@@ -1057,8 +1057,6 @@ GUARDRAIL FINAL : Si tu n'es pas certain à 100% → retourne null."""
         text = text.replace('&#39;', "'")
 
         # ÉTAPE 2: Extraire et protéger les adresses email (maintenant décodées)
-        # Pattern pour détecter les emails dans <email@domain.com>
-        email_pattern = r'<([\w\.-]+@[\w\.-]+\.\w+)>'
         emails_found = []
 
         def save_email(match):
@@ -1068,7 +1066,23 @@ GUARDRAIL FINAL : Si tu n'es pas certain à 100% → retourne null."""
             emails_found.append(email)
             return placeholder
 
-        # Remplacer les emails par des placeholders
+        # 2a. Emails dans href="mailto:email" (headers Outlook transférés)
+        # Ex: <a href="mailto:marie.nader@meg.com.eg">Marie Nader</a>
+        # → devient : Marie Nader marie.nader@meg.com.eg
+        # On remplace la balise ouvrante <a href="mailto:X"> par le placeholder SUIVI d'un espace
+        # pour que l'email apparaisse dans le texte résultant après stripping des balises.
+        def _expand_mailto(m):
+            email = m.group(1)
+            placeholder = f"__EMAIL_{len(emails_found)}__"
+            emails_found.append(email)
+            # Remplace toute la balise ouvrante par le placeholder (sera visible dans le texte)
+            return placeholder + " "
+
+        mailto_pattern = r'<a\b[^>]*\bhref=["\']mailto:([\w\.\+\-]+@[\w\.\-]+\.\w{2,})["\'][^>]*>'
+        text = re.sub(mailto_pattern, _expand_mailto, text, flags=re.IGNORECASE)
+
+        # 2b. Emails en texte brut entre <> : <email@domain.com>
+        email_pattern = r'<([\w\.\+\-]+@[\w\.\-]+\.\w{2,})>'
         text = re.sub(email_pattern, save_email, text)
 
         # ÉTAPE 3: Supprimer les balises HTML (maintenant sans risque pour les emails)
