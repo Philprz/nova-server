@@ -8,7 +8,7 @@ import tempfile
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
 import logging
-import requests
+import httpx
 from dotenv import load_dotenv
 load_dotenv()
 from services.security_helpers import escape_soql, escape_odata
@@ -865,14 +865,14 @@ class MCPConnector:
             safe_q = escape_odata(query)
             endpoint = f"/Items?$filter=contains(ItemName,'{safe_q}') or contains(ItemCode,'{safe_q}')&$orderby=ItemCode&$top=100"
             
-            response = requests.get(
-                self.sap_client['base_url'] + endpoint, 
-                auth=(self.sap_client['user'], self.sap_client['password']),
-                timeout=30
-            )
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(
+                    self.sap_client['base_url'] + endpoint,
+                    auth=(self.sap_client['user'], self.sap_client['password'])
+                )
             response.raise_for_status()
             result = response.json()
-            
+
             return {
                 "success": True,
                 "items": result.get("value", []),
@@ -894,14 +894,14 @@ class MCPConnector:
             
             endpoint = f"/Items('{escape_odata(item_code)}')/ItemWarehouseInfoCollection"
             
-            response = requests.get(
-                self.sap_client['base_url'] + endpoint,
-                auth=(self.sap_client['user'], self.sap_client['password']),
-                timeout=30
-            )
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(
+                    self.sap_client['base_url'] + endpoint,
+                    auth=(self.sap_client['user'], self.sap_client['password'])
+                )
             response.raise_for_status()
             result = response.json()
-            
+
             total_stock = sum(item.get("InStock", 0) for item in result.get("value", []))
             
             return {
@@ -928,12 +928,12 @@ class MCPConnector:
             
             endpoint = "/Quotations"
             
-            response = requests.post(
-                self.sap_client['base_url'] + endpoint, 
-                json=quote_data, 
-                auth=(self.sap_client['user'], self.sap_client['password']),
-                timeout=60
-            )
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                response = await client.post(
+                    self.sap_client['base_url'] + endpoint,
+                    json=quote_data,
+                    auth=(self.sap_client['user'], self.sap_client['password'])
+                )
             response.raise_for_status()
             result = response.json()
             
