@@ -1,5 +1,8 @@
 #main.py - CORRECTIONS CRITIQUES POUR NOVA
 
+from dotenv import load_dotenv
+load_dotenv()
+
 import uvicorn
 import logging
 from pathlib import Path

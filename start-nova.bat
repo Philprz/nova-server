@@ -1,112 +1,139 @@
 @echo off
-REM ============================================
-REM  NOVA-SERVER - Script de demarrage complet
-REM  Lance Backend (FastAPI) + Frontend (React)
-REM ============================================
+setlocal EnableDelayedExpansion
+chcp 65001 >nul 2>&1
+title NOVA - Facturation
 
 echo.
-echo ========================================
-echo   NOVA-SERVER v2.3.0
-echo   Demarrage Backend + Frontend
-echo ========================================
+echo  ============================================================
+echo    NOVA - Facturation  ^|  Demarrage complet
+echo  ============================================================
 echo.
 
-REM Verifier Python
-python --version >nul 2>&1
-if errorlevel 1 (
-    echo [ERREUR] Python non trouve. Veuillez installer Python 3.9+
+:: ---------------------------------------------------------------
+:: [1/4] Demarrage des services
+:: ---------------------------------------------------------------
+echo  [1/4] Demarrage des services...
+
+:: Verifier l'etat actuel
+set BACKEND_RUNNING=0
+set TUNNEL_RUNNING=0
+sc query NOVA-Backend 2>nul | find "RUNNING" >nul 2>&1 && set BACKEND_RUNNING=1
+sc query Cloudflared  2>nul | find "RUNNING" >nul 2>&1 && set TUNNEL_RUNNING=1
+
+if %BACKEND_RUNNING%==1 if %TUNNEL_RUNNING%==1 (
+    echo        Services deja actifs  [OK]
+    goto HEALTH_CHECK
+)
+
+:: Demarrage NOVA-Backend
+if %BACKEND_RUNNING%==0 (
+    sc start NOVA-Backend >nul 2>&1
+    if !errorlevel! neq 0 (
+        echo.
+        echo  [ERREUR] Impossible de demarrer NOVA-Backend.
+        echo  Solution : relancez nova-setup-tache.bat en administrateur.
+        echo.
+        pause
+        exit /b 1
+    )
+)
+
+:: Demarrage Cloudflared (tunnel HTTPS)
+if %TUNNEL_RUNNING%==0 (
+    sc start Cloudflared >nul 2>&1
+    if !errorlevel! neq 0 (
+        echo.
+        echo  [ERREUR] Impossible de demarrer Cloudflared.
+        echo  Solution : relancez nova-setup-tache.bat en administrateur.
+        echo.
+        pause
+        exit /b 1
+    )
+)
+echo        Services demarre  [OK]
+
+:: ---------------------------------------------------------------
+:: [2/4] Attente que les services soient RUNNING
+:: ---------------------------------------------------------------
+echo  [2/4] Attente demarrage des services...
+set RETRY=0
+:SERVICES_LOOP
+if %RETRY% geq 10 (
+    echo.
+    echo  [ERREUR] Les services ne passent pas en RUNNING ^(20s ecoules^).
+    echo  Consultez : eventvwr.msc ^> Journaux Windows ^> Application
+    echo.
     pause
     exit /b 1
 )
+set BACKEND_RUNNING=0
+set TUNNEL_RUNNING=0
+sc query NOVA-Backend 2>nul | find "RUNNING" >nul 2>&1 && set BACKEND_RUNNING=1
+sc query Cloudflared  2>nul | find "RUNNING" >nul 2>&1 && set TUNNEL_RUNNING=1
+if %BACKEND_RUNNING%==0 (
+    set /a RETRY+=1
+    timeout /t 2 /nobreak >nul
+    goto SERVICES_LOOP
+)
+if %TUNNEL_RUNNING%==0 (
+    set /a RETRY+=1
+    timeout /t 2 /nobreak >nul
+    goto SERVICES_LOOP
+)
+echo        NOVA-Backend  [RUNNING]
+echo        Cloudflared   [RUNNING]
 
-echo [OK] Python detecte
-echo.
-
-REM Verifier dossier mail-to-biz
-if not exist "mail-to-biz\" (
-    echo [ERREUR] Dossier mail-to-biz introuvable
+:: ---------------------------------------------------------------
+:: [3/4] Health check FastAPI
+:: ---------------------------------------------------------------
+:HEALTH_CHECK
+echo  [3/4] Verification sante du serveur...
+set RETRY=0
+:HEALTH_LOOP
+if %RETRY% geq 15 (
+    echo.
+    echo  [ERREUR] Le serveur FastAPI ne repond pas apres 30 secondes.
+    echo  Logs : C:\Users\PPZ\NOVA-SERVER\nova.log
+    echo.
     pause
     exit /b 1
 )
+powershell -NoProfile -Command ^
+    "try { $r = Invoke-WebRequest -Uri 'http://localhost:8001/health' -UseBasicParsing -TimeoutSec 2; exit ($r.StatusCode -ne 200) } catch { exit 1 }" >nul 2>&1
+if %errorlevel% neq 0 (
+    set /a RETRY+=1
+    set /a ELAPSED=RETRY*2
+    <nul set /p "=        Attente... (!ELAPSED!s / 30s)^M"
+    timeout /t 2 /nobreak >nul
+    goto HEALTH_LOOP
+)
+echo        Serveur operationnel  [OK]
 
-REM Demarrer Backend FastAPI en arriere-plan
-echo ========================================
-echo   1/2 - Demarrage Backend FastAPI
-echo ========================================
-echo.
-echo Demarrage serveur FastAPI sur http://localhost:8001...
-start "NOVA Backend" cmd /k ".venv\Scripts\python.exe main.py"
-
-REM Attendre que le backend demarre
-timeout /t 5 /nobreak >nul
-
-REM Verifier si Node.js est installe
-where node >nul 2>&1
-if errorlevel 1 (
-    echo.
-    echo [INFO] Node.js non trouve - Frontend deja compile
-    echo Le frontend sera servi par FastAPI sur http://localhost:8001/mail-to-biz
-    echo.
-    goto :backend_only
+:: ---------------------------------------------------------------
+:: [4/4] Etat final
+:: ---------------------------------------------------------------
+echo  [4/4] Etat final...
+for %%S in (NOVA-Backend Cloudflared) do (
+    sc query %%S 2>nul | find "RUNNING" >nul 2>&1
+    if !errorlevel! equ 0 (
+        echo        %%S  [RUNNING]
+    ) else (
+        echo        %%S  [STOPPED - VERIFIER]
+    )
 )
 
-REM Verifier si le frontend source existe
-if not exist "mail-to-biz\src\" (
-    echo.
-    echo [INFO] Frontend source non trouve - Utilisation du build
-    echo Le frontend sera servi par FastAPI sur http://localhost:8001/mail-to-biz
-    echo.
-    goto :backend_only
-)
+echo.
+echo  ============================================================
+echo    NOVA pret  ^|  https://nova-rondot.itspirit.ovh
+echo  ============================================================
+echo.
+echo  Interface  : https://nova-rondot.itspirit.ovh/mail-to-biz
+echo  API        : http://localhost:8001
+echo  Health     : http://localhost:8001/health
+echo  Logs       : C:\Users\PPZ\NOVA-SERVER\nova.log
+echo.
 
-REM Demarrer Frontend React Dev Server
-echo.
-echo ========================================
-echo   2/2 - Demarrage Frontend React Dev
-echo ========================================
-echo.
-echo Demarrage React Dev Server...
-cd mail-to-biz
-start "NOVA Frontend" cmd /k "npm run dev"
-cd ..
+start "" "https://nova-rondot.itspirit.ovh/mail-to-biz"
 
-echo.
-echo ========================================
-echo   NOVA DEMARRE AVEC SUCCES!
-echo ========================================
-echo.
-echo Backend FastAPI : http://localhost:8001
-echo Frontend React Dev : http://localhost:5173 (si disponible)
-echo Mail-to-Biz : http://localhost:8001/mail-to-biz
-echo NOVA Assistant : http://localhost:8001/interface/itspirit
-echo API Docs : http://localhost:8001/docs
-echo.
-echo Appuyez sur une touche pour arreter tous les services...
-pause >nul
-goto :end
-
-:backend_only
-echo.
-echo ========================================
-echo   NOVA DEMARRE (Backend uniquement)
-echo ========================================
-echo.
-echo Backend FastAPI : http://localhost:8001
-echo Mail-to-Biz : http://localhost:8001/mail-to-biz
-echo NOVA Assistant : http://localhost:8001/interface/itspirit
-echo API Docs : http://localhost:8001/docs
-echo.
-echo Le frontend compile est servi par FastAPI.
-echo.
-echo Appuyez sur une touche pour arreter le backend...
-pause >nul
-goto :end
-
-:end
-REM Arreter les processus
-echo.
-echo Arret des services NOVA...
-taskkill /FI "WINDOWTITLE eq NOVA Backend*" /F >nul 2>&1
-taskkill /FI "WINDOWTITLE eq NOVA Frontend*" /F >nul 2>&1
-echo Services arretes.
-echo.
+endlocal
+exit /b 0

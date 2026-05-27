@@ -158,3 +158,6 @@ docs/_build/
 *.apikey
 .env.local
 .env.*.local
+
+# Diagnostics contenant des fragments de credentials
+claude_diagnostic_results*.json
