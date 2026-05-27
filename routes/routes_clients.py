@@ -5,6 +5,7 @@ from typing import Dict, Any, Optional
 import re
 import time
 from services.mcp_connector import MCPConnector
+from services.security_helpers import escape_soql, safe_int
 
 
 router = APIRouter()
@@ -394,7 +395,7 @@ async def search_clients(q: str, source: str = "both", limit: int = 10):
         
         if source in ["both", "salesforce"]:
             # Recherche Salesforce
-            sf_query = f"SELECT Id, Name, AccountNumber, Phone, BillingCity, BillingCountry FROM Account WHERE Name LIKE '%{q}%' LIMIT {limit}"
+            sf_query = f"SELECT Id, Name, AccountNumber, Phone, BillingCity, BillingCountry FROM Account WHERE Name LIKE '%{escape_soql(q)}%' LIMIT {safe_int(limit, default=20, max_value=200)}"
             sf_result = await MCPConnector.call_salesforce_mcp("salesforce_query", {
                 "query": sf_query
             })
@@ -570,8 +571,7 @@ async def search_clients_advanced(q: str = "", limit: int =50):
             LIMIT {limit}
             """
         else:
-            # Échapper correctement la recherche pour éviter les injections SOQL
-            escaped_query = q.replace("'", "\\'").replace("\\", "\\\\")
+            escaped_query = escape_soql(q)
             query = f"""
             SELECT Id, Name, BillingCity, BillingCountry, BillingState, Phone, Type, Industry,
                    ShippingCity, ShippingCountry, AccountNumber, CreatedDate
@@ -581,8 +581,9 @@ async def search_clients_advanced(q: str = "", limit: int =50):
             LIMIT {limit}
             """
         
-        # Log de debugging pour la requête Salesforce
-        logger.info(f"Requête SOQL: {query}")
+        # Log en DEBUG : la requête contient le terme utilisateur, à ne pas
+        # journaliser au niveau INFO en production (cf. C-7).
+        logger.debug(f"Requête SOQL: {query}")
         
         # Appel au connecteur MCP avec délai augmenté
         result = await MCPConnector.call_salesforce_mcp("salesforce_query", {

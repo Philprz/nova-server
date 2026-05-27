@@ -12,6 +12,7 @@ import os # Ajout de os
 import httpx # Ajout de httpx
 # NOUVEAU : Import du service de recherche d'entreprises
 from .company_search_service import company_search_service
+from services.security_helpers import escape_soql
 # Importer les dÃ©pendances avec gestion des erreurs
 try:
     from thefuzz import fuzz
@@ -455,7 +456,7 @@ class ClientValidator:
 
             # Recherche doublons Salesforce
             sf_search = await MCPConnector.call_salesforce_mcp("salesforce_query", {
-                "query": f"SELECT Id, Name, AccountNumber, Phone, Email FROM Account WHERE Name LIKE '%{company_name[:10]}%' LIMIT 10"
+                "query": f"SELECT Id, Name, AccountNumber, Phone, Email FROM Account WHERE Name LIKE '%{escape_soql(company_name[:10])}%' LIMIT 10"
             })
 
             if sf_search.get("success") and sf_search.get("data"):

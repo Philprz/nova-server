@@ -17,6 +17,8 @@ from datetime import datetime
 import re
 import json
 
+from services.security_helpers import escape_soql, safe_int
+
 # Configuration du router FastAPI
 router = APIRouter(tags=["Assistant Intelligent"])
 # Import du système de progression
@@ -569,7 +571,7 @@ async def get_unified_data(data_type: str, limit: int = 20):
         if data_type == "clients":
             # Appel direct au MCP
             sf_result = await MCPConnector.call_salesforce_mcp("salesforce_query", {
-                "query": f"SELECT Id, Name, Phone, BillingCity, BillingCountry, Type, Industry, AccountNumber FROM Account LIMIT {limit}"
+                "query": f"SELECT Id, Name, Phone, BillingCity, BillingCountry, Type, Industry, AccountNumber FROM Account LIMIT {safe_int(limit, default=10, max_value=100)}"
             })
             
             if "error" not in sf_result:

@@ -9,6 +9,8 @@ from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
+from services.security_helpers import escape_soql
+
 # 🔧 CORRECTION : Import Redis avec gestion d'erreur
 try:
     import redis
@@ -436,9 +438,9 @@ async def get_cached_client_or_fetch(client_name: str, mcp_connector) -> Dict:
         "salesforce_query",
         {
             "query": f"""
-                SELECT Id, Name, AccountNumber, Phone, BillingCity, BillingCountry 
-                FROM Account 
-                WHERE UPPER(Name) = UPPER('{client_name}') 
+                SELECT Id, Name, AccountNumber, Phone, BillingCity, BillingCountry
+                FROM Account
+                WHERE UPPER(Name) = UPPER('{escape_soql(client_name)}')
                 LIMIT 1
                 """.strip()
         }
@@ -455,10 +457,10 @@ async def get_cached_client_or_fetch(client_name: str, mcp_connector) -> Dict:
         "salesforce_query", 
         {
             "query": f"""
-                SELECT Id, Name, AccountNumber 
-                FROM Account 
-                WHERE UPPER(Name) LIKE UPPER('%{client_name[:5]}%') 
-                ORDER BY Name 
+                SELECT Id, Name, AccountNumber
+                FROM Account
+                WHERE UPPER(Name) LIKE UPPER('%{escape_soql(client_name[:5])}%')
+                ORDER BY Name
                 LIMIT 5
                 """.strip()
         }

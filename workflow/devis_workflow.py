@@ -25,6 +25,7 @@ from services.price_engine import PriceEngineService
 from services.cache_manager import referential_cache
 from workflow.validation_workflow import SequentialValidator
 from services.local_product_search import LocalProductSearchService
+from services.security_helpers import escape_soql
 # Configuration sécurisée pour Windows
 if sys.platform == "win32":
     os.environ["PYTHONIOENCODING"] = "utf-8"
@@ -454,9 +455,9 @@ class DevisWorkflow:
             return []
         
         query = f"""
-            SELECT Id, Name, AccountNumber, FederalTaxID 
-            FROM Account 
-            WHERE FederalTaxID LIKE '%{siren}%'
+            SELECT Id, Name, AccountNumber, FederalTaxID
+            FROM Account
+            WHERE FederalTaxID LIKE '%{escape_soql(siren)}%'
         """
         result = await self.mcp_connector.call_mcp("salesforce_mcp", "salesforce_query", {"query": query})
         return result.get("data", []) if result.get("success") else []
@@ -468,7 +469,7 @@ class DevisWorkflow:
         if not words:
             return []
         
-        conditions = " OR ".join([f"Name LIKE '%{word}%'" for word in words])
+        conditions = " OR ".join([f"Name LIKE '%{escape_soql(word)}%'" for word in words])
         query = f"""
             SELECT Id, Name, AccountNumber 
             FROM Account 
@@ -2137,13 +2138,13 @@ class DevisWorkflow:
                 # Récupérer les données complètes du client créé
                 client_id = result["id"]
                 detailed_query = f"""
-                SELECT Id, Name, AccountNumber, 
+                SELECT Id, Name, AccountNumber,
                     BillingStreet, BillingCity, BillingState, BillingPostalCode, BillingCountry,
                     ShippingStreet, ShippingCity, ShippingState, ShippingPostalCode, ShippingCountry,
                     Phone, Fax, Website, Industry, AnnualRevenue, NumberOfEmployees,
                     Description, Type, OwnerId, CreatedDate, LastModifiedDate
-                FROM Account 
-                WHERE Id = '{client_id}'
+                FROM Account
+                WHERE Id = '{escape_soql(client_id)}'
                 """
                 
                 detailed_result = await MCPConnector.call_salesforce_mcp("salesforce_query", {"query": detailed_query})
@@ -2296,7 +2297,7 @@ class DevisWorkflow:
     async def _find_product_in_salesforce(self, product_code: str) -> Optional[str]:
         """Trouve l'ID Salesforce correspondant au code produit SAP - RESTAURÉE"""
         try:
-            query = f"SELECT Id, Name, ProductCode FROM Product2 WHERE ProductCode = '{product_code}' LIMIT 1"
+            query = f"SELECT Id, Name, ProductCode FROM Product2 WHERE ProductCode = '{escape_soql(product_code)}' LIMIT 1"
             result = await MCPConnector.call_salesforce_mcp("salesforce_query", {"query": query})
             
             if "error" not in result and result.get("totalSize", 0) > 0:
@@ -3534,7 +3535,7 @@ class DevisWorkflow:
 
         try:
             # === RECHERCHE CLASSIQUE (code existant) ===
-            query = f"SELECT Id, Name, AccountNumber, AnnualRevenue, LastActivityDate FROM Account WHERE Name LIKE '%{client_name}%' LIMIT 10"
+            query = f"SELECT Id, Name, AccountNumber, AnnualRevenue, LastActivityDate FROM Account WHERE Name LIKE '%{escape_soql(client_name)}%' LIMIT 10"
             logger.debug(f"📝 Requête Salesforce: {query}")
 
             sf_result = await self.mcp_connector.call_salesforce_mcp("salesforce_query", {"query": query})
@@ -6070,7 +6071,7 @@ class DevisWorkflow:
                             sf_query = (
                                 "SELECT Id, Name, AccountNumber, Phone, BillingStreet, "
                                 "BillingCity, BillingPostalCode, BillingCountry "
-                                f"FROM Account WHERE Id = '{sf_id}'"
+                                f"FROM Account WHERE Id = '{escape_soql(sf_id)}'"
                             )
                             sf_result = await self.mcp_connector.call_mcp(
                                 "salesforce_mcp", "salesforce_query", {"query": sf_query}
@@ -7420,7 +7421,7 @@ class DevisWorkflow:
                 "enrichment_data": enrichment_data
             }
     def _sanitize_soql_string(self, value: str) -> str:
-        return value.replace("'", "\\'")
+        return escape_soql(value)
     
 
     async def _propose_existing_clients_selection(self, client_name: str, search_results: Dict[str, Any]) -> Dict[str, Any]:

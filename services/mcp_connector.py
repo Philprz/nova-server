@@ -11,6 +11,7 @@ import logging
 import requests
 from dotenv import load_dotenv
 load_dotenv()
+from services.security_helpers import escape_soql, escape_odata
 # Configuration du logging
 logger = logging.getLogger("mcp_connector")
 # Imports conditionnels avec gestion d'erreurs
@@ -350,7 +351,8 @@ class MCPConnector:
         query = "SELECT Id, Name, AccountNumber, Type, Industry, AnnualRevenue, Phone, Website, Description, CreatedDate, BillingCity, BillingCountry FROM Account"
         
         if search_term:
-            query += f" WHERE Name LIKE '%{search_term}%' OR AccountNumber LIKE '%{search_term}%'"
+            safe_term = escape_soql(search_term)
+            query += f" WHERE Name LIKE '%{safe_term}%' OR AccountNumber LIKE '%{safe_term}%'"
         
         query += f" LIMIT {limit}"
         
@@ -783,7 +785,8 @@ class MCPConnector:
             if not self.salesforce_client:
                 return {"success": False, "error": "Connexion Salesforce non disponible", "accounts": []}
             
-            soql_query = f"SELECT Id, Name, AccountNumber, Type, Industry, AnnualRevenue, Phone, Website, Description, CreatedDate, BillingCity, BillingCountry FROM Account WHERE Name LIKE '%{query}%' OR AccountNumber LIKE '%{query}%' LIMIT 100"
+            safe_q = escape_soql(query)
+            soql_query = f"SELECT Id, Name, AccountNumber, Type, Industry, AnnualRevenue, Phone, Website, Description, CreatedDate, BillingCity, BillingCountry FROM Account WHERE Name LIKE '%{safe_q}%' OR AccountNumber LIKE '%{safe_q}%' LIMIT 100"
             result = self.salesforce_client.query(soql_query)
             
             return {
@@ -808,8 +811,13 @@ class MCPConnector:
             query = "SELECT Id, Name, StageName, CloseDate, Amount, AccountId FROM Opportunity"
             
             if filters:
-                conditions = [f"{key} = '{value}'" for key, value in filters.items()]
-                query += " WHERE " + " AND ".join(conditions)
+                conditions = [
+                    f"{key} = '{escape_soql(value)}'"
+                    for key, value in filters.items()
+                    if key.isidentifier()
+                ]
+                if conditions:
+                    query += " WHERE " + " AND ".join(conditions)
             
             query += " LIMIT 100"
             
@@ -854,7 +862,8 @@ class MCPConnector:
             if not self.sap_client:
                 return {"success": False, "error": "Connexion SAP non disponible", "items": []}
             
-            endpoint = f"/Items?$filter=contains(ItemName,'{query}') or contains(ItemCode,'{query}')&$orderby=ItemCode&$top=100"
+            safe_q = escape_odata(query)
+            endpoint = f"/Items?$filter=contains(ItemName,'{safe_q}') or contains(ItemCode,'{safe_q}')&$orderby=ItemCode&$top=100"
             
             response = requests.get(
                 self.sap_client['base_url'] + endpoint, 
@@ -883,7 +892,7 @@ class MCPConnector:
             if not self.sap_client:
                 return {"success": False, "error": "Connexion SAP non disponible", "item_code": item_code}
             
-            endpoint = f"/Items('{item_code}')/ItemWarehouseInfoCollection"
+            endpoint = f"/Items('{escape_odata(item_code)}')/ItemWarehouseInfoCollection"
             
             response = requests.get(
                 self.sap_client['base_url'] + endpoint,
