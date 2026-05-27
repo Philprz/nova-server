@@ -112,9 +112,18 @@ class SAPBusinessService:
         endpoint: str,
         method: str = "GET",
         payload: Optional[Dict] = None,
-        params: Optional[Dict] = None
+        params: Optional[Dict] = None,
+        _retry_count: int = 0,
     ) -> Dict[str, Any]:
-        """Appel générique à l'API SAP avec gestion de session"""
+        """Appel générique à l'API SAP avec gestion de session.
+
+        _retry_count : compteur interne pour éviter une récursion infinie
+        en cas d'indisponibilité durable de SAP (max 2 retries internes).
+        """
+        if _retry_count >= 2:
+            raise RuntimeError(
+                f"SAP call failed after {_retry_count} retries: {method} {endpoint}"
+            )
         if not await self.ensure_session():
             raise Exception("Impossible de se connecter à SAP")
 
@@ -145,7 +154,7 @@ class SAPBusinessService:
                 logger.warning("Session expirée, reconnexion...")
                 self.session_id = None
                 if await self.login():
-                    return await self._call_sap(endpoint, method, payload, params)
+                    return await self._call_sap(endpoint, method, payload, params, _retry_count=_retry_count + 1)
 
             elif e.response.status_code == 500:
                 # Vérifier si c'est un Switch company error (code 305)
@@ -157,7 +166,7 @@ class SAPBusinessService:
                         self.session_timeout = None
                         await asyncio.sleep(1.0)  # Laisser SAP stabiliser sa session
                         if await self.login():
-                            return await self._call_sap(endpoint, method, payload, params)
+                            return await self._call_sap(endpoint, method, payload, params, _retry_count=_retry_count + 1)
                 except Exception:
                     pass
 
@@ -165,7 +174,7 @@ class SAPBusinessService:
                 # SAP proxy temporairement surchargé — réessayer après délai
                 logger.warning("Erreur 502 SAP (proxy), retry dans 3s...")
                 await asyncio.sleep(3.0)
-                return await self._call_sap(endpoint, method, payload, params)
+                return await self._call_sap(endpoint, method, payload, params, _retry_count=_retry_count + 1)
 
             logger.error(f"Erreur SAP {e.response.status_code}: {e.response.text}")
             raise
