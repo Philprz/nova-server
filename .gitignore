@@ -1,163 +1,109 @@
-*.log
-*.db
-logs/
+# Python
 __pycache__/
+*.py[cod]
+*.pyd
+*.pyo
 *.pyc
-alembic/versions/
-.env
 
-# Fichiers temporaires et cachés
-*~
-*.swp
-*.swo
-
-# Dossiers de build
-/build/
-/dist/
-
-# Fichiers de configuration spécifiques à l'utilisateur
-.vscode/
-.idea/
-
-# Fichiers de log
-/logs/
-*.log
-
-# Dépendances
-/node_modules/
-/vendor/
-
-# Fichiers compilés
-*.class
-*.o
-*.pyc
-__pycache__/
-
-# Fichiers de documentation générés
-/docs/build/
-
-# Fichiers spécifiques à macOS
-.DS_Store
-
-# Fichiers spécifiques à Windows
-Thumbs.db
-ehthumbs.db
-Desktop.ini
-# Nom réservé Windows (périphérique) - évite "error: invalid path 'nul'"
-/nul
-nul
-
-# Fichiers spécifiques à JetBrains (PyCharm, IntelliJ, etc.)
-.idea/
-*.iml
-
-# Fichiers spécifiques à Visual Studio Code
-.vscode/
-
-# Fichiers spécifiques à Sublime Text
-*.sublime-project
-*.sublime-workspace
-
-# Fichiers spécifiques à NetBeans
-/nbproject/
-
-# Fichiers spécifiques à Eclipse
-.project
-.classpath
-.settings/
-
-# Fichiers spécifiques à Xcode
-*.xcworkspace
-!default.xcworkspace
-
-# Fichiers spécifiques à Android Studio
-.gradle/
-.idea/
-build/
-*.iml
-local.properties
-
-# Fichiers spécifiques à Docker
-.dockerignore
-Dockerfile
-docker-compose.yml
-
-# Fichiers spécifiques à Heroku
-.slugignore
-.qodo
-
-# config Claude Desktop, ne pas versionner
-claude_desktop_config.json
-venv
-
-# 1. Ajouter au .gitignore
-echo "# Migrations - spécifiques à chaque environnement" >> .gitignore
-echo "alembic/versions/*.py" >> .gitignore
-echo "!alembic/versions/__init__.py" >> .gitignore
-
-# Environnements Python
+# Environnements virtuels
 venv/
 .venv/
 ENV/
 env/
 .Python
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
 
 # Configuration sensible
 .env
 .env.local
 .env.production
+.env.*.local
 
-# Base de données
+# Bases de données locales
 *.db
+*.sqlite
 *.sqlite3
+api_cache.sqlite
 
 # Logs
 logs/
 *.log
 
+# Alembic migrations (spécifiques à chaque environnement)
+alembic/versions/*.py
+!alembic/versions/__init__.py
+
+# Données clients et pièces jointes (RGPD)
+data/attachments/
+*.eml
+# PDF interdits par défaut (souvent docs clients), autorisés uniquement dans docs/
+*.pdf
+!docs/**/*.pdf
+
+# Binaires
+*.exe
+
+# Artefacts de tests
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+
 # IDE
 .vscode/
 .idea/
+*.iml
 *.swp
 *.swo
+*.sublime-project
+*.sublime-workspace
+.project
+.classpath
+.settings/
 
 # OS
 .DS_Store
 Thumbs.db
+ehthumbs.db
+Desktop.ini
 
-# Alembic
-alembic/versions/*.py
-!alembic/versions/__init__.py
+# Nom réservé Windows (périphérique) - évite "error: invalid path 'nul'"
+/nul
+nul
+
+# Build frontend
+node_modules/
+dist/
+build/
+/build/
+/dist/
 
 # Fichiers temporaires
 tmp/
 temp/
 *.tmp
-
-# Documentation générée
-docs/_build/
+*.bak
+*.backup
 
 # Certificats et clés
 *.pem
 *.key
 *.crt
+*.apikey
 
-# Sauvegardes
-*.bak
-*.backup
+# Diagnostics contenant des fragments de credentials
+claude_diagnostic_results*.json
 
 # Fichiers de configuration locale pour les scripts push
 .ai_commit_initialized
 .push_selector_initialized
 
-# Clés API (sécurité)
-*.apikey
-.env.local
-.env.*.local
+# Claude Desktop config
+claude_desktop_config.json
 
-# Diagnostics contenant des fragments de credentials
-claude_diagnostic_results*.json
+# Documentation générée
+docs/_build/
+docs/build/
+
+# Heroku
+.slugignore
+.qodo
