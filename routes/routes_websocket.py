@@ -5,15 +5,37 @@ import asyncio
 import logging
 from datetime import datetime
 
+import jwt
+from auth.jwt_service import decode_access_token
 from services.websocket_manager import websocket_manager
 from services.progress_tracker import progress_tracker
 from routes.routes_progress import handle_user_response_task
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+async def _authenticate_ws(websocket: WebSocket) -> bool:
+    """Vérifie le cookie nova_session sur un handshake WebSocket.
+    Ferme la connexion avec 4401 si absent/invalide. Retourne True si OK."""
+    token = websocket.cookies.get("nova_session")
+    if not token:
+        await websocket.close(code=4401, reason="Non authentifié")
+        return False
+    try:
+        decode_access_token(token)
+    except jwt.ExpiredSignatureError:
+        await websocket.close(code=4401, reason="Token expiré")
+        return False
+    except jwt.InvalidTokenError:
+        await websocket.close(code=4401, reason="Token invalide")
+        return False
+    return True
 @router.websocket("/ws/assistant/{task_id}")
 async def websocket_assistant_progress(websocket: WebSocket, task_id: str):
     """WebSocket pour l'assistant intelligent avec gestion des messages"""
+    if not await _authenticate_ws(websocket):
+        return
     await websocket_manager.connect(websocket, task_id)
     logger.info(f"🔌 Assistant WebSocket connecté pour {task_id}")
     
@@ -66,6 +88,8 @@ async def websocket_assistant_progress(websocket: WebSocket, task_id: str):
 @router.websocket("/ws/task/{task_id}")
 async def websocket_task_progress(websocket: WebSocket, task_id: str):
     """WebSocket pour suivi en temps réel d'une tâche"""
+    if not await _authenticate_ws(websocket):
+        return
     await websocket_manager.connect(websocket, task_id)
     logger.info(f"Client connecté au WebSocket pour tâche {task_id}")
     try:
@@ -96,6 +120,8 @@ async def websocket_task_progress(websocket: WebSocket, task_id: str):
 @router.websocket("/ws/{client_id}")
 async def websocket_endpoint(websocket: WebSocket, client_id: str):
     """Endpoint WebSocket principal"""
+    if not await _authenticate_ws(websocket):
+        return
     await websocket_manager.connect(websocket, client_id)
     
     try:
