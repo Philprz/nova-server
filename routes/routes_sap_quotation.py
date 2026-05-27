@@ -14,7 +14,8 @@ import logging
 import sqlite3
 from datetime import datetime
 from pathlib import Path
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from auth.dependencies import get_current_user
 from pydantic import BaseModel
 from typing import Optional
 
@@ -86,7 +87,7 @@ def _log_quote_creation(
 # Initialisation au chargement du module
 _init_quote_log_db()
 
-router = APIRouter(prefix="/api/sap", tags=["SAP Quotation"])
+router = APIRouter(prefix="/api/sap", tags=["SAP Quotation"], dependencies=[Depends(get_current_user)])
 
 
 # ============================================================

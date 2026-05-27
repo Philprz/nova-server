@@ -10,7 +10,8 @@ import httpx
 import logging
 from datetime import datetime
 from typing import Optional, List, Dict, Any
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from auth.dependencies import get_current_user
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
@@ -20,7 +21,7 @@ from services.sap_tls import SAP_VERIFY
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/sap-rondot", tags=["SAP Rondot"])
+router = APIRouter(prefix="/api/sap-rondot", tags=["SAP Rondot"], dependencies=[Depends(get_current_user)])
 
 # Configuration SAP Rondot
 SAP_BASE_URL = os.getenv("SAP_REST_BASE_URL")

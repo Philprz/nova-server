@@ -1,11 +1,12 @@
 """Endpoint pour exporter le JSON pre-sap-quote avec données backend"""
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from auth.dependencies import get_current_user
 from services.email_analyzer import get_email_analyzer
 from services.email_matcher import get_email_matcher
 from services.graph_service import get_graph_service
 import logging
 
-router = APIRouter(prefix="/api/export", tags=["export"])
+router = APIRouter(prefix="/api/export", tags=["export"], dependencies=[Depends(get_current_user)])
 logger = logging.getLogger(__name__)
 
 @router.get("/pre-sap-quote/{email_id}")

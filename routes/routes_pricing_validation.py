@@ -4,9 +4,10 @@ Routes API pour le workflow de validation commerciale
 """
 
 import logging
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import List, Optional
 
+from auth.dependencies import get_current_user
 from services.quote_validator import get_quote_validator
 from services.validation_models import (
     ValidationRequest,
@@ -22,7 +23,7 @@ from services.validation_models import (
 )
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 @router.get("/pending", response_model=List[ValidationRequest])

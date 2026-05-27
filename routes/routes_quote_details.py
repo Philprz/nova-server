@@ -3,7 +3,8 @@ API Routes pour la récupération détaillée des devis (Version MCPConnector Co
 Utilise la bonne méthode du MCPConnector - performance optimale
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from auth.dependencies import get_current_user
 from typing import Dict, Any
 import logging
 from datetime import datetime
@@ -15,7 +16,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter(
     prefix="/api/quotes",
     tags=["Quote Details"],
-    responses={404: {"description": "Quote not found"}}
+    responses={404: {"description": "Quote not found"}},
+    dependencies=[Depends(get_current_user)],
 )
 
 @router.get("/details/{quote_id}")

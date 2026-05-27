@@ -3,15 +3,16 @@ Routes API pour la validation et création de produits.
 Gère les mappings externes → SAP et la création d'articles.
 """
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import logging
 
+from auth.dependencies import get_current_user
 from services.product_mapping_db import get_product_mapping_db
 from services.sap_product_creator import get_sap_product_creator
 
-router = APIRouter(prefix="/api/products", tags=["Product Validation"])
+router = APIRouter(prefix="/api/products", tags=["Product Validation"], dependencies=[Depends(get_current_user)])
 logger = logging.getLogger(__name__)
 
 

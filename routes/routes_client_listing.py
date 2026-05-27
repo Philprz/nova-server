@@ -5,14 +5,15 @@ Routes API pour lister et rechercher les clients dans Salesforce et SAP
 
 import logging
 from typing import Dict, Any, Optional
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from auth.dependencies import get_current_user
 from pydantic import BaseModel
 
 # Import de nos fonctions de listing
 from utils.client_lister import list_all_clients, find_client_everywhere, client_lister
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 class ClientSearchRequest(BaseModel):
     client_name: str
