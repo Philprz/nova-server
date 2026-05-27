@@ -8,6 +8,7 @@ import logging
 import asyncio
 from typing import List, Dict, Any
 from services.mcp_connector import MCPConnector
+from services.security_helpers import escape_soql
 
 logger = logging.getLogger(__name__)
 
@@ -115,13 +116,14 @@ class ClientLister:
         """Recherche dans Salesforce avec différentes variantes - CORRIGÉ"""
         try:
             # Requête SOQL corrigée - insensible à la casse + champs existants
+            safe_name = escape_soql(client_name)
             exact_query = f"""
-            SELECT Id, Name, AccountNumber, Phone, BillingCity, BillingCountry, BillingPostalCode, Type, Industry, Website 
-            FROM Account 
-            WHERE (Name = '{client_name}' 
-            OR Name LIKE '{client_name} %' 
-            OR Name LIKE '% {client_name}' 
-            OR Name LIKE '%{client_name}%')
+            SELECT Id, Name, AccountNumber, Phone, BillingCity, BillingCountry, BillingPostalCode, Type, Industry, Website
+            FROM Account
+            WHERE (Name = '{safe_name}'
+            OR Name LIKE '{safe_name} %'
+            OR Name LIKE '% {safe_name}'
+            OR Name LIKE '%{safe_name}%')
             LIMIT 20
             """.strip()
             
@@ -157,9 +159,9 @@ class ClientLister:
             
             # Si pas de résultat exact, recherche approximative simple
             fuzzy_query = f"""
-            SELECT Id, Name, AccountNumber, Phone, BillingCity, BillingCountry 
-            FROM Account 
-            WHERE Name LIKE '%{client_name}%' 
+            SELECT Id, Name, AccountNumber, Phone, BillingCity, BillingCountry
+            FROM Account
+            WHERE Name LIKE '%{escape_soql(client_name)}%'
             LIMIT 10
             """.strip()
             
@@ -572,7 +574,7 @@ async def debug_raw_responses(client_name: str = "RONDOT") -> Dict[str, Any]:
     connector = MCPConnector()
     
     # Test Salesforce
-    sf_query = f"SELECT Id, Name, AccountNumber FROM Account WHERE Name LIKE '%{client_name}%' LIMIT 3"
+    sf_query = f"SELECT Id, Name, AccountNumber FROM Account WHERE Name LIKE '%{escape_soql(client_name)}%' LIMIT 3"
     sf_result = await connector.call_mcp("salesforce_mcp", "salesforce_query", {"query": sf_query})
     
     # Test SAP

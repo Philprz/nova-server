@@ -12,6 +12,7 @@ import asyncio
 from services.client_validator import ClientValidator
 from services.mcp_connector import MCPConnector
 from services.suggestion_engine import SuggestionEngine
+from services.security_helpers import escape_soql
 from utils.common_utils import ResponseBuilder, ErrorHandler
 from models.data_models import ClientData, ValidationResult
 
@@ -216,7 +217,7 @@ class ClientManager:
     async def _search_salesforce_client(self, client_name: str) -> Dict[str, Any]:
         """Recherche dans Salesforce - VERSION CORRIGÉE"""
         try:
-            safe_name = client_name.replace("'", "\\'")
+            safe_name = escape_soql(client_name)
             
             # 🔧 REQUÊTE CORRIGÉE - CHAMPS VÉRIFIÉS
             query = f"""

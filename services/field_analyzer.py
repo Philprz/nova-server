@@ -13,6 +13,7 @@ from datetime import datetime
 from typing import Dict, List, Any
 from collections import Counter
 from mcp_connector import MCPConnector
+from services.security_helpers import safe_int
 # Ajouter le répertoire racine au path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -122,7 +123,8 @@ class FieldAnalyzer:
                 "CreatedDate", "LastModifiedDate"
             ]
             
-            query = f"SELECT {', '.join(important_fields)} FROM Account ORDER BY CreatedDate DESC LIMIT {sample_size}"
+            safe_fields = ", ".join(f for f in important_fields if f.isidentifier())
+            query = f"SELECT {safe_fields} FROM Account ORDER BY CreatedDate DESC LIMIT {safe_int(sample_size, default=5, max_value=50)}"
             
             sample_result = await MCPConnector.call_salesforce_mcp("salesforce_query", {
                 "query": query

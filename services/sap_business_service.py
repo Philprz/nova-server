@@ -14,6 +14,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from services.security_helpers import escape_odata
+
 logger = logging.getLogger(__name__)
 
 
@@ -195,7 +197,8 @@ class SAPBusinessService:
 
             # Ajouter le filtre seulement si query n'est pas vide
             if query and query.strip():
-                filter_query = f"contains(ItemCode, '{query}') or contains(ItemName, '{query}')"
+                safe_q = escape_odata(query)
+                filter_query = f"contains(ItemCode, '{safe_q}') or contains(ItemName, '{safe_q}')"
                 params["$filter"] = filter_query
 
             result = await self._call_sap("/Items", params=params)
@@ -224,7 +227,7 @@ class SAPBusinessService:
         """
         try:
             result = await self._call_sap(
-                f"/Items('{item_code}')",
+                f"/Items('{escape_odata(item_code)}')",
                 params={"$select": "ItemCode,ItemName,QuantityOnStock"}
             )
             return SAPItem(

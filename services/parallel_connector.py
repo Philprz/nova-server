@@ -2,6 +2,9 @@
 import asyncio
 from typing import List, Dict, Any
 
+from services.security_helpers import escape_soql
+
+
 class ParallelConnector:
     """Connecteur parallèle pour performances"""
     
@@ -25,8 +28,8 @@ class ParallelConnector:
     async def get_client_and_products_parallel(self, client_name: str, product_codes: List[str]) -> Dict[str, Any]:
         """Récupération client + produits en parallèle"""
         calls = [
-            {"server": "salesforce", "action": "salesforce_query", 
-             "params": {"query": f"SELECT * FROM Account WHERE Name LIKE '%{client_name}%'"}},
+            {"server": "salesforce", "action": "salesforce_query",
+             "params": {"query": f"SELECT * FROM Account WHERE Name LIKE '%{escape_soql(client_name)}%'"}},
             {"server": "sap", "action": "sap_search", 
              "params": {"query": client_name, "entity_type": "BusinessPartners"}}
         ]

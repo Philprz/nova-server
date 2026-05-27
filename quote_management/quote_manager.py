@@ -89,16 +89,22 @@ class QuoteManager:
         try:
             # Calculer la date de début
             date_from = (datetime.now() - timedelta(days=days_back)).strftime("%Y-%m-%d")
-            
-            logger.info(f"🔍 Récupération des opportunités Salesforce depuis {date_from}")
-            
+            # Valider le format ISO avant interpolation dans la requête SOQL
+            try:
+                datetime.fromisoformat(date_from)
+                safe_date = date_from
+            except (ValueError, TypeError):
+                safe_date = "1970-01-01"
+
+            logger.info(f"🔍 Récupération des opportunités Salesforce depuis {safe_date}")
+
             # Requête SOQL pour récupérer les opportunités
             query = f"""
-                SELECT Id, Name, StageName, Amount, CloseDate, 
+                SELECT Id, Name, StageName, Amount, CloseDate,
                        Account.Name, Account.SAP_Code__c, OpportunityNumber__c,
                        SAP_Quote_Number__c, CreatedDate
-                FROM Opportunity 
-                WHERE CreatedDate >= {date_from}T00:00:00Z
+                FROM Opportunity
+                WHERE CreatedDate >= {safe_date}T00:00:00Z
                 ORDER BY CreatedDate DESC
                 LIMIT 500
             """
