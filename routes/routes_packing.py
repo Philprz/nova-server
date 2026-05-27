@@ -7,16 +7,17 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from auth.dependencies import get_current_user
 from services.packing.packing_service import (
     PackingItemInput,
     PackingResponse,
     get_packing_service,
 )
 
-router = APIRouter(prefix="/api/packing", tags=["Colisage"])
+router = APIRouter(prefix="/api/packing", tags=["Colisage"], dependencies=[Depends(get_current_user)])
 logger = logging.getLogger(__name__)
 
 

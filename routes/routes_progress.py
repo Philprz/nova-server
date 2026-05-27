@@ -4,7 +4,8 @@ Routes API pour le suivi de progression des générations de devis
 À intégrer dans main.py avec : app.include_router(progress_router, prefix="/progress", tags=["progress"])
 """
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect
+from auth.dependencies import get_current_user
 from pydantic import BaseModel
 from services.websocket_manager import websocket_manager
 from services.progress_tracker import progress_tracker, TaskStatus
@@ -19,7 +20,8 @@ logger = logging.getLogger(__name__)
 # Le préfixe est appliqué lors de l'enregistrement dans main.py.
 # Ne pas définir de préfixe ici pour éviter un doublon dans les routes.
 router = APIRouter(
-    tags=["Progress"]
+    tags=["Progress"],
+    dependencies=[Depends(get_current_user)],
 )
 
 # =============================================

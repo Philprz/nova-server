@@ -7,7 +7,8 @@ capable de comprendre les demandes en langage naturel et proposer
 des solutions proactives.
 """
 from __future__ import annotations  # optionnel mais recommandé
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Request, BackgroundTasks
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect, HTTPException, Request, BackgroundTasks
+from auth.dependencies import get_current_user
 import time
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field, validator, model_validator
@@ -20,7 +21,7 @@ import json
 from services.security_helpers import escape_soql, safe_int
 
 # Configuration du router FastAPI
-router = APIRouter(tags=["Assistant Intelligent"])
+router = APIRouter(tags=["Assistant Intelligent"], dependencies=[Depends(get_current_user)])
 # Import du système de progression
 from services.progress_tracker import progress_tracker, TaskStatus
 from workflow.devis_workflow import DevisWorkflow

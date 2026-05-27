@@ -1,14 +1,15 @@
 # routes/routes_clients.py
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, validator
 from typing import Dict, Any, Optional
 import re
 import time
+from auth.dependencies import get_current_user
 from services.mcp_connector import MCPConnector
 from services.security_helpers import escape_soql, safe_int
 
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 class ClientCreationRequest(BaseModel):
     """Modèle pour la création de client"""

@@ -7,9 +7,10 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from auth.dependencies import get_current_user
 from services.transport.transport_service import (
     ShippingRequest,
     ShippingResponse,
@@ -17,7 +18,7 @@ from services.transport.transport_service import (
 )
 from services.transport.carrier_interface import Destination, Shipper
 
-router = APIRouter(prefix="/api/shipping", tags=["Transport"])
+router = APIRouter(prefix="/api/shipping", tags=["Transport"], dependencies=[Depends(get_current_user)])
 logger = logging.getLogger(__name__)
 
 

@@ -3,9 +3,10 @@ Routes API pour la création d'entités SAP (clients, produits)
 """
 
 import logging
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from typing import Optional
 
+from auth.dependencies import get_current_user
 from services.sap_creation_service import (
     get_sap_creation_service,
     NewClientData,
@@ -14,7 +15,7 @@ from services.sap_creation_service import (
 )
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 # ==========================================

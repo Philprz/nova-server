@@ -11,14 +11,16 @@ import logging
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from dotenv import load_dotenv, set_key
 
+from auth.dependencies import get_current_user
+
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/supplier-tariffs", tags=["Supplier Tariffs"])
+router = APIRouter(prefix="/api/supplier-tariffs", tags=["Supplier Tariffs"], dependencies=[Depends(get_current_user)])
 
 # Chemin du fichier .env
 ENV_FILE = Path(__file__).parent.parent / ".env"

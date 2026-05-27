@@ -1,10 +1,12 @@
 # routes/routes_devis.py - Correction pour interface
 from datetime import datetime
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 import logging
 
-router = APIRouter()
+from auth.dependencies import get_current_user
+
+router = APIRouter(dependencies=[Depends(get_current_user)])
 logger = logging.getLogger(__name__)
 
 class DevisPromptRequest(BaseModel):
