@@ -4,9 +4,11 @@ Reçoit les notifications et déclenche le traitement automatique
 """
 
 import logging
-from fastapi import APIRouter, Request, Response, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, Request, Response, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
+
+from auth.dependencies import require_role
 from services.webhook_service import get_webhook_service
 from services.graph_service import get_graph_service
 import asyncio
@@ -14,6 +16,10 @@ import asyncio
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/webhooks", tags=["webhooks"])
+
+# Endpoints publics : POST /notification (callback Microsoft Graph, validé par HMAC clientState).
+# Endpoints admin : GET/POST/DELETE /subscriptions/*, GET /scheduler/status (actions de gestion).
+_admin_only = [Depends(require_role("ADMIN"))]
 
 
 class WebhookNotification(BaseModel):
@@ -244,7 +250,7 @@ async def auto_process_email(message_id: str):
 import os
 
 
-@router.get("/subscriptions")
+@router.get("/subscriptions", dependencies=_admin_only)
 async def list_subscriptions():
     """Liste toutes les subscriptions actives."""
     webhook_service = get_webhook_service()
@@ -256,7 +262,7 @@ async def list_subscriptions():
     }
 
 
-@router.get("/subscriptions/to-renew")
+@router.get("/subscriptions/to-renew", dependencies=_admin_only)
 async def list_subscriptions_to_renew():
     """Liste les subscriptions à renouveler (expire < 24h)."""
     webhook_service = get_webhook_service()
@@ -268,7 +274,7 @@ async def list_subscriptions_to_renew():
     }
 
 
-@router.post("/subscriptions/renew/{subscription_id}")
+@router.post("/subscriptions/renew/{subscription_id}", dependencies=_admin_only)
 async def renew_subscription(subscription_id: str):
     """Renouvelle une subscription."""
     try:
@@ -285,7 +291,7 @@ async def renew_subscription(subscription_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.delete("/subscriptions/{subscription_id}")
+@router.delete("/subscriptions/{subscription_id}", dependencies=_admin_only)
 async def delete_subscription(subscription_id: str):
     """Supprime une subscription."""
     try:
@@ -302,7 +308,7 @@ async def delete_subscription(subscription_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/scheduler/status")
+@router.get("/scheduler/status", dependencies=_admin_only)
 async def get_scheduler_status():
     """Retourne le statut du système de renouvellement automatique."""
     try:

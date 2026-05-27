@@ -8,10 +8,12 @@ import sys
 import asyncio
 from datetime import datetime
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
+from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import JSONResponse, HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
+
+from auth.dependencies import get_current_user, require_role
 
 from routes.routes_intelligent_assistant import router as assistant_router
 from routes.routes_clients import router as clients_router
@@ -275,7 +277,7 @@ async def websocket_assistant_endpoint(websocket: WebSocket, task_id: str):
     await websocket_endpoint(websocket, task_id)
 app.include_router(routes_quote_details.router)
 
-@app.get("/api/assistant/prompt", response_class=PlainTextResponse)
+@app.get("/api/assistant/prompt", response_class=PlainTextResponse, dependencies=[Depends(require_role("ADMIN"))])
 async def get_assistant_prompt():
     """Renvoie le prompt système de l'assistant"""
     try:
@@ -341,7 +343,7 @@ async def get_assistant_prompt():
         raise HTTPException(status_code=500, detail="Impossible de récupérer le prompt de l'assistant")
 
 # Route pour edit-quote manquante
-@app.get("/edit-quote/{quote_id}")
+@app.get("/edit-quote/{quote_id}", dependencies=[Depends(get_current_user)])
 async def edit_quote_page(quote_id: str):
     """Page d'édition de devis"""
     # Validation stricte du format pour défense en profondeur (avant injection
@@ -456,7 +458,7 @@ async def health_check():
             }
         )
 
-@app.get("/diagnostic/connections")
+@app.get("/diagnostic/connections", dependencies=[Depends(require_role("ADMIN"))])
 async def diagnostic_connections():
     """Endpoint de diagnostic détaillé des connexions"""
     if not HEALTH_CHECK_RESULTS:
@@ -468,7 +470,7 @@ async def diagnostic_connections():
         "recommendations": HEALTH_CHECK_RESULTS["recommendations"],
         "timestamp": HEALTH_CHECK_RESULTS["timestamp"]
     }
-@app.get("/diagnostic/data-retrieval") 
+@app.get("/diagnostic/data-retrieval", dependencies=[Depends(require_role("ADMIN"))])
 async def diagnostic_data_retrieval():
     """Endpoint de diagnostic de la récupération de données"""
     if not HEALTH_CHECK_RESULTS:
@@ -489,7 +491,7 @@ async def diagnostic_data_retrieval():
         "last_check": HEALTH_CHECK_RESULTS["timestamp"]
     }
 
-@app.post("/diagnostic/recheck")
+@app.post("/diagnostic/recheck", dependencies=[Depends(require_role("ADMIN"))])
 async def force_health_recheck():
     """Force une nouvelle vérification complète du système"""
     global HEALTH_CHECK_RESULTS
