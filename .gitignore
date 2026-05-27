@@ -35,6 +35,9 @@ alembic/versions/*.py
 # Données clients et pièces jointes (RGPD)
 data/attachments/
 *.eml
+# PDF interdits par défaut (souvent docs clients), autorisés uniquement dans docs/
+*.pdf
+!docs/**/*.pdf
 
 # Binaires
 *.exe
