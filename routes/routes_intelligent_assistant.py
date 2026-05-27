@@ -851,7 +851,7 @@ async def chat_with_nova(message_data: ChatMessage):
                 )
         
         # Générer la réponse selon l'intention (logique existante)
-        response = generate_intelligent_response(user_message, intent_analysis)
+        response = await generate_intelligent_response(user_message, intent_analysis)
         
         # Sauvegarder dans l'historique
         conversation_manager.conversation_history.append({
@@ -872,7 +872,7 @@ async def chat_with_nova(message_data: ChatMessage):
         logger.error(f"Erreur dans chat_with_nova: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Erreur interne: {str(e)}")
 
-def generate_intelligent_response(message: str, intent: Dict[str, Any]) -> Dict[str, Any]:
+async def generate_intelligent_response(message: str, intent: Dict[str, Any]) -> Dict[str, Any]:
     """Génère une réponse intelligente basée sur l'intention détectée"""
     
     primary_intent = intent['primary_intent']
@@ -901,7 +901,7 @@ def generate_intelligent_response(message: str, intent: Dict[str, Any]) -> Dict[
         return handle_client_search_intent(message, entities)
     
     elif primary_intent == 'find_product':
-        return handle_product_search_intent(message, entities)
+        return await handle_product_search_intent(message, entities)
     
     elif primary_intent == 'help':
         return {
@@ -1079,11 +1079,11 @@ def handle_client_search_intent(message: str, entities: Dict[str, Any]) -> Dict[
             ]
         }
 
-def handle_product_search_intent(message: str, entities: Dict[str, Any]) -> Dict[str, Any]:
+async def handle_product_search_intent(message: str, entities: Dict[str, Any]) -> Dict[str, Any]:
     """Gère l'intention de recherche de produit avec recherche google-like"""
-    
+
     product_refs = entities.get('product_refs', [])
-    
+
     if not product_refs:
         return {
             'type': 'product_search_prompt',
@@ -1094,29 +1094,16 @@ def handle_product_search_intent(message: str, entities: Dict[str, Any]) -> Dict
             ],
             'enable_search_mode': True
         }
-    
+
     # Recherche intelligente avec les vraies données
     try:
         search_term = product_refs[0]
         logger.info(f"🔍 Recherche google-like pour produit: '{search_term}'")
-        
-        # Appel HTTP interne à l'endpoint de recherche produits
-        import httpx
-        import asyncio
-        
-        async def search_real_products():
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    f"http://localhost:8001/products/search_products_advanced",
-                    params={"q": search_term, "limit": 10}
-                )
-                return response.json()
-        
-        # Exécuter la recherche
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        products_data = loop.run_until_complete(search_real_products())
-        loop.close()
+
+        # Appel direct à la fonction Python (P5-M4 : remplace l'appel HTTP self-loop
+        # qui créait un nouvel event loop dans un contexte sync — antipattern).
+        from routes.routes_products import search_products_advanced
+        products_data = await search_products_advanced(q=search_term, limit=10)
         
         response = {
             'type': 'product_search_results',
