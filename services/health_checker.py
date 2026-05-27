@@ -88,9 +88,8 @@ class HealthChecker:
         
         try:
             required_vars = [
-                "ANTHROPIC_API_KEY", 
+                "ANTHROPIC_API_KEY",
                 "OPENAI_API_KEY",
-                "POSTGRES_URL",
                 "REDIS_URL"
             ]
             
