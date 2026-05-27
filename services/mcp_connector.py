@@ -787,7 +787,7 @@ class MCPConnector:
             
             safe_q = escape_soql(query)
             soql_query = f"SELECT Id, Name, AccountNumber, Type, Industry, AnnualRevenue, Phone, Website, Description, CreatedDate, BillingCity, BillingCountry FROM Account WHERE Name LIKE '%{safe_q}%' OR AccountNumber LIKE '%{safe_q}%' LIMIT 100"
-            result = self.salesforce_client.query(soql_query)
+            result = await asyncio.to_thread(self.salesforce_client.query, soql_query)
             
             return {
                 "success": True,
@@ -820,8 +820,8 @@ class MCPConnector:
                     query += " WHERE " + " AND ".join(conditions)
             
             query += " LIMIT 100"
-            
-            result = self.salesforce_client.query(query)
+
+            result = await asyncio.to_thread(self.salesforce_client.query, query)
             return {
                 "success": True,
                 "opportunities": result.get("records", []),
