@@ -1,16 +1,18 @@
 """
 NOVA Auth Routes
-POST /api/auth/login    — SAP validation → JWT NOVA
-POST /api/auth/refresh  — rotation refresh token
-POST /api/auth/logout   — révocation refresh token
+POST /api/auth/login    — SAP validation → JWT NOVA (cookies HttpOnly)
+POST /api/auth/refresh  — rotation refresh token (lit cookie nova_refresh)
+POST /api/auth/logout   — révocation refresh token + suppression cookies
 GET  /api/auth/me       — profil utilisateur courant
 """
 
 import logging
+import os
 from datetime import datetime, timezone
 
 import jwt
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
 from auth.auth_db import (
@@ -27,6 +29,8 @@ from auth.auth_db import (
 )
 from auth.dependencies import AuthenticatedUser, get_current_user
 from auth.jwt_service import (
+    ACCESS_TTL,
+    REFRESH_TTL,
     create_access_token,
     create_refresh_token,
     decode_access_token,
@@ -35,6 +39,10 @@ from auth.jwt_service import (
 from auth.sap_validator import validate_sap_credentials
 
 logger = logging.getLogger(__name__)
+
+# Cookies sécurisés en production (HTTPS) — assouplis en dev pour permettre
+# le test sur localhost http://. Voir NOVA_MODE dans .env.
+_SECURE_COOKIES = os.getenv("NOVA_MODE", "development").lower() == "production"
 
 router = APIRouter(prefix="/api/auth", tags=["Auth"])
 
@@ -47,21 +55,37 @@ class LoginRequest(BaseModel):
     sap_password:   str
 
 
-class TokenResponse(BaseModel):
-    access_token:  str
-    refresh_token: str
-    token_type:    str = "bearer"
-    expires_in:    int = 3600
-
-
-class RefreshRequest(BaseModel):
-    refresh_token: str
+class LoginSuccessResponse(BaseModel):
+    message:    str = "Authentification réussie"
+    expires_in: int
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
 
-@router.post("/login", response_model=TokenResponse)
-async def login(body: LoginRequest) -> TokenResponse:
+def _set_auth_cookies(response: Response, access_token: str, refresh_token: str) -> None:
+    """Pose les cookies HttpOnly nova_session et nova_refresh sur une réponse."""
+    response.set_cookie(
+        key="nova_session",
+        value=access_token,
+        httponly=True,
+        secure=_SECURE_COOKIES,
+        samesite="strict",
+        max_age=int(ACCESS_TTL.total_seconds()),
+        path="/",
+    )
+    response.set_cookie(
+        key="nova_refresh",
+        value=refresh_token,
+        httponly=True,
+        secure=_SECURE_COOKIES,
+        samesite="strict",
+        max_age=int(REFRESH_TTL.total_seconds()),
+        path="/api/auth/refresh",  # cookie scoped au seul endpoint refresh
+    )
+
+
+@router.post("/login")
+async def login(body: LoginRequest):
     """
     Flux :
     1. Vérifie que la société existe dans nova_auth.db
@@ -123,21 +147,31 @@ async def login(body: LoginRequest) -> TokenResponse:
 
     logger.info(f"Login OK : {body.sap_username}@{body.sap_company_db} (role={user['role']})")
 
-    return TokenResponse(
-        access_token=access_token,
-        refresh_token=raw_refresh,
-    )
+    response = JSONResponse({
+        "message": "Authentification réussie",
+        "expires_in": int(ACCESS_TTL.total_seconds()),
+    })
+    _set_auth_cookies(response, access_token, raw_refresh)
+    return response
 
 
-@router.post("/refresh", response_model=TokenResponse)
-async def refresh(body: RefreshRequest) -> TokenResponse:
+@router.post("/refresh")
+async def refresh(request: Request):
     """
     Rotation du refresh token :
-    1. Vérifie le token en base (non révoqué, non expiré)
-    2. Révoque l'ancien
-    3. Émet une nouvelle paire access + refresh
+    1. Lit le cookie nova_refresh (HttpOnly)
+    2. Vérifie le token en base (non révoqué, non expiré)
+    3. Révoque l'ancien
+    4. Émet une nouvelle paire access + refresh via Set-Cookie
     """
-    token_hash = hash_token(body.refresh_token)
+    raw_refresh_cookie = request.cookies.get("nova_refresh")
+    if not raw_refresh_cookie:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token manquant",
+        )
+
+    token_hash = hash_token(raw_refresh_cookie)
     stored = get_refresh_token(token_hash)
 
     if not stored:
@@ -180,17 +214,28 @@ async def refresh(body: RefreshRequest) -> TokenResponse:
     new_raw_refresh, new_hash, new_expires = create_refresh_token(user["id"])
     store_refresh_token(user["id"], new_hash, new_expires.isoformat())
 
-    return TokenResponse(access_token=new_access, refresh_token=new_raw_refresh)
+    response = JSONResponse({
+        "message": "Token renouvelé",
+        "expires_in": int(ACCESS_TTL.total_seconds()),
+    })
+    _set_auth_cookies(response, new_access, new_raw_refresh)
+    return response
 
 
-@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+@router.post("/logout")
 async def logout(
-    body: RefreshRequest,
+    request: Request,
     _user: AuthenticatedUser = Depends(get_current_user),
-) -> None:
-    """Révoque le refresh token fourni."""
-    token_hash = hash_token(body.refresh_token)
-    revoke_refresh_token(token_hash)
+):
+    """Révoque le refresh token courant et supprime les cookies d'authentification."""
+    raw_refresh_cookie = request.cookies.get("nova_refresh")
+    if raw_refresh_cookie:
+        revoke_refresh_token(hash_token(raw_refresh_cookie))
+
+    response = JSONResponse({"message": "Déconnecté"})
+    response.delete_cookie("nova_session", path="/")
+    response.delete_cookie("nova_refresh", path="/api/auth/refresh")
+    return response
 
 
 @router.get("/me")
@@ -216,25 +261,3 @@ async def me(user: AuthenticatedUser = Depends(get_current_user)) -> dict:
     }
 
 
-# ── Debug temporaire — à supprimer en production ──────────────────────────────
-
-@router.post("/debug-sap")
-async def debug_sap_login(body: LoginRequest):
-    """Endpoint debug : montre la réponse SAP brute sans valider dans NOVA."""
-    import httpx as _httpx
-    society = get_society_by_sap_company(body.sap_company_db)
-    if not society:
-        return {"error": "société inconnue"}
-    try:
-        login_data = {"CompanyDB": body.sap_company_db, "UserName": body.sap_username, "Password": body.sap_password}
-        async with _httpx.AsyncClient(verify=False, timeout=20.0) as client:
-            r = await client.post(f"{society['sap_base_url']}/Login", json=login_data)
-        try:
-            body_json = r.json()
-        except Exception:
-            body_json = r.text[:500]
-        return {"http_status": r.status_code, "sap_response": body_json}
-    except _httpx.TimeoutException:
-        return {"error": "timeout", "url": society['sap_base_url']}
-    except Exception as e:
-        return {"error": str(e)}

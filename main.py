@@ -268,6 +268,9 @@ app.include_router(risk_router)      # GET /api/risk-check
 @app.websocket("/ws/assistant/{task_id}")
 async def websocket_assistant_endpoint(websocket: WebSocket, task_id: str):
     """WebSocket pour l'assistant intelligent"""
+    from routes.routes_websocket import _authenticate_ws
+    if not await _authenticate_ws(websocket):
+        return
     from routes.routes_intelligent_assistant import websocket_endpoint
     await websocket_endpoint(websocket, task_id)
 app.include_router(routes_quote_details.router)
@@ -389,6 +392,16 @@ async def itspirit_interface():
             return HTMLResponse(content=f.read(), media_type="text/html; charset=utf-8")
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Interface IT Spirit non trouvée")
+
+# Route pour servir la page de login NOVA
+@app.get('/login', response_class=HTMLResponse)
+async def login_page():
+    """Sert le formulaire de login NOVA (cookie HttpOnly)."""
+    try:
+        with open('templates/login.html', 'r', encoding='utf-8') as f:
+            return HTMLResponse(content=f.read(), media_type="text/html; charset=utf-8")
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Page de login non trouvée")
 
 # Route pour servir l'interface mail-to-biz (React SPA)
 @app.get('/mail-to-biz', response_class=HTMLResponse)

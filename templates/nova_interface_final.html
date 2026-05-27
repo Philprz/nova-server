@@ -1087,6 +1087,20 @@
     </div>
 
     <script>
+        // Wrapper global fetch : redirige vers /login sur 401 (cookie expiré/manquant).
+        // Évite la modification individuelle des 100+ fetch() existants.
+        (function () {
+            const _origFetch = window.fetch.bind(window);
+            window.fetch = async (input, init) => {
+                const response = await _origFetch(input, init);
+                if (response.status === 401) {
+                    const target = window.location.pathname + window.location.search;
+                    window.location.href = '/login?redirect=' + encodeURIComponent(target);
+                }
+                return response;
+            };
+        })();
+
         // Variables globales
         let currentTaskId = null;
         let isProcessing = false;

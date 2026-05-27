@@ -14,14 +14,11 @@ from typing import Callable, List
 
 import jwt
 from fastapi import Depends, HTTPException, Request, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from auth.auth_db import check_mailbox_permission, get_user_by_id
 from auth.jwt_service import decode_access_token
 
 logger = logging.getLogger(__name__)
-
-_bearer_scheme = HTTPBearer(auto_error=True)
 
 
 class AuthenticatedUser:
@@ -42,30 +39,38 @@ class AuthenticatedUser:
         )
 
 
-async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(_bearer_scheme),
-) -> AuthenticatedUser:
+async def get_current_user(request: Request) -> AuthenticatedUser:
     """
-    1. Extrait le Bearer token.
-    2. Décode et valide la signature + expiration.
+    1. Lit le JWT depuis le cookie HttpOnly `nova_session` (priorité).
+       Fallback sur le header `Authorization: Bearer <token>` pour compatibilité
+       (clients externes, scripts, tests).
+    2. Décode et valide signature + expiration.
     3. Vérifie que l'utilisateur est toujours actif en base.
     4. Retourne AuthenticatedUser.
     """
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Token invalide ou expiré",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
+    token = request.cookies.get("nova_session")
+    if not token:
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Non authentifié",
+        )
+
     try:
-        payload = decode_access_token(credentials.credentials)
+        payload = decode_access_token(token)
     except jwt.ExpiredSignatureError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token expiré",
-            headers={"WWW-Authenticate": "Bearer"},
         )
     except jwt.InvalidTokenError:
-        raise credentials_exception
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token invalide",
+        )
 
     user_id = int(payload.get("sub", 0))
     db_user = get_user_by_id(user_id)
@@ -73,7 +78,6 @@ async def get_current_user(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Utilisateur inactif ou supprimé",
-            headers={"WWW-Authenticate": "Bearer"},
         )
 
     return AuthenticatedUser(payload)
