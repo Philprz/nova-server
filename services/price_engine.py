@@ -4,6 +4,8 @@ import requests
 import logging
 from typing import Dict, Any, Optional
 
+from services.sap_tls import SAP_VERIFY
+
 logger = logging.getLogger(__name__)
 
 class PriceEngineService:
@@ -30,7 +32,7 @@ class PriceEngineService:
                     "Content-Type": "application/json",
                     "Accept": "application/json"
                 },
-                verify=False
+                verify=SAP_VERIFY
             )
             response.raise_for_status()
             
@@ -72,7 +74,7 @@ class PriceEngineService:
                     "Cookie": f"B1SESSION={self.session_cookie}"
                 },
                 cookies=self.session_cookies if self.session_cookies else {},
-                verify=False
+                verify=SAP_VERIFY
             )
             response.raise_for_status()
             

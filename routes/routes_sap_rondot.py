@@ -16,6 +16,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from services.sap_tls import SAP_VERIFY
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/sap-rondot", tags=["SAP Rondot"])
@@ -91,7 +93,7 @@ async def login_sap_rondot() -> bool:
     }
 
     try:
-        async with httpx.AsyncClient(verify=False, http2=False, timeout=30.0) as client:
+        async with httpx.AsyncClient(verify=SAP_VERIFY, http2=False, timeout=30.0) as client:
             response = await client.post(url, content=json.dumps(auth_payload), headers=headers)
             response.raise_for_status()
             sap_rondot_session["cookies"] = response.cookies
@@ -115,7 +117,7 @@ async def call_sap_rondot(endpoint: str, method: str = "GET", payload: Optional[
     url = f"{SAP_BASE_URL}{endpoint}"
 
     try:
-        async with httpx.AsyncClient(cookies=sap_rondot_session["cookies"], verify=False, timeout=30.0) as client:
+        async with httpx.AsyncClient(cookies=sap_rondot_session["cookies"], verify=SAP_VERIFY, timeout=30.0) as client:
             if method == "GET":
                 response = await client.get(url)
             elif method == "POST":

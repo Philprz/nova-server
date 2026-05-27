@@ -18,6 +18,8 @@ from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, Field
 
 import httpx
+
+from services.sap_tls import SAP_VERIFY
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -156,7 +158,7 @@ class SAPQuotationService:
                 "Password": self.password,
             }
 
-            async with httpx.AsyncClient(verify=False, timeout=10.0) as client:
+            async with httpx.AsyncClient(verify=SAP_VERIFY, timeout=10.0) as client:
                 response = await client.post(
                     f"{self.base_url}/Login",
                     json=login_data,
@@ -260,7 +262,7 @@ class SAPQuotationService:
         """
         url = f"{self.base_url}{endpoint}"
 
-        async with httpx.AsyncClient(verify=False, timeout=10.0) as client:
+        async with httpx.AsyncClient(verify=SAP_VERIFY, timeout=10.0) as client:
             response = await client.post(url, headers=self._get_headers(), json=payload)
 
             if response.status_code == 401:

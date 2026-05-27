@@ -12,6 +12,8 @@ import httpx
 import logging
 from datetime import datetime
 
+from services.sap_tls import SAP_VERIFY
+
 logger = logging.getLogger(__name__)
 
 TIMEOUT = 15.0
@@ -64,7 +66,7 @@ async def validate_sap_credentials(
             "UserName":  username,
             "Password":  password,
         }
-        async with httpx.AsyncClient(verify=False, timeout=TIMEOUT) as client:
+        async with httpx.AsyncClient(verify=SAP_VERIFY, timeout=TIMEOUT) as client:
             response = await client.post(f"{sap_base_url}/Login", json=login_data)
 
         if response.status_code == 200:

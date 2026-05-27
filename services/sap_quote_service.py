@@ -9,6 +9,8 @@ import logging
 from typing import Dict, Any
 from datetime import datetime
 
+from services.sap_tls import SAP_VERIFY
+
 logger = logging.getLogger(__name__)
 
 class SAPQuoteService:
@@ -31,7 +33,7 @@ class SAPQuoteService:
                 "Password": self.password
             }
             
-            async with httpx.AsyncClient(verify=False) as client:
+            async with httpx.AsyncClient(verify=SAP_VERIFY) as client:
                 response = await client.post(
                     f"{self.base_url}/Login",
                     json=login_data,
@@ -79,7 +81,7 @@ class SAPQuoteService:
                 "Content-Type": "application/json"
             }
             
-            async with httpx.AsyncClient(verify=False) as client:
+            async with httpx.AsyncClient(verify=SAP_VERIFY) as client:
                 response = await client.get(url, headers=headers, timeout=30.0)
             
             if response.status_code == 404:
@@ -139,7 +141,7 @@ class SAPQuoteService:
                 "Content-Type": "application/json"
             }
             
-            async with httpx.AsyncClient(verify=False) as client:
+            async with httpx.AsyncClient(verify=SAP_VERIFY) as client:
                 response = await client.get(url, headers=headers, timeout=15.0)
             
             if response.status_code == 200:
@@ -283,7 +285,7 @@ class SAPQuoteService:
                 "Content-Type": "application/json"
             }
             
-            async with httpx.AsyncClient(verify=False) as client:
+            async with httpx.AsyncClient(verify=SAP_VERIFY) as client:
                 response = await client.post(
                     f"{self.base_url}/Logout",
                     headers=headers,

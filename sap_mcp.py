@@ -17,6 +17,8 @@ from typing import Dict, Optional, Any
 import io
 import sys
 from dotenv import load_dotenv
+
+from services.sap_tls import SAP_VERIFY
 # Configuration sécurisée pour Windows
 if sys.platform == "win32":
     os.environ["PYTHONIOENCODING"] = "utf-8"
@@ -86,7 +88,7 @@ async def login_sap():
         log(f"Tentative de connexion à SAP: {SAP_BASE_URL}")
         log(f"Utilisateur: {SAP_USER}, Base: {SAP_CLIENT}")
         
-        async with httpx.AsyncClient(verify=False, timeout=30.0) as client:
+        async with httpx.AsyncClient(verify=SAP_VERIFY, timeout=30.0) as client:
             response = await client.post(url, json=auth_payload, headers=headers)
             
             # Log des détails de la réponse
@@ -157,7 +159,7 @@ async def call_sap(endpoint: str, method="GET", payload: Optional[Dict[str, Any]
         if payload:
             log(f"Payload: {json.dumps(payload, indent=2)}", "DEBUG")
         
-        async with httpx.AsyncClient(cookies=sap_session["cookies"], verify=False, timeout=60.0, follow_redirects=True) as client:
+        async with httpx.AsyncClient(cookies=sap_session["cookies"], verify=SAP_VERIFY, timeout=60.0, follow_redirects=True) as client:
             # Force UTF-8 encoding for responses
             client.headers.update({"Accept-Charset": "utf-8"})
             if method.upper() == "GET":

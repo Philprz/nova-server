@@ -17,6 +17,8 @@ from typing import Optional
 
 import httpx
 
+from services.sap_tls import SAP_VERIFY
+
 logger = logging.getLogger(__name__)
 
 _PAPPERS_BASE_URL = os.getenv("PAPPERS_URL", "https://api.pappers.fr/v2").rstrip("/")
@@ -111,7 +113,7 @@ async def get_company_risk(
         return _unknown("Clé API Pappers non configurée", country)
 
     try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT_S, verify=False) as client:
+        async with httpx.AsyncClient(timeout=_TIMEOUT_S, verify=SAP_VERIFY) as client:
             if siren:
                 result = await _check_by_siren(client, siren)
             else:

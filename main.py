@@ -66,6 +66,14 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+# Avertissement TLS SAP : si SAP_CA_BUNDLE_PATH absent, la vérification du
+# certificat SAP est désactivée — acceptable en dev, dangereux en prod.
+if not os.getenv("SAP_CA_BUNDLE_PATH"):
+    logger.warning(
+        "SAP TLS verification is DISABLED (SAP_CA_BUNDLE_PATH not set). "
+        "Set this variable to the SAP CA bundle path to enable certificate validation."
+    )
+
 # Variables globales
 HEALTH_CHECK_RESULTS = None
 
