@@ -15,6 +15,7 @@ from typing import Dict, List, Any
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from dotenv import load_dotenv
+from services.sap_tls import SAP_VERIFY
 # Import des modèles de données
 from models.database_models import ProduitsSAP
 # Configuration logging
@@ -43,7 +44,7 @@ class SAPProductSyncer:
         
         # Configuration SAP session
         self.session_id = None
-        self.http_client = httpx.AsyncClient(timeout=30.0, verify=False, http2=False)
+        self.http_client = httpx.AsyncClient(timeout=30.0, verify=SAP_VERIFY, http2=False)
         
         # Configuration PostgreSQL
         self.engine = create_engine(self.db_url)

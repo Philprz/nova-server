@@ -9,6 +9,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from services.sap_tls import SAP_VERIFY
+
 SAP_BASE_URL = os.getenv("SAP_REST_BASE_URL")
 SAP_USER = os.getenv("SAP_USER")
 SAP_PASSWORD = os.getenv("SAP_CLIENT_PASSWORD")
@@ -36,7 +38,7 @@ async def test_sap_connection():
     }
 
     try:
-        async with httpx.AsyncClient(verify=False, http2=False, timeout=30.0) as client:
+        async with httpx.AsyncClient(verify=SAP_VERIFY, http2=False, timeout=30.0) as client:
             print(f"\nConnexion a {url}...")
             response = await client.post(url, content=json.dumps(auth_payload), headers=headers)
 

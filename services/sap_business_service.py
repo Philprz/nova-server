@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from services.security_helpers import escape_odata
+from services.sap_tls import SAP_VERIFY
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +87,7 @@ class SAPBusinessService:
                 "Password": self.password
             }
 
-            async with httpx.AsyncClient(verify=False, timeout=30.0) as client:
+            async with httpx.AsyncClient(verify=SAP_VERIFY, timeout=30.0) as client:
                 response = await client.post(
                     f"{self.base_url}/Login",
                     json=login_data
@@ -135,7 +136,7 @@ class SAPBusinessService:
         url = f"{self.base_url}{endpoint}"
 
         try:
-            async with httpx.AsyncClient(verify=False, timeout=30.0) as client:
+            async with httpx.AsyncClient(verify=SAP_VERIFY, timeout=30.0) as client:
                 if method == "GET":
                     response = await client.get(url, headers=headers, params=params)
                 elif method == "POST":
@@ -695,7 +696,7 @@ class SAPBusinessService:
                 "Content-Type": "application/json"
             }
 
-            async with httpx.AsyncClient(verify=False, timeout=10.0) as client:
+            async with httpx.AsyncClient(verify=SAP_VERIFY, timeout=10.0) as client:
                 await client.post(f"{self.base_url}/Logout", headers=headers)
 
             self.session_id = None

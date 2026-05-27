@@ -9,6 +9,8 @@ import logging
 
 load_dotenv()
 
+from services.sap_tls import SAP_VERIFY
+
 SAP_BASE_URL = os.getenv("SAP_REST_BASE_URL")
 
 sap_session = {
@@ -33,7 +35,7 @@ async def login_sap():
     }
     data = json.dumps(auth_payload)
 
-    async with httpx.AsyncClient(verify=False, http2=False, headers=headers) as client:
+    async with httpx.AsyncClient(verify=SAP_VERIFY, http2=False, headers=headers) as client:
         print("----> LOGIN SAP - Envoi du payload:")
         print(data)
         response = await client.post(url, content=data)
@@ -45,7 +47,7 @@ async def call_sap(endpoint: str, method="GET", payload: Optional[dict] = None):
     if not sap_session["cookies"] or datetime.datetime.utcnow().timestamp() > sap_session["expires"]:
         await login_sap()
 
-    async with httpx.AsyncClient(cookies=sap_session["cookies"], verify=False) as client:
+    async with httpx.AsyncClient(cookies=sap_session["cookies"], verify=SAP_VERIFY) as client:
         url = SAP_BASE_URL + endpoint
         try:
             if method == "GET":
