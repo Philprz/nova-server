@@ -2144,10 +2144,11 @@
                 }
 
                 // Ajouter des suggestions avec boutons fonctionnels
+                const suggestedQuoteId = globalQuoteIdRaw || quoteNumber || '';
                 const suggestions = [
-                    { text: 'Voir le devis', action: `viewQuote('${globalQuoteIdRaw || quoteNumber || ''}')` },
-                    { text: 'Créer un nouveau devis', action: 'newQuote()' },
-                    { text: 'Modifier le devis', action: `modifyQuote('${globalQuoteIdRaw || quoteNumber || ''}')` }
+                    { text: 'Voir le devis', action: () => viewQuote(suggestedQuoteId) },
+                    { text: 'Créer un nouveau devis', action: () => newQuote() },
+                    { text: 'Modifier le devis', action: () => modifyQuote(suggestedQuoteId) }
                 ];
                 addFunctionalSuggestions(suggestions);
 
@@ -3287,7 +3288,7 @@
                 const button = document.createElement('button');
                 button.className = 'suggestion-button';
                 button.textContent = suggestion.text;
-                button.onclick = () => eval(suggestion.action);
+                button.onclick = suggestion.action;
                 button.style.cssText = `
                     background: linear-gradient(135deg, #832DFE, #E220FB);
                     color: white;
