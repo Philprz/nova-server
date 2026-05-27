@@ -116,9 +116,14 @@ class DevisWorkflow:
         self.cache_manager = referential_cache
         self.sequential_validator = SequentialValidator(self.mcp_connector, self.llm_extractor)
 
+        # Références aux tâches fire-and-forget (évite garbage collection prématurée)
+        self._background_tasks: set = set()
+
         # Pré-chargement asynchrone du cache
         try:
-            asyncio.create_task(self._initialize_cache())
+            cache_task = asyncio.create_task(self._initialize_cache())
+            self._background_tasks.add(cache_task)
+            cache_task.add_done_callback(self._background_tasks.discard)
         except RuntimeError:
             logger.info("⏳ Initialisation du cache différée (pas d'event loop actif)")
         # Initialiser WebSocket manager
@@ -151,7 +156,7 @@ class DevisWorkflow:
             
             # Notification WebSocket si disponible
             try:
-                asyncio.create_task(websocket_manager.broadcast_to_task(
+                ws_task = asyncio.create_task(websocket_manager.broadcast_to_task(
                     self.task_id,  # CORRECTION: Ajouter task_id explicite
                     {
                         "type": "progress_update",
@@ -161,6 +166,8 @@ class DevisWorkflow:
                         "message": message
                     }
                 ))
+                self._background_tasks.add(ws_task)
+                ws_task.add_done_callback(self._background_tasks.discard)
             except Exception:
                 pass  # WebSocket optionnel
     

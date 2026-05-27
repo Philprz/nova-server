@@ -61,6 +61,8 @@ class WebSocketManager:
         self.active_connections: Dict[str, Set["WebSocket"]] = {"all": set()}
         self.task_connections: Dict[str, Set["WebSocket"]] = {}
         self.pending_messages: Dict[str, List[dict]] = {}
+        # Références aux tâches fire-and-forget (évite garbage collection prématurée)
+        self._background_tasks: set = set()
 
     async def connect(self, websocket: "WebSocket", task_id: str = None) -> None:
         """
@@ -320,8 +322,12 @@ class WebSocketManager:
 
     def _schedule_retry(self, task_id: str) -> None:
         # Requiert une reconnexion côté client ET tente périodiquement d'envoyer les messages en attente
-        asyncio.create_task(self._attempt_reconnection(task_id))
-        asyncio.create_task(self._retry_pending(task_id))
+        recon_task = asyncio.create_task(self._attempt_reconnection(task_id))
+        self._background_tasks.add(recon_task)
+        recon_task.add_done_callback(self._background_tasks.discard)
+        retry_task = asyncio.create_task(self._retry_pending(task_id))
+        self._background_tasks.add(retry_task)
+        retry_task.add_done_callback(self._background_tasks.discard)
 
 
     async def _retry_pending(self, task_id: str) -> None:

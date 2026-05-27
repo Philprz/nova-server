@@ -339,6 +339,8 @@ class ProgressTracker:
         self.active_tasks: Dict[str, QuoteTask] = {}
         self.completed_tasks: List[Dict[str, Any]] = []
         self.max_completed_history = 50  # Garder les 50 dernières tâches
+        # Références aux tâches fire-and-forget (évite garbage collection prématurée)
+        self._background_tasks: set = set()
     
     def create_task(self, user_prompt: str = "", draft_mode: bool = False, task_id: str = None) -> QuoteTask:
         """Crée une nouvelle tâche de génération de devis avec idempotence"""
@@ -457,13 +459,15 @@ class ProgressTracker:
             from services.websocket_manager import websocket_manager
             import asyncio
             
-            asyncio.create_task(websocket_manager.broadcast_to_task(task_id, {
+            ws_task = asyncio.create_task(websocket_manager.broadcast_to_task(task_id, {
                 "type": "error",
                 "task_id": task_id,
                 "error": error,
                 "status": "failed",
                 "timestamp": datetime.now().isoformat()
             }))
+            self._background_tasks.add(ws_task)
+            ws_task.add_done_callback(self._background_tasks.discard)
             logger.info(f"🔔 Notification WebSocket d'erreur envoyée pour {task_id}")
         except Exception as e:
             logger.error(f"Erreur notification WebSocket échec: {e}")

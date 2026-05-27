@@ -118,7 +118,10 @@ async def lifespan(app: FastAPI):
         try:
             from services.sap_sync_startup import sync_sap_data_if_needed
             # Lancer la synchronisation en arrière-plan
-            asyncio.create_task(sync_sap_data_if_needed())
+            startup_task = asyncio.create_task(sync_sap_data_if_needed())
+            startup_task.add_done_callback(
+                lambda t: t.exception() and logger.error("SAP sync failed", exc_info=t.exception())
+            )
             logger.info("🔄 Synchronisation cache SAP lancée en arrière-plan")
         except Exception as e:
             logger.error(f"❌ Erreur lancement synchronisation cache SAP: {e}")
