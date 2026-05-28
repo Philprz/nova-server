@@ -40,7 +40,7 @@ from routes.routes_mail import router as mail_router
 from routes.routes_packing import router as packing_router
 from routes.routes_shipping import router as shipping_router
 from routes.routes_auth import router as auth_router
-from routes.routes_admin import router as admin_router
+from routes.routes_admin import router as admin_router, llm_admin_router
 from services.webhook_scheduler import start_webhook_scheduler, stop_webhook_scheduler
 
 if sys.platform == "win32":
@@ -266,6 +266,7 @@ app.include_router(packing_router)   # POST /api/packing/calculate — Colisage 
 app.include_router(shipping_router)  # POST /api/shipping/quote — Transport DHL Express
 app.include_router(auth_router)      # POST /api/auth/login|refresh|logout  GET /api/auth/me
 app.include_router(admin_router)     # GET/POST/PATCH/DELETE /api/admin/*
+app.include_router(llm_admin_router) # /api/admin/llm/* — auth session token independante
 
 from routes.routes_risk import router as risk_router
 app.include_router(risk_router)      # GET /api/risk-check
@@ -530,6 +531,23 @@ async def root():
             "assistant": "/api/assistant/interface"
         }
     }
+
+# Route HTML secrete pour le panneau Admin LLM (servie uniquement si la
+# variable NOVA_ADMIN_SECRET_PATH est definie dans .env — sinon 404 standard).
+_admin_llm_secret = os.getenv("NOVA_ADMIN_SECRET_PATH", "").strip().strip("/")
+if _admin_llm_secret:
+    @app.get(f"/{_admin_llm_secret}", response_class=HTMLResponse, include_in_schema=False)
+    async def admin_llm_panel():
+        """Panneau d'administration LLM (URL secrete configuree en .env)."""
+        try:
+            with open("templates/admin_llm.html", "r", encoding="utf-8") as f:
+                return HTMLResponse(content=f.read(), media_type="text/html; charset=utf-8")
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail="Not Found")
+    logger.info("Admin LLM panel route registered at /%s", _admin_llm_secret)
+else:
+    logger.warning("NOVA_ADMIN_SECRET_PATH not set — admin LLM panel route disabled")
+
 
 def kill_process_on_port(port: int):
     """Tue le processus qui occupe le port spécifié (Windows uniquement)"""

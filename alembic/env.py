@@ -4,14 +4,22 @@ from alembic import context
 import os
 import sys
 
-# Ajout du rÃ©pertoire parent au path
+# Ajout du repertoire parent au path
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+
+from dotenv import load_dotenv
+load_dotenv()
 
 from models.database_models import Base
 
 config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
+
+# Override sqlalchemy.url avec DATABASE_URL (.env) — source de verite unique
+_env_db_url = os.getenv("DATABASE_URL")
+if _env_db_url:
+    config.set_main_option("sqlalchemy.url", _env_db_url)
 
 target_metadata = Base.metadata
 

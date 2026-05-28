@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NOVA — Admin LLM</title>
+<link rel="stylesheet" href="/static/it_spirit_styles.css">
+<style>
+  :root {
+    --primary-blue: #02B9FD;
+    --primary-purple: #832DFE;
+    --white: #FFFFFF;
+    --gray-50: #F8FAFC;
+    --gray-100: #F1F5F9;
+    --gray-200: #E2E8F0;
+    --gray-300: #CBD5E1;
+    --gray-400: #94A3B8;
+    --gray-500: #64748B;
+    --gray-700: #334155;
+    --gray-900: #0F172A;
+    --red: #DC2626;
+    --green: #16A34A;
+    --amber: #D97706;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: linear-gradient(135deg, var(--primary-blue) 0%, var(--primary-purple) 100%);
+    color: var(--gray-900);
+  }
+  .center-screen {
+    min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    padding: 24px;
+  }
+  .card {
+    background: var(--white); border-radius: 16px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+    padding: 32px 36px; width: 100%; max-width: 420px;
+  }
+  .card.wide { max-width: 1100px; padding: 28px 32px; }
+  h1 { margin: 0 0 8px; font-size: 26px; color: var(--primary-purple); font-weight: 700; }
+  h2 { margin: 24px 0 12px; font-size: 18px; color: var(--gray-900); }
+  .subtitle { margin: 0 0 24px; color: var(--gray-400); font-size: 14px; }
+  label { display: block; margin: 12px 0 6px; font-size: 13px; font-weight: 600; color: var(--gray-700); }
+  input, select, textarea {
+    width: 100%; padding: 10px 12px; border: 1px solid var(--gray-300);
+    border-radius: 8px; font-size: 14px; background: var(--white); color: var(--gray-900);
+  }
+  input:focus, select:focus, textarea:focus {
+    outline: none; border-color: var(--primary-purple);
+    box-shadow: 0 0 0 3px rgba(131, 45, 254, 0.15);
+  }
+  button {
+    cursor: pointer; border: none; border-radius: 8px;
+    padding: 10px 18px; font-size: 14px; font-weight: 600;
+    transition: filter .15s, transform .05s;
+  }
+  button:active { transform: translateY(1px); }
+  .btn-primary { background: var(--primary-purple); color: var(--white); }
+  .btn-primary:hover { filter: brightness(1.08); }
+  .btn-secondary { background: var(--gray-100); color: var(--gray-900); border: 1px solid var(--gray-300); }
+  .btn-secondary:hover { background: var(--gray-200); }
+  .btn-danger { background: var(--red); color: var(--white); }
+  .btn-ghost { background: transparent; color: var(--primary-purple); padding: 6px 8px; font-weight: 500; }
+  .link { color: var(--primary-purple); cursor: pointer; text-decoration: underline; font-size: 13px; }
+  .row { display: flex; gap: 12px; align-items: center; }
+  .row > * { flex: 1; }
+  .row.tight { gap: 8px; }
+  .flash { padding: 10px 14px; border-radius: 8px; margin: 12px 0; font-size: 13px; }
+  .flash.error { background: #FEF2F2; color: var(--red); border: 1px solid #FCA5A5; }
+  .flash.success { background: #F0FDF4; color: var(--green); border: 1px solid #86EFAC; }
+  .flash.info { background: #EFF6FF; color: #1E40AF; border: 1px solid #93C5FD; }
+  .hidden { display: none !important; }
+
+  /* Header dashboard */
+  .topbar {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--gray-200);
+  }
+  .topbar h1 { margin: 0; font-size: 22px; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+  .tab {
+    padding: 8px 16px; cursor: pointer; border-radius: 8px;
+    font-size: 14px; font-weight: 600; color: var(--gray-500);
+    border: 1px solid transparent;
+  }
+  .tab.active { color: var(--primary-purple); background: var(--gray-50); border-color: var(--gray-200); }
+
+  /* Tables */
+  table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--gray-200); font-size: 13px; }
+  th { color: var(--gray-500); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; }
+  td.actions { white-space: nowrap; }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+  .pill.on { background: #DCFCE7; color: var(--green); }
+  .pill.off { background: var(--gray-100); color: var(--gray-500); }
+  .mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; color: var(--gray-700); }
+
+  /* Chain */
+  .chain-list { list-style: none; padding: 0; margin: 0; }
+  .chain-item {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 14px; background: var(--gray-50);
+    border: 1px solid var(--gray-200); border-radius: 8px; margin-bottom: 8px;
+  }
+  .chain-item .badge {
+    flex-shrink: 0; width: 28px; height: 28px; border-radius: 50%;
+    background: var(--primary-purple); color: var(--white);
+    display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700;
+  }
+  .chain-item .badge.primary { background: var(--primary-purple); }
+  .chain-item .badge.fb { background: var(--gray-400); }
+  .chain-item .meta { flex: 1; }
+  .chain-item .meta b { display: block; font-size: 14px; }
+  .chain-item .meta span { font-size: 12px; color: var(--gray-500); }
+  .chain-item .move { display: flex; gap: 4px; }
+  .icon-btn {
+    padding: 4px 8px; border: 1px solid var(--gray-300); background: var(--white);
+    border-radius: 6px; cursor: pointer; font-weight: 700;
+  }
+
+  /* Modal */
+  .modal-backdrop {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+    display: flex; align-items: center; justify-content: center; z-index: 1000;
+  }
+  .modal {
+    background: var(--white); border-radius: 12px; padding: 24px;
+    width: 100%; max-width: 480px; max-height: 90vh; overflow-y: auto;
+  }
+  .modal h2 { margin-top: 0; }
+  .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
+</style>
+</head>
+<body>
+
+<!-- =========================================================================
+  ECRAN 1 : LOGIN / SETUP / RESET
+========================================================================= -->
+<div id="auth-screen" class="center-screen">
+  <div class="card">
+    <h1>NOVA — Admin LLM</h1>
+    <p class="subtitle" id="auth-subtitle">Connexion au panneau d'administration</p>
+
+    <div id="flash" class="flash hidden"></div>
+
+    <!-- Login form -->
+    <form id="form-login" autocomplete="off">
+      <label for="login-password">Mot de passe</label>
+      <input type="password" id="login-password" required autofocus>
+      <div style="margin-top: 18px;">
+        <button type="submit" class="btn-primary" style="width: 100%;">Se connecter</button>
+      </div>
+      <div style="margin-top: 12px; text-align: center;">
+        <span class="link" id="link-forgot">Mot de passe oublie ?</span>
+      </div>
+    </form>
+
+    <!-- Setup form (first run) -->
+    <form id="form-setup" class="hidden" autocomplete="off">
+      <p class="subtitle">Premiere connexion : choisir un mot de passe et une question de securite.</p>
+      <label>Mot de passe (8 caracteres min.)</label>
+      <input type="password" id="setup-password" required minlength="8">
+      <label>Question de securite</label>
+      <input type="text" id="setup-question" placeholder="Ex : Nom de mon premier animal" required>
+      <label>Reponse</label>
+      <input type="text" id="setup-answer" required>
+      <div style="margin-top: 18px;">
+        <button type="submit" class="btn-primary" style="width: 100%;">Initialiser</button>
+      </div>
+    </form>
+
+    <!-- Reset form -->
+    <form id="form-reset" class="hidden" autocomplete="off">
+      <p class="subtitle">Reinitialisation via la question de securite.</p>
+      <label>Question</label>
+      <div id="reset-question" class="mono" style="padding: 8px; background: var(--gray-50); border-radius: 6px;">...</div>
+      <label>Reponse</label>
+      <input type="text" id="reset-answer" required>
+      <label>Nouveau mot de passe (8 caracteres min.)</label>
+      <input type="password" id="reset-password" required minlength="8">
+      <div style="margin-top: 18px;">
+        <button type="submit" class="btn-primary" style="width: 100%;">Reinitialiser</button>
+      </div>
+      <div style="margin-top: 12px; text-align: center;">
+        <span class="link" id="link-back-login">Retour connexion</span>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- =========================================================================
+  ECRAN 2 : DASHBOARD
+========================================================================= -->
+<div id="dashboard-screen" class="center-screen hidden" style="align-items: flex-start;">
+  <div class="card wide">
+    <div class="topbar">
+      <h1>NOVA — Admin LLM</h1>
+      <button class="btn-secondary" id="btn-logout">Deconnexion</button>
+    </div>
+
+    <div class="tabs">
+      <div class="tab active" data-tab="providers">Fournisseurs</div>
+      <div class="tab" data-tab="config">Configuration</div>
+    </div>
+
+    <div id="dash-flash" class="flash hidden"></div>
+
+    <!-- TAB Fournisseurs -->
+    <section id="tab-providers">
+      <div style="display:flex; justify-content: space-between; align-items: center;">
+        <h2 style="margin: 0;">Fournisseurs LLM</h2>
+        <div style="display: flex; gap: 8px;">
+          <button class="btn-secondary" id="btn-test-chain-providers">Tester la configuration</button>
+          <button class="btn-primary" id="btn-add-provider">+ Ajouter un fournisseur</button>
+        </div>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Nom</th><th>Format</th><th>Base URL</th><th>Cle</th><th>Modeles</th><th>Statut</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="providers-tbody">
+          <tr><td colspan="7" style="text-align: center; color: var(--gray-400);">Chargement...</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- TAB Configuration -->
+    <section id="tab-config" class="hidden">
+      <h2 style="margin-top: 0;">Chaine de routage LLM</h2>
+      <p class="subtitle">
+        La 1re entree est le modele <b>principal</b>. Les suivantes sont des fallbacks ordonnes
+        (utilises si le precedent echoue).
+      </p>
+
+      <ul id="chain-ul" class="chain-list"></ul>
+
+      <div style="margin-top: 16px; padding: 16px; background: var(--gray-50);
+                  border: 1px dashed var(--gray-300); border-radius: 8px;">
+        <h2 style="margin-top: 0; font-size: 14px;">Ajouter une entree</h2>
+        <div class="row">
+          <div>
+            <label>Fournisseur</label>
+            <select id="add-provider-id"></select>
+          </div>
+          <div>
+            <label>Modele</label>
+            <select id="add-model-name"></select>
+          </div>
+          <div style="flex: 0 0 auto;">
+            <label>&nbsp;</label>
+            <button class="btn-secondary" id="btn-add-to-chain">Ajouter</button>
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top: 20px; display: flex; justify-content: flex-end; gap: 8px;">
+        <button class="btn-secondary" id="btn-test-chain-config">Tester la configuration</button>
+        <button class="btn-secondary" id="btn-reload-config">Annuler les modifications</button>
+        <button class="btn-primary" id="btn-save-config">Sauvegarder la configuration</button>
+      </div>
+
+      <div id="chain-test-results" class="hidden" style="margin-top: 16px;">
+        <h2 style="font-size: 14px; margin-bottom: 8px;">Resultat du test</h2>
+        <ul id="chain-test-list" class="chain-list"></ul>
+      </div>
+    </section>
+  </div>
+</div>
+
+<!-- =========================================================================
+  MODALE Provider
+========================================================================= -->
+<div id="provider-modal" class="modal-backdrop hidden">
+  <div class="modal">
+    <h2 id="provider-modal-title">Ajouter un fournisseur</h2>
+    <input type="hidden" id="provider-id">
+    <label>Nom</label>
+    <input type="text" id="provider-name" placeholder="Ex: Anthropic, Mistral, Custom">
+    <label>Format API</label>
+    <select id="provider-format">
+      <option value="anthropic">anthropic</option>
+      <option value="openai">openai (compatible: OpenAI, Mistral, etc.)</option>
+    </select>
+    <label>Base URL</label>
+    <input type="text" id="provider-base-url" placeholder="https://api.example.com">
+    <label>Cle API (laisser vide pour ne pas changer)</label>
+    <input type="password" id="provider-api-key" placeholder="sk-..." autocomplete="new-password">
+    <label>Modeles disponibles</label>
+    <div id="provider-models-list" style="display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px;"></div>
+    <div style="display: flex; gap: 6px;">
+      <button type="button" class="btn-secondary" id="btn-add-model-line" style="font-size: 12px; padding: 6px 10px;">+ Ajouter un modele</button>
+      <button type="button" class="btn-secondary" id="btn-discover-models" style="font-size: 12px; padding: 6px 10px;" title="Interroger l'API du fournisseur pour lister les modeles disponibles">Decouvrir depuis l'API</button>
+    </div>
+    <label class="row tight" style="margin-top: 12px;">
+      <input type="checkbox" id="provider-active" checked style="width: auto; flex: 0;">
+      <span style="font-weight: normal;">Actif</span>
+    </label>
+    <div class="modal-actions">
+      <button class="btn-secondary" id="btn-cancel-provider">Annuler</button>
+      <button class="btn-primary" id="btn-save-provider">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- JS externe pour respecter la CSP script-src 'self' definie dans main.SecurityHeadersMiddleware -->
+<script src="/static/admin_llm.js"></script>
+
+</body>
+</html>

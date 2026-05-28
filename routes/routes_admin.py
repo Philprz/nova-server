@@ -1,13 +1,20 @@
 """
 NOVA Admin Routes — accès réservé au rôle ADMIN
 CRUD : sociétés, utilisateurs, boîtes mail, permissions
+
+Sous-routeur llm_admin_router (prefixe /api/admin/llm) : administration LLM dynamique.
+Auth INDEPENDANTE du JWT utilisateur (session token simple, TTL 4h).
 """
 
+import os
+import re
+import time
 import logging
-from typing import Optional
+import secrets
+from typing import Optional, List, Dict, Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from pydantic import BaseModel, Field, field_validator
 
 import auth.auth_db as db
 from auth.dependencies import AuthenticatedUser, get_current_user, require_role
@@ -238,3 +245,492 @@ async def revoke_permission(
     _user: AuthenticatedUser = _admin,
 ) -> None:
     db.revoke_mailbox_permission(user_id, mailbox_id)
+
+
+# ===========================================================================
+# Admin LLM dynamique
+# Routeur INDEPENDANT (pas de dependance JWT). Auth = session token simple
+# stocke cote serveur en memoire, valide via header X-LLM-Admin-Token.
+# ===========================================================================
+
+import bcrypt
+from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
+
+from models.database_models import (
+    SessionLocal, LLMProvider, LLMConfiguration, AdminCredentials,
+)
+from services.encryption_service import encrypt, decrypt, mask
+from services.llm_router import get_llm_router
+
+
+llm_admin_router = APIRouter(prefix="/api/admin/llm", tags=["Admin LLM"])
+
+
+_SESSION_TTL = int(os.getenv("NOVA_ADMIN_SESSION_TTL", "14400"))  # 4h
+_ADMIN_SESSIONS: Dict[str, float] = {}  # token -> expires_at_epoch
+
+
+def _hash_password(plain: str) -> str:
+    return bcrypt.hashpw(plain.encode("utf-8"), bcrypt.gensalt()).decode("ascii")
+
+
+def _verify_password(plain: str, hashed: str) -> bool:
+    try:
+        return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("ascii"))
+    except (ValueError, TypeError):
+        return False
+
+
+def _normalize_answer(answer: str) -> str:
+    """Reponse de securite : insensible casse/espaces avant hash."""
+    return answer.strip().lower()
+
+
+def _purge_expired_sessions() -> None:
+    now = time.time()
+    expired = [t for t, exp in _ADMIN_SESSIONS.items() if exp < now]
+    for t in expired:
+        _ADMIN_SESSIONS.pop(t, None)
+
+
+def require_llm_admin(request: Request) -> None:
+    """Valide le header X-LLM-Admin-Token contre la table en memoire."""
+    _purge_expired_sessions()
+    token = request.headers.get("X-LLM-Admin-Token", "")
+    if not token or token not in _ADMIN_SESSIONS:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
+                            detail="Session admin LLM invalide ou expiree")
+    # Glissement TTL : prolonge a chaque appel valide
+    _ADMIN_SESSIONS[token] = time.time() + _SESSION_TTL
+
+
+def _db() -> Session:
+    return SessionLocal()
+
+
+# ── Auth Pydantic ────────────────────────────────────────────────────────────
+
+class LLMAdminSetup(BaseModel):
+    password: str = Field(min_length=8, max_length=200)
+    security_question: str = Field(min_length=3, max_length=500)
+    security_answer: str = Field(min_length=1, max_length=500)
+
+
+class LLMAdminLogin(BaseModel):
+    password: str
+
+
+class LLMAdminReset(BaseModel):
+    security_answer: str
+    new_password: str = Field(min_length=8, max_length=200)
+
+
+# ── Auth endpoints ───────────────────────────────────────────────────────────
+
+@llm_admin_router.get("/auth/status")
+async def auth_status() -> Dict[str, Any]:
+    """Indique si le premier parametrage a deja ete fait (pour l'UI)."""
+    db_sess = _db()
+    try:
+        creds = db_sess.query(AdminCredentials).first()
+        return {
+            "initialized": bool(creds),
+            "security_question": creds.security_question if creds else None,
+        }
+    finally:
+        db_sess.close()
+
+
+@llm_admin_router.post("/auth/setup")
+async def auth_setup(body: LLMAdminSetup) -> Dict[str, Any]:
+    """Premier parametrage. Refuse si deja initialise."""
+    db_sess = _db()
+    try:
+        if db_sess.query(AdminCredentials).first():
+            raise HTTPException(status_code=409, detail="Deja initialise. Utiliser /auth/reset.")
+        creds = AdminCredentials(
+            password_hash=_hash_password(body.password),
+            security_question=body.security_question,
+            security_answer_hash=_hash_password(_normalize_answer(body.security_answer)),
+        )
+        db_sess.add(creds)
+        db_sess.commit()
+        token = secrets.token_urlsafe(32)
+        _ADMIN_SESSIONS[token] = time.time() + _SESSION_TTL
+        logger.info("Admin LLM: setup initial reussi")
+        return {"session_token": token, "expires_in": _SESSION_TTL}
+    finally:
+        db_sess.close()
+
+
+@llm_admin_router.post("/auth/login")
+async def auth_login(body: LLMAdminLogin) -> Dict[str, Any]:
+    db_sess = _db()
+    try:
+        creds = db_sess.query(AdminCredentials).first()
+        if not creds:
+            raise HTTPException(status_code=409, detail="Non initialise. Faire /auth/setup.")
+        if not _verify_password(body.password, creds.password_hash):
+            raise HTTPException(status_code=401, detail="Mot de passe incorrect")
+        token = secrets.token_urlsafe(32)
+        _ADMIN_SESSIONS[token] = time.time() + _SESSION_TTL
+        logger.info("Admin LLM: connexion reussie")
+        return {"session_token": token, "expires_in": _SESSION_TTL}
+    finally:
+        db_sess.close()
+
+
+@llm_admin_router.post("/auth/reset")
+async def auth_reset(body: LLMAdminReset) -> Dict[str, Any]:
+    """Reset via reponse a la question de securite."""
+    db_sess = _db()
+    try:
+        creds = db_sess.query(AdminCredentials).first()
+        if not creds:
+            raise HTTPException(status_code=409, detail="Non initialise")
+        if not _verify_password(_normalize_answer(body.security_answer),
+                                creds.security_answer_hash):
+            raise HTTPException(status_code=401, detail="Reponse de securite incorrecte")
+        creds.password_hash = _hash_password(body.new_password)
+        db_sess.commit()
+        # Invalider toutes les sessions existantes
+        _ADMIN_SESSIONS.clear()
+        token = secrets.token_urlsafe(32)
+        _ADMIN_SESSIONS[token] = time.time() + _SESSION_TTL
+        logger.info("Admin LLM: mot de passe reinitialise via question de securite")
+        return {"session_token": token, "expires_in": _SESSION_TTL}
+    finally:
+        db_sess.close()
+
+
+# ── Providers Pydantic ──────────────────────────────────────────────────────
+
+_BASE_URL_RE = re.compile(r"^https?://[\w\-.]+(:\d+)?(/.*)?$", re.IGNORECASE)
+
+
+def _normalize_base_url(v: str) -> str:
+    """Trim, supprime trailing slash, ajoute https:// si absent."""
+    if v is None:
+        return v
+    v = v.strip().rstrip("/")
+    if not v:
+        raise ValueError("base_url ne peut pas etre vide")
+    # Reparer les cas frequents : "https//foo", "http//foo", "foo.com"
+    if v.startswith("https//"):
+        v = "https://" + v[len("https//"):]
+    elif v.startswith("http//"):
+        v = "http://" + v[len("http//"):]
+    elif not v.lower().startswith(("http://", "https://")):
+        v = "https://" + v
+    if not _BASE_URL_RE.match(v):
+        raise ValueError(f"base_url invalide : {v!r}. Format attendu : https://hostname[:port][/path]")
+    return v
+
+
+class ProviderCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    base_url: str = Field(min_length=1, max_length=500)
+    api_format: str = Field(pattern="^(anthropic|openai)$")
+    api_key: str = Field(min_length=1)
+    available_models: List[str] = Field(default_factory=list)
+    is_active: bool = True
+
+    @field_validator("base_url")
+    @classmethod
+    def _validate_base_url(cls, v: str) -> str:
+        return _normalize_base_url(v)
+
+
+class ProviderUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    base_url: Optional[str] = Field(default=None, min_length=1, max_length=500)
+    api_format: Optional[str] = Field(default=None, pattern="^(anthropic|openai)$")
+    api_key: Optional[str] = None  # None = ne pas changer
+    available_models: Optional[List[str]] = None
+    is_active: Optional[bool] = None
+
+    @field_validator("base_url")
+    @classmethod
+    def _validate_base_url(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        return _normalize_base_url(v)
+
+
+def _serialize_provider(prov: LLMProvider) -> Dict[str, Any]:
+    try:
+        plain = decrypt(prov.api_key_encrypted)
+        key_preview = mask(plain, visible=4)
+    except ValueError:
+        key_preview = "(indechiffrable)"
+    return {
+        "id": prov.id,
+        "name": prov.name,
+        "base_url": prov.base_url,
+        "api_format": prov.api_format,
+        "api_key_preview": key_preview,
+        "available_models": prov.available_models or [],
+        "is_active": prov.is_active,
+        "created_at": prov.created_at.isoformat() if prov.created_at else None,
+        "updated_at": prov.updated_at.isoformat() if prov.updated_at else None,
+    }
+
+
+# ── Providers endpoints ─────────────────────────────────────────────────────
+
+@llm_admin_router.get("/providers", dependencies=[Depends(require_llm_admin)])
+async def list_providers() -> Dict[str, Any]:
+    db_sess = _db()
+    try:
+        rows = db_sess.query(LLMProvider).order_by(LLMProvider.id.asc()).all()
+        return {"providers": [_serialize_provider(p) for p in rows]}
+    finally:
+        db_sess.close()
+
+
+@llm_admin_router.post("/providers", status_code=201,
+                       dependencies=[Depends(require_llm_admin)])
+async def create_provider(body: ProviderCreate) -> Dict[str, Any]:
+    db_sess = _db()
+    try:
+        prov = LLMProvider(
+            name=body.name,
+            base_url=body.base_url,
+            api_format=body.api_format,
+            api_key_encrypted=encrypt(body.api_key),
+            available_models=body.available_models,
+            is_active=body.is_active,
+        )
+        db_sess.add(prov)
+        try:
+            db_sess.commit()
+        except IntegrityError as exc:
+            db_sess.rollback()
+            raise HTTPException(status_code=409, detail=f"Nom deja utilise: {body.name}") from exc
+        db_sess.refresh(prov)
+        get_llm_router().reload()
+        return _serialize_provider(prov)
+    finally:
+        db_sess.close()
+
+
+@llm_admin_router.put("/providers/{provider_id}",
+                      dependencies=[Depends(require_llm_admin)])
+async def update_provider(provider_id: int, body: ProviderUpdate) -> Dict[str, Any]:
+    db_sess = _db()
+    try:
+        prov = db_sess.query(LLMProvider).filter(LLMProvider.id == provider_id).first()
+        if not prov:
+            raise HTTPException(status_code=404, detail="Provider introuvable")
+        if body.name is not None:
+            prov.name = body.name
+        if body.base_url is not None:
+            prov.base_url = body.base_url
+        if body.api_format is not None:
+            prov.api_format = body.api_format
+        if body.api_key is not None:
+            prov.api_key_encrypted = encrypt(body.api_key)
+        if body.available_models is not None:
+            prov.available_models = body.available_models
+        if body.is_active is not None:
+            prov.is_active = body.is_active
+        try:
+            db_sess.commit()
+        except IntegrityError as exc:
+            db_sess.rollback()
+            raise HTTPException(status_code=409, detail="Conflit (nom deja utilise ?)") from exc
+        db_sess.refresh(prov)
+        get_llm_router().reload()
+        return _serialize_provider(prov)
+    finally:
+        db_sess.close()
+
+
+@llm_admin_router.delete("/providers/{provider_id}", status_code=204,
+                         dependencies=[Depends(require_llm_admin)])
+async def delete_provider(provider_id: int) -> None:
+    db_sess = _db()
+    try:
+        prov = db_sess.query(LLMProvider).filter(LLMProvider.id == provider_id).first()
+        if not prov:
+            raise HTTPException(status_code=404, detail="Provider introuvable")
+        in_use = (db_sess.query(LLMConfiguration)
+                  .filter(LLMConfiguration.provider_id == provider_id).count())
+        if in_use:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Provider utilise par {in_use} entree(s) de configuration. "
+                       "Retirer de la chaine avant suppression.",
+            )
+        db_sess.delete(prov)
+        db_sess.commit()
+        get_llm_router().reload()
+    finally:
+        db_sess.close()
+
+
+@llm_admin_router.post("/test/{provider_id}",
+                       dependencies=[Depends(require_llm_admin)])
+async def test_provider(provider_id: int) -> Dict[str, Any]:
+    ok, msg = await get_llm_router().test_provider(provider_id)
+    return {"ok": ok, "message": msg}
+
+
+@llm_admin_router.post("/providers/{provider_id}/discover-models",
+                       dependencies=[Depends(require_llm_admin)])
+async def discover_models(provider_id: int) -> Dict[str, Any]:
+    """
+    Interroge l'API du fournisseur pour lister les modeles disponibles.
+    Supporte le format OpenAI-compatible (GET /v1/models avec Bearer) et
+    le format Anthropic (GET /v1/models avec x-api-key).
+    """
+    import httpx
+    db_sess = _db()
+    try:
+        prov = db_sess.query(LLMProvider).filter(LLMProvider.id == provider_id).first()
+        if not prov:
+            raise HTTPException(status_code=404, detail="Provider introuvable")
+        try:
+            api_key = decrypt(prov.api_key_encrypted)
+        except ValueError as exc:
+            raise HTTPException(status_code=500, detail=f"Cle indechiffrable : {exc}")
+        base_url = prov.base_url.rstrip("/")
+        api_format = prov.api_format
+    finally:
+        db_sess.close()
+
+    url = f"{base_url}/v1/models"
+    if api_format == "anthropic":
+        headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01"}
+    else:
+        headers = {"Authorization": f"Bearer {api_key}"}
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            r = await client.get(url, headers=headers)
+            r.raise_for_status()
+            data = r.json()
+    except httpx.HTTPStatusError as exc:
+        sc = exc.response.status_code if exc.response is not None else "?"
+        body = exc.response.text[:200] if exc.response is not None else ""
+        raise HTTPException(status_code=502, detail=f"HTTP {sc} : {body}")
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"{type(exc).__name__}: {exc}")
+
+    # Format de reponse : OpenAI/Mistral renvoient {"data": [{"id": "..."}, ...]}
+    # Anthropic renvoie {"data": [{"id": "..."}, ...]} egalement (depuis 2024)
+    raw = data.get("data") or data.get("models") or []
+    models = sorted({(m.get("id") or m.get("name") or "") for m in raw if isinstance(m, dict)})
+    models = [m for m in models if m]
+    return {"models": models, "count": len(models)}
+
+
+class TestEntry(BaseModel):
+    provider_id: int
+    model_name: str = Field(min_length=1, max_length=200)
+
+
+@llm_admin_router.post("/test-entry", dependencies=[Depends(require_llm_admin)])
+async def test_entry(body: TestEntry) -> Dict[str, Any]:
+    """Teste un couple (provider, modele) precis — utilise par le bouton
+    Tester de chaque entree de chaine."""
+    ok, msg, latency = await get_llm_router().test_entry(body.provider_id,
+                                                        body.model_name)
+    return {"ok": ok, "message": msg, "latency_ms": latency}
+
+
+@llm_admin_router.post("/test-chain", dependencies=[Depends(require_llm_admin)])
+async def test_chain() -> Dict[str, Any]:
+    """
+    Teste chaque entree de la chaine de routage active et retourne un rapport.
+    Chaque appel utilise le modele exact configure (pas le modele par defaut).
+    """
+    # Forcer le rechargement pour tester l'etat reel en base, pas la cache
+    router = get_llm_router()
+    router.reload()
+    report = await router.test_chain()
+    if not report:
+        return {
+            "ok": False,
+            "summary": "Aucune chaine configuree (DB vide ou .env vide).",
+            "results": [],
+        }
+    n_ok = sum(1 for r in report if r["ok"])
+    return {
+        "ok": n_ok == len(report),
+        "summary": f"{n_ok}/{len(report)} entree(s) operationnelle(s)",
+        "results": report,
+    }
+
+
+# ── Configuration Pydantic ──────────────────────────────────────────────────
+
+class ConfigEntry(BaseModel):
+    provider_id: int
+    model_name: str = Field(min_length=1, max_length=200)
+
+
+class ConfigUpdate(BaseModel):
+    """priority 0 = principal. Ordre du tableau = ordre de priorite."""
+    chain: List[ConfigEntry] = Field(min_length=1)
+
+
+# ── Configuration endpoints ─────────────────────────────────────────────────
+
+@llm_admin_router.get("/config", dependencies=[Depends(require_llm_admin)])
+async def get_config() -> Dict[str, Any]:
+    db_sess = _db()
+    try:
+        rows = (db_sess.query(LLMConfiguration, LLMProvider)
+                .join(LLMProvider, LLMConfiguration.provider_id == LLMProvider.id)
+                .filter(LLMConfiguration.is_enabled.is_(True))
+                .order_by(LLMConfiguration.priority.asc())
+                .all())
+        chain = [{
+            "priority": cfg.priority,
+            "provider_id": cfg.provider_id,
+            "provider_name": prov.name,
+            "model_name": cfg.model_name,
+            "api_format": prov.api_format,
+        } for cfg, prov in rows]
+        return {"chain": chain}
+    finally:
+        db_sess.close()
+
+
+@llm_admin_router.put("/config", dependencies=[Depends(require_llm_admin)])
+async def put_config(body: ConfigUpdate) -> Dict[str, Any]:
+    db_sess = _db()
+    try:
+        # Verifier tous les provider_id existent et sont actifs
+        ids = [e.provider_id for e in body.chain]
+        provs = db_sess.query(LLMProvider).filter(LLMProvider.id.in_(ids)).all()
+        prov_map = {p.id: p for p in provs}
+        for entry in body.chain:
+            if entry.provider_id not in prov_map:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Provider id={entry.provider_id} introuvable",
+                )
+            if entry.model_name not in (prov_map[entry.provider_id].available_models or []):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Modele '{entry.model_name}' non declare pour provider "
+                           f"{prov_map[entry.provider_id].name}",
+                )
+
+        # Remplacement atomique : delete + insert dans la meme transaction
+        db_sess.query(LLMConfiguration).delete()
+        for prio, entry in enumerate(body.chain):
+            db_sess.add(LLMConfiguration(
+                provider_id=entry.provider_id,
+                model_name=entry.model_name,
+                priority=prio,
+                is_enabled=True,
+            ))
+        db_sess.commit()
+        get_llm_router().reload()
+        return {"success": True, "count": len(body.chain)}
+    finally:
+        db_sess.close()

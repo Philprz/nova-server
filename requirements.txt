@@ -31,3 +31,7 @@ pillow>=10.0.0
 
 # SQL Server connection pour fonctions SAP personnalisées
 pyodbc>=5.0.0
+
+# Admin LLM dynamique (chiffrement clés API, hash mot de passe admin)
+cryptography>=42.0.0
+bcrypt>=4.1.0

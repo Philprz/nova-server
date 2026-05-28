@@ -14,6 +14,8 @@ from pydantic import BaseModel
 import httpx
 from dotenv import load_dotenv
 
+from services.llm_router import get_llm_router
+
 load_dotenv()
 
 logger = logging.getLogger(__name__)
@@ -466,6 +468,8 @@ CONTENU:
         """
         Moteur d'extraction strict : retourne le lieu de livraison UNIQUEMENT si
         un pattern explicite est présent dans le texte. Jamais d'inférence.
+
+        Routage : via LLMRouter (chaine principal + fallbacks geree dynamiquement).
         """
         SHIP_TO_SYSTEM = """Tu es un moteur d'extraction strict.
 
@@ -518,126 +522,81 @@ Output: {"ship_to": null}
 
 GUARDRAIL FINAL : Si tu n'es pas certain à 100% → retourne null."""
 
-        if ANTHROPIC_API_KEY:
-            try:
-                headers = {
-                    "x-api-key": ANTHROPIC_API_KEY,
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json"
-                }
-                payload = {
-                    "model": ANTHROPIC_MODEL,
-                    "max_tokens": 64,
-                    "system": SHIP_TO_SYSTEM,
-                    "messages": [{"role": "user", "content": text[:3000]}],
-                    "temperature": 0.0
-                }
-                async with httpx.AsyncClient(timeout=15.0) as client:
-                    response = await client.post(
-                        "https://api.anthropic.com/v1/messages",
-                        headers=headers,
-                        json=payload
-                    )
-                    response.raise_for_status()
-                    raw = response.json()["content"][0]["text"].strip()
-                    data = json.loads(raw)
-                    return data.get("ship_to") or None
-            except Exception as e:
-                logger.debug("_extract_ship_to claude error: %s", e)
-
-        if OPENAI_API_KEY:
-            try:
-                import openai
-                client = openai.AsyncOpenAI(api_key=OPENAI_API_KEY)
-                resp = await client.chat.completions.create(
-                    model=os.getenv("OPENAI_MODEL", "gpt-4.1"),
-                    max_tokens=64,
-                    temperature=0.0,
-                    messages=[
-                        {"role": "system", "content": SHIP_TO_SYSTEM},
-                        {"role": "user", "content": text[:3000]},
-                    ]
-                )
-                raw = resp.choices[0].message.content.strip()
-                data = json.loads(raw)
-                return data.get("ship_to") or None
-            except Exception as e:
-                logger.debug("_extract_ship_to openai error: %s", e)
-
-        return None
+        try:
+            raw = await get_llm_router().call(
+                system_prompt=SHIP_TO_SYSTEM,
+                user_message=text[:3000],
+                max_tokens=64,
+                temperature=0.0,
+            )
+            raw = (raw or "").strip()
+            if not raw:
+                return None
+            data = json.loads(raw)
+            return data.get("ship_to") or None
+        except Exception as e:
+            logger.debug("_extract_ship_to LLMRouter error: %s", e)
+            return None
 
     async def _call_llm(self, email_context: str) -> str:
-        """Appelle le LLM (Claude en priorité, OpenAI en fallback)."""
-
+        """Appelle le LLM via LLMRouter (chaine principal + fallbacks configurables)."""
         user_message = f"""Analyse cet email commercial:
 
 {email_context}"""
+        return await get_llm_router().call(
+            system_prompt=EMAIL_CLASSIFICATION_PROMPT,
+            user_message=user_message,
+            max_tokens=1500,
+            temperature=0.0,
+        )
 
-        # Essayer Claude d'abord
-        if ANTHROPIC_API_KEY:
-            try:
-                return await self._call_claude(user_message)
-            except Exception as e:
-                logger.warning(f"Claude call failed: {e}, falling back to OpenAI")
-
-        # Fallback OpenAI
-        if OPENAI_API_KEY:
-            return await self._call_openai(user_message)
-
-        raise ValueError("No LLM API key configured (ANTHROPIC_API_KEY or OPENAI_API_KEY)")
-
-    async def _call_claude(self, user_message: str) -> str:
-        """Appel à l'API Claude."""
-        headers = {
-            "x-api-key": ANTHROPIC_API_KEY,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json"
-        }
-
-        payload = {
-            "model": ANTHROPIC_MODEL,
-            "max_tokens": 1500,
-            "system": EMAIL_CLASSIFICATION_PROMPT,
-            "messages": [{"role": "user", "content": user_message}],
-            "temperature": 0.0
-        }
-
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(
-                "https://api.anthropic.com/v1/messages",
-                headers=headers,
-                json=payload
-            )
-            response.raise_for_status()
-            data = response.json()
-            return data.get("content", [{}])[0].get("text", "")
-
-    async def _call_openai(self, user_message: str) -> str:
-        """Appel à l'API OpenAI (fallback)."""
-        headers = {
-            "Authorization": f"Bearer {OPENAI_API_KEY}",
-            "Content-Type": "application/json"
-        }
-
-        payload = {
-            "model": OPENAI_MODEL,
-            "messages": [
-                {"role": "system", "content": EMAIL_CLASSIFICATION_PROMPT},
-                {"role": "user", "content": user_message}
-            ],
-            "max_tokens": 1500,
-            "temperature": 0.0
-        }
-
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(
-                "https://api.openai.com/v1/chat/completions",
-                headers=headers,
-                json=payload
-            )
-            response.raise_for_status()
-            data = response.json()
-            return data["choices"][0]["message"]["content"]
+    # === DEPRECATED v2.4 — methodes remplacees par LLMRouter ===
+    # Conservees pour rollback rapide. A supprimer apres stabilisation.
+    #
+    # async def _call_claude(self, user_message: str) -> str:
+    #     """Appel direct a l'API Claude (remplace par LLMRouter)."""
+    #     headers = {
+    #         "x-api-key": ANTHROPIC_API_KEY,
+    #         "anthropic-version": "2023-06-01",
+    #         "content-type": "application/json"
+    #     }
+    #     payload = {
+    #         "model": ANTHROPIC_MODEL,
+    #         "max_tokens": 1500,
+    #         "system": EMAIL_CLASSIFICATION_PROMPT,
+    #         "messages": [{"role": "user", "content": user_message}],
+    #         "temperature": 0.0
+    #     }
+    #     async with httpx.AsyncClient(timeout=30.0) as client:
+    #         response = await client.post(
+    #             "https://api.anthropic.com/v1/messages",
+    #             headers=headers, json=payload)
+    #         response.raise_for_status()
+    #         data = response.json()
+    #         return data.get("content", [{}])[0].get("text", "")
+    #
+    # async def _call_openai(self, user_message: str) -> str:
+    #     """Appel direct OpenAI fallback (remplace par LLMRouter)."""
+    #     headers = {
+    #         "Authorization": f"Bearer {OPENAI_API_KEY}",
+    #         "Content-Type": "application/json"
+    #     }
+    #     payload = {
+    #         "model": OPENAI_MODEL,
+    #         "messages": [
+    #             {"role": "system", "content": EMAIL_CLASSIFICATION_PROMPT},
+    #             {"role": "user", "content": user_message}
+    #         ],
+    #         "max_tokens": 1500, "temperature": 0.0
+    #     }
+    #     async with httpx.AsyncClient(timeout=30.0) as client:
+    #         response = await client.post(
+    #             "https://api.openai.com/v1/chat/completions",
+    #             headers=headers, json=payload)
+    #         response.raise_for_status()
+    #         data = response.json()
+    #         return data["choices"][0]["message"]["content"]
+    # === END DEPRECATED ===
 
     def _parse_llm_response(self, response: str) -> EmailAnalysisResult:
         """Parse la réponse JSON du LLM."""
