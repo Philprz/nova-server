@@ -276,28 +276,6 @@ export function PriceEditor({
           {/* Séparateur calculs */}
           {effectiveCost > 0 && (
             <>
-              <div className="flex items-center justify-between px-4 py-2 bg-red-50/50 dark:bg-red-950/20">
-                <div className="flex items-center gap-2">
-                  <TrendingDown className="w-4 h-4 text-red-500" />
-                  <span className="text-sm text-muted-foreground">Marge min {minMargin}%</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold text-red-700 dark:text-red-400">
-                    {(effectiveCost * (1 + minMargin / 100)).toFixed(2)} {currency}
-                  </span>
-                  {!isReadOnly && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-6 text-xs px-2"
-                      onClick={() => { const p = parseFloat((effectiveCost * (1 + minMargin / 100)).toFixed(2)); setEditedPrice(p); setPriceInput(p.toFixed(2)); setMarginSlider(minMargin); }}
-                    >
-                      Utiliser
-                    </Button>
-                  )}
-                </div>
-              </div>
-
               <div className="flex items-center justify-between px-4 py-2 bg-green-50/60 dark:bg-green-950/20 border-l-4 border-green-500">
                 <div className="flex items-center gap-2">
                   <TrendingUp className="w-4 h-4 text-green-600" />
@@ -321,27 +299,6 @@ export function PriceEditor({
                 </div>
               </div>
 
-              <div className="flex items-center justify-between px-4 py-2 bg-orange-50/50 dark:bg-orange-950/20">
-                <div className="flex items-center gap-2">
-                  <TrendingUp className="w-4 h-4 text-orange-500" />
-                  <span className="text-sm text-muted-foreground">Marge max {maxMargin}%</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold text-orange-700 dark:text-orange-400">
-                    {(effectiveCost * (1 + maxMargin / 100)).toFixed(2)} {currency}
-                  </span>
-                  {!isReadOnly && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-6 text-xs px-2"
-                      onClick={() => { const p = parseFloat((effectiveCost * (1 + maxMargin / 100)).toFixed(2)); setEditedPrice(p); setPriceInput(p.toFixed(2)); setMarginSlider(maxMargin); }}
-                    >
-                      Utiliser
-                    </Button>
-                  )}
-                </div>
-              </div>
             </>
           )}
 
@@ -350,7 +307,7 @@ export function PriceEditor({
             <div className="flex items-center justify-between px-4 py-3 bg-blue-50/30 dark:bg-blue-950/20">
               <div className="flex items-center gap-2">
                 <FileText className="w-4 h-4 text-blue-500" />
-                <span className="text-sm text-muted-foreground">Prix moyen SAP (AvgStdPrice)</span>
+                <span className="text-sm text-muted-foreground">Prix d'achat moyen</span>
               </div>
               <div className="flex items-center gap-2">
                 <span className="font-semibold text-blue-700 dark:text-blue-400">
