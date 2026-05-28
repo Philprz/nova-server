@@ -2006,6 +2006,19 @@ MAX_ALTERNATIVES=5
 
 ## 📥 Installation et Démarrage
 
+### Architecture serveur (production Windows)
+
+Ce Windows Server héberge **deux applications Python** indépendantes :
+
+| Application | Exécutable | Port | Rôle |
+| ----------- | ---------- | ---- | ---- |
+| **NOVA** | `.venv\Scripts\python.exe main.py` | **8001** | Mail-to-Biz, IA, SAP |
+| **BIOFORCE** | `C:\Python\python.exe main.py` | **8000** | Application Bioforce |
+
+Le domaine `nova-rondot.itspirit.ovh` est redirigé vers NOVA (port 8001).
+
+> ⚠️ **ATTENTION** : Ne jamais tuer tous les processus `python.exe` — cela arrêterait aussi BIOFORCE. Utiliser `restart_server.bat` qui cible uniquement le PID NOVA via le chemin `.venv\Scripts\python.exe`.
+
 ### Prérequis
 
 - **OS :** Windows Server 2019+ ou Linux
@@ -2049,38 +2062,60 @@ python -c "from services.supplier_tariffs_db import index_tariffs; index_tariffs
 cd mail-to-biz
 npm install
 npm run build
-
-# Les fichiers buildés seront dans frontend/
+# Les fichiers buildés sont écrits dans ../frontend/ (cf vite.config.ts)
+# FastAPI sert frontend/ sur /mail-to-biz — déploiement immédiat, pas de copie manuelle
 ```
 
 ### Démarrage
 
-```bash
-# Méthode 1 : Script PowerShell (Windows)
-.\start_nova.ps1
+```cmd
+:: Production (Windows)
+cd C:\Users\PPZ\NOVA-SERVER
+.venv\Scripts\python.exe main.py
 
-# Méthode 2 : Uvicorn direct
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
-
-# Méthode 3 : Production (sans reload)
-uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4
+:: Redémarrage propre (ne touche pas BIOFORCE)
+restart_server.bat
 ```
 
-### Vérification
-
 ```bash
-# Health check
-curl http://localhost:8001/health
-
-# Interface NOVA
-http://localhost:8001/interface/itspirit
-
-# Interface Mail-to-Biz
-http://localhost:8001/mail-to-biz
-
-# Documentation API
-http://localhost:8001/docs
+# Développement avec auto-reload (port configurable via APP_PORT)
+uvicorn main:app --reload --host 0.0.0.0 --port 8001
 ```
+
+### Mode développement frontend (hot-reload)
+
+```cmd
+cd mail-to-biz
+npm run dev
+```
+
+Accessible sur `http://localhost:8082/mail-to-biz/` — le proxy Vite redirige automatiquement les appels `/api/*` vers `localhost:8001`.
+
+### URLs d'accès
+
+| Service | URL |
+| ------- | --- |
+| Mail-to-Biz | <http://localhost:8001/mail-to-biz> |
+| NOVA Assistant | <http://localhost:8001/interface/itspirit> |
+| Documentation API | <http://localhost:8001/docs> |
+| Health Check | <http://localhost:8001/health> |
+| Frontend dev (Vite) | <http://localhost:8082/mail-to-biz/> |
+
+### Dépannage
+
+**Vérifier quel Python tourne sur quel port** :
+
+```cmd
+wmic process where "name='python.exe'" get ProcessId,ExecutablePath,CommandLine
+```
+
+**Routes FastAPI qui ne répondent pas après modification de code** :
+
+1. Vérifier que le serveur a bien été redémarré (Python charge le code au démarrage)
+2. Supprimer les `.pyc` stale si nécessaire : `del routes\__pycache__\*.pyc`
+3. Redémarrer via `restart_server.bat`
+
+**Logs** : les logs uvicorn s'affichent dans la fenêtre console NOVA, et sont aussi rotés dans `nova.log` (10 Mo / 5 backups).
 
 ---
 
