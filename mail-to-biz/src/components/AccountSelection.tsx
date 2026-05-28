@@ -3,11 +3,13 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { AlertCircle, ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
+import { AlertCircle, ChevronDown, ChevronUp, Loader2, Sun, Moon } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useTheme } from '@/context/ThemeContext';
 
 export const AccountSelection = () => {
   const { login } = useAuth();
+  const { theme, toggleTheme } = useTheme();
   const [username, setUsername]     = useState('');
   const [password, setPassword]     = useState('');
   const [companyDb, setCompanyDb]   = useState('RON_20260109');
@@ -34,13 +36,22 @@ export const AccountSelection = () => {
   return (
     <div className="min-h-screen bg-background flex flex-col">
       {/* Header */}
-      <header className="border-b bg-card px-6 py-4">
+      <header className="border-b-2 border-transparent [border-image:var(--gradient-main)_1] bg-card px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="h-8 w-8 rounded bg-primary flex items-center justify-center">
-            <span className="text-primary-foreground font-bold text-sm">N</span>
+          <div className="h-8 w-8 rounded its-logo-badge flex items-center justify-center">
+            <span className="font-bold text-sm">N</span>
           </div>
           <span className="font-semibold text-lg">NOVA</span>
         </div>
+        <button
+          type="button"
+          onClick={toggleTheme}
+          className="theme-toggle"
+          aria-label="Basculer le theme"
+          title={theme === 'dark' ? 'Passer en mode clair' : 'Passer en mode sombre'}
+        >
+          {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+        </button>
       </header>
 
       {/* Login form */}

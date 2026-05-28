@@ -1,151 +1,202 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* Design System - Enterprise ERP Application
-   Palette: Professional blues, neutral grays, status colors
-   Inspired by: SAP, Microsoft Dynamics, Salesforce
-*/
+/* ----------------------------------------------------------------------------
+ * Design System — Charte IT Spirit
+ * Gradient : Cyan #02B9FD → Violet #832DFE → Magenta #E220FB
+ * Accents  : Orange #FD5202, Vert #2DFE83, Turquoise #20FBE2
+ * Fonts    : League Spartan (titres) / Montserrat (corps)
+ * --------------------------------------------------------------------------*/
 
 @layer base {
   :root {
-    /* Core backgrounds */
-    --background: 210 20% 98%;
-    --foreground: 220 25% 10%;
+    /* ---- Surfaces (clair) -------------------------------------------------*/
+    --background: 240 33% 99%;
+    --foreground: 0 0% 4%;
 
-    /* Cards and surfaces */
-    --card: 0 0% 100%;
-    --card-foreground: 220 25% 10%;
+    --card: 240 33% 96%;
+    --card-foreground: 0 0% 4%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 220 25% 10%;
+    --popover-foreground: 0 0% 4%;
 
-    /* Primary - Professional Blue */
-    --primary: 215 90% 42%;
+    --muted: 240 20% 95%;
+    --muted-foreground: 240 9% 47%;
+
+    --secondary: 240 20% 92%;
+    --secondary-foreground: 240 18% 27%;
+
+    /* ---- Couleurs de marque (gradient IT Spirit) --------------------------*/
+    --brand-cyan: 198 99% 50%;       /* #02B9FD */
+    --brand-violet: 265 99% 59%;     /* #832DFE */
+    --brand-magenta: 293 96% 55%;    /* #E220FB */
+    --gradient-main: linear-gradient(90deg, #02B9FD 0%, #832DFE 50%, #E220FB 100%);
+    --gradient-btn: linear-gradient(135deg, #832DFE 0%, #02B9FD 100%);
+    --gradient-logo: linear-gradient(135deg, #02B9FD 0%, #832DFE 50%, #E220FB 100%);
+
+    /* Primary = violet (clair, lisible sur fond blanc) */
+    --primary: 265 99% 59%;
     --primary-foreground: 0 0% 100%;
 
-    /* Secondary - Slate */
-    --secondary: 214 20% 92%;
-    --secondary-foreground: 220 25% 20%;
-
-    /* Muted surfaces */
-    --muted: 214 20% 96%;
-    --muted-foreground: 215 16% 47%;
-
-    /* Accent - Teal for emphasis */
-    --accent: 195 80% 40%;
+    /* Accent = cyan */
+    --accent: 198 99% 50%;
     --accent-foreground: 0 0% 100%;
 
-    /* Status colors */
-    --destructive: 0 72% 51%;
+    /* ---- Statuts (clair — assombris pour lisibilité sur blanc) ------------*/
+    --destructive: 19 78% 44%;       /* #E04800 */
     --destructive-foreground: 0 0% 100%;
 
-    --success: 142 71% 45%;
+    --success: 147 62% 45%;          /* #1BC96A */
     --success-foreground: 0 0% 100%;
 
-    --warning: 38 92% 50%;
+    --warning: 292 72% 47%;          /* #C018D9 */
     --warning-foreground: 0 0% 100%;
 
-    --info: 199 89% 48%;
+    --info: 196 75% 43%;             /* #009FDB */
     --info-foreground: 0 0% 100%;
 
-    /* Borders and inputs */
-    --border: 214 25% 88%;
-    --input: 214 25% 88%;
-    --ring: 215 90% 42%;
+    /* ---- Bordures, inputs, ring ------------------------------------------*/
+    --border: 265 50% 88%;
+    --input: 265 50% 88%;
+    --ring: 265 99% 59%;
 
     --radius: 0.5rem;
 
-    /* Sidebar - slightly darker */
-    --sidebar-background: 220 20% 14%;
-    --sidebar-foreground: 210 20% 90%;
-    --sidebar-primary: 215 90% 55%;
+    /* ---- Sidebar ----------------------------------------------------------*/
+    --sidebar-background: 240 33% 96%;
+    --sidebar-foreground: 0 0% 4%;
+    --sidebar-primary: 265 99% 59%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 220 20% 22%;
-    --sidebar-accent-foreground: 210 20% 95%;
-    --sidebar-border: 220 15% 25%;
-    --sidebar-ring: 215 90% 55%;
+    --sidebar-accent: 240 20% 92%;
+    --sidebar-accent-foreground: 240 18% 27%;
+    --sidebar-border: 265 50% 88%;
+    --sidebar-ring: 265 99% 59%;
 
-    /* Custom tokens for ERP */
-    --header-bg: 220 20% 14%;
-    --header-foreground: 210 20% 95%;
-    --table-row-hover: 214 40% 96%;
-    --badge-quote: 215 90% 42%;
+    /* ---- Header & tokens métier ------------------------------------------*/
+    --header-bg: 0 0% 100%;
+    --header-foreground: 0 0% 4%;
+    --table-row-hover: 265 60% 96%;
+    --badge-quote: 265 99% 59%;
     --badge-pending: 38 92% 50%;
-    --badge-validated: 142 71% 45%;
-    --badge-rejected: 0 72% 51%;
+    --badge-validated: 147 62% 45%;
+    --badge-rejected: 19 78% 44%;
+
+    /* ---- Ombres & blobs ---------------------------------------------------*/
+    --shadow-card: 0 4px 16px rgba(131, 45, 254, 0.12);
+    --shadow-glow: 0 0 20px rgba(131, 45, 254, 0.15);
+    --btn-hover-shadow: 0 0 20px rgba(131, 45, 254, 0.30);
+    --blob-1: rgba(2, 185, 253, 0.09);
+    --blob-2: rgba(131, 45, 254, 0.07);
+    --blob-3: rgba(226, 32, 251, 0.06);
   }
 
   .dark {
-    --background: 220 20% 8%;
-    --foreground: 210 20% 95%;
+    /* ---- Surfaces (sombre — par défaut) -----------------------------------*/
+    --background: 0 0% 4%;           /* #0A0A0A */
+    --foreground: 0 0% 100%;
 
-    --card: 220 20% 12%;
-    --card-foreground: 210 20% 95%;
+    --card: 240 18% 11%;             /* #161622 */
+    --card-foreground: 0 0% 100%;
 
-    --popover: 220 20% 12%;
-    --popover-foreground: 210 20% 95%;
+    --popover: 240 18% 11%;
+    --popover-foreground: 0 0% 100%;
 
-    --primary: 215 80% 55%;
+    --muted: 0 0% 10%;               /* #1A1A1A */
+    --muted-foreground: 240 18% 73%; /* #B0B0C8 */
+
+    --secondary: 0 0% 7%;            /* #111111 */
+    --secondary-foreground: 0 0% 100%;
+
+    /* Primary = violet IT Spirit */
+    --primary: 265 99% 59%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 220 15% 22%;
-    --secondary-foreground: 210 20% 90%;
-
-    --muted: 220 15% 18%;
-    --muted-foreground: 215 15% 60%;
-
-    --accent: 195 70% 50%;
+    /* Accent = cyan IT Spirit */
+    --accent: 198 99% 50%;
     --accent-foreground: 0 0% 100%;
 
-    --destructive: 0 62% 55%;
+    /* ---- Statuts (sombre — saturation max) --------------------------------*/
+    --destructive: 19 98% 50%;       /* #FD5202 */
     --destructive-foreground: 0 0% 100%;
 
-    --success: 142 60% 50%;
-    --success-foreground: 0 0% 100%;
+    --success: 145 99% 59%;          /* #2DFE83 */
+    --success-foreground: 0 0% 4%;
 
-    --warning: 38 85% 55%;
+    --warning: 293 96% 55%;          /* #E220FB */
     --warning-foreground: 0 0% 100%;
 
-    --info: 199 80% 55%;
+    --info: 198 99% 50%;             /* #02B9FD */
     --info-foreground: 0 0% 100%;
 
-    --border: 220 15% 22%;
-    --input: 220 15% 22%;
-    --ring: 215 80% 55%;
+    /* ---- Bordures, inputs, ring ------------------------------------------*/
+    --border: 265 30% 25%;
+    --input: 240 18% 14%;
+    --ring: 265 99% 59%;
 
-    --sidebar-background: 220 20% 6%;
-    --sidebar-foreground: 210 20% 90%;
-    --sidebar-primary: 215 80% 55%;
+    /* ---- Sidebar ----------------------------------------------------------*/
+    --sidebar-background: 0 0% 7%;
+    --sidebar-foreground: 240 18% 90%;
+    --sidebar-primary: 265 99% 59%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 220 15% 15%;
-    --sidebar-accent-foreground: 210 20% 95%;
-    --sidebar-border: 220 15% 18%;
-    --sidebar-ring: 215 80% 55%;
+    --sidebar-accent: 240 18% 14%;
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 265 30% 22%;
+    --sidebar-ring: 265 99% 59%;
 
-    --header-bg: 220 20% 6%;
-    --header-foreground: 210 20% 95%;
-    --table-row-hover: 220 15% 15%;
+    /* ---- Header & tokens métier ------------------------------------------*/
+    --header-bg: 0 0% 7%;
+    --header-foreground: 0 0% 100%;
+    --table-row-hover: 240 18% 14%;
+    --badge-quote: 265 99% 59%;
+    --badge-pending: 293 96% 55%;
+    --badge-validated: 145 99% 59%;
+    --badge-rejected: 19 98% 50%;
+
+    /* ---- Ombres & blobs ---------------------------------------------------*/
+    --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.6);
+    --shadow-glow: 0 0 30px rgba(131, 45, 254, 0.40);
+    --btn-hover-shadow: 0 0 20px rgba(131, 45, 254, 0.60);
+    --blob-1: rgba(2, 185, 253, 0.12);
+    --blob-2: rgba(131, 45, 254, 0.10);
+    --blob-3: rgba(226, 32, 251, 0.08);
   }
 }
 
+/* ----------------------------------------------------------------------------
+ * Base — fonts, body, transitions globales
+ * --------------------------------------------------------------------------*/
 @layer base {
   * {
     @apply border-border;
   }
 
+  *,
+  *::before,
+  *::after {
+    transition: background-color 0.3s ease, color 0.3s ease,
+                border-color 0.3s ease, box-shadow 0.3s ease;
+  }
+
   body {
     @apply bg-background text-foreground antialiased;
-    font-family: 'Inter', system-ui, sans-serif;
+    font-family: 'Montserrat', system-ui, sans-serif;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'League Spartan', sans-serif;
+    font-weight: 700;
+    letter-spacing: -0.01em;
   }
 
   code, pre {
-    font-family: 'JetBrains Mono', monospace;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
   }
 }
 
+/* ----------------------------------------------------------------------------
+ * Components — utilitaires métier réutilisés dans le code
+ * --------------------------------------------------------------------------*/
 @layer components {
   .card-elevated {
     @apply bg-card border shadow-sm hover:shadow-md transition-shadow duration-200;
@@ -184,6 +235,95 @@
   }
 
   .input-erp {
-    @apply h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2;
+    @apply h-10 rounded-md border border-input bg-background px-3 py-2 text-sm
+           ring-offset-background focus-visible:outline-none focus-visible:ring-2
+           focus-visible:ring-ring focus-visible:ring-offset-2;
   }
+
+  /* ---- Bouton primaire gradient IT Spirit ---- */
+  .btn-its-gradient {
+    background: var(--gradient-btn);
+    color: #FFFFFF;
+    border: none;
+    transition: box-shadow 0.3s ease, transform 0.15s ease;
+  }
+  .btn-its-gradient:hover:not(:disabled) {
+    box-shadow: var(--btn-hover-shadow);
+  }
+  .btn-its-gradient:active:not(:disabled) {
+    transform: translateY(1px);
+  }
+
+  /* ---- Logo NOVA — badge gradient ---- */
+  .its-logo-badge {
+    background: var(--gradient-logo);
+    color: #FFFFFF;
+    box-shadow: var(--shadow-glow);
+  }
+
+  /* ---- Bouton toggle thème ---- */
+  .theme-toggle {
+    background: hsl(var(--secondary));
+    border: 1px solid hsl(var(--border));
+    border-radius: 9999px;
+    width: 38px;
+    height: 38px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: hsl(var(--foreground));
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+  }
+  .theme-toggle:hover {
+    box-shadow: var(--btn-hover-shadow);
+    border-color: hsl(var(--ring));
+  }
+}
+
+/* ----------------------------------------------------------------------------
+ * Blobs décoratifs IT Spirit (layout racine)
+ * --------------------------------------------------------------------------*/
+.its-blob {
+  position: fixed;
+  border-radius: 50% 60% 40% 70% / 50% 40% 60% 50%;
+  filter: blur(60px);
+  pointer-events: none;
+  z-index: 0;
+  animation: its-blob-float 8s ease-in-out infinite alternate;
+}
+.its-blob-1 {
+  width: 400px; height: 400px;
+  background: var(--blob-1);
+  top: -80px; right: -80px;
+}
+.its-blob-2 {
+  width: 280px; height: 280px;
+  background: var(--blob-2);
+  bottom: 80px; left: -60px;
+  animation-delay: -4s;
+}
+.its-blob-3 {
+  width: 200px; height: 200px;
+  background: var(--blob-3);
+  top: 45%; right: 18%;
+  animation-delay: -2s;
+}
+@keyframes its-blob-float {
+  from { transform: translate(0, 0) scale(1); }
+  to   { transform: translate(15px, -25px) scale(1.04); }
+}
+
+/* ----------------------------------------------------------------------------
+ * Scrollbar — gradient IT Spirit
+ * --------------------------------------------------------------------------*/
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: hsl(var(--secondary)); }
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #02B9FD, #832DFE);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #832DFE, #E220FB);
 }

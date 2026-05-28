@@ -14,8 +14,18 @@ export default {
     },
     extend: {
       fontFamily: {
-        sans: ["Inter", "system-ui", "sans-serif"],
+        sans: ["Montserrat", "system-ui", "sans-serif"],
+        display: ["League Spartan", "sans-serif"],
         mono: ["JetBrains Mono", "monospace"],
+      },
+      backgroundImage: {
+        "its-gradient": "linear-gradient(90deg, #02B9FD 0%, #832DFE 50%, #E220FB 100%)",
+        "its-gradient-btn": "linear-gradient(135deg, #832DFE 0%, #02B9FD 100%)",
+        "its-gradient-logo": "linear-gradient(135deg, #02B9FD 0%, #832DFE 50%, #E220FB 100%)",
+      },
+      boxShadow: {
+        "its-glow": "0 0 30px rgba(131, 45, 254, 0.40)",
+        "its-hover": "0 0 20px rgba(131, 45, 254, 0.60)",
       },
       colors: {
         border: "hsl(var(--border))",

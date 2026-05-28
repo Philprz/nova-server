@@ -1,5 +1,6 @@
-import { Mail, Bell, LogOut, User } from 'lucide-react';
+import { Mail, Bell, LogOut, User, Sun, Moon } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useTheme } from '@/context/ThemeContext';
 import { Button } from '@/components/ui/button';
 
 interface AppHeaderProps {
@@ -8,12 +9,13 @@ interface AppHeaderProps {
 
 export function AppHeader({ pendingCount }: AppHeaderProps) {
   const { user, logout } = useAuth();
+  const { theme, toggleTheme } = useTheme();
 
   return (
-    <header className="bg-header text-header-foreground px-6 py-3 flex items-center justify-between border-b border-sidebar-border">
+    <header className="bg-header text-header-foreground px-6 py-3 flex items-center justify-between border-b-2 border-transparent [border-image:var(--gradient-main)_1]">
       <div className="flex items-center gap-3">
-        <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-primary">
-          <Mail className="w-5 h-5 text-primary-foreground" />
+        <div className="flex items-center justify-center w-9 h-9 rounded-lg its-logo-badge">
+          <Mail className="w-5 h-5" />
         </div>
         <div>
           <h1 className="text-lg font-semibold tracking-tight">Devis Entrants</h1>
@@ -28,6 +30,15 @@ export function AppHeader({ pendingCount }: AppHeaderProps) {
             <span className="text-sm font-medium">{pendingCount} en attente</span>
           </div>
         )}
+        <button
+          type="button"
+          onClick={toggleTheme}
+          className="theme-toggle"
+          aria-label="Basculer le theme"
+          title={theme === 'dark' ? 'Passer en mode clair' : 'Passer en mode sombre'}
+        >
+          {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+        </button>
         {user && (
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1.5 text-sm text-sidebar-foreground/80">
