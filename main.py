@@ -98,6 +98,21 @@ async def lifespan(app: FastAPI):
         init_auth_db()
         logger.info("nova_auth.db initialisee")
 
+        # Nettoyage des runs benchmark orphelins (status='running' au demarrage)
+        from models.database_models import SessionLocal, BenchmarkRun
+        _db = SessionLocal()
+        try:
+            _orphans = _db.query(BenchmarkRun).filter(
+                BenchmarkRun.status == "running"
+            ).update({"status": "error"})
+            _db.commit()
+            if _orphans:
+                logger.warning("LLM Benchmark : %d run(s) orphelin(s) remis a 'error'", _orphans)
+        except Exception as _e:
+            logger.error("LLM Benchmark : nettoyage runs orphelins echoue : %s", _e)
+        finally:
+            _db.close()
+
         # CORRECTION: Import et utilisation de la bonne classe
         from services.health_checker import HealthChecker
         health_checker = HealthChecker()

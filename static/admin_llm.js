@@ -218,6 +218,12 @@
       const tab = el.getAttribute("data-tab");
       $("tab-providers").classList.toggle("hidden", tab !== "providers");
       $("tab-config").classList.toggle("hidden", tab !== "config");
+      $("tab-benchmark").classList.toggle("hidden", tab !== "benchmark");
+      if (tab === "benchmark") {
+        loadBenchmarkCases();
+        loadBenchmarkRuns();
+        loadBenchmarkLLMCheckboxes();
+      }
     });
   });
 
@@ -767,6 +773,353 @@
       {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]
     ));
   }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // BENCHMARK
+  // Radar Chart.js charge depuis /static/chart.umd.min.js (compatible CSP self).
+  // ═══════════════════════════════════════════════════════════════════════
+
+  let _benchmarkRadarChart = null;
+
+  const SCORE_LABELS = {
+    score_json_valid: "JSON valide",
+    score_client_match: "Client",
+    score_product_recall: "Rappel produits",
+    score_product_precision: "Precision produits",
+    score_qty_accuracy: "Quantites",
+  };
+  const SCORE_KEYS = Object.keys(SCORE_LABELS);
+  const BENCH_COLORS = ["#02B9FD", "#832DFE", "#16A34A", "#D97706",
+                        "#DC2626", "#0EA5E9", "#A21CAF", "#0891B2"];
+
+  function pct(v) { return v != null ? Math.round(v * 100) + "%" : "—"; }
+  function scoreColor(v) {
+    if (v == null) return "var(--gray-400)";
+    if (v >= 0.8) return "var(--green)";
+    if (v >= 0.5) return "var(--amber)";
+    return "var(--red)";
+  }
+
+  async function loadBenchmarkCases() {
+    const tbody = $("benchmark-cases-tbody");
+    try {
+      const res = await api("/benchmark/cases");
+      if (!res.cases || !res.cases.length) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color: var(--gray-400);">Aucun cas de test</td></tr>';
+        return;
+      }
+      tbody.innerHTML = res.cases.map(c => {
+        const prods = ((c.expected_output || {}).products || []).length;
+        const client = (c.expected_output || {}).client || "—";
+        return `<tr data-bcase-id="${c.id}">
+          <td>${c.id}</td>
+          <td><b>${escapeHtml(c.label)}</b></td>
+          <td>${escapeHtml(client)}</td>
+          <td>${prods} produit(s)</td>
+          <td class="mono">${escapeHtml((c.created_at || "").substring(0,10))}</td>
+          <td class="actions" style="text-align:right;">
+            <button class="btn-ghost" style="color: var(--red);" data-bcase-del="${c.id}">Supprimer</button>
+          </td>
+        </tr>`;
+      }).join("");
+      tbody.querySelectorAll("button[data-bcase-del]").forEach(btn => {
+        btn.addEventListener("click", () => deleteBenchmarkCase(parseInt(btn.dataset.bcaseDel, 10)));
+      });
+    } catch (e) {
+      flash("dash-flash", "Erreur chargement cas benchmark : " + e.message, "error");
+    }
+  }
+
+  async function deleteBenchmarkCase(caseId) {
+    if (!confirm("Supprimer ce cas de test ?")) return;
+    try {
+      await api("/benchmark/cases/" + caseId, {method: "DELETE"});
+      loadBenchmarkCases();
+    } catch (e) {
+      flash("dash-flash", "Erreur suppression : " + e.message, "error");
+    }
+  }
+
+  $("btn-add-bcase").addEventListener("click", () => openBenchmarkCaseModal());
+
+  function openBenchmarkCaseModal() {
+    $("bc-label").value = "";
+    $("bc-email").value = "";
+    $("bc-client").value = "";
+    $("bc-products-list").innerHTML = "";
+    $("bc-eml-input").value = "";
+    $("bc-eml-status").textContent = "";
+    hide($("bc-error"));
+    addBenchmarkProductRow();
+    show($("bcase-modal"));
+  }
+
+  async function importEmlForBenchmark(inputEl) {
+    const file = inputEl.files[0];
+    if (!file) return;
+
+    const statusEl = $("bc-eml-status");
+    statusEl.textContent = "Parsing en cours...";
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    // Appel direct (FormData : ne pas forcer Content-Type, le navigateur le gere)
+    // On reutilise toutefois le header d'auth de l'API existante.
+    try {
+      const t = token();
+      const headers = {};
+      if (t) headers["X-LLM-Admin-Token"] = t;
+      const r = await fetch(API + "/benchmark/cases/parse-eml", {
+        method: "POST",
+        headers,
+        body: formData,
+      });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        statusEl.textContent = "Erreur : " + (err.detail || r.status);
+        return;
+      }
+      const data = await r.json();
+
+      // Pre-remplir le formulaire (sans ecraser un libelle deja saisi)
+      const labelEl = $("bc-label");
+      const emailEl = $("bc-email");
+      if (labelEl && !labelEl.value) {
+        labelEl.value = data.subject || file.name.replace(/\.eml$/i, "");
+      }
+      if (emailEl) emailEl.value = data.body_text || "";
+      statusEl.textContent = "Importe depuis : " + (data.from || "expediteur inconnu");
+    } catch (err) {
+      statusEl.textContent = "Erreur reseau : " + err.message;
+    } finally {
+      // Reinitialiser l'input pour permettre le rechargement du meme fichier
+      inputEl.value = "";
+    }
+  }
+
+  $("bc-eml-input").addEventListener("change", e => importEmlForBenchmark(e.target));
+
+  $("btn-cancel-bcase").addEventListener("click", () => hide($("bcase-modal")));
+
+  function addBenchmarkProductRow() {
+    const list = $("bc-products-list");
+    const div = document.createElement("div");
+    div.style.cssText = "display:flex; gap:6px; align-items:center;";
+    div.innerHTML = `
+      <input type="text" placeholder="Code (REF)" class="bc-prod-code" style="flex:1; font-family: ui-monospace, Menlo, Consolas, monospace;">
+      <input type="text" placeholder="Nom produit" class="bc-prod-name" style="flex:2;">
+      <input type="number" placeholder="Qte" class="bc-prod-qty" style="width:80px;" min="1" value="1">
+      <button type="button" class="icon-btn" style="color: var(--red);" title="Retirer">&times;</button>`;
+    div.querySelector("button").addEventListener("click", () => div.remove());
+    list.appendChild(div);
+  }
+
+  $("btn-add-bproduct").addEventListener("click", addBenchmarkProductRow);
+
+  $("btn-save-bcase").addEventListener("click", async () => {
+    const label = $("bc-label").value.trim();
+    const email = $("bc-email").value.trim();
+    const client = $("bc-client").value.trim();
+    const errEl = $("bc-error");
+
+    if (!label || !email) {
+      errEl.textContent = "Libelle et email obligatoires.";
+      show(errEl);
+      return;
+    }
+
+    const products = [];
+    $("bc-products-list").querySelectorAll("div").forEach(row => {
+      const code = row.querySelector(".bc-prod-code").value.trim();
+      const name = row.querySelector(".bc-prod-name").value.trim();
+      const qty = parseFloat(row.querySelector(".bc-prod-qty").value) || 1;
+      if (code || name) products.push({code, name, quantity: qty});
+    });
+
+    try {
+      await api("/benchmark/cases", {
+        method: "POST",
+        body: JSON.stringify({
+          label,
+          email_content: email,
+          expected_output: {client, products},
+        }),
+      });
+      hide($("bcase-modal"));
+      flash("dash-flash", "Cas de test enregistre", "success");
+      loadBenchmarkCases();
+    } catch (e) {
+      errEl.textContent = "Erreur : " + e.message;
+      show(errEl);
+    }
+  });
+
+  async function loadBenchmarkLLMCheckboxes() {
+    const container = $("benchmark-llm-checkboxes");
+    try {
+      const res = await api("/config");
+      if (!res.chain || !res.chain.length) {
+        container.innerHTML = '<span style="color: var(--gray-400); font-size: 13px;">Aucun LLM configure. Configurer la chaine dans l\'onglet Configuration.</span>';
+        return;
+      }
+      container.innerHTML = res.chain.map((entry, i) => `
+        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; padding: 6px 10px; background: var(--white); border: 1px solid var(--gray-200); border-radius: 6px; font-weight: normal;">
+          <input type="checkbox" checked class="bench-llm-cb"
+                 data-provider-id="${entry.provider_id}"
+                 data-model-name="${escapeHtml(entry.model_name)}"
+                 style="width: auto; flex: 0; margin: 0;">
+          <span style="font-size: 13px;">${escapeHtml(entry.provider_name)} &mdash; <span class="mono">${escapeHtml(entry.model_name)}</span></span>
+        </label>`).join("");
+    } catch (e) {
+      container.innerHTML = '<span style="color: var(--red); font-size: 13px;">Erreur : ' + escapeHtml(e.message) + '</span>';
+    }
+  }
+
+  $("btn-launch-bench").addEventListener("click", async () => {
+    const checkboxes = document.querySelectorAll(".bench-llm-cb:checked");
+    if (!checkboxes.length) {
+      alert("Selectionner au moins un LLM.");
+      return;
+    }
+    const pairs = Array.from(checkboxes).map(cb => ({
+      provider_id: parseInt(cb.dataset.providerId, 10),
+      model_name: cb.dataset.modelName,
+    }));
+    const label = $("benchmark-run-label").value.trim() || null;
+    const statusEl = $("benchmark-run-status");
+    statusEl.textContent = "Lancement en cours...";
+    try {
+      const res = await api("/benchmark/run", {
+        method: "POST",
+        body: JSON.stringify({label, provider_model_pairs: pairs}),
+      });
+      statusEl.textContent = "Run #" + res.run_id + " demarre. Actualisation auto dans quelques secondes...";
+      setTimeout(loadBenchmarkRuns, 3000);
+    } catch (e) {
+      statusEl.textContent = "Erreur : " + e.message;
+    }
+  });
+
+  $("btn-refresh-bruns").addEventListener("click", loadBenchmarkRuns);
+
+  async function loadBenchmarkRuns() {
+    const tbody = $("benchmark-runs-tbody");
+    try {
+      const res = await api("/benchmark/runs");
+      if (!res.runs || !res.runs.length) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color: var(--gray-400);">Aucun run</td></tr>';
+        return;
+      }
+      const pillClass = s => s === "completed" ? "on" : "off";
+      tbody.innerHTML = res.runs.map(r => {
+        const dt = (r.created_at || "").substring(0,16).replace("T", " ");
+        const actionBtn = r.status === "completed"
+          ? `<button class="btn-ghost" data-brun-view="${r.id}" data-brun-label="${escapeHtml(r.label || "Run #" + r.id)}">Voir resultats</button>`
+          : `<button class="btn-ghost" data-brun-refresh="1">Actualiser</button>`;
+        return `<tr>
+          <td>${r.id}</td>
+          <td>${escapeHtml(r.label || "—")}</td>
+          <td>${r.llm_count}</td>
+          <td>${r.case_count}</td>
+          <td><span class="pill ${pillClass(r.status)}">${escapeHtml(r.status)}</span></td>
+          <td class="mono">${escapeHtml(dt)}</td>
+          <td class="actions" style="text-align:right;">${actionBtn}</td>
+        </tr>`;
+      }).join("");
+      tbody.querySelectorAll("button[data-brun-view]").forEach(btn => {
+        btn.addEventListener("click", () => showBenchmarkResults(
+          parseInt(btn.dataset.brunView, 10), btn.dataset.brunLabel));
+      });
+      tbody.querySelectorAll("button[data-brun-refresh]").forEach(btn => {
+        btn.addEventListener("click", loadBenchmarkRuns);
+      });
+    } catch (e) {
+      flash("dash-flash", "Erreur chargement runs : " + e.message, "error");
+    }
+  }
+
+  async function showBenchmarkResults(runId, runLabel) {
+    try {
+      const res = await api("/benchmark/runs/" + runId);
+      $("benchmark-results-title").textContent = "Resultats - " + runLabel;
+      show($("benchmark-results-panel"));
+
+      // Radar Chart.js
+      const labels = SCORE_KEYS.map(k => SCORE_LABELS[k]);
+      const datasets = res.llm_summary.map((llm, i) => {
+        const color = BENCH_COLORS[i % BENCH_COLORS.length];
+        return {
+          label: llm.provider_name + " - " + llm.model_name,
+          data: SCORE_KEYS.map(k => Math.round((llm.avg_scores[k] || 0) * 100)),
+          borderColor: color,
+          backgroundColor: color + "33",
+          pointBackgroundColor: color,
+        };
+      });
+      if (_benchmarkRadarChart) _benchmarkRadarChart.destroy();
+      const ctx = $("benchmark-radar-chart").getContext("2d");
+      _benchmarkRadarChart = new Chart(ctx, {
+        type: "radar",
+        data: {labels, datasets},
+        options: {
+          scales: {r: {min: 0, max: 100, ticks: {stepSize: 20}}},
+          plugins: {legend: {position: "bottom"}},
+        },
+      });
+
+      // Tableau recapitulatif
+      const sumBody = $("benchmark-summary-tbody");
+      sumBody.innerHTML = res.llm_summary.map(llm => {
+        const s = llm.avg_scores;
+        return `<tr>
+          <td><b>${escapeHtml(llm.provider_name)}</b><br><span class="mono" style="color: var(--gray-500); font-size: 11px;">${escapeHtml(llm.model_name)}</span></td>
+          <td style="color:${scoreColor(s.score_global)}; font-weight: 700;">${pct(s.score_global)}</td>
+          <td>${pct(s.score_json_valid)}</td>
+          <td>${pct(s.score_client_match)}</td>
+          <td>${pct(s.score_product_recall)}</td>
+          <td>${pct(s.score_product_precision)}</td>
+          <td>${pct(s.score_qty_accuracy)}</td>
+          <td>${llm.avg_latency_ms} ms</td>
+          <td>${llm.error_count ? '<span style="color: var(--red);">' + llm.error_count + '</span>' : 0}</td>
+        </tr>`;
+      }).join("");
+
+      // Detail par cas (accordeon natif <details>)
+      const accordion = $("benchmark-detail-accordion");
+      accordion.innerHTML = res.detail_by_case.map(caseDet => {
+        const rows = caseDet.results.map(r => `<tr>
+          <td>${escapeHtml(r.provider_name)}<br><span class="mono" style="color: var(--gray-500); font-size: 11px;">${escapeHtml(r.model_name)}</span></td>
+          <td style="color:${scoreColor(r.score_global)}; font-weight: 700;">${pct(r.score_global)}</td>
+          <td>${pct(r.score_json_valid)}</td>
+          <td>${pct(r.score_client_match)}</td>
+          <td>${pct(r.score_product_recall)}</td>
+          <td>${pct(r.score_product_precision)}</td>
+          <td>${pct(r.score_qty_accuracy)}</td>
+          <td>${r.latency_ms != null ? r.latency_ms + " ms" : "—"}</td>
+          <td style="color: var(--red); font-size: 11px;">${escapeHtml(r.error_message || "")}</td>
+        </tr>`).join("");
+        return `<details style="margin-bottom: 8px; border: 1px solid var(--gray-200); border-radius: 8px; overflow: hidden;">
+          <summary style="padding: 10px 14px; cursor: pointer; font-weight: 600; background: var(--gray-50); font-size: 13px;">${escapeHtml(caseDet.case_label)}</summary>
+          <div style="overflow-x:auto; padding: 0 10px 10px;">
+            <table>
+              <thead><tr>
+                <th>LLM</th><th>Global</th><th>JSON</th><th>Client</th>
+                <th>Rappel</th><th>Precision</th><th>Qte</th><th>Latence</th><th>Erreur</th>
+              </tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        </details>`;
+      }).join("");
+
+      $("benchmark-results-panel").scrollIntoView({behavior: "smooth"});
+    } catch (e) {
+      flash("dash-flash", "Erreur chargement resultats : " + e.message, "error");
+    }
+  }
+
+  $("btn-close-bresults").addEventListener("click", () => hide($("benchmark-results-panel")));
 
   // Boot
   bootstrap();

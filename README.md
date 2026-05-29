@@ -1,6 +1,8 @@
 # NOVA-SERVER - Plateforme Intelligente de Gestion Commerciale
 
-**Statut : 🟢 OPÉRATIONNEL** | **Version : 2.8.0** | **Dernière MAJ : 20/02/2026**
+**Statut : 🟢 OPÉRATIONNEL EN PRODUCTION** | **Version : 3.2.0** | **Dernière MAJ : 29/05/2026**
+
+> **Synthèse v2.9 → v3.2** : depuis février 2026, NOVA a été enrichi d'un module **Transport DHL Express + Colisage**, d'une **création de devis manuelle/téléphonique**, d'une **qualification client français robuste**, d'un **système d'authentification JWT HttpOnly + multi-tenant** (sociétés / utilisateurs / boîtes mail), d'une **administration LLM dynamique avec benchmark** et d'un **hardening pré-production complet** (L1→L8 : sécurité SQL/OData, TLS SAP, async, CSP, RBAC). Le serveur tourne désormais en service Windows derrière `nova-rondot.itspirit.ovh`.
 
 ## 🎯 Vue d'Ensemble
 
@@ -1429,7 +1431,327 @@ pytest tests/test_sap_quotation.py -v
 
 ---
 
-### 3. Moteur de Pricing Intelligent RONDOT-SAS ⭐ NOUVEAU
+#### 2.10 Création de Devis Manuel & par Téléphone ⭐ NOUVEAU (v2.9.0)
+
+**Objectif :** Permettre à un commercial de créer un devis directement dans NOVA sans passer par un email entrant — saisie manuelle des informations client + produits, ou prise d'appel téléphonique.
+
+**Composant : `mail-to-biz/src/components/ManualQuoteModal.tsx`**
+
+- Modal de saisie : client, produits (codes + quantités), commentaires
+- Réutilise toute la chaîne d'analyse (LLM extraction, matching SAP, pricing engine)
+- Bypass Microsoft Graph — l'email source devient le formulaire
+- Workflow identique à un email entrant (quote_draft + corrections + envoi SAP)
+
+**Cas d'usage :**
+
+- **Devis téléphonique** : le commercial saisit ce que le client demande au téléphone
+- **Devis manuel** : pas d'email reçu (fax, courrier, ad-hoc)
+
+**Intégration `Pages/Index.tsx`** : bouton "Nouveau devis manuel" dans l'en-tête de l'inbox.
+
+---
+
+### 3. Module Transport DHL Express & Colisage ⭐ NOUVEAU (v2.9.0 - mars 2026)
+
+**Objectif :** Calculer automatiquement le colisage optimal d'une commande et obtenir le tarif DHL Express en temps réel.
+
+**Architecture :**
+
+```
+services/
+  packing/
+    box_catalog.py          # Catalogue 4 types de colis (S/M/L/XL)
+    packing_algorithm.py    # First Fit Decreasing (FFD) - rangement 3D
+    packing_service.py      # Orchestration + enrichissement dimensions DB
+
+  transport/
+    carrier_interface.py    # Interface abstraite CarrierAdapter
+    transport_service.py    # Orchestrateur multi-transporteur + cache 5 min
+    carriers/
+      dhl_adapter.py        # Adapter DHL Express (MyDHL API REST)
+
+routes/
+  routes_packing.py         # POST /api/packing/calculate
+  routes_shipping.py        # POST /api/shipping/quote
+```
+
+**Pipeline :**
+
+```
+Produits (item_code, qty)
+    ↓ PackingService.suggest_packages()
+    │  - Résolution dimensions depuis supplier_tariffs.db
+    │  - Algorithme FFD (First Fit Decreasing)
+    ↓
+PackingResponse
+    - packages[] : colis calculés (type, contenu, poids)
+    - dhl_packages[] : payload DHL prêt
+    - summary : texte lisible commercial
+    ↓ [Validation utilisateur : Valider | Modifier]
+    ↓ TransportService.calculate_shipping()
+    │  - DHLCarrierAdapter.get_rate() (MyDHL API)
+    │  - Cache TTL 5 min
+    ↓
+ShippingResponse
+    - rates[] : tous les services DHL (Express Worldwide, 9:00, 12:00...)
+    - best_rate : tarif le moins cher
+    - delivery_days : délais estimés
+    ↓
+Prix final devis = coût_produits + marge + transport
+```
+
+**Composant frontend : `ShippingCalculatorPanel.tsx` (~600 lignes)**
+
+- Affichage colisage : visualisation des cartons avec contenu
+- Édition dimensions/poids ligne par ligne
+- Sélection destinataire + adresse de livraison
+- Sélection service DHL (avec comparatif prix/délai)
+- Personnalisation tarif (remises négociées RONDOT)
+
+**Endpoints :**
+
+```
+POST /api/packing/calculate   # Calcul colisage (FFD)
+POST /api/shipping/quote      # Tarif DHL Express (Basic Auth)
+```
+
+**Configuration (.env) :**
+
+```env
+DHL_API_BASE_URL=https://express.api.dhl.com/mydhlapi
+DHL_API_USERNAME=rondotFR
+DHL_API_PASSWORD=***
+DHL_ACCOUNT_NUMBER=***
+DHL_SHIPPER_COUNTRY=FR
+DHL_SHIPPER_POSTAL_CODE=***
+```
+
+**Documentation détaillée :** `docs/transport_and_packing.md`
+
+---
+
+### 4. Qualification Client Français & Recherche Robuste ⭐ NOUVEAU (v2.10.0 - mars 2026)
+
+**Objectif :** Améliorer la qualification automatique des clients français (validation SIRET, enrichissement Pappers/INSEE) et rendre la recherche client SAP plus robuste face aux variantes de nommage.
+
+**Améliorations clés :**
+
+- 🇫🇷 **Qualification client français** lors de l'extraction email
+  - Détection automatique SIRET/TVA dans le corps + signature
+  - Cross-check INSEE + Pappers (raison sociale, dirigeant, effectif)
+  - Enrichissement des données client avant matching SAP
+- 🔍 **Recherche client SAP plus robuste** (`bcb6cc63`)
+  - Normalisation casse + diacritiques
+  - Recherche multi-champs (CardName, CardForeignName, FederalTaxID, email)
+  - Gestion variantes (SA / SAS / SARL / Sarl) avec scoring distinct
+  - Fallback recherche fuzzy si pas de match exact
+- 🛠️ **Fix identification client** (`7245797b`)
+  - Résolution faux positifs sur domaines emails partagés (gmail.com, outlook.com)
+  - Priorité donnée au nom dans le corps quand domaine générique
+
+**Fichiers impactés :**
+
+- `services/email_analyzer.py` — extraction SIRET + qualification
+- `services/email_matcher.py` — refonte matching client multi-stratégies
+- `routes/routes_clients.py` — nouveaux endpoints de qualification
+
+---
+
+### 5. Authentification & Multi-Tenant ⭐ NOUVEAU (v3.0.0 - mai 2026)
+
+**Objectif :** Sécuriser l'ensemble du serveur avec une authentification utilisateur (JWT cookie HttpOnly) couvrant **18 routers métier** et un modèle multi-sociétés / utilisateurs / boîtes mail.
+
+#### 5.1 Authentification JWT NOVA
+
+**Architecture (L7-T1) :**
+
+- Login SAP-based : credentials SAP B1 → validation via `auth/sap_validator.py` → délivrance JWT
+- Cookies **HttpOnly Secure SameSite=Strict** :
+  - `nova_session` : access JWT (TTL court)
+  - `nova_refresh` : refresh token rotatif
+- WebSocket : authentification par cookie (extraction `nova_session` depuis handshake)
+
+**Endpoints :**
+
+```
+POST /api/auth/login    # Validation SAP → délivrance JWT + cookies
+POST /api/auth/refresh  # Rotation refresh token
+POST /api/auth/logout   # Révocation + suppression cookies
+GET  /api/auth/me       # Profil utilisateur courant
+```
+
+**Garde globale (L7-T2 + L7-post) :**
+
+- 18 routers métier protégés par `Depends(get_current_user)` (devis, clients, pricing, sap_business, mail-to-biz, webhooks, diagnostic, prompt, edit-quote…)
+- RBAC par rôle : `ADMIN | MANAGER | ADV`
+- Permissions par boîte mail (`can_write` / read-only)
+
+**Fichiers :**
+
+```
+auth/
+  auth_db.py          # Tables sociétés, users, mailboxes, permissions, refresh tokens
+  jwt_service.py      # create/decode + hash + TTL
+  sap_validator.py    # Validation credentials SAP (Login B1S)
+  dependencies.py     # get_current_user + require_role
+```
+
+**Page de login : `templates/login.html`** — formulaire dédié, redirection sur succès.
+
+#### 5.2 Multi-Tenant (Sociétés / Utilisateurs / Mailboxes)
+
+**Modèle de données :**
+
+| Table | Description |
+| ----- | ----------- |
+| `societies` | Sociétés tenants (name, sap_company_db, sap_base_url) |
+| `users` | Utilisateurs liés à une société (sap_username, display_name, role) |
+| `mailboxes` | Boîtes mail Office 365 par société (address, ms_tenant_id) |
+| `user_mailbox_permissions` | ACL par utilisateur × mailbox (read / write) |
+| `refresh_tokens` | Hashes + TTL pour rotation |
+
+**Routes admin (`/api/admin`) :**
+
+```
+GET/POST/PATCH    /api/admin/societies
+GET/POST/PATCH/DELETE /api/admin/users
+GET/POST/PATCH    /api/admin/mailboxes
+POST/DELETE       /api/admin/permissions
+```
+
+#### 5.3 Session SAP B1 (`auth/sap_session/`)
+
+Module complémentaire (port du projet BILLING) qui conserve un **B1SESSION SAP côté serveur** signé HMAC-SHA256, jamais exposé au navigateur.
+
+- Routes : `POST/GET /api/sapauth/{login,logout,me,keepalive,ping}`
+- Cookie : `pa_session` (UUID signé, B1SESSION jamais transmis au front)
+- Coexistence avec JWT NOVA (cf. `auth/sap_session/__init__.py` pour stratégie de routage)
+- Permet de respecter la traçabilité utilisateur côté SAP B1 quand nécessaire
+
+---
+
+### 6. Hardening Pré-Production (L1 → L8) ⭐ NOUVEAU (v3.0.0 - mai 2026)
+
+**Objectif :** Mise en production sécurisée — vague exhaustive de durcissement sécurité, performance et stabilité.
+
+| Lot | Objet | Détail |
+| --- | ----- | ------ |
+| **L1** | Nettoyage pré-prod | Suppression fichiers obsolètes et parasites |
+| **L2** | `.env` | Suppression doublons, variables obsolètes, gpt-4.1 retiré, renommage SF |
+| **L3** | Patches ciblés | Modèles LLM mis à jour, **DB fail-fast** au démarrage, **webhook HMAC**, SAP logout propre |
+| **L4** | Anti-injection | Helpers `escape_soql` / `escape_odata` / `safe_int` + **23 sites injection** neutralisés |
+| **L5a** | MCP SAP async | `requests` → `httpx.AsyncClient` (3 sites) |
+| **L5b** | MCP Salesforce async | `simple_salesforce` → `asyncio.to_thread()` |
+| **L5c** | Tasks async | `asyncio.create_task` : stockage refs + `done_callback` (6 sites) |
+| **L5d** | TLS SAP | `verify=False` → `SAP_CA_BUNDLE_PATH` env var + WARNING démarrage |
+| **L6a** | CSP | Autorisation CDN Bootstrap / Tailwind / Fonts (Option B) |
+| **L6c** | `eval` → fonction | Refactor `eval(suggestion.action)` en référence directe |
+| **L6e** | HTTP self-loop | Appel HTTP self-loop → **import direct + propagation async** |
+| **L7-T1** | Auth cookies | Login form + Set-Cookie HttpOnly + WS cookie auth |
+| **L7-T2** | RBAC | Activation `Depends(get_current_user)` sur **18 routers** |
+| **L7-post** | Auth admin | Auth sur 9 routes backlog (webhooks subs, diagnostic, prompt, edit-quote) |
+| **L8** | Déploiement prod | Documentation opérationnelle + cleanup logs orphelins |
+
+**Nettoyages production associés :**
+
+- **95 fichiers** supprimés (scripts debug, données clients RGPD, artefacts) — commit `ea281cdd`
+- **17 scripts racine** non utilisés supprimés — `d20d4abb`
+- **8 modules orphelins** supprimés (services/ + managers/) — `1eb4737a`
+- `requirements.txt` nettoyé : retrait 4 packages non importés + ajout `pandas` — `808900d8`
+- `.gitignore` durci : blocage `*.pdf` par défaut (RGPD), exception `docs/` — `122f869a`
+
+**Documentation prod :** `docs/PRODUCTION_DEPLOYMENT.md`, `docs/AUTH_ARCHITECTURE.md`
+
+---
+
+### 7. Administration LLM Dynamique & Benchmark ⭐ NOUVEAU (v3.1.0 - mai 2026)
+
+**Objectif :** Permettre à l'administrateur de **changer le LLM utilisé sans redémarrer NOVA** et de **comparer les modèles sur des cas réels** via un système de benchmark intégré.
+
+#### 7.1 LLMRouter Dynamique
+
+**Architecture :**
+
+- Configuration **en base PostgreSQL** (tables `llm_providers` + `llm_configuration`)
+- **Chaîne ordonnée** : principal (`priority=0`) puis fallbacks
+- **Bascule automatique** sur fallback en cas d'échec LLM courant
+- **Cache TTL 60 s** + `reload()` instantané après modification admin
+- **Fallback rétrocompatible** : si aucune config en base → `.env` (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`)
+- Support **multi-format** : `anthropic` (Messages API) et `openai` (Chat Completions)
+- **API keys chiffrées** en base (`services/encryption_service.py` — Fernet)
+
+**Fichier principal : `services/llm_router.py`** (singleton)
+
+#### 7.2 Interface Admin LLM
+
+**Accès :** `/admin/llm` (auth indépendante du JWT utilisateur, session token TTL 4 h, password bcrypt + question de secours)
+
+**Fonctionnalités :**
+
+- Création/édition de **providers** (Anthropic, OpenAI, Mistral, custom OpenAI-compatible)
+- Gestion **chaîne fallback** ordonnée (drag-and-drop priorité)
+- Affichage **coûts $/M tokens** par modèle (input / output) avec fallback famille
+- Test de connectivité direct depuis l'interface
+- Masquage des API keys (préfixe + `***` + suffixe)
+
+**Fichiers :**
+
+- `templates/admin_llm.html` — formulaire login + dashboard (charte IT Spirit)
+- `static/admin_llm.js` — logique frontend pure (sans framework)
+- `routes/routes_admin.py` — sous-routeur `llm_admin_router` (préfixe `/api/admin/llm`)
+
+#### 7.3 Benchmark LLM
+
+**Objectif :** comparer plusieurs LLM sur des emails de test réels pour choisir le meilleur modèle.
+
+**Modèle de données (PostgreSQL) :**
+
+| Table | Description |
+| ----- | ----------- |
+| `benchmark_cases` | Cas de test : email + sortie attendue (client + produits) |
+| `benchmark_runs` | Sessions de comparaison (quels LLMs, quels cas, statut) |
+| `benchmark_results` | Résultat par LLM × cas : réponse brute, latence, scores |
+
+**Scores automatiques (0.0 → 1.0) :**
+
+- `score_json_valid` — JSON parsable
+- `score_client_match` — client extrait correct
+- `score_product_recall` — % produits attendus trouvés
+- `score_product_precision` — % produits extraits pertinents
+- `score_qty_accuracy` — exactitude quantités
+- `score_global` — agrégat pondéré
+
+**Endpoints :**
+
+```
+GET/POST/PATCH/DELETE /api/admin/llm/benchmark/cases    # CRUD cas
+POST /api/admin/llm/benchmark/runs                       # Lance un run
+GET  /api/admin/llm/benchmark/runs                       # Liste runs
+GET  /api/admin/llm/benchmark/runs/{id}                  # Détails + résultats
+GET  /api/admin/llm/benchmark/runs/{id}/export           # Export résultats
+```
+
+**Nettoyage runs orphelins :** au démarrage, `main.py` remet à `error` tout `BenchmarkRun.status='running'` (lifespan startup).
+
+**Modèles supportés par défaut :**
+
+- Anthropic : `claude-opus-4-7`, `claude-sonnet-4-6`, `claude-haiku-4-5`
+- OpenAI : `gpt-4o`, `gpt-4o-mini`, `gpt-4.1-mini`, `gpt-4.1-nano`
+
+---
+
+### 8. Charte IT Spirit & Build Frontend ⭐ NOUVEAU (v3.1.0 - mai 2026)
+
+- **Charte graphique IT Spirit** appliquée sur Mail-to-Biz (`a687bd7f`)
+  - Mode **dark/light** avec toggle
+  - Palette : `--primary-blue: #02B9FD` + `--primary-purple: #832DFE`
+  - Feuille de styles partagée : `static/it_spirit_styles.css`
+- **`dev-front.bat`** (`ec552135`) : watch auto-rebuild frontend (Vite watch mode) pour dev sans `npm run dev`
+- **Charts** : ajout `static/chart.umd.min.js` pour visualisations dashboard
+
+---
+
+### 9. Moteur de Pricing Intelligent RONDOT-SAS ⭐
 
 **Objectif :** Calculer automatiquement les prix de vente selon l'organigramme décisionnel RONDOT-SAS (4 CAS déterministes).
 
@@ -1860,6 +2182,70 @@ POST /api/quote-management/quotes/delete  # Suppression
 GET  /api/quote-management/quotes/stats   # Statistiques
 ```
 
+### Authentification (v3.0.0) ⭐ NOUVEAU
+
+```
+POST /api/auth/login                   # Login SAP → JWT HttpOnly cookies
+POST /api/auth/refresh                 # Rotation refresh token
+POST /api/auth/logout                  # Révocation + suppression cookies
+GET  /api/auth/me                      # Profil utilisateur courant
+
+# Session SAP B1 (B1SESSION serveur, jamais exposé au front)
+POST /api/sapauth/login                # Login SAP B1
+GET  /api/sapauth/me                   # Session courante
+POST /api/sapauth/keepalive            # Glisse expiration
+GET  /api/sapauth/ping                 # Test session B1
+POST /api/sapauth/logout               # Logout B1
+```
+
+### Multi-Tenant Admin (v3.0.0) ⭐ NOUVEAU
+
+```
+# Sociétés
+GET/POST    /api/admin/societies
+PATCH       /api/admin/societies/{id}
+
+# Utilisateurs (rôles ADMIN | MANAGER | ADV)
+GET/POST    /api/admin/users
+PATCH       /api/admin/users/{id}
+DELETE      /api/admin/users/{id}
+
+# Boîtes mail Office 365
+GET/POST    /api/admin/mailboxes
+PATCH       /api/admin/mailboxes/{id}
+
+# Permissions utilisateur × boîte mail
+POST/DELETE /api/admin/permissions
+```
+
+### Administration LLM Dynamique (v3.1.0) ⭐ NOUVEAU
+
+```
+# Auth admin LLM (session token TTL 4h, indépendant du JWT user)
+POST /api/admin/llm/login              # Mot de passe admin
+POST /api/admin/llm/recover            # Question de secours
+
+# Providers + chaîne fallback
+GET/POST/PATCH/DELETE /api/admin/llm/providers
+GET/PUT /api/admin/llm/config          # Chaîne ordonnée (priority asc)
+POST /api/admin/llm/reload             # Recharge cache LLMRouter
+GET  /api/admin/llm/pricing            # Coûts $/M tokens par modèle
+
+# Benchmark LLM
+GET/POST/PATCH/DELETE /api/admin/llm/benchmark/cases
+POST /api/admin/llm/benchmark/runs                    # Lance comparaison
+GET  /api/admin/llm/benchmark/runs                    # Liste runs
+GET  /api/admin/llm/benchmark/runs/{id}               # Résultats + scores
+GET  /api/admin/llm/benchmark/runs/{id}/export        # Export CSV/JSON
+```
+
+### Transport DHL & Colisage (v2.9.0) ⭐ NOUVEAU
+
+```
+POST /api/packing/calculate            # Calcul colisage FFD
+POST /api/shipping/quote               # Tarif DHL Express (Basic Auth)
+```
+
 ### Système
 
 ```
@@ -1873,10 +2259,12 @@ GET  /docs                             # Documentation Swagger
 ### Interfaces Web
 
 ```
+GET  /                                 # Page de login NOVA
 GET  /interface/itspirit               # NOVA Assistant
-GET  /mail-to-biz                      # Mail-to-Biz React SPA
+GET  /mail-to-biz                      # Mail-to-Biz React SPA (charte IT Spirit dark/light)
 GET  /quote-management                 # Quote Management
 GET  /edit-quote/{quote_id}            # Édition devis
+GET  /admin/llm                        # Administration LLM dynamique + benchmark ⭐ NOUVEAU
 ```
 
 ---
@@ -2000,6 +2388,56 @@ WEBSOCKET_TIMEOUT=300
 USER_VALIDATION_ENABLED=true
 AUTO_SUGGEST_THRESHOLD=0.8
 MAX_ALTERNATIVES=5
+```
+
+#### Authentification & Sécurité (v3.0.0) ⭐ NOUVEAU
+
+```env
+# Mode (active cookies Secure HTTPS si "production")
+NOVA_MODE=production
+
+# JWT NOVA
+JWT_SECRET=***                          # Secret long aléatoire (32+ chars)
+JWT_ACCESS_TTL=900                      # 15 minutes
+JWT_REFRESH_TTL=2592000                 # 30 jours
+
+# Session SAP B1 (cookie pa_session signé HMAC)
+SAP_SESSION_SECRET=***                  # HMAC-SHA256
+SAP_SESSION_IDLE_TTL=1800               # 30 min sliding
+SAP_SESSION_ABSOLUTE_TTL=28800          # 8h max
+
+# TLS SAP (L5d - remplace verify=False)
+SAP_CA_BUNDLE_PATH=C:\certs\sap_ca.pem  # Chemin CA bundle SAP (laisser vide → WARNING)
+
+# Webhook Microsoft Graph signature HMAC (L3)
+WEBHOOK_HMAC_SECRET=***
+```
+
+#### Transport DHL Express (v2.9.0) ⭐ NOUVEAU
+
+```env
+DHL_API_BASE_URL=https://express.api.dhl.com/mydhlapi
+DHL_API_USERNAME=rondotFR
+DHL_API_PASSWORD=***
+DHL_ACCOUNT_NUMBER=***
+DHL_SHIPPER_COUNTRY=FR
+DHL_SHIPPER_POSTAL_CODE=***
+DHL_CACHE_TTL_SECONDS=300
+```
+
+#### Administration LLM (v3.1.0) ⭐ NOUVEAU
+
+```env
+# Fallback si aucune config en base llm_providers/llm_configuration
+ANTHROPIC_API_KEY=sk-ant-***
+OPENAI_API_KEY=sk-proj-***
+
+# Chiffrement des api_key_encrypted en DB
+LLM_ENCRYPTION_KEY=***                  # Clé Fernet (44 chars base64)
+
+# Cache LLMRouter
+LLM_ROUTER_CACHE_TTL=60                 # secondes
+LLM_HTTP_TIMEOUT=30                     # secondes
 ```
 
 ---
@@ -2224,6 +2662,143 @@ docker run -d -p 8000:8000 --env-file .env --name nova nova-server
 
 ---
 
+## 🎉 Nouveautés Version 3.2.0 (29/05/2026) ⭐ EN COURS
+
+### Améliorations Admin LLM
+
+Itération sur l'interface d'administration des modèles LLM (commits `dabe3f23` + `c1eaa43e`) :
+
+- Ergonomie : drag-and-drop chaîne fallback, masquage API keys, indicateurs coût
+- Benchmark : reprise des runs orphelins au démarrage (`main.py` lifespan)
+- Affichage tarifs `$/M tokens` avec fallback famille (claude-opus → claude-opus-4-7, etc.)
+- Charts : ajout `static/chart.umd.min.js` pour visualisations
+
+---
+
+## 🎉 Nouveautés Version 3.1.0 (28/05/2026)
+
+### Administration LLM Dynamique + Benchmark ⭐ MAJEUR
+
+Permet de **changer le LLM utilisé en production sans redémarrer** NOVA, et de **comparer les modèles** sur cas réels.
+
+**Composants livrés** :
+
+- `services/llm_router.py` — singleton routeur dynamique multi-providers
+- `templates/admin_llm.html` + `static/admin_llm.js` — UI admin charte IT Spirit
+- `routes/routes_admin.py::llm_admin_router` — préfixe `/api/admin/llm`
+- Tables PostgreSQL : `llm_providers`, `llm_configuration`, `admin_credentials`, `benchmark_cases`, `benchmark_runs`, `benchmark_results`
+- `services/encryption_service.py` — chiffrement Fernet API keys
+
+**Fonctionnalités** :
+
+- ✅ Chaîne ordonnée principal → fallbacks avec bascule auto en cas d'échec
+- ✅ Cache TTL 60 s + `reload()` instantané après modification admin
+- ✅ Rétrocompatibilité `.env` si pas de config en base
+- ✅ Support `anthropic` (Messages API) + `openai` (Chat Completions)
+- ✅ Benchmark : 6 scores auto (JSON valid, client, product recall/precision, qty, global)
+- ✅ Export résultats benchmark CSV/JSON
+
+### Modification Price Engine (28/05/2026)
+
+Commit `b3261044` — ajustement moteur de prix RONDOT-SAS + composant `PriceEditor.tsx` allégé.
+
+### Charte IT Spirit dark/light
+
+Commit `a687bd7f` — application de la charte IT Spirit sur Mail-to-Biz avec toggle dark/light. Feuille de style partagée `static/it_spirit_styles.css`.
+
+### Outillage dev
+
+- `dev-front.bat` (`ec552135`) : watch auto-rebuild Vite pour développer sans `npm run dev` côté front
+
+---
+
+## 🎉 Nouveautés Version 3.0.0 (mai 2026) — Hardening Production
+
+### Auth & Multi-Tenant ⭐ MAJEUR
+
+NOVA passe en mode production sécurisé :
+
+- **Auth JWT cookies HttpOnly Secure** (L7-T1) — login form, refresh rotatif, WS cookie auth
+- **RBAC** : `Depends(get_current_user)` activé sur 18 routers métier (L7-T2)
+- **9 routes admin backlog** sécurisées : webhooks subs, diagnostic, prompt, edit-quote (L7-post)
+- **Multi-tenant** : sociétés, utilisateurs (ADMIN/MANAGER/ADV), boîtes mail, permissions
+- **Session SAP B1** (`auth/sap_session/`) — B1SESSION serveur signé HMAC, jamais transmis au front
+
+### Sécurité (L1 → L8)
+
+| Lot | Action |
+| --- | ------ |
+| L1 | Cleanup fichiers obsolètes pré-prod |
+| L2 | `.env` : doublons + variables obsolètes + gpt-4.1 retiré |
+| L3 | Modèles LLM, **DB fail-fast**, **webhook HMAC**, SAP logout |
+| L4 | Helpers `escape_soql/odata/safe_int` + **23 sites injection** neutralisés |
+| L5a-c | MCP async : `httpx.AsyncClient` + `asyncio.to_thread` + tasks tracking |
+| L5d | TLS SAP : `SAP_CA_BUNDLE_PATH` au lieu de `verify=False` |
+| L6 | CSP, suppression `eval`, HTTP self-loop → import direct |
+| L7 | Auth système complet (T1 + T2 + post) |
+| L8 | Documentation déploiement + cleanup logs |
+
+### Nettoyage Production
+
+- **95 fichiers** supprimés (debug scripts, données clients RGPD, artefacts)
+- **17 scripts racine** non utilisés supprimés
+- **8 modules orphelins** services/ + managers/ supprimés
+- `requirements.txt` : -4 packages non importés, +`pandas`
+- `.gitignore` : `*.pdf` bloqué par défaut (RGPD), exception `docs/`
+
+### Service Windows NSSM
+
+NOVA tourne désormais en **service Windows** (`NOVA-Backend`).
+
+```powershell
+Restart-Service NOVA-Backend           # Redémarrage propre (recommandé)
+Get-Service NOVA-Backend               # Statut
+```
+
+> ⚠️ Ne **jamais** lancer `python main.py` à la main si le service tourne déjà (conflit port + session SAP).
+
+---
+
+## 🎉 Nouveautés Version 2.10.0 (mars 2026)
+
+### Qualification Client Français + Recherche Robuste
+
+- 🇫🇷 Extraction SIRET/TVA depuis corps + signature email
+- 🔍 Cross-check INSEE + Pappers avant matching SAP
+- ♻️ Refonte recherche SAP : multi-champs + variantes (SA/SAS/SARL) + fuzzy fallback
+- 🐛 Fix faux positifs sur domaines emails partagés (gmail, outlook)
+
+Commits : `e1051bfc` (qualification française), `bcb6cc63` (recherche robuste), `7245797b` (fix identification client).
+
+---
+
+## 🎉 Nouveautés Version 2.9.0 (mars 2026)
+
+### Transport DHL Express + Colisage ⭐ MAJEUR
+
+Module complet de calcul du colisage et du tarif transport intégré au workflow devis.
+
+**Pipeline :** Produits → PackingService (FFD) → Validation → TransportService (DHL) → Prix final.
+
+**Composants** :
+
+- `services/packing/` — box catalog + algorithme FFD + service
+- `services/transport/` — interface CarrierAdapter + DHL adapter MyDHL API
+- `routes/routes_packing.py`, `routes/routes_shipping.py`
+- `mail-to-biz/src/components/ShippingCalculatorPanel.tsx` (~600 lignes)
+
+**Documentation détaillée** : [`docs/transport_and_packing.md`](docs/transport_and_packing.md)
+
+### Création Devis Manuel & par Téléphone
+
+- `ManualQuoteModal.tsx` : saisie directe client + produits depuis l'inbox
+- Bypass Microsoft Graph mais réutilise toute la chaîne d'analyse (LLM + matching + pricing)
+- Cas d'usage : prise de commande téléphonique, devis ad-hoc
+
+Commits : `bb7b531e` (mail manuel + dimensions/volume DHL), `c780d54e` (devis tél + perso tarif DHL).
+
+---
+
 ## 🎉 Nouveautés Version 2.6.0 (13/02/2026)
 
 ### Webhook Microsoft Graph - Traitement Automatique 100% ⭐ MAJEUR
@@ -2392,40 +2967,81 @@ curl -X POST http://localhost:8001/diagnostic/recheck
 - [X] Cache local SQLite (23,571 produits SAP)
 - [X] Statistiques temps réel apprentissage
 
-### 📋 Phase 6 - Production Avancée (En cours)
+### ✅ Phase 6 - Transport DHL & Devis Manuel (Terminée - mars 2026)
 
-- [ ] Transport optimisé (API DHL, UPS, Chronopost, Geodis)
+- [X] Module Colisage FFD (services/packing/)
+- [X] Adapter DHL Express (services/transport/carriers/dhl_adapter.py)
+- [X] Cache transport TTL 5 min
+- [X] Composant ShippingCalculatorPanel
+- [X] Création devis manuel / téléphonique (ManualQuoteModal)
+- [X] Qualification client français (SIRET + Pappers + INSEE)
+- [X] Recherche client SAP robuste (multi-stratégies + fuzzy)
+
+### ✅ Phase 7 - Hardening Pré-Production (Terminée - mai 2026)
+
+- [X] Auth JWT NOVA cookies HttpOnly Secure (L7-T1)
+- [X] RBAC `Depends(get_current_user)` sur 18 routers (L7-T2)
+- [X] Multi-tenant : sociétés / utilisateurs / mailboxes / permissions
+- [X] Session SAP B1 (auth/sap_session/) — B1SESSION jamais exposé au front
+- [X] Anti-injection : escape_soql / escape_odata / safe_int (23 sites - L4)
+- [X] Async refactor : MCP SAP/Salesforce via httpx.AsyncClient (L5)
+- [X] TLS SAP : SAP_CA_BUNDLE_PATH au lieu de verify=False (L5d)
+- [X] CSP, suppression eval (L6)
+- [X] Webhook HMAC, DB fail-fast, SAP logout propre (L3)
+- [X] Nettoyage : 95 fichiers + 17 scripts + 8 modules orphelins
+- [X] Documentation déploiement (docs/PRODUCTION_DEPLOYMENT.md)
+
+### ✅ Phase 8 - Admin LLM Dynamique (Terminée - mai 2026)
+
+- [X] LLMRouter dynamique avec chaîne fallback PostgreSQL
+- [X] Interface admin `/admin/llm` (templates/admin_llm.html)
+- [X] Chiffrement Fernet des API keys en base
+- [X] Benchmark LLM : cases / runs / results + scoring auto
+- [X] 6 scores (JSON valid, client, product recall/precision, qty, global)
+- [X] Cache TTL 60 s + reload instantané
+- [X] Charte IT Spirit dark/light sur Mail-to-Biz
+
+### 📋 Phase 9 - Production Avancée (Backlog)
+
+- [ ] Multi-transporteurs : UPS, Chronopost, Geodis (interface CarrierAdapter prête)
 - [ ] Comparaison transporteurs en temps réel
-- [ ] HTTPS + Authentification utilisateurs
 - [ ] Application mobile React Native
 - [ ] Machine Learning pricing avancé
 - [ ] Export PDF devis automatique
-- [ ] Envoi automatique emails clients
-- [ ] Webhooks temps réel (notifications)
+- [ ] Envoi automatique emails clients (réponse devis)
 - [ ] Support multidevise étendu (JPY, CNY)
 - [ ] Gestion remises clients SAP hiérarchiques
 - [ ] Workflow approbation multi-niveaux
 - [ ] Analytics avancés (BI dashboard)
+- [ ] SQLite WAL avant workers > 1 (cf. memo `project_backlog_postprod`)
 
 ---
 
 ## 🔐 Sécurité
 
-### Mesures Actuelles
+### Mesures Actuelles (post-L1→L8, mai 2026)
 
-- ✅ Pare-feu Windows configuré (port 8000)
-- ✅ API Keys sécurisées (.env gitignored)
-- ✅ Authentification SAP/Salesforce/Graph
-- ✅ Tokens OAuth2 en mémoire uniquement
-- ✅ Validation SIRET/adresses via APIs officielles
+- ✅ **Pare-feu Windows** configuré (port 8001 NOVA, 8000 BIOFORCE)
+- ✅ **HTTPS** via reverse-proxy `nova-rondot.itspirit.ovh`
+- ✅ **Auth JWT NOVA** cookies HttpOnly Secure SameSite=Strict (L7)
+- ✅ **RBAC** : 18 routers métier protégés + rôles ADMIN/MANAGER/ADV
+- ✅ **Multi-tenant** : permissions utilisateur × boîte mail
+- ✅ **Session SAP B1** signée HMAC-SHA256 — B1SESSION jamais exposé au front
+- ✅ **API Keys chiffrées** en base (Fernet) pour LLM providers
+- ✅ **Anti-injection** : `escape_soql` / `escape_odata` / `safe_int` (L4 - 23 sites)
+- ✅ **TLS SAP** : CA bundle obligatoire (`SAP_CA_BUNDLE_PATH`, L5d)
+- ✅ **Webhook HMAC** : validation signature Microsoft Graph
+- ✅ **DB fail-fast** : refus démarrage si DATABASE_URL invalide
+- ✅ **CSP** : Content-Security-Policy stricte (L6a)
+- ✅ **`.env` gitignored** + `*.pdf` bloqué par défaut (RGPD, L1)
+- ✅ Validation SIRET/adresses via APIs officielles (INSEE, Pappers, Adresse Gouv)
 
 ### À Implémenter
 
-- [ ] HTTPS avec certificat SSL
-- [ ] Authentification utilisateurs (JWT)
-- [ ] Rate limiting API
-- [ ] Audit logs des actions critiques
-- [ ] Chiffrement base de données sensibles
+- [ ] Rate limiting API (slowapi)
+- [ ] Audit logs des actions critiques (table dédiée)
+- [ ] Chiffrement at-rest base de données PostgreSQL
+- [ ] Rotation automatique JWT_SECRET
 
 ---
 
@@ -2516,13 +3132,15 @@ Propriétaire - ITSpirit © 2025-2026
 
 ---
 
-**🌟 NOVA-SERVER est opérationnel et accessible publiquement !**
+**🌟 NOVA-SERVER est opérationnel en production derrière `nova-rondot.itspirit.ovh` !**
 
-**Version** : 2.6.0
-**Build** : 2026-02-13
+**Version** : 3.2.0
+**Build** : 2026-05-29
 **Python** : 3.10+
 **FastAPI** : 0.104+
 **React** : 18+
+**PostgreSQL** : 13+ (pg_trgm)
+**Service Windows** : `NOVA-Backend` (NSSM)
 
 ---
 

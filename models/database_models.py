@@ -72,6 +72,69 @@ class AdminCredentials(Base):
     security_answer_hash = Column(String(255), nullable=False)
     updated_at = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
 
+
+# ===========================================================================
+# Benchmark LLM : jeu de cas tests, sessions de comparaison, résultats
+# ===========================================================================
+
+class BenchmarkCase(Base):
+    """Email test avec sortie attendue (ground truth) pour comparaison LLM."""
+    __tablename__ = 'benchmark_cases'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    label = Column(String(200), nullable=False)
+    email_content = Column(Text, nullable=False)
+    expected_output = Column(JSON, nullable=False)
+    # expected_output = {"client": "Nom Client", "products": [{"code": "REF", "name": "...", "quantity": N}]}
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
+    updated_at = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
+
+
+class BenchmarkRun(Base):
+    """Session de comparaison : quels LLMs ont été testés, quand."""
+    __tablename__ = 'benchmark_runs'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    label = Column(String(200), nullable=True)
+    llm_entries = Column(JSON, nullable=False)
+    # llm_entries = [{"provider_id": 1, "provider_name": "Anthropic", "model_name": "claude-sonnet-4-6"}]
+    case_ids = Column(JSON, nullable=False)
+    # case_ids = [1, 2, 3]  ids des BenchmarkCase inclus dans ce run
+    status = Column(String(20), nullable=False, default='pending')
+    # status: pending | running | completed | error
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
+
+
+class BenchmarkResult(Base):
+    """Résultat d'un LLM sur un cas test dans une session donnée."""
+    __tablename__ = 'benchmark_results'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    run_id = Column(Integer, ForeignKey('benchmark_runs.id', ondelete='CASCADE'),
+                    nullable=False, index=True)
+    case_id = Column(Integer, ForeignKey('benchmark_cases.id', ondelete='CASCADE'),
+                     nullable=False, index=True)
+    provider_id = Column(Integer, ForeignKey('llm_providers.id', ondelete='SET NULL'),
+                         nullable=True, index=True)
+    provider_name = Column(String(100), nullable=False)
+    model_name = Column(String(200), nullable=False)
+    raw_response = Column(Text, nullable=True)
+    parsed_response = Column(JSON, nullable=True)
+    latency_ms = Column(Integer, nullable=True)
+    error_message = Column(Text, nullable=True)
+    # Scores automatiques (0.0 à 1.0)
+    score_json_valid = Column(Float, nullable=True)
+    score_client_match = Column(Float, nullable=True)
+    score_product_recall = Column(Float, nullable=True)
+    score_product_precision = Column(Float, nullable=True)
+    score_qty_accuracy = Column(Float, nullable=True)
+    score_global = Column(Float, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
+
+
 # Configuration base de données
 DATABASE_URL = os.getenv('DATABASE_URL')
 engine = create_engine(DATABASE_URL)

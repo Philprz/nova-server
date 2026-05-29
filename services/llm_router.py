@@ -416,6 +416,67 @@ class LLMRouter:
             elapsed_ms = int((time.monotonic() - t0) * 1000)
             return False, f"{type(exc).__name__}: {exc}", elapsed_ms
 
+    async def call_for_benchmark(
+        self,
+        provider_id: int,
+        model_name: str,
+        system_prompt: str,
+        user_message: str,
+        max_tokens: int = 1024,
+        temperature: float = 0.0,
+    ) -> dict:
+        """
+        Appelle un LLM précis (provider_id + model_name) pour un benchmark.
+        Retourne un dict avec : raw_response, latency_ms, error (None si succès).
+        N'utilise pas la chaîne fallback — appel direct et isolé.
+        """
+        db: Session = SessionLocal()
+        try:
+            prov = db.query(LLMProvider).filter(LLMProvider.id == provider_id).first()
+            if not prov:
+                return {
+                    "raw_response": None,
+                    "latency_ms": 0,
+                    "error": f"Provider id={provider_id} introuvable",
+                }
+            try:
+                api_key = decrypt(prov.api_key_encrypted)
+            except ValueError as exc:
+                return {
+                    "raw_response": None,
+                    "latency_ms": 0,
+                    "error": f"Cle indechiffrable : {exc}",
+                }
+            entry = _Entry(
+                name=prov.name,
+                base_url=prov.base_url,
+                api_format=prov.api_format,
+                api_key=api_key,
+                model=model_name,
+                priority=0,
+            )
+        finally:
+            db.close()
+
+        t0 = time.monotonic()
+        try:
+            raw = await self._call_entry(
+                entry, system_prompt, user_message, max_tokens, temperature
+            )
+            elapsed_ms = int((time.monotonic() - t0) * 1000)
+            normalized = self._normalize_response(raw, provider_name=prov.name)
+            return {"raw_response": normalized, "latency_ms": elapsed_ms, "error": None}
+        except httpx.HTTPStatusError as exc:
+            elapsed_ms = int((time.monotonic() - t0) * 1000)
+            sc = exc.response.status_code if exc.response is not None else "?"
+            body = exc.response.text[:300] if exc.response is not None else ""
+            return {"raw_response": None, "latency_ms": elapsed_ms,
+                    "error": f"HTTP {sc}: {body}"}
+        except Exception as exc:
+            elapsed_ms = int((time.monotonic() - t0) * 1000)
+            return {"raw_response": None, "latency_ms": elapsed_ms,
+                    "error": f"{type(exc).__name__}: {exc}"}
+
     async def test_provider(self, provider_id: int) -> Tuple[bool, str]:
         """
         Test minimal d'un provider precis (utilise par l'endpoint admin).

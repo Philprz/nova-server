@@ -203,6 +203,7 @@
     <div class="tabs">
       <div class="tab active" data-tab="providers">Fournisseurs</div>
       <div class="tab" data-tab="config">Configuration</div>
+      <div class="tab" data-tab="benchmark">Benchmark</div>
     </div>
 
     <div id="dash-flash" class="flash hidden"></div>
@@ -270,6 +271,123 @@
         <ul id="chain-test-list" class="chain-list"></ul>
       </div>
     </section>
+
+    <!-- TAB Benchmark -->
+    <section id="tab-benchmark" class="hidden">
+
+      <!-- Cas de test -->
+      <div style="display:flex; justify-content: space-between; align-items: center;">
+        <h2 style="margin: 0;">Cas de test</h2>
+        <button class="btn-primary" id="btn-add-bcase">+ Ajouter un cas</button>
+      </div>
+      <div style="overflow-x: auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th><th>Libelle</th><th>Client attendu</th>
+              <th>Produits</th><th>Date</th><th style="text-align:right;">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="benchmark-cases-tbody">
+            <tr><td colspan="6" style="text-align:center; color: var(--gray-400);">Chargement...</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Lancer un run -->
+      <h2 style="margin-top: 28px;">Lancer une comparaison</h2>
+      <div style="padding: 14px 16px; background: var(--gray-50); border: 1px solid var(--gray-200); border-radius: 8px;">
+        <label>LLMs a comparer (selection multiple)</label>
+        <div id="benchmark-llm-checkboxes" style="display:flex; flex-wrap:wrap; gap:12px; margin-top:6px; min-height: 28px;">
+          <span style="color: var(--gray-400); font-size: 13px;">Chargement...</span>
+        </div>
+        <label style="margin-top: 14px;">Libelle du run (optionnel)</label>
+        <input type="text" id="benchmark-run-label" placeholder="Ex: Comparaison Claude vs GPT - sprint 12">
+        <div style="margin-top: 14px; display: flex; align-items: center; gap: 12px;">
+          <button class="btn-primary" id="btn-launch-bench">Lancer la comparaison</button>
+          <span id="benchmark-run-status" style="font-size: 13px; color: var(--gray-500);"></span>
+        </div>
+      </div>
+
+      <!-- Historique -->
+      <div style="display:flex; justify-content: space-between; align-items: center; margin-top: 28px;">
+        <h2 style="margin: 0;">Historique des runs</h2>
+        <button class="btn-secondary" id="btn-refresh-bruns">Actualiser</button>
+      </div>
+      <div style="overflow-x: auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th><th>Libelle</th><th>LLMs</th><th>Cas</th>
+              <th>Statut</th><th>Date</th><th style="text-align:right;">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="benchmark-runs-tbody">
+            <tr><td colspan="7" style="text-align:center; color: var(--gray-400);">Aucun run</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Resultats d'un run selectionne -->
+      <div id="benchmark-results-panel" class="hidden" style="margin-top: 28px;">
+        <div style="display:flex; justify-content: space-between; align-items: center;">
+          <h2 id="benchmark-results-title" style="margin: 0;">Resultats</h2>
+          <button class="btn-secondary" id="btn-close-bresults">Fermer</button>
+        </div>
+
+        <!-- Radar Chart.js (charge depuis /static/chart.umd.min.js, compatible CSP self) -->
+        <div style="max-width: 520px; margin: 16px auto 0;">
+          <canvas id="benchmark-radar-chart"></canvas>
+        </div>
+
+        <!-- Tableau recapitulatif par LLM -->
+        <h2 style="margin-top: 24px; font-size: 16px;">Recapitulatif par LLM</h2>
+        <div style="overflow-x: auto;">
+          <table id="benchmark-summary-table">
+            <thead>
+              <tr>
+                <th>LLM</th><th>Global</th><th>JSON</th><th>Client</th>
+                <th>Rappel</th><th>Precision</th><th>Quantites</th>
+                <th>Latence moy.</th><th>Erreurs</th>
+              </tr>
+            </thead>
+            <tbody id="benchmark-summary-tbody"></tbody>
+          </table>
+        </div>
+
+        <!-- Detail par cas -->
+        <h2 style="margin-top: 24px; font-size: 16px;">Detail par cas</h2>
+        <div id="benchmark-detail-accordion"></div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<!-- =========================================================================
+  MODALE Benchmark Case
+========================================================================= -->
+<div id="bcase-modal" class="modal-backdrop hidden">
+  <div class="modal" style="max-width: 700px;">
+    <h2>Ajouter un cas de test</h2>
+    <div style="margin-bottom: 12px; padding: 12px; border: 1px dashed var(--gray-300); border-radius: 8px; background: var(--gray-50);">
+      <label style="margin-top: 0;">Importer depuis un fichier .eml (optionnel)</label>
+      <input type="file" id="bc-eml-input" accept=".eml" style="padding: 6px;">
+      <span id="bc-eml-status" style="display: block; font-size: 12px; color: var(--gray-500); margin-top: 6px;"></span>
+    </div>
+    <label>Libelle *</label>
+    <input type="text" id="bc-label" placeholder="Ex: Email client Dupont - 3 produits">
+    <label>Contenu de l'email *</label>
+    <textarea id="bc-email" rows="8" placeholder="Coller ici l'email brut..."></textarea>
+    <label>Client attendu</label>
+    <input type="text" id="bc-client" placeholder="Nom exact du client">
+    <label>Produits attendus</label>
+    <div id="bc-products-list" style="display: flex; flex-direction: column; gap: 6px;"></div>
+    <button type="button" class="btn-secondary" id="btn-add-bproduct" style="margin-top: 8px; font-size: 12px; padding: 6px 10px;">+ Produit</button>
+    <div id="bc-error" class="flash error hidden" style="margin-top: 12px;"></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" id="btn-cancel-bcase">Annuler</button>
+      <button class="btn-primary" id="btn-save-bcase">Enregistrer</button>
+    </div>
   </div>
 </div>
 
@@ -309,6 +427,7 @@
 </div>
 
 <!-- JS externe pour respecter la CSP script-src 'self' definie dans main.SecurityHeadersMiddleware -->
+<script src="/static/chart.umd.min.js"></script>
 <script src="/static/admin_llm.js"></script>
 
 </body>

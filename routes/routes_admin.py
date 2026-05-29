@@ -9,11 +9,15 @@ Auth INDEPENDANTE du JWT utilisateur (session token simple, TTL 4h).
 import os
 import re
 import time
+import json
+import asyncio
 import logging
 import secrets
+from datetime import datetime
+from difflib import SequenceMatcher
 from typing import Optional, List, Dict, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, status
 from pydantic import BaseModel, Field, field_validator
 
 import auth.auth_db as db
@@ -259,6 +263,7 @@ from sqlalchemy.exc import IntegrityError
 
 from models.database_models import (
     SessionLocal, LLMProvider, LLMConfiguration, AdminCredentials,
+    BenchmarkCase, BenchmarkRun, BenchmarkResult,
 )
 from services.encryption_service import encrypt, decrypt, mask
 from services.llm_router import get_llm_router
@@ -747,3 +752,513 @@ async def put_config(body: ConfigUpdate) -> Dict[str, Any]:
         return {"success": True, "count": len(body.chain)}
     finally:
         db_sess.close()
+
+
+# ===========================================================================
+# Benchmark LLM : cas de test, runs, résultats avec scoring automatique
+# ===========================================================================
+
+class BenchmarkCaseCreate(BaseModel):
+    label: str
+    email_content: str
+    expected_output: dict
+    # expected_output = {"client": "...", "products": [{"code":"...", "name":"...", "quantity": N}]}
+
+
+class BenchmarkRunCreate(BaseModel):
+    label: Optional[str] = None
+    provider_model_pairs: List[dict]
+    # [{"provider_id": 1, "model_name": "claude-sonnet-4-6"}, ...]
+    case_ids: Optional[List[int]] = None
+    # None = utiliser tous les cas actifs
+
+
+def _score_result(expected: dict, actual_raw: Optional[str]) -> dict:
+    """
+    Compare la sortie brute du LLM (JSON string) à la sortie attendue.
+    Retourne un dict de scores entre 0.0 et 1.0.
+    Pondération score_global : json_valid 15%, client_match 25%,
+    product_recall 30%, product_precision 15%, qty_accuracy 15%.
+    """
+    scores = {
+        "score_json_valid": 0.0,
+        "score_client_match": 0.0,
+        "score_product_recall": 0.0,
+        "score_product_precision": 0.0,
+        "score_qty_accuracy": 0.0,
+        "score_global": 0.0,
+    }
+    if not actual_raw:
+        return scores
+
+    # JSON valid
+    try:
+        actual = json.loads(actual_raw)
+        scores["score_json_valid"] = 1.0
+    except (json.JSONDecodeError, ValueError):
+        return scores
+
+    # Client match
+    exp_client = (expected.get("client") or "").strip().lower()
+    act_client = (actual.get("client") or "").strip().lower()
+    if not exp_client:
+        scores["score_client_match"] = 1.0
+    elif act_client:
+        ratio = SequenceMatcher(None, exp_client, act_client).ratio()
+        scores["score_client_match"] = 1.0 if ratio >= 0.8 else ratio
+    # sinon 0.0
+
+    # Products
+    exp_products: list = expected.get("products") or []
+    act_products: list = actual.get("products") or []
+
+    if not exp_products:
+        scores["score_product_recall"] = 1.0
+        scores["score_product_precision"] = 1.0
+        scores["score_qty_accuracy"] = 1.0
+    else:
+        matched_pairs: list = []
+        for i, ep in enumerate(exp_products):
+            exp_code = (ep.get("code") or ep.get("item_code") or "").strip().lower()
+            exp_name = (ep.get("name") or "").strip().lower()
+            best_j, best_score = -1, 0.0
+            for j, ap in enumerate(act_products):
+                act_code = (ap.get("code") or ap.get("item_code") or "").strip().lower()
+                act_name = (ap.get("name") or "").strip().lower()
+                if exp_code and act_code and exp_code == act_code:
+                    sc = 1.0
+                elif exp_name and act_name:
+                    sc = SequenceMatcher(None, exp_name, act_name).ratio()
+                else:
+                    sc = 0.0
+                if sc > best_score:
+                    best_score = sc
+                    best_j = j
+            if best_j >= 0 and best_score >= 0.8:
+                matched_pairs.append((i, best_j))
+
+        matched_count = len(matched_pairs)
+        scores["score_product_recall"] = matched_count / len(exp_products)
+        scores["score_product_precision"] = (
+            matched_count / len(act_products) if act_products else 0.0
+        )
+        if matched_pairs:
+            qty_hits = 0
+            for i, j in matched_pairs:
+                exp_qty = exp_products[i].get("quantity") or exp_products[i].get("qty")
+                act_qty = act_products[j].get("quantity") or act_products[j].get("qty")
+                if exp_qty is not None and act_qty is not None:
+                    try:
+                        if abs(float(exp_qty) - float(act_qty)) < 0.01:
+                            qty_hits += 1
+                    except (TypeError, ValueError):
+                        pass
+            scores["score_qty_accuracy"] = qty_hits / len(matched_pairs)
+
+    weights = {
+        "score_json_valid": 0.15,
+        "score_client_match": 0.25,
+        "score_product_recall": 0.30,
+        "score_product_precision": 0.15,
+        "score_qty_accuracy": 0.15,
+    }
+    scores["score_global"] = sum(scores[k] * w for k, w in weights.items())
+    return scores
+
+
+# ── Benchmark ────────────────────────────────────────────────────────────────
+
+@llm_admin_router.get("/benchmark/cases", dependencies=[Depends(require_llm_admin)])
+async def list_benchmark_cases() -> dict:
+    db: Session = SessionLocal()
+    try:
+        cases = db.query(BenchmarkCase).filter(
+            BenchmarkCase.is_active.is_(True)
+        ).order_by(BenchmarkCase.created_at.desc()).all()
+        return {"cases": [
+            {
+                "id": c.id, "label": c.label,
+                "expected_output": c.expected_output,
+                "created_at": c.created_at.isoformat(),
+            }
+            for c in cases
+        ]}
+    finally:
+        db.close()
+
+
+@llm_admin_router.post("/benchmark/cases/parse-eml",
+                       dependencies=[Depends(require_llm_admin)])
+async def parse_eml_for_benchmark(file: UploadFile = File(...)) -> dict:
+    """
+    Parse un fichier .eml et retourne le texte brut extrait.
+    Ne crée pas de cas — retourne seulement les données pour pré-remplir
+    le formulaire côté client.
+    """
+    import email as _email
+    from email import policy as _policy
+
+    if not file.filename.lower().endswith('.eml'):
+        raise HTTPException(status_code=400,
+                            detail="Fichier .eml attendu")
+
+    raw = await file.read()
+    try:
+        msg = _email.message_from_bytes(raw,
+                                        policy=_policy.default)
+    except Exception as exc:
+        raise HTTPException(status_code=422,
+                            detail=f"Impossible de parser le fichier : {exc}")
+
+    subject = str(msg.get('Subject', '')).strip()
+    sender  = str(msg.get('From', '')).strip()
+
+    body_text = ''
+    # Priorité : text/plain, sinon text/html nettoyé
+    for part in msg.walk():
+        ct = part.get_content_type()
+        if ct == 'text/plain':
+            try:
+                body_text = part.get_content()
+                break
+            except Exception:
+                payload = part.get_payload(decode=True)
+                if payload:
+                    charset = part.get_content_charset() or 'utf-8'
+                    body_text = payload.decode(charset, errors='replace')
+                    break
+    if not body_text:
+        for part in msg.walk():
+            if part.get_content_type() == 'text/html':
+                try:
+                    html = part.get_content()
+                except Exception:
+                    payload = part.get_payload(decode=True)
+                    html = payload.decode('utf-8', errors='replace') if payload else ''
+                # Suppression basique des balises HTML
+                import re as _re
+                body_text = _re.sub(r'<[^>]+>', ' ', html)
+                body_text = _re.sub(r'[ \t]{2,}', ' ', body_text)
+                body_text = '\n'.join(
+                    line.strip() for line in body_text.splitlines()
+                    if line.strip()
+                )
+                break
+
+    return {
+        "subject": subject,
+        "from":    sender,
+        "body_text": body_text[:8000],  # limite raisonnable pour un email
+    }
+
+
+@llm_admin_router.post("/benchmark/cases", status_code=status.HTTP_201_CREATED,
+                       dependencies=[Depends(require_llm_admin)])
+async def create_benchmark_case(body: BenchmarkCaseCreate) -> dict:
+    db: Session = SessionLocal()
+    try:
+        case = BenchmarkCase(
+            label=body.label,
+            email_content=body.email_content,
+            expected_output=body.expected_output,
+        )
+        db.add(case)
+        db.commit()
+        db.refresh(case)
+        return {"id": case.id, "label": case.label}
+    finally:
+        db.close()
+
+
+@llm_admin_router.delete("/benchmark/cases/{case_id}",
+                          status_code=status.HTTP_204_NO_CONTENT,
+                          dependencies=[Depends(require_llm_admin)])
+async def delete_benchmark_case(case_id: int) -> None:
+    db: Session = SessionLocal()
+    try:
+        case = db.query(BenchmarkCase).filter(BenchmarkCase.id == case_id).first()
+        if not case:
+            raise HTTPException(status_code=404, detail="Cas introuvable")
+        case.is_active = False
+        db.commit()
+    finally:
+        db.close()
+
+
+@llm_admin_router.post("/benchmark/run", status_code=status.HTTP_201_CREATED,
+                       dependencies=[Depends(require_llm_admin)])
+async def start_benchmark_run(body: BenchmarkRunCreate) -> dict:
+    """Lance un run de benchmark en arrière-plan. Retourne immédiatement le run_id."""
+    db: Session = SessionLocal()
+    try:
+        # Résoudre les case_ids
+        if body.case_ids:
+            case_ids = body.case_ids
+        else:
+            case_ids = [
+                c.id for c in db.query(BenchmarkCase).filter(
+                    BenchmarkCase.is_active.is_(True)
+                ).all()
+            ]
+        if not case_ids:
+            raise HTTPException(status_code=400, detail="Aucun cas de test disponible")
+
+        # Résoudre les noms de providers
+        llm_entries = []
+        for pair in body.provider_model_pairs:
+            prov = db.query(LLMProvider).filter(
+                LLMProvider.id == pair["provider_id"]
+            ).first()
+            if not prov:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Provider id={pair['provider_id']} introuvable",
+                )
+            llm_entries.append({
+                "provider_id": prov.id,
+                "provider_name": prov.name,
+                "model_name": pair["model_name"],
+            })
+
+        run = BenchmarkRun(
+            label=body.label,
+            llm_entries=llm_entries,
+            case_ids=case_ids,
+            status="pending",
+        )
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+        run_id = run.id
+    finally:
+        db.close()
+
+    # Lancer l'exécution en arrière-plan
+    asyncio.create_task(_execute_benchmark_run(run_id))
+    return {"run_id": run_id, "status": "pending"}
+
+
+async def _execute_benchmark_run(run_id: int) -> None:
+    """Exécute un run de benchmark de façon asynchrone."""
+    router = get_llm_router()
+
+    db: Session = SessionLocal()
+    try:
+        run = db.query(BenchmarkRun).filter(BenchmarkRun.id == run_id).first()
+        if not run:
+            return
+        run.status = "running"
+        run.started_at = datetime.now()
+        db.commit()
+        llm_entries = run.llm_entries
+        case_ids = run.case_ids
+        cases = db.query(BenchmarkCase).filter(BenchmarkCase.id.in_(case_ids)).all()
+        cases_map = {c.id: c for c in cases}
+    finally:
+        db.close()
+
+    # Prompt système NOVA standard
+    system_prompt = (
+        "Tu es NOVA, un assistant commercial. Analyse l'email suivant et extrais "
+        "les informations au format JSON strict : "
+        "{\"client\": \"NOM_CLIENT\", \"products\": [{\"code\": \"REF\", \"name\": \"NOM\", \"quantity\": N}]}. "
+        "Réponds UNIQUEMENT avec le JSON, sans texte autour."
+    )
+
+    for case_id in case_ids:
+        case = cases_map.get(case_id)
+        if not case:
+            continue
+
+        # Appels parallèles pour tous les LLMs sur ce cas
+        tasks = [
+            router.call_for_benchmark(
+                provider_id=entry["provider_id"],
+                model_name=entry["model_name"],
+                system_prompt=system_prompt,
+                user_message=case.email_content,
+                max_tokens=1024,
+                temperature=0.0,
+            )
+            for entry in llm_entries
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        db = SessionLocal()
+        try:
+            for idx, entry in enumerate(llm_entries):
+                res = results[idx]
+                if isinstance(res, Exception):
+                    raw_response = None
+                    latency_ms = 0
+                    error_message = str(res)
+                else:
+                    raw_response = res.get("raw_response")
+                    latency_ms = res.get("latency_ms", 0)
+                    error_message = res.get("error")
+
+                parsed = None
+                if raw_response:
+                    try:
+                        parsed = json.loads(raw_response)
+                    except (json.JSONDecodeError, ValueError):
+                        pass
+
+                scores = _score_result(case.expected_output, raw_response)
+
+                result = BenchmarkResult(
+                    run_id=run_id,
+                    case_id=case_id,
+                    provider_id=entry["provider_id"],
+                    provider_name=entry["provider_name"],
+                    model_name=entry["model_name"],
+                    raw_response=raw_response,
+                    parsed_response=parsed,
+                    latency_ms=latency_ms,
+                    error_message=error_message,
+                    **scores,
+                )
+                db.add(result)
+            db.commit()
+        finally:
+            db.close()
+
+    # Marquer le run comme terminé
+    db = SessionLocal()
+    try:
+        run = db.query(BenchmarkRun).filter(BenchmarkRun.id == run_id).first()
+        if run:
+            run.status = "completed"
+            run.completed_at = datetime.now()
+            db.commit()
+    finally:
+        db.close()
+
+
+@llm_admin_router.get("/benchmark/runs", dependencies=[Depends(require_llm_admin)])
+async def list_benchmark_runs() -> dict:
+    db: Session = SessionLocal()
+    try:
+        runs = db.query(BenchmarkRun).order_by(
+            BenchmarkRun.created_at.desc()
+        ).limit(50).all()
+        return {"runs": [
+            {
+                "id": r.id,
+                "label": r.label,
+                "status": r.status,
+                "llm_count": len(r.llm_entries or []),
+                "case_count": len(r.case_ids or []),
+                "created_at": r.created_at.isoformat(),
+                "completed_at": r.completed_at.isoformat() if r.completed_at else None,
+            }
+            for r in runs
+        ]}
+    finally:
+        db.close()
+
+
+@llm_admin_router.get("/benchmark/runs/{run_id}", dependencies=[Depends(require_llm_admin)])
+async def get_benchmark_run(run_id: int) -> dict:
+    """Retourne le détail d'un run : résultats par cas et par LLM, scores agrégés."""
+    db: Session = SessionLocal()
+    try:
+        run = db.query(BenchmarkRun).filter(BenchmarkRun.id == run_id).first()
+        if not run:
+            raise HTTPException(status_code=404, detail="Run introuvable")
+
+        results = db.query(BenchmarkResult).filter(
+            BenchmarkResult.run_id == run_id
+        ).all()
+
+        cases = db.query(BenchmarkCase).filter(
+            BenchmarkCase.id.in_(run.case_ids or [])
+        ).all()
+        cases_map = {c.id: c.label for c in cases}
+
+        # Agrégation par LLM
+        llm_agg: dict = {}
+        for r in results:
+            key = f"{r.provider_name}:{r.model_name}"
+            if key not in llm_agg:
+                llm_agg[key] = {
+                    "provider_name": r.provider_name,
+                    "model_name": r.model_name,
+                    "scores": {
+                        "score_json_valid": [],
+                        "score_client_match": [],
+                        "score_product_recall": [],
+                        "score_product_precision": [],
+                        "score_qty_accuracy": [],
+                        "score_global": [],
+                    },
+                    "avg_latency_ms": [],
+                    "error_count": 0,
+                }
+            entry = llm_agg[key]
+            if r.error_message:
+                entry["error_count"] += 1
+            for sk in entry["scores"]:
+                val = getattr(r, sk, None)
+                if val is not None:
+                    entry["scores"][sk].append(val)
+            if r.latency_ms is not None:
+                entry["avg_latency_ms"].append(r.latency_ms)
+
+        # Calcul des moyennes
+        llm_summary = []
+        for key, entry in llm_agg.items():
+            avg_scores = {
+                sk: round(sum(vals) / len(vals), 3) if vals else 0.0
+                for sk, vals in entry["scores"].items()
+            }
+            avg_lat = (
+                int(sum(entry["avg_latency_ms"]) / len(entry["avg_latency_ms"]))
+                if entry["avg_latency_ms"] else 0
+            )
+            llm_summary.append({
+                "provider_name": entry["provider_name"],
+                "model_name": entry["model_name"],
+                "avg_scores": avg_scores,
+                "avg_latency_ms": avg_lat,
+                "error_count": entry["error_count"],
+            })
+
+        # Détail par cas
+        detail_by_case = []
+        for case_id in (run.case_ids or []):
+            case_results = [r for r in results if r.case_id == case_id]
+            detail_by_case.append({
+                "case_id": case_id,
+                "case_label": cases_map.get(case_id, f"Cas #{case_id}"),
+                "results": [
+                    {
+                        "provider_name": r.provider_name,
+                        "model_name": r.model_name,
+                        "score_global": r.score_global,
+                        "score_json_valid": r.score_json_valid,
+                        "score_client_match": r.score_client_match,
+                        "score_product_recall": r.score_product_recall,
+                        "score_product_precision": r.score_product_precision,
+                        "score_qty_accuracy": r.score_qty_accuracy,
+                        "latency_ms": r.latency_ms,
+                        "error_message": r.error_message,
+                        "raw_response": r.raw_response,
+                    }
+                    for r in case_results
+                ],
+            })
+
+        return {
+            "run": {
+                "id": run.id,
+                "label": run.label,
+                "status": run.status,
+                "created_at": run.created_at.isoformat(),
+                "completed_at": run.completed_at.isoformat() if run.completed_at else None,
+            },
+            "llm_summary": llm_summary,
+            "detail_by_case": detail_by_case,
+        }
+    finally:
+        db.close()
