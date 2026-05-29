@@ -216,16 +216,18 @@
           <button class="btn-primary" id="btn-add-provider">+ Ajouter un fournisseur</button>
         </div>
       </div>
-      <table>
-        <thead>
-          <tr>
-            <th>Nom</th><th>Format</th><th>Base URL</th><th>Cle</th><th>Modeles</th><th>Statut</th><th></th>
-          </tr>
-        </thead>
-        <tbody id="providers-tbody">
-          <tr><td colspan="7" style="text-align: center; color: var(--gray-400);">Chargement...</td></tr>
-        </tbody>
-      </table>
+      <div style="overflow-x: auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>Nom</th><th>Format</th><th>Base URL</th><th>Cle</th><th>Modeles</th><th>Statut</th><th style="text-align: right;">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="providers-tbody">
+            <tr><td colspan="7" style="text-align: center; color: var(--gray-400);">Chargement...</td></tr>
+          </tbody>
+        </table>
+      </div>
     </section>
 
     <!-- TAB Configuration -->

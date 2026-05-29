@@ -19,6 +19,59 @@
   let providers = [];
   let chain = [];
   let chainDirty = false;
+  let pricing = null;  // {currency, unit, last_updated, models, aliases}
+
+  // ── Pricing helpers ─────────────────────────────────────────────────────
+  // Retourne {input, output} en $/M tokens, ou null si inconnu.
+  function lookupPrice(modelName) {
+    if (!pricing || !modelName) return null;
+    if (pricing.models[modelName]) return pricing.models[modelName];
+    const aliased = pricing.aliases[modelName];
+    if (aliased && pricing.models[aliased]) return pricing.models[aliased];
+    // Fallback famille (regex prefixe). Faute de cote serveur, on tente quelques prefixes
+    // les plus frequents.
+    const families = [
+      ["claude-opus", "claude-opus-4-7"],
+      ["claude-sonnet", "claude-sonnet-4-6"],
+      ["claude-haiku", "claude-haiku-4-5"],
+      ["gpt-4o-mini", "gpt-4o-mini"],
+      ["gpt-4.1-mini", "gpt-4.1-mini"],
+      ["gpt-4.1-nano", "gpt-4.1-nano"],
+      ["gpt-4o", "gpt-4o"],
+      ["gpt-4.1", "gpt-4.1"],
+      ["mistral-large", "mistral-large-2512"],
+      ["mistral-medium", "mistral-medium-2604"],
+      ["mistral-small", "mistral-small-2603"],
+      ["ministral-3b", "ministral-3b-2512"],
+      ["ministral-8b", "ministral-8b-2512"],
+      ["codestral", "codestral-latest"],
+      ["magistral-medium", "magistral-medium-2509"],
+      ["magistral-small", "magistral-small-2509"],
+    ];
+    const lower = modelName.toLowerCase();
+    for (const [prefix, ref] of families) {
+      if (lower.startsWith(prefix.toLowerCase())) {
+        return pricing.models[ref] || null;
+      }
+    }
+    return null;
+  }
+
+  // Formatte un prix : "$3.00 / $15.00 par M tokens"
+  function formatPrice(p) {
+    if (!p) return "";
+    const fmt = v => v < 1 ? "$" + v.toFixed(2) : "$" + v.toFixed(2);
+    return `${fmt(p.input)} in / ${fmt(p.output)} out (M tok)`;
+  }
+
+  async function loadPricing() {
+    try {
+      pricing = await api("/pricing");
+    } catch (e) {
+      console.warn("Pricing indisponible :", e.message);
+      pricing = {currency: "USD", unit: "per_million_tokens", models: {}, aliases: {}};
+    }
+  }
 
   function token() { return sessionStorage.getItem(TOKEN_KEY); }
   function setToken(t) { sessionStorage.setItem(TOKEN_KEY, t); }
@@ -39,7 +92,9 @@
     try { body = await r.json(); } catch { body = null; }
     if (!r.ok) {
       const detail = (body && body.detail) ? body.detail : ("HTTP " + r.status);
-      throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+      const err = new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+      err.status = r.status;
+      throw err;
     }
     return body;
   }
@@ -151,7 +206,7 @@
 
   // Dashboard
   async function loadDashboard() {
-    await Promise.all([loadProviders(), loadConfig()]);
+    await Promise.all([loadPricing(), loadProviders(), loadConfig()]);
     hide($("auth-screen"));
     show($("dashboard-screen"));
   }
@@ -185,17 +240,17 @@
       return;
     }
     tbody.innerHTML = providers.map(p => `
-      <tr>
+      <tr data-row-id="${p.id}">
         <td><b>${escapeHtml(p.name)}</b></td>
         <td><span class="pill ${p.api_format === "anthropic" ? "on" : "off"}">${escapeHtml(p.api_format)}</span></td>
         <td class="mono">${escapeHtml(p.base_url)}</td>
         <td class="mono">${escapeHtml(p.api_key_preview)}</td>
         <td>${(p.available_models || []).map(m => '<span class="pill off" style="margin-right:4px;">' + escapeHtml(m) + '</span>').join("")}</td>
         <td><span class="pill ${p.is_active ? "on" : "off"}">${p.is_active ? "actif" : "inactif"}</span></td>
-        <td class="actions">
-          <button class="btn-ghost" data-act="test" data-id="${p.id}">Tester</button>
-          <button class="btn-ghost" data-act="edit" data-id="${p.id}">Modifier</button>
-          <button class="btn-ghost" style="color: var(--red);" data-act="del" data-id="${p.id}">Suppr.</button>
+        <td class="actions" style="text-align: right; white-space: nowrap;">
+          <button class="btn-ghost" data-act="test" data-id="${p.id}" title="Tester la connexion">Tester</button>
+          <button class="btn-ghost" data-act="edit" data-id="${p.id}" title="Modifier">Modifier</button>
+          <button class="btn-ghost" style="color: var(--red);" data-act="del" data-id="${p.id}" title="Supprimer">Supprimer</button>
         </td>
       </tr>
     `).join("");
@@ -214,13 +269,30 @@
     } else if (act === "edit") {
       openProviderModal(providers.find(p => p.id === id));
     } else if (act === "del") {
-      if (!confirm("Supprimer ce fournisseur ?")) return;
+      const prov = providers.find(p => p.id === id);
+      const name = prov ? prov.name : "ce fournisseur";
+      if (!confirm(`Supprimer le fournisseur "${name}" ? Cette action est irreversible.`)) return;
       try {
         await api("/providers/" + id, {method: "DELETE"});
-        flash("dash-flash", "Fournisseur supprime", "success");
-        await loadProviders();
+        // Suppression optimiste : retirer la ligne du tableau sans re-fetch
+        providers = providers.filter(p => p.id !== id);
+        const row = document.querySelector(`tr[data-row-id="${id}"]`);
+        if (row) row.remove();
+        refreshAddProviderDropdown();
+        flash("dash-flash", `Fournisseur "${name}" supprime`, "success");
+        // Si la config active referencait ce provider, son ID disparait des dropdowns
+        // -> on rafraichit la chaine en background pour rester coherent
         await loadConfig();
-      } catch (e) { flash("dash-flash", e.message, "error"); }
+      } catch (e) {
+        if (e.status === 409) {
+          flash("dash-flash",
+                `Impossible de supprimer "${name}" : il est utilise dans la configuration active. ` +
+                "Retirez-le d'abord de la chaine de fallback (onglet Configuration).",
+                "error");
+        } else {
+          flash("dash-flash", e.message, "error");
+        }
+      }
     }
   }
 
@@ -245,12 +317,19 @@
       list.innerHTML = '<div style="font-size: 12px; color: var(--gray-400); padding: 6px 0;">Aucun modele. Cliquez "+ Ajouter un modele" ou "Decouvrir depuis l\'API".</div>';
       return;
     }
-    list.innerHTML = models.map((m, i) => `
-      <div class="model-line" style="display: flex; gap: 6px; align-items: center;">
-        <input type="text" data-model-i="${i}" value="${escapeHtml(m)}" placeholder="ex: claude-sonnet-4-6" style="flex: 1; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px;">
-        <button type="button" class="icon-btn" data-model-rm="${i}" style="color: var(--red);" title="Retirer">&times;</button>
-      </div>
-    `).join("");
+    list.innerHTML = models.map((m, i) => {
+      const p = lookupPrice(m);
+      const priceTxt = p
+        ? `<span style="font-size: 11px; color: var(--gray-500); min-width: 165px; text-align: right;">${escapeHtml(formatPrice(p))}</span>`
+        : `<span style="font-size: 11px; color: var(--gray-300); min-width: 165px; text-align: right;">prix inconnu</span>`;
+      return `
+        <div class="model-line" style="display: flex; gap: 6px; align-items: center;">
+          <input type="text" data-model-i="${i}" value="${escapeHtml(m)}" placeholder="ex: claude-sonnet-4-6" style="flex: 1; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px;">
+          ${priceTxt}
+          <button type="button" class="icon-btn" data-model-rm="${i}" style="color: var(--red);" title="Retirer">&times;</button>
+        </div>
+      `;
+    }).join("");
     list.querySelectorAll("button[data-model-rm]").forEach(btn => {
       btn.addEventListener("click", () => {
         const i = parseInt(btn.dataset.modelRm, 10);
@@ -330,11 +409,18 @@
         const f = (filter || "").toLowerCase();
         listEl.innerHTML = sorted
           .filter(m => !f || m.toLowerCase().includes(f))
-          .map(m => `
-            <label style="display: flex; align-items: center; gap: 8px; padding: 4px 6px; cursor: pointer; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px;">
-              <input type="checkbox" value="${escapeHtml(m)}" ${preselected.has(m) ? "checked" : ""} style="width: auto; flex: 0;">
-              <span>${escapeHtml(m)}</span>
-            </label>`).join("");
+          .map(m => {
+            const p = lookupPrice(m);
+            const priceTxt = p
+              ? `<span style="color: var(--gray-500); font-size: 11px; margin-left: auto; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">${escapeHtml(formatPrice(p))}</span>`
+              : `<span style="color: var(--gray-300); font-size: 11px; margin-left: auto; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">prix inconnu</span>`;
+            return `
+              <label style="display: flex; align-items: center; gap: 8px; padding: 4px 6px; cursor: pointer; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px;">
+                <input type="checkbox" value="${escapeHtml(m)}" ${preselected.has(m) ? "checked" : ""} style="width: auto; flex: 0;">
+                <span>${escapeHtml(m)}</span>
+                ${priceTxt}
+              </label>`;
+          }).join("");
         listEl.querySelectorAll("input[type=checkbox]").forEach(cb => {
           cb.addEventListener("change", () => {
             if (cb.checked) preselected.add(cb.value);
@@ -441,13 +527,17 @@
           ${c._testResult.ok ? "OK" : "ECHEC"} &middot; ${c._testResult.latency_ms} ms &middot; ${escapeHtml(c._testResult.message)}
          </div>`
       : "";
+    const p = lookupPrice(c.model_name);
+    const priceMeta = p
+      ? ` &middot; <span style="color: var(--gray-500);">${escapeHtml(formatPrice(p))}</span>`
+      : "";
     return `
       <li class="chain-item-wrap" style="margin-bottom: 8px;">
         <div class="chain-item" style="margin-bottom: 0;">
           <div class="badge ${i === 0 ? "primary" : "fb"}">${i === 0 ? "P" : i}</div>
           <div class="meta">
             <b>${escapeHtml(c.provider_name)} &mdash; ${escapeHtml(c.model_name)}</b>
-            <span>${i === 0 ? "Principal" : "Fallback " + i} &middot; format ${escapeHtml(c.api_format)}</span>
+            <span>${i === 0 ? "Principal" : "Fallback " + i} &middot; format ${escapeHtml(c.api_format)}${priceMeta}</span>
           </div>
           <div class="move">
             <button class="icon-btn" data-act="test" data-i="${i}" title="Tester ce couple">&#x2713;</button>

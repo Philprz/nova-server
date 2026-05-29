@@ -262,6 +262,7 @@ from models.database_models import (
 )
 from services.encryption_service import encrypt, decrypt, mask
 from services.llm_router import get_llm_router
+from services.llm_pricing import get_pricing, get_all_pricing
 
 
 llm_admin_router = APIRouter(prefix="/api/admin/llm", tags=["Admin LLM"])
@@ -461,7 +462,12 @@ class ProviderUpdate(BaseModel):
 def _serialize_provider(prov: LLMProvider) -> Dict[str, Any]:
     try:
         plain = decrypt(prov.api_key_encrypted)
-        key_preview = mask(plain, visible=4)
+        # Preview compact a largeur fixe : 4 etoiles + 4 derniers chars
+        # (jamais > 8 chars affiches quelle que soit la longueur reelle de la cle)
+        if len(plain) <= 4:
+            key_preview = "*" * len(plain)
+        else:
+            key_preview = "****" + plain[-4:]
     except ValueError:
         key_preview = "(indechiffrable)"
     return {
@@ -478,6 +484,13 @@ def _serialize_provider(prov: LLMProvider) -> Dict[str, Any]:
 
 
 # ── Providers endpoints ─────────────────────────────────────────────────────
+
+@llm_admin_router.get("/pricing", dependencies=[Depends(require_llm_admin)])
+async def get_pricing_catalog() -> Dict[str, Any]:
+    """Catalogue de prix LLM (USD par million de tokens). Maintenu manuellement
+    dans services/llm_pricing.py. Indicatif — verifier les prix officiels."""
+    return get_all_pricing()
+
 
 @llm_admin_router.get("/providers", dependencies=[Depends(require_llm_admin)])
 async def list_providers() -> Dict[str, Any]:

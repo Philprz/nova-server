@@ -10,6 +10,8 @@ ANTHROPIC_API_KEY / OPENAI_API_KEY du .env pour ne pas casser l'existant.
 """
 
 import os
+import re
+import json
 import time
 import asyncio
 import logging
@@ -219,6 +221,58 @@ class LLMRouter:
         raise ValueError(f"Format API inconnu pour {entry.name}: {entry.api_format}")
 
     # -----------------------------------------------------------------------
+    # Normalisation reponse LLM
+    # -----------------------------------------------------------------------
+
+    @staticmethod
+    def _normalize_response(raw: str, provider_name: str = "?") -> str:
+        """
+        Nettoie la reponse brute d'un LLM pour en extraire un JSON valide.
+        Applique systematiquement avant tout retour de la methode call().
+        """
+        text = raw.strip()
+
+        # Etape 1 : supprimer les balises Markdown ```json ... ``` ou ``` ... ```
+        text = re.sub(r'^```(?:json)?\s*', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'\s*```$', '', text)
+        text = text.strip()
+
+        # Etape 2 : tenter json.loads direct
+        try:
+            json.loads(text)
+            return text
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+        # Etape 3 : extraire le premier objet JSON {...}
+        match = re.search(r'\{.*\}', text, re.DOTALL)
+        if match:
+            candidate = match.group(0)
+            try:
+                json.loads(candidate)
+                return candidate
+            except (json.JSONDecodeError, ValueError):
+                pass
+
+        # Etape 4 : extraire le premier tableau JSON [...]
+        match = re.search(r'\[.*\]', text, re.DOTALL)
+        if match:
+            candidate = match.group(0)
+            try:
+                json.loads(candidate)
+                return candidate
+            except (json.JSONDecodeError, ValueError):
+                pass
+
+        # Etape 5 : aucun JSON recuperable — retourner le texte brut
+        logger.debug(
+            "LLMRouter._normalize_response : JSON non extrait pour fournisseur %s — "
+            "reponse brute retournee telle quelle (longueur : %d chars)",
+            provider_name, len(raw)
+        )
+        return text
+
+    # -----------------------------------------------------------------------
     # API publique
     # -----------------------------------------------------------------------
 
@@ -240,12 +294,12 @@ class LLMRouter:
             role = "primary" if idx == 0 else f"fallback#{idx}"
             try:
                 logger.info("LLMRouter: tentative %s -> %s", role, entry)
-                result = await self._call_entry(entry, system_prompt, user_message,
-                                                max_tokens, temperature)
+                raw_response = await self._call_entry(entry, system_prompt, user_message,
+                                                      max_tokens, temperature)
                 if idx > 0:
                     logger.warning("LLMRouter: succes via %s apres %d echec(s)",
                                    entry, idx)
-                return result
+                return self._normalize_response(raw_response, provider_name=entry.name)
             except httpx.HTTPStatusError as exc:
                 status_code = exc.response.status_code if exc.response is not None else "?"
                 logger.warning("LLMRouter: %s %s a echoue (HTTP %s), bascule fallback",
