@@ -21,15 +21,25 @@ class CompanySearchService:
     def __init__(self):
         """Initialise le service avec la configuration NOVA"""
         self.agent = None
+        # Sources d'enrichissement actives. Défaut RONDOT : "insee,local"
+        # (Pappers est une API payante hors budget — non appelée par défaut).
+        # Pour réactiver Pappers : CLIENT_ENRICHMENT_SOURCES="insee,local,pappers".
+        raw_sources = os.getenv('CLIENT_ENRICHMENT_SOURCES', 'insee,local')
+        self.enrichment_sources = [
+            s.strip().lower() for s in raw_sources.split(',') if s.strip()
+        ]
         self._initialize_agent()
-    
+
     def _initialize_agent(self):
         """Initialise l'agent avec la configuration NOVA"""
         try:
-            # Configuration depuis les variables d'environnement
+            # Configuration depuis les variables d'environnement.
+            # La clé Pappers ne provient QUE de l'env (défaut vide) : aucun
+            # secret en dur, aucun appel Pappers si la clé est absente.
             config = {
                 'insee_key': os.getenv('INSEE_API_KEY'),
-                'pappers_key': os.getenv('PAPPERS_API_KEY', '29fbe59dd017f52bcb7bb0532d72935f3cedfa6b96123170')
+                'pappers_key': os.getenv('PAPPERS_API_KEY', ''),
+                'sources': self.enrichment_sources,
             }
             
             # Créer l'agent via la factory
@@ -44,9 +54,13 @@ class CompanySearchService:
     def _initialize_fallback_agent(self):
         """Initialise un agent avec des clés par défaut en cas d'échec"""
         try:
+            # NOTE sécurité : la clé INSEE ci-dessous reste codée en dur en
+            # attendant validation (cf. sweep secrets — à déplacer vers l'env).
+            # La clé Pappers en dur a été retirée (env uniquement, défaut vide).
             fallback_config = {
-                'insee_key': 'c83c88f1-ca96-4272-bc88-f1ca96827240',
-                'pappers_key': '29fbe59dd017f52bcb7bb0532d72935f3cedfa6b96123170'
+                'insee_key': os.getenv('INSEE_API_KEY', 'c83c88f1-ca96-4272-bc88-f1ca96827240'),
+                'pappers_key': os.getenv('PAPPERS_API_KEY', ''),
+                'sources': self.enrichment_sources,
             }
             
             self.agent = NovaCompanyAgentFactory.create_agent(fallback_config)
