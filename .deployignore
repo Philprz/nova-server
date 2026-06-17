@@ -1,0 +1,22 @@
+# .deployignore — éléments EXCLUS du PACKAGE de déploiement.
+#
+# IMPORTANT : ce fichier n'affecte PAS git. Il est lu uniquement par
+# scripts/package_deploy.ps1, qui construit le package à partir des fichiers
+# SUIVIS par git (git ls-files) puis retire les chemins listés ici.
+#
+# Comme le package part de `git ls-files`, tout ce qui est gitignoré est déjà
+# absent (.env, .venv/, *.db, *.pyc, node_modules/, logs/, alembic/versions/*).
+#
+# Règle de correspondance (cf. package_deploy.ps1) : un fichier est exclu si son
+# chemin (séparateurs '/') commence par un préfixe de dossier listé ci-dessous,
+# ou correspond à un motif glob simple.
+
+# --- Tests : inutiles en production ---
+tests/
+
+# --- Sources frontend mail-to-biz : le build servi est déjà dans frontend/ ---
+mail-to-biz/
+
+# --- Métafichiers de packaging eux-mêmes ---
+.deployignore
+.env.example
