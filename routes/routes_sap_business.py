@@ -10,6 +10,7 @@ import logging
 
 from auth.dependencies import get_current_user
 from services.sap_business_service import get_sap_business_service
+from services.quote_quota_service import QuotaDevisDepasse
 
 logger = logging.getLogger(__name__)
 
@@ -496,6 +497,18 @@ async def create_quotation(request: QuotationCreateRequest):
             doc_num=None  # SAP génère le DocNum automatiquement
         )
 
+    except QuotaDevisDepasse as quota_exc:
+        # Quota mensuel atteint : aucun devis créé → 429 explicite.
+        logger.warning(f"Quota devis dépassé : {quota_exc}")
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "success": False,
+                "error_code": quota_exc.error_code,
+                "message": str(quota_exc),
+                "max_quota": quota_exc.max_quota,
+            },
+        )
     except Exception as e:
         logger.error(f"Quotation creation failed: {e}")
         return QuotationCreateResponse(
@@ -783,6 +796,18 @@ async def create_quotation_from_email(
 
     except HTTPException:
         raise
+    except QuotaDevisDepasse as quota_exc:
+        # Quota mensuel atteint : aucun devis créé → 429 explicite.
+        logger.warning(f"Quota devis dépassé : {quota_exc}")
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "success": False,
+                "error_code": quota_exc.error_code,
+                "message": str(quota_exc),
+                "max_quota": quota_exc.max_quota,
+            },
+        )
     except Exception as e:
         logger.error(f"Create quotation from email failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))

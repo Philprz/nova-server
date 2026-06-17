@@ -1,7 +1,7 @@
 # models/database_models.py
 from sqlalchemy import (
     Column, String, Float, Integer, Boolean, DateTime, Text,
-    ForeignKey, JSON, create_engine,
+    ForeignKey, JSON, UniqueConstraint, create_engine,
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
@@ -133,6 +133,35 @@ class BenchmarkResult(Base):
     score_qty_accuracy = Column(Float, nullable=True)
     score_global = Column(Float, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.now)
+
+
+# ===========================================================================
+# Compteur de devis : quota mensuel calendaire (blocage dur RONDOT)
+# ===========================================================================
+
+class QuoteUsageCounter(Base):
+    """Compteur de devis créés par société et par mois calendaire.
+
+    `society_id` est une clé LOGIQUE de société (pas la company DB SAP) : chez
+    RONDOT, deux bases SAP distinctes partagent le MÊME quota de 50 devis/mois,
+    donc les deux chemins de création incrémentent la même ligne (cf.
+    services/quote_quota_service.py, env QUOTA_SOCIETY_ID).
+
+    Le compteur n'est incrémenté que sur une création SAP réellement réussie.
+    Contrainte d'unicité (society_id, period) : une seule ligne par mois/société.
+    """
+    __tablename__ = 'quote_usage_counter'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    society_id = Column(String(100), nullable=False, index=True)
+    period = Column(String(7), nullable=False, index=True)  # 'YYYY-MM'
+    count = Column(Integer, nullable=False, default=0)
+    max_quota = Column(Integer, nullable=False, default=50)
+    updated_at = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
+
+    __table_args__ = (
+        UniqueConstraint('society_id', 'period', name='uq_quote_usage_society_period'),
+    )
 
 
 # Configuration base de données
