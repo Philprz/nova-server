@@ -247,3 +247,140 @@ class TestQuotaWiringRondotRoute:
             row = s.query(QuoteUsageCounter).filter_by(society_id="RONDOT").first()
             assert row is not None
             assert row.count == 1
+
+
+# ============================================================
+# TESTS : BRANCHEMENT chemin MCP — mcp_connector (mock subprocess SAP)
+# ============================================================
+
+
+class TestQuotaWiringMcpConnector:
+    """Le flux principal mail-to-biz (MCP, process principal) est gété.
+
+    On gète au niveau du connecteur (call_sap_mcp dispatcher + create_sap_quote),
+    PAS dans le subprocess sap_mcp.py. _call_mcp (le dispatch vers le subprocess)
+    est mocké : aucun vrai devis SAP n'est créé.
+    """
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("action", [
+        "sap_create_quotation_complete",
+        "sap_create_quotation_draft",
+    ])
+    async def test_mcp_creation_blocked_when_full(self, quota, action):
+        """Quota plein → retour structuré QUOTA_DEVIS_DEPASSE, AUCUN dispatch SAP."""
+        from services.mcp_connector import MCPConnector
+
+        for _ in range(50):
+            quota.increment()
+
+        no_dispatch = AsyncMock(side_effect=AssertionError("SAP ne doit pas être appelé"))
+        with patch("services.mcp_connector.get_quote_quota_service", return_value=quota), \
+             patch.object(MCPConnector, "_call_mcp", new=no_dispatch):
+            result = await MCPConnector.call_sap_mcp(action, {"quotation_data": {"CardCode": "C1"}})
+
+        assert result["success"] is False
+        assert result["error_code"] == "QUOTA_DEVIS_DEPASSE"
+        assert result["quota_exceeded"] is True
+        no_dispatch.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("action", [
+        "sap_create_quotation_complete",
+        "sap_create_quotation_draft",
+    ])
+    async def test_mcp_creation_increments_once(self, quota, session_factory, action):
+        """Création réussie via MCP → compteur incrémenté d'exactement 1."""
+        from services.mcp_connector import MCPConnector
+
+        dispatch = AsyncMock(return_value={"success": True, "doc_entry": 12, "doc_num": 34})
+        with patch("services.mcp_connector.get_quote_quota_service", return_value=quota), \
+             patch.object(MCPConnector, "_call_mcp", new=dispatch):
+            result = await MCPConnector.call_sap_mcp(action, {"quotation_data": {"CardCode": "C1"}})
+
+        assert result.get("doc_entry") == 12
+        with session_factory() as s:
+            row = s.query(QuoteUsageCounter).filter_by(society_id="RONDOT").first()
+            assert row.count == 1  # exactement 1, pas de double comptage
+
+    @pytest.mark.asyncio
+    async def test_mcp_read_action_not_gated(self, quota, session_factory):
+        """Une action de lecture n'est ni bloquée ni comptée, même quota plein."""
+        from services.mcp_connector import MCPConnector
+
+        for _ in range(50):
+            quota.increment()
+
+        dispatch = AsyncMock(return_value={"value": [{"ItemCode": "X"}]})
+        with patch("services.mcp_connector.get_quote_quota_service", return_value=quota), \
+             patch.object(MCPConnector, "_call_mcp", new=dispatch):
+            result = await MCPConnector.call_sap_mcp("sap_read", {"endpoint": "/Items", "method": "GET"})
+
+        assert "value" in result
+        dispatch.assert_awaited_once()
+        with session_factory() as s:
+            row = s.query(QuoteUsageCounter).filter_by(society_id="RONDOT").first()
+            assert row.count == 50  # inchangé
+
+    @pytest.mark.asyncio
+    async def test_mcp_no_increment_on_sap_error(self, quota, session_factory):
+        """Échec SAP (pas de doc_entry) → pas d'incrément."""
+        from services.mcp_connector import MCPConnector
+
+        dispatch = AsyncMock(return_value={"success": False, "error": "Client non trouvé"})
+        with patch("services.mcp_connector.get_quote_quota_service", return_value=quota), \
+             patch.object(MCPConnector, "_call_mcp", new=dispatch):
+            result = await MCPConnector.call_sap_mcp(
+                "sap_create_quotation_complete", {"quotation_data": {"CardCode": "C1"}}
+            )
+
+        assert result["success"] is False
+        with session_factory() as s:
+            row = s.query(QuoteUsageCounter).filter_by(society_id="RONDOT").first()
+            # check_quota a créé la ligne à 0 ; aucun incrément car création échouée
+            assert (row.count if row else 0) == 0
+
+    @pytest.mark.asyncio
+    async def test_create_sap_quote_blocked_when_full(self, quota):
+        """create_sap_quote (POST direct) : quota plein → bloqué avant tout POST."""
+        from services.mcp_connector import MCPConnector
+
+        for _ in range(50):
+            quota.increment()
+
+        connector = MCPConnector()
+        # sap_client laissé None : si le POST était tenté, _init_sap échouerait —
+        # mais on doit retourner AVANT, sur le quota.
+        with patch("services.mcp_connector.get_quote_quota_service", return_value=quota):
+            result = await connector.create_sap_quote({"CardCode": "C1", "DocumentLines": []})
+
+        assert result["success"] is False
+        assert result["error_code"] == "QUOTA_DEVIS_DEPASSE"
+        assert result["quota_exceeded"] is True
+
+    @pytest.mark.asyncio
+    async def test_create_sap_quote_increments_once(self, quota, session_factory):
+        """create_sap_quote réussi → compteur +1 (httpx mocké)."""
+        from services.mcp_connector import MCPConnector
+
+        connector = MCPConnector()
+        connector.sap_client = {"base_url": "http://sap", "user": "u", "password": "p"}
+
+        resp = MagicMock()
+        resp.raise_for_status = MagicMock()
+        resp.json = MagicMock(return_value={"DocEntry": 7, "DocNum": 8})
+        client_mock = MagicMock()
+        client_mock.post = AsyncMock(return_value=resp)
+        acm = MagicMock()
+        acm.__aenter__ = AsyncMock(return_value=client_mock)
+        acm.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("services.mcp_connector.get_quote_quota_service", return_value=quota), \
+             patch("services.mcp_connector.httpx.AsyncClient", return_value=acm):
+            result = await connector.create_sap_quote({"CardCode": "C1", "DocumentLines": [{"ItemCode": "X"}]})
+
+        assert result["success"] is True
+        assert result["quote_id"] == 7
+        with session_factory() as s:
+            row = s.query(QuoteUsageCounter).filter_by(society_id="RONDOT").first()
+            assert row.count == 1
