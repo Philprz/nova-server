@@ -196,3 +196,54 @@ class TestQuotaWiringSalesQuotation:
             row = s.query(QuoteUsageCounter).filter_by(society_id="RONDOT").first()
             assert row is not None
             assert row.count == 1
+
+
+# ============================================================
+# TESTS : BRANCHEMENT 3e chemin — routes_sap_rondot (mock SAP)
+# ============================================================
+
+
+class TestQuotaWiringRondotRoute:
+    """Le 3e chemin de création (POST /api/sap-rondot/quotations) est aussi gété."""
+
+    def _request(self):
+        from routes.routes_sap_rondot import CreateQuoteRequest, QuoteLine
+        return CreateQuoteRequest(
+            CardCode="C00042",
+            DocumentLines=[QuoteLine(ItemCode="ART-1", Quantity=1, UnitPrice=10.0)],
+        )
+
+    @pytest.mark.asyncio
+    async def test_quota_exceeded_blocks_before_sap(self, quota):
+        """Quota plein → QuotaDevisDepasse AVANT call_sap_rondot (aucune création)."""
+        from routes import routes_sap_rondot
+
+        for _ in range(50):
+            quota.increment()
+
+        no_sap = AsyncMock(side_effect=AssertionError("SAP ne doit pas être appelé"))
+        with patch.object(routes_sap_rondot, "get_quote_quota_service", return_value=quota), \
+             patch.object(routes_sap_rondot, "call_sap_rondot", new=no_sap):
+            with pytest.raises(QuotaDevisDepasse):
+                await routes_sap_rondot.create_sap_rondot_quotation(self._request())
+
+        no_sap.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_successful_creation_increments_counter(self, quota, session_factory):
+        """Création réussie via le chemin rondot → compteur incrémenté de 1."""
+        from routes import routes_sap_rondot
+
+        sap_ok = AsyncMock(return_value={
+            "DocEntry": 77, "DocNum": 88, "CardCode": "C00042", "DocTotal": 10.0,
+        })
+        with patch.object(routes_sap_rondot, "get_quote_quota_service", return_value=quota), \
+             patch.object(routes_sap_rondot, "call_sap_rondot", new=sap_ok):
+            resp = await routes_sap_rondot.create_sap_rondot_quotation(self._request())
+
+        assert resp["success"] is True
+        assert resp["quotation"]["DocEntry"] == 77
+        with session_factory() as s:
+            row = s.query(QuoteUsageCounter).filter_by(society_id="RONDOT").first()
+            assert row is not None
+            assert row.count == 1

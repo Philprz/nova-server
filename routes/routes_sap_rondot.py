@@ -18,6 +18,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from services.sap_tls import SAP_VERIFY
+from services.quote_quota_service import get_quote_quota_service
 
 logger = logging.getLogger(__name__)
 
@@ -323,6 +324,11 @@ async def get_sap_rondot_quotation(doc_entry: int):
 @router.post("/quotations")
 async def create_sap_rondot_quotation(request: CreateQuoteRequest):
     """Crée un devis SAP Rondot"""
+    # ── Quota mensuel (blocage dur) : vérifié AVANT toute création SAP ──
+    # Même société logique que les deux autres chemins (env QUOTA_SOCIETY_ID).
+    # QuotaDevisDepasse se propage jusqu'au handler global → HTTP 429.
+    get_quote_quota_service().check_quota()
+
     # Préparer le payload SAP
     today = datetime.now().strftime("%Y-%m-%d")
 
@@ -346,11 +352,23 @@ async def create_sap_rondot_quotation(request: CreateQuoteRequest):
     if "error" in result:
         raise HTTPException(status_code=500, detail=result["error"])
 
+    # Incrément du quota APRÈS création réussie (doc_entry obtenu). Une erreur de
+    # compteur ne doit pas masquer le succès SAP : on log sans lever.
+    doc_entry = result.get("DocEntry")
+    if doc_entry is not None:
+        try:
+            get_quote_quota_service().increment()
+        except Exception as quota_exc:
+            logger.error(
+                f"⚠️ Devis SAP Rondot créé (DocEntry={doc_entry}) mais incrément du "
+                f"compteur de quota échoué : {quota_exc}"
+            )
+
     return {
         "success": True,
         "message": "Devis cree avec succes",
         "quotation": {
-            "DocEntry": result.get("DocEntry"),
+            "DocEntry": doc_entry,
             "DocNum": result.get("DocNum"),
             "CardCode": result.get("CardCode"),
             "DocTotal": result.get("DocTotal")
