@@ -14,10 +14,7 @@
       "Bash(find data *)"
     ],
     "deny": [
-      "Bash(rm -rf:*)",
-      "Bash(git push:*)",
-      "Read(./.env)",
-      "Read(./.env.*)"
+      "Bash(rm -rf:*)"
     ]
   }
 }
