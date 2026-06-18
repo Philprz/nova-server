@@ -54,11 +54,9 @@ class CompanySearchService:
     def _initialize_fallback_agent(self):
         """Initialise un agent avec des clés par défaut en cas d'échec"""
         try:
-            # NOTE sécurité : la clé INSEE ci-dessous reste codée en dur en
-            # attendant validation (cf. sweep secrets — à déplacer vers l'env).
-            # La clé Pappers en dur a été retirée (env uniquement, défaut vide).
+            # Identifiants depuis l'environnement uniquement (aucun secret en dur).
             fallback_config = {
-                'insee_key': os.getenv('INSEE_API_KEY', 'c83c88f1-ca96-4272-bc88-f1ca96827240'),
+                'insee_key': os.getenv('INSEE_API_KEY'),
                 'pappers_key': os.getenv('PAPPERS_API_KEY', ''),
                 'sources': self.enrichment_sources,
             }

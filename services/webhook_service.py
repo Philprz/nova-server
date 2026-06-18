@@ -75,7 +75,12 @@ class WebhookService:
             raise ValueError("WEBHOOK_NOTIFICATION_URL not configured in .env")
 
         if not client_state:
-            client_state = os.getenv("WEBHOOK_CLIENT_STATE", "NOVA_WEBHOOK_SECRET_2026")
+            client_state = os.getenv("WEBHOOK_CLIENT_STATE")
+        if not client_state:
+            # Fail-closed : aucun placeholder par défaut. La variable est exigée.
+            raise ValueError(
+                "WEBHOOK_CLIENT_STATE non configuré (requis, aucune valeur par défaut)"
+            )
 
         # Durée d'expiration : 3 jours (maximum pour mailbox)
         expiration = datetime.utcnow() + timedelta(days=3)

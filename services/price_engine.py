@@ -17,13 +17,28 @@ class PriceEngineService:
         self.session_cookies = None  # Initialiser session_cookies
         
     async def authenticate(self):
-        """Authentification SAP pour Price Engine"""
+        """Authentification SAP pour Price Engine.
+
+        Identifiants SAP fournis UNIQUEMENT via l'environnement (aucun défaut
+        codé). Si l'un manque, on échoue proprement sans tenter de connexion
+        avec des credentials de démo.
+        """
+        company_db = os.getenv("SAP_CLIENT")
+        user_name = os.getenv("SAP_USER")
+        password = os.getenv("SAP_CLIENT_PASSWORD")
+        if not (company_db and user_name and password):
+            logger.error(
+                "❌ Price Engine : credentials SAP absents "
+                "(SAP_CLIENT / SAP_USER / SAP_CLIENT_PASSWORD) — authentification impossible"
+            )
+            return False
+
         auth_data = {
-            "CompanyDB": os.getenv("SAP_CLIENT", "SBODemoFR"),
-            "UserName": os.getenv("SAP_USER", "manager"),
-            "Password": os.getenv("SAP_CLIENT_PASSWORD", "spirit")
+            "CompanyDB": company_db,
+            "UserName": user_name,
+            "Password": password,
         }
-        
+
         try:
             response = requests.post(
                 self.login_url,
