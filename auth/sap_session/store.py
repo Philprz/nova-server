@@ -100,6 +100,24 @@ def delete_session(session_id: str) -> None:
         _store.pop(session_id, None)
 
 
+def evict_user_sessions(user_id: int, *, except_session_id: Optional[str] = None) -> list[str]:
+    """Supprime toutes les sessions d'un utilisateur (session unique par user).
+
+    Utilisé au login pour évincer une session antérieure : la connexion la plus
+    récente gagne. `except_session_id` permet d'épargner la session courante.
+    Retourne les session_id évincés (pour log).
+    """
+    with _lock:
+        to_evict = [
+            sid
+            for sid, s in _store.items()
+            if s.user_id == user_id and sid != except_session_id
+        ]
+        for sid in to_evict:
+            _store.pop(sid, None)
+        return to_evict
+
+
 def _update_session_locked(session_id: str, **patch) -> Optional[SapSession]:
     session = _store.get(session_id)
     if session is None:

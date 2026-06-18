@@ -6,7 +6,8 @@ PostgreSQL, et bascule automatiquement sur les fallbacks en cas d'echec
 du provider courant.
 
 Compatibilite descendante : si aucune configuration en base, retombe sur
-ANTHROPIC_API_KEY / OPENAI_API_KEY du .env pour ne pas casser l'existant.
+MISTRAL_API_KEY (principal) puis ANTHROPIC_API_KEY (fallback) du .env pour
+ne pas casser l'existant.
 """
 
 import os
@@ -100,8 +101,25 @@ class LLMRouter:
         return chain
 
     def _load_chain_from_env(self) -> List[_Entry]:
-        """Fallback si la base est vide : reproduit l'ancien comportement (Claude > GPT)."""
+        """Fallback si la base est vide : Mistral (principal) -> Anthropic (fallback).
+
+        OpenAI est exclu de ce filet de secours (deploiement RONDOT).
+        Mistral est compatible OpenAI (api_format "openai") : son endpoint final
+        est https://api.mistral.ai/v1/chat/completions, donc base_url n'inclut PAS
+        le suffixe /v1 (ajoute par _call_openai_compat), comme pour OpenAI.
+        """
         chain: List[_Entry] = []
+        mistral_key = os.getenv("MISTRAL_API_KEY")
+        mistral_model = os.getenv("MISTRAL_MODEL", "mistral-large-latest")
+        if mistral_key:
+            chain.append(_Entry(
+                name="Mistral (env)",
+                base_url="https://api.mistral.ai",
+                api_format="openai",
+                api_key=mistral_key,
+                model=mistral_model,
+                priority=0,
+            ))
         anth_key = os.getenv("ANTHROPIC_API_KEY")
         anth_model = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
         if anth_key:
@@ -111,17 +129,6 @@ class LLMRouter:
                 api_format="anthropic",
                 api_key=anth_key,
                 model=anth_model,
-                priority=0,
-            ))
-        oai_key = os.getenv("OPENAI_API_KEY")
-        oai_model = os.getenv("OPENAI_MODEL", "gpt-4.1")
-        if oai_key:
-            chain.append(_Entry(
-                name="OpenAI (env)",
-                base_url="https://api.openai.com",
-                api_format="openai",
-                api_key=oai_key,
-                model=oai_model,
                 priority=1,
             ))
         return chain
@@ -286,7 +293,7 @@ class LLMRouter:
         if not chain:
             raise RuntimeError(
                 "LLMRouter: aucune configuration LLM disponible "
-                "(verifier admin LLM ou ANTHROPIC_API_KEY/OPENAI_API_KEY dans .env)"
+                "(verifier admin LLM ou MISTRAL_API_KEY/ANTHROPIC_API_KEY dans .env)"
             )
 
         last_exc: Optional[BaseException] = None

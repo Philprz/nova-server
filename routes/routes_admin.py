@@ -21,6 +21,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
 from pydantic import BaseModel, Field, field_validator
 
 import auth.auth_db as db
+from auth.auth_db import CapacityExceededError
 from auth.dependencies import AuthenticatedUser, get_current_user, require_role
 
 logger = logging.getLogger(__name__)
@@ -36,12 +37,14 @@ class SocietyCreate(BaseModel):
     name:           str
     sap_company_db: str
     sap_base_url:   str
+    max_users:      int = Field(default=1, ge=1)
 
 
 class SocietyUpdate(BaseModel):
     name:         Optional[str] = None
     sap_base_url: Optional[str] = None
     is_active:    Optional[bool] = None
+    max_users:    Optional[int] = Field(default=None, ge=1)
 
 
 class UserCreate(BaseModel):
@@ -92,6 +95,7 @@ async def create_society(
             name=body.name,
             sap_company_db=body.sap_company_db,
             sap_base_url=body.sap_base_url,
+            max_users=body.max_users,
         )
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -137,6 +141,8 @@ async def create_user(
             display_name=body.display_name,
             role=body.role,
         )
+    except CapacityExceededError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"id": user_id, **body.model_dump()}
@@ -153,7 +159,10 @@ async def update_user(
     kwargs = {k: v for k, v in body.model_dump().items() if v is not None}
     if "is_active" in kwargs:
         kwargs["is_active"] = int(kwargs["is_active"])
-    updated = db.update_user(user_id, **kwargs)
+    try:
+        updated = db.update_user(user_id, **kwargs)
+    except CapacityExceededError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
     if not updated:
         raise HTTPException(status_code=404, detail="Utilisateur introuvable")
     return {"success": True}

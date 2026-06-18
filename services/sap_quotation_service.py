@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 import httpx
 
 from services.sap_tls import SAP_VERIFY
+from services.quote_quota_service import get_quote_quota_service, QuotaDevisDepasse
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -316,7 +317,15 @@ class SAPQuotationService:
         Returns:
             QuotationResult avec DocEntry, DocNum, DocTotal si succès.
             Le champ `retried=True` est positionné si un retry a été nécessaire.
+
+        Raises:
+            QuotaDevisDepasse: si le quota mensuel de devis est atteint. Levée
+            AVANT tout appel SAP (aucun devis n'est créé dans ce cas).
         """
+        # ── Quota mensuel (blocage dur) : vérifié AVANT toute création SAP ──
+        # QuotaDevisDepasse se propage volontairement (hors try) jusqu'à la route.
+        get_quote_quota_service().check_quota()
+
         if not await self.ensure_session():
             return QuotationResult(
                 success=False,
@@ -369,6 +378,15 @@ class SAPQuotationService:
                     doc_total or 0,
                     " (après retry)" if retried else "",
                 )
+                # Incrément du quota APRÈS création réussie (doc_entry obtenu).
+                # Une erreur ici ne doit pas masquer le succès SAP : on log sans lever.
+                try:
+                    get_quote_quota_service().increment()
+                except Exception as quota_exc:
+                    logger.error(
+                        "⚠️ Devis SAP créé (DocEntry=%s) mais incrément du compteur "
+                        "de quota échoué : %s", doc_entry, quota_exc,
+                    )
                 return QuotationResult(
                     success=True,
                     doc_entry=doc_entry,

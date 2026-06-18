@@ -12,6 +12,7 @@ import httpx
 from dotenv import load_dotenv
 load_dotenv()
 from services.security_helpers import escape_soql, escape_odata
+from services.quote_quota_service import get_quote_quota_service, QuotaDevisDepasse
 # Configuration du logging
 logger = logging.getLogger("mcp_connector")
 # Imports conditionnels avec gestion d'erreurs
@@ -338,10 +339,63 @@ class MCPConnector:
             logger.error(f"Erreur call_salesforce_mcp: {str(e)}")
             return {"error": str(e)}
 
+    # Actions MCP qui créent un VRAI devis SAP (POST /Quotations) → comptées dans
+    # le quota. Le "draft" n'est PAS un objet Draft SAP : sap_create_quotation_draft
+    # fait aussi POST /Quotations (cf sap_mcp.py), il compte donc comme une création.
+    _QUOTA_GATED_SAP_ACTIONS = {
+        "sap_create_quotation_complete",
+        "sap_create_quotation_draft",
+    }
+
+    @staticmethod
+    def _is_quotation_created(result: Any) -> bool:
+        """True si le résultat MCP correspond à une création de devis réussie."""
+        if not isinstance(result, dict):
+            return False
+        if result.get("error") or result.get("success") is False:
+            return False
+        return bool(result.get("doc_entry") or result.get("DocEntry"))
+
     @staticmethod
     async def call_sap_mcp(action: str, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Appelle un outil MCP SAP"""
-        return await MCPConnector._call_mcp("sap_mcp", action, params)
+        """Appelle un outil MCP SAP.
+
+        Pour les actions qui créent un devis (cf _QUOTA_GATED_SAP_ACTIONS), applique
+        le quota mensuel (blocage dur RONDOT) DANS LE PROCESS PRINCIPAL (accès
+        SessionLocal) — le subprocess sap_mcp.py reste inchangé. check_quota AVANT
+        le dispatch, increment APRÈS création réussie. Même société logique que les
+        autres chemins (env QUOTA_SOCIETY_ID).
+
+        En cas de quota atteint : retour structuré (pas d'exception levée) compatible
+        avec la gestion d'erreur du workflow et des tâches de fond ; AUCUN appel SAP.
+        Les autres actions (lecture, etc.) gardent un comportement strictement inchangé.
+        """
+        gated = action in MCPConnector._QUOTA_GATED_SAP_ACTIONS
+
+        if gated:
+            try:
+                get_quote_quota_service().check_quota()
+            except QuotaDevisDepasse as exc:
+                logger.warning("🚫 Quota devis atteint (MCP %s) : %s", action, exc)
+                return {
+                    "success": False,
+                    "error": str(exc),
+                    "error_code": exc.error_code,
+                    "quota_exceeded": True,
+                }
+
+        result = await MCPConnector._call_mcp("sap_mcp", action, params)
+
+        if gated and MCPConnector._is_quotation_created(result):
+            try:
+                get_quote_quota_service().increment()
+            except Exception as quota_exc:
+                logger.error(
+                    "⚠️ Devis SAP créé via MCP (%s) mais incrément du compteur de "
+                    "quota échoué : %s", action, quota_exc,
+                )
+
+        return result
 
     # --- SALESFORCE MCP METHODS ---
 
@@ -919,15 +973,28 @@ class MCPConnector:
 
     async def create_sap_quote(self, quote_data: Dict[str, Any]) -> Dict[str, Any]:
         """Création d'un devis SAP via connexion directe"""
+        # ── Quota mensuel (blocage dur) : vérifié AVANT le POST SAP ──
+        # Retour structuré (pas d'exception) cohérent avec ce chemin ; aucun POST.
+        try:
+            get_quote_quota_service().check_quota()
+        except QuotaDevisDepasse as exc:
+            logger.warning("🚫 Quota devis atteint (create_sap_quote) : %s", exc)
+            return {
+                "success": False,
+                "error": str(exc),
+                "error_code": exc.error_code,
+                "quota_exceeded": True,
+            }
+
         try:
             if not self.sap_client:
                 await self._init_sap()
-            
+
             if not self.sap_client:
                 return {"success": False, "error": "Connexion SAP non disponible"}
-            
+
             endpoint = "/Quotations"
-            
+
             async with httpx.AsyncClient(timeout=60.0) as client:
                 response = await client.post(
                     self.sap_client['base_url'] + endpoint,
@@ -936,7 +1003,18 @@ class MCPConnector:
                 )
             response.raise_for_status()
             result = response.json()
-            
+
+            # Incrément du quota APRÈS création réussie (doc_entry obtenu).
+            if result.get("DocEntry") is not None:
+                try:
+                    get_quote_quota_service().increment()
+                except Exception as quota_exc:
+                    logger.error(
+                        "⚠️ Devis SAP créé (create_sap_quote, DocEntry=%s) mais "
+                        "incrément du compteur de quota échoué : %s",
+                        result.get("DocEntry"), quota_exc,
+                    )
+
             return {
                 "success": True,
                 "quote_id": result.get("DocEntry"),
@@ -944,7 +1022,7 @@ class MCPConnector:
                 "message": "Devis SAP créé avec succès",
                 "data": quote_data
             }
-            
+
         except Exception as e:
             logger.error(f"Erreur création devis SAP: {str(e)}")
             return {"success": False, "error": str(e)}

@@ -2,9 +2,9 @@
 Adapter DHL Express — API MyDHL
 Documentation : https://developer.dhl.com/api-reference/mydhl-api-dhl-express
 
-Authentification : Basic Auth
-  Username : rondotFR
-  Password : H$3xI$7rU@1kB^9z
+Authentification : Basic Auth (identifiants fournis UNIQUEMENT via l'environnement :
+  DHL_USERNAME / DHL_PASSWORD / DHL_ACCOUNT_NUMBER). Sans ces variables,
+  l'adaptateur se désactive proprement (is_available() -> False).
 
 Endpoints :
   Test : https://express.api.dhl.com/mydhlapi/test/rates
@@ -38,12 +38,15 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Configuration DHL (depuis .env ou valeurs par défaut)
+# Configuration DHL
+# Identifiants/compte : environnement UNIQUEMENT, aucun défaut codé en dur.
+# Si absents, is_available() renvoie False et l'adaptateur reste inactif.
+# (Adresse expéditeur ci-dessous = origine RONDOT par défaut, non sensible.)
 # ─────────────────────────────────────────────────────────────────────────────
 
-DHL_USERNAME = os.getenv("DHL_USERNAME", "rondotFR")
-DHL_PASSWORD = os.getenv("DHL_PASSWORD", "H$3xI$7rU@1kB^9z")
-DHL_ACCOUNT_NUMBER = os.getenv("DHL_ACCOUNT_NUMBER", "220294850")
+DHL_USERNAME = os.getenv("DHL_USERNAME", "")
+DHL_PASSWORD = os.getenv("DHL_PASSWORD", "")
+DHL_ACCOUNT_NUMBER = os.getenv("DHL_ACCOUNT_NUMBER", "")
 DHL_SHIPPER_POSTAL = os.getenv("DHL_SHIPPER_POSTAL", "13002")
 DHL_SHIPPER_CITY = os.getenv("DHL_SHIPPER_CITY", "MARSEILLE")
 DHL_SHIPPER_COUNTRY = os.getenv("DHL_SHIPPER_COUNTRY", "FR")
@@ -136,6 +139,11 @@ class DHLCarrierAdapter(CarrierAdapter):
         self._auth_header = self._build_auth_header()
         env_label = "TEST" if DHL_USE_TEST_ENV else "PROD"
         logger.info(f"✓ DHLCarrierAdapter initialisé [{env_label}] → {self._base_url}")
+        if not self.is_available():
+            logger.warning(
+                "DHL inactif : identifiants absents "
+                "(DHL_USERNAME / DHL_PASSWORD / DHL_ACCOUNT_NUMBER non définis)."
+            )
 
     @property
     def carrier_name(self) -> str:

@@ -16,6 +16,7 @@ load_dotenv()
 
 from services.security_helpers import escape_odata
 from services.sap_tls import SAP_VERIFY
+from services.quote_quota_service import get_quote_quota_service, QuotaDevisDepasse
 
 logger = logging.getLogger(__name__)
 
@@ -661,7 +662,16 @@ class SAPBusinessService:
 
         Returns:
             DocEntry du devis créé ou None en cas d'erreur
+
+        Raises:
+            QuotaDevisDepasse: si le quota mensuel de devis est atteint. Levée
+            AVANT tout appel SAP (aucun devis n'est créé dans ce cas).
         """
+        # ── Quota mensuel (blocage dur) : vérifié AVANT toute création SAP ──
+        # Volontairement hors du try ci-dessous pour que QuotaDevisDepasse se
+        # propage jusqu'à la route (et ne soit pas transformée en None).
+        get_quote_quota_service().check_quota()
+
         try:
             doc_date = datetime.now().strftime("%Y-%m-%d")
             doc_due_date = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
@@ -679,6 +689,16 @@ class SAPBusinessService:
 
             doc_entry = result.get("DocEntry")
             logger.info(f"✓ Devis créé: DocEntry {doc_entry}")
+            # Incrément du quota APRÈS création réussie. Une erreur de compteur
+            # ne doit pas masquer le succès SAP : on log sans lever.
+            if doc_entry is not None:
+                try:
+                    get_quote_quota_service().increment()
+                except Exception as quota_exc:
+                    logger.error(
+                        f"⚠️ Devis SAP créé (DocEntry={doc_entry}) mais incrément du "
+                        f"compteur de quota échoué : {quota_exc}"
+                    )
             return doc_entry
 
         except Exception as e:

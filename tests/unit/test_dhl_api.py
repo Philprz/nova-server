@@ -2,12 +2,10 @@
 Tests DHL Express API — Adapter + Service Transport
 Couvre : DHLCarrierAdapter, TransportService, mapping réponse, gestion erreurs
 
-IMPORTANT : Ces tests appellent l'API DHL réelle (env TEST).
-  Username : rondotFR
-  Password : H$3xI$7rU@1kB^9z
-  Endpoint : https://express.api.dhl.com/mydhlapi/test/rates
-
-Pour exécuter en isolation sans réseau, utiliser le marqueur --skip-api.
+IMPORTANT : Les identifiants DHL réels ne sont JAMAIS codés ici. Les tests
+unitaires moquent l'appel réseau ; des identifiants factices sont injectés via
+la fixture autouse `_dhl_test_credentials` pour que is_available() soit vrai.
+Endpoint TEST : https://express.api.dhl.com/mydhlapi/test/rates
 """
 
 import pytest
@@ -30,6 +28,31 @@ from services.transport.transport_service import TransportService
 # ─────────────────────────────────────────────────────────────────────────────
 # Fixtures
 # ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.fixture(autouse=True)
+def _dhl_test_credentials(request):
+    """Injecte des identifiants DHL factices au niveau du module.
+
+    L'app ne fournit plus aucun credential par défaut : sans cette fixture,
+    is_available() serait False et l'adaptateur se désactiverait. On patche les
+    globales du module (lues à l'exécution par is_available()) le temps du test.
+
+    Exception : les tests marqués `integration` appellent l'API DHL réelle et
+    doivent utiliser les VRAIS identifiants d'environnement (ou être ignorés).
+    """
+    if request.node.get_closest_marker("integration"):
+        yield
+        return
+    import services.transport.carriers.dhl_adapter as dhl
+    saved = (dhl.DHL_USERNAME, dhl.DHL_PASSWORD, dhl.DHL_ACCOUNT_NUMBER)
+    dhl.DHL_USERNAME = "test_user"
+    dhl.DHL_PASSWORD = "test_pass"
+    dhl.DHL_ACCOUNT_NUMBER = "000000000"
+    try:
+        yield
+    finally:
+        dhl.DHL_USERNAME, dhl.DHL_PASSWORD, dhl.DHL_ACCOUNT_NUMBER = saved
+
 
 @pytest.fixture
 def adapter():
@@ -145,10 +168,11 @@ class TestDHLPayloadBuilding:
         assert shipper["postalCode"] == "13002"
 
     def test_account_number_set(self, adapter, one_package, destination_paris):
+        import services.transport.carriers.dhl_adapter as dhl
         payload = adapter._build_payload(
             one_package, destination_paris, Shipper(), 100.0, "EUR"
         )
-        assert payload["accounts"][0]["number"] == "220294850"
+        assert payload["accounts"][0]["number"] == dhl.DHL_ACCOUNT_NUMBER
         assert payload["accounts"][0]["typeCode"] == "shipper"
 
     def test_package_format(self, adapter, one_package, destination_paris):
@@ -360,6 +384,10 @@ async def test_dhl_api_real_call():
     Test d'intégration réel — appelle l'API DHL TEST.
     Nécessite une connexion réseau et des credentials valides.
     """
+    import services.transport.carriers.dhl_adapter as dhl
+    if not (dhl.DHL_USERNAME and dhl.DHL_PASSWORD and dhl.DHL_ACCOUNT_NUMBER):
+        pytest.skip("Identifiants DHL absents de l'environnement — intégration ignorée")
+
     adapter = DHLCarrierAdapter()
     packages = [PackageInput(weight_kg=1.0, length_cm=30.0, width_cm=20.0, height_cm=20.0)]
     destination = Destination(postal_code="75001", city_name="PARIS", country_code="FR")
@@ -378,6 +406,10 @@ async def test_dhl_api_real_call():
 @pytest.mark.asyncio
 async def test_dhl_api_international():
     """Test international France → Dubaï."""
+    import services.transport.carriers.dhl_adapter as dhl
+    if not (dhl.DHL_USERNAME and dhl.DHL_PASSWORD and dhl.DHL_ACCOUNT_NUMBER):
+        pytest.skip("Identifiants DHL absents de l'environnement — intégration ignorée")
+
     adapter = DHLCarrierAdapter()
     packages = [PackageInput(weight_kg=5.0, length_cm=40.0, width_cm=30.0, height_cm=30.0)]
     destination = Destination(postal_code="DUBAI", city_name="DUBAI", country_code="AE")
