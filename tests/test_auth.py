@@ -36,9 +36,14 @@ def tmp_auth_db(tmp_path, monkeypatch):
 
 @pytest.fixture
 def seeded_db(tmp_auth_db):
-    """DB avec une société, un user ADMIN et une boîte mail."""
+    """DB avec une société, un user ADMIN et une boîte mail.
+
+    max_users=10 : plusieurs tests (TestDependencies) ajoutent des users à cette
+    société ; la capacité par défaut (1) les bloquerait. Les tests de capacité
+    dédiés (TestUserCapacity) créent leurs propres sociétés à capacité contrôlée.
+    """
     import auth.auth_db as db
-    sid = db.create_society("Test Corp", "TEST_DB", "https://sap.test/b1s/v1")
+    sid = db.create_society("Test Corp", "TEST_DB", "https://sap.test/b1s/v1", max_users=10)
     uid = db.create_user(sid, "admin_user", "Admin Test", "ADMIN")
     mid = db.create_mailbox(sid, "test@corp.fr", "Test Mailbox")
     db.grant_mailbox_permission(uid, mid, can_write=True, granted_by=uid)
@@ -270,7 +275,20 @@ class TestSAPValidator:
 # ── TestLoginFlow ─────────────────────────────────────────────────────────────
 
 class TestLoginFlow:
-    """Tests d'intégration du flux login via FastAPI TestClient."""
+    """Tests d'intégration du flux login via FastAPI TestClient.
+
+    Le flux login/refresh utilise des cookies HttpOnly (nova_session / nova_refresh) :
+    le raw refresh token n'est jamais exposé dans le corps JSON. Les assertions
+    portent donc sur les Set-Cookie, pas sur un body { access_token, refresh_token }.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _no_real_sap(self, monkeypatch):
+        """Neutralise l'appel best-effort ensure_session() (évite un vrai login SAP)."""
+        from services import sap_business_service
+        fake = MagicMock()
+        fake.ensure_session = AsyncMock(return_value=True)
+        monkeypatch.setattr(sap_business_service, "get_sap_business_service", lambda: fake)
 
     def _make_app(self):
         from fastapi import FastAPI
@@ -279,7 +297,7 @@ class TestLoginFlow:
         app.include_router(router)
         return app
 
-    def test_login_success_returns_tokens(self, seeded_db):
+    def test_login_success_sets_auth_cookies(self, seeded_db):
         from fastapi.testclient import TestClient
         app = self._make_app()
         client = TestClient(app)
@@ -292,10 +310,13 @@ class TestLoginFlow:
             })
 
         assert response.status_code == 200
+        # Tokens posés en cookies HttpOnly, jamais dans le corps
+        assert response.cookies.get("nova_session")
+        assert response.cookies.get("nova_refresh")
         data = response.json()
-        assert "access_token" in data
-        assert "refresh_token" in data
-        assert data["token_type"] == "bearer"
+        assert "access_token" not in data
+        assert "refresh_token" not in data
+        assert data["expires_in"] > 0
 
     def test_login_unknown_company_returns_401(self, seeded_db):
         from fastapi.testclient import TestClient
@@ -342,7 +363,7 @@ class TestLoginFlow:
         app = self._make_app()
         client = TestClient(app)
 
-        # 1. Login
+        # 1. Login → cookie nova_refresh posé dans le jar du client
         with patch("routes.routes_auth.validate_sap_credentials", new_callable=AsyncMock, return_value=True):
             login_resp = client.post("/api/auth/login", json={
                 "sap_company_db": "TEST_DB",
@@ -350,14 +371,17 @@ class TestLoginFlow:
                 "sap_password":   "anypass",
             })
         assert login_resp.status_code == 200
-        refresh_token = login_resp.json()["refresh_token"]
+        old_refresh = login_resp.cookies["nova_refresh"]
 
-        # 2. Refresh
-        refresh_resp = client.post("/api/auth/refresh", json={"refresh_token": refresh_token})
+        # 2. Refresh : on pose le cookie nova_refresh sur le client (le cookie est
+        # path-scopé sur /api/auth/refresh côté serveur).
+        client.cookies.clear()
+        client.cookies.set("nova_refresh", old_refresh)
+        refresh_resp = client.post("/api/auth/refresh")
         assert refresh_resp.status_code == 200
-        new_data = refresh_resp.json()
-        assert "access_token" in new_data
-        assert new_data["refresh_token"] != refresh_token  # token rotaté
+        assert refresh_resp.cookies.get("nova_session")
+        new_refresh = refresh_resp.cookies["nova_refresh"]
+        assert new_refresh != old_refresh  # token rotaté
 
     def test_revoked_refresh_returns_401(self, seeded_db):
         from fastapi.testclient import TestClient
@@ -370,13 +394,18 @@ class TestLoginFlow:
                 "sap_username":   "admin_user",
                 "sap_password":   "anypass",
             })
-        refresh_token = login_resp.json()["refresh_token"]
+        old_refresh = login_resp.cookies["nova_refresh"]
 
-        # Utiliser une première fois
-        client.post("/api/auth/refresh", json={"refresh_token": refresh_token})
+        # Utiliser une première fois (rotation → l'ancien est révoqué)
+        client.cookies.clear()
+        client.cookies.set("nova_refresh", old_refresh)
+        first = client.post("/api/auth/refresh")
+        assert first.status_code == 200
 
-        # Réutiliser l'ancien token révoqué → 401
-        resp2 = client.post("/api/auth/refresh", json={"refresh_token": refresh_token})
+        # Rejouer l'ancien cookie révoqué → 401
+        client.cookies.clear()
+        client.cookies.set("nova_refresh", old_refresh)
+        resp2 = client.post("/api/auth/refresh")
         assert resp2.status_code == 401
 
 
@@ -515,3 +544,179 @@ class TestDependencies:
         client = TestClient(app)
         resp = client.get("/any-auth")
         assert resp.status_code in (401, 403)
+
+
+# ── TestUserCapacity ──────────────────────────────────────────────────────────
+
+class TestUserCapacity:
+    """Capacité d'utilisateurs actifs par société (max_users, défaut 1)."""
+
+    def test_default_capacity_is_one(self, tmp_auth_db):
+        import auth.auth_db as db
+        sid = db.create_society("Cap", "CAP_DB", "https://sap.cap/b1s/v1")
+        s = db.get_society_by_id(sid)
+        assert s["max_users"] == 1
+
+    def test_second_user_blocked_at_default_capacity(self, tmp_auth_db):
+        import auth.auth_db as db
+        sid = db.create_society("Cap", "CAP_DB", "https://sap.cap/b1s/v1")  # max 1
+        db.create_user(sid, "u1", "User 1", "ADV")
+        with pytest.raises(db.CapacityExceededError):
+            db.create_user(sid, "u2", "User 2", "ADV")
+        assert db.count_active_users(sid) == 1
+
+    def test_capacity_is_parametrable_per_society(self, tmp_auth_db):
+        import auth.auth_db as db
+        sid = db.create_society("Cap3", "CAP3_DB", "https://sap.cap3/b1s/v1", max_users=3)
+        db.create_user(sid, "a", "A", "ADV")
+        db.create_user(sid, "b", "B", "ADV")
+        db.create_user(sid, "c", "C", "ADV")
+        assert db.count_active_users(sid) == 3
+        with pytest.raises(db.CapacityExceededError):
+            db.create_user(sid, "d", "D", "ADV")
+
+    def test_deactivation_frees_a_slot(self, tmp_auth_db):
+        import auth.auth_db as db
+        sid = db.create_society("Cap4", "CAP4_DB", "https://sap.cap4/b1s/v1")  # max 1
+        u1 = db.create_user(sid, "u1", "U1", "ADV")
+        db.deactivate_user(u1)
+        # Capacité libérée → on peut créer un nouvel utilisateur
+        u2 = db.create_user(sid, "u2", "U2", "ADV")
+        assert u2 > 0
+        assert db.count_active_users(sid) == 1
+
+    def test_reactivation_blocked_when_capacity_full(self, tmp_auth_db):
+        import auth.auth_db as db
+        sid = db.create_society("Cap5", "CAP5_DB", "https://sap.cap5/b1s/v1", max_users=2)
+        db.create_user(sid, "u1", "U1", "ADV")
+        u2 = db.create_user(sid, "u2", "U2", "ADV")
+        db.deactivate_user(u2)
+        # On resserre la capacité : u1 actif occupe déjà l'unique slot
+        db.update_society(sid, max_users=1)
+        with pytest.raises(db.CapacityExceededError):
+            db.update_user(u2, is_active=1)
+        assert db.count_active_users(sid) == 1
+
+    def test_reactivation_allowed_when_slot_free(self, tmp_auth_db):
+        import auth.auth_db as db
+        sid = db.create_society("Cap6", "CAP6_DB", "https://sap.cap6/b1s/v1", max_users=2)
+        u1 = db.create_user(sid, "u1", "U1", "ADV")
+        db.deactivate_user(u1)
+        assert db.update_user(u1, is_active=1) is True
+        assert db.count_active_users(sid) == 1
+
+    def test_update_non_activating_fields_not_blocked(self, tmp_auth_db):
+        import auth.auth_db as db
+        sid = db.create_society("Cap7", "CAP7_DB", "https://sap.cap7/b1s/v1")  # max 1
+        u1 = db.create_user(sid, "u1", "U1", "ADV")
+        # u1 déjà actif : renommer ne doit pas déclencher la garde capacité
+        assert db.update_user(u1, display_name="Renommé") is True
+
+    def test_migration_adds_max_users_to_existing_db(self, tmp_path, monkeypatch):
+        """Une base créée AVANT max_users doit recevoir la colonne via _init_db."""
+        import sqlite3
+        import auth.auth_db as db
+        legacy = tmp_path / "legacy_auth.db"
+        # Base "ancienne" : table societies sans la colonne max_users
+        conn = sqlite3.connect(str(legacy))
+        conn.execute(
+            """CREATE TABLE societies (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                sap_company_db TEXT NOT NULL UNIQUE,
+                sap_base_url TEXT NOT NULL,
+                is_active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )"""
+        )
+        conn.execute(
+            "INSERT INTO societies (name, sap_company_db, sap_base_url) "
+            "VALUES ('Old', 'OLD_DB', 'https://sap.old/b1s/v1')"
+        )
+        conn.commit()
+        conn.close()
+
+        monkeypatch.setattr(db, "DB_PATH", legacy)
+        db._init_db()  # doit ajouter max_users sans perdre les données
+
+        s = db.get_society_by_sap_company("OLD_DB")
+        assert s is not None
+        assert s["max_users"] == 1  # DEFAULT appliqué aux lignes existantes
+
+
+# ── TestSessionEviction ───────────────────────────────────────────────────────
+
+class TestSessionEviction:
+    """Session unique par utilisateur : la connexion la plus récente évince l'ancienne."""
+
+    @pytest.fixture(autouse=True)
+    def _clean_store(self):
+        from auth.sap_session import store
+        store._store.clear()
+        yield
+        store._store.clear()
+
+    def _make_session(self, user_id, society_id=1):
+        from auth.sap_session import store
+        now = datetime.now(timezone.utc)
+        return store.create_session(
+            b1_session=f"b1-{user_id}",
+            sap_cookie_header=f"B1SESSION=b1-{user_id}",
+            company_db="DB",
+            sap_base_url="https://sap.test/b1s/v1",
+            sap_user=f"user{user_id}",
+            user_id=user_id,
+            society_id=society_id,
+            display_name="U",
+            role="ADV",
+            session_timeout_minutes=30,
+            idle_expires_at=now + timedelta(minutes=30),
+            absolute_expires_at=now + timedelta(minutes=60),
+        )
+
+    def test_evict_removes_user_sessions(self):
+        from auth.sap_session import store
+        s1 = self._make_session(42)
+        assert store.get_session(s1.session_id) is not None
+        evicted = store.evict_user_sessions(42)
+        assert s1.session_id in evicted
+        assert store.get_session(s1.session_id) is None
+
+    def test_evict_spares_other_users(self):
+        from auth.sap_session import store
+        sa = self._make_session(1)
+        sb = self._make_session(2)
+        store.evict_user_sessions(1)
+        assert store.get_session(sa.session_id) is None
+        assert store.get_session(sb.session_id) is not None
+
+    def test_login_route_evicts_previous_session(self, seeded_db, monkeypatch):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from auth.sap_session import cookie_signing, store
+        from auth.sap_session.sap_auth_service import SapLoginResult
+        from routes.routes_sap_session import router
+
+        # Secret requis pour signer le cookie pa_session (lu au runtime).
+        monkeypatch.setattr(cookie_signing, "_SECRET", "test_cookie_secret_32_chars_long!!")
+
+        app = FastAPI()
+        app.include_router(router)
+        client = TestClient(app)
+
+        fake = SapLoginResult(
+            b1_session="b1",
+            sap_cookie_header="B1SESSION=b1",
+            session_timeout_minutes=30,
+        )
+        body = {"companyDb": "TEST_DB", "userName": "admin_user", "password": "x"}
+        with patch("routes.routes_sap_session.sap_login", new_callable=AsyncMock, return_value=fake):
+            r1 = client.post("/api/sapauth/login", json=body)
+            assert r1.status_code == 200
+            assert store.count_active_sessions() == 1
+            r2 = client.post("/api/sapauth/login", json=body)
+            assert r2.status_code == 200
+
+        # La 2e connexion a évincé la 1re : une seule session active subsiste
+        assert store.count_active_sessions() == 1

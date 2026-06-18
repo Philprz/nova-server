@@ -1,8 +1,23 @@
 {
   "permissions": {
     "allow": [
-      "Bash(sqlite3:*)",
-      "Bash(cmd /c \"curl --max-time 5 http://localhost:8001/health\")"
+      "Bash",
+      "Read",
+      "Edit",
+      "Write",
+      "Bash(npm install *)",
+      "Bash(psql --username=postgres --no-password -c \"SELECT version\\(\\);\")",
+      "Bash(net stop *)",
+      "Bash(net start *)",
+      "Bash(rm -f scripts/verify-corrective-invoice.ts scripts/_cleanup_verify.ts)",
+      "Bash(rm -f data/generated/GEN_A384-VERIFY* data/processed/GEN_A384-VERIFY* data/invoices/2026-06/*A384-VERIFY*)",
+      "Bash(find data *)"
+    ],
+    "deny": [
+      "Bash(rm -rf:*)",
+      "Bash(git push:*)",
+      "Read(./.env)",
+      "Read(./.env.*)"
     ]
   }
 }

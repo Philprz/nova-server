@@ -25,16 +25,23 @@ class MultiSourceCompanyAgent:
     Combine API INSEE, base locale et API Pappers comme fallback.
     """
     
-    def __init__(self, insee_key: str, pappers_key: str):
+    def __init__(self, insee_key: str, pappers_key: str,
+                 sources: Optional[List[str]] = None):
         """
         Initialise l'agent avec les clés des APIs.
-        
+
         Args:
             insee_key (str): Clé API INSEE
             pappers_key (str): Clé API Pappers
+            sources (Optional[List[str]]): Sources d'enrichissement actives
+                (ex: ["insee", "local"]). Pappers n'est appelé que si
+                "pappers" figure explicitement dans la liste. Défaut :
+                ["insee", "local"] — aucun appel Pappers (API payante).
         """
         self.insee_key = insee_key
         self.pappers_key = pappers_key
+        self.sources = ([s.strip().lower() for s in sources]
+                        if sources else ["insee", "local"])
         
         # Configuration INSEE
         self.insee_base_url = "https://api.insee.fr/api-sirene/3.11"
@@ -249,6 +256,16 @@ class MultiSourceCompanyAgent:
         Returns:
             List[Dict[str, Any]]: Liste des entreprises trouvées
         """
+        # Garde production : Pappers est une API payante, hors budget RONDOT.
+        # Aucun appel n'est déclenché tant que "pappers" n'est pas activé
+        # explicitement via CLIENT_ENRICHMENT_SOURCES.
+        if "pappers" not in self.sources:
+            logger.debug("Recherche Pappers ignorée (source non activée)")
+            return []
+        if not self.pappers_key:
+            logger.debug("Recherche Pappers ignorée (PAPPERS_API_KEY absent)")
+            return []
+
         # Vérifier le cache
         cache_key = f"pappers_name_{name.lower()}"
         if cache_key in self.cache:
@@ -514,5 +531,6 @@ class NovaCompanyAgentFactory:
         
         return MultiSourceCompanyAgent(
             insee_key=config['insee_key'],
-            pappers_key=config['pappers_key']
+            pappers_key=config['pappers_key'],
+            sources=config.get('sources')
         )

@@ -252,6 +252,30 @@ app = FastAPI(
 
 app.add_middleware(SecurityHeadersMiddleware)
 
+# ── Quota mensuel de devis : blocage dur → HTTP 429 cohérent partout ──
+# Couvre les routes qui n'encapsulent pas l'appel de création dans un try/except
+# (ex: routes_sap_quotation). Les routes qui interceptent largement les exceptions
+# (routes_sap_business) re-lèvent explicitement vers HTTPException 429.
+from fastapi import Request as _Request
+from fastapi.responses import JSONResponse as _JSONResponse
+from services.quote_quota_service import QuotaDevisDepasse as _QuotaDevisDepasse
+
+
+@app.exception_handler(_QuotaDevisDepasse)
+async def _quota_devis_depasse_handler(request: _Request, exc: _QuotaDevisDepasse):
+    return _JSONResponse(
+        status_code=429,
+        content={
+            "success": False,
+            "error_code": exc.error_code,
+            "message": str(exc),
+            "society_id": exc.society_id,
+            "period": exc.period,
+            "count": exc.count,
+            "max_quota": exc.max_quota,
+        },
+    )
+
 # Configuration des routes statiques pour l'interface
 app.mount("/static", StaticFiles(directory="static"), name="static")
 

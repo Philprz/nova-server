@@ -26,8 +26,32 @@ Toujours copier depuis `.env.example` et compléter. Variables critiques à vali
 | `WEBHOOK_CLIENT_STATE` | secret aléatoire ≥ 32 chars | utilisé par HMAC `compare_digest` (L3) |
 | `NOVA_JWT_SECRET` | `secrets.token_hex(32)` | signature JWT cookies HttpOnly |
 | `SAP_CA_BUNDLE_PATH` | chemin vers bundle CA SAP | sinon `verify=False` + WARNING au boot (L5d) |
-| `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | clés roteables | rotation tous les 6 mois |
+| `MISTRAL_API_KEY`, `ANTHROPIC_API_KEY` | clés roteables (Mistral principal, Anthropic fallback) | rotation tous les 6 mois — **AUCUNE clé OpenAI** (retiré du déploiement RONDOT) |
 | `SALESFORCE_CONSUMER_KEY`, `SALESFORCE_CONSUMER_SECRET` | renommés en L2 (anciennement franco-anglais) | clés Connected App |
+
+## Packaging de déploiement
+
+Pour livrer une version sans les sources de dev, construire un package zip :
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\package_deploy.ps1
+# -> dist\nova-deploy-<horodatage>.zip
+```
+
+Le package part des fichiers **suivis par git** (`git ls-files`) : tout ce qui
+est gitignoré (`.env`, `.venv/`, `*.db`, `*.pyc`, `node_modules/`, `logs/`,
+`alembic/versions/*`) est donc déjà exclu — **aucun secret n'est embarqué**.
+
+Les exclusions supplémentaires sont déclarées dans [`.deployignore`](../.deployignore) :
+
+| Exclu du package | Raison |
+|---|---|
+| `tests/` | inutile en production |
+| `mail-to-biz/` | sources frontend ; le build servi est déjà dans `frontend/` |
+| `.deployignore`, `.env.example` | métafichiers |
+
+Sur le serveur cible, après décompression : `copy .env.example .env`, compléter
+les secrets, puis suivre **Démarrage initial** (dont `alembic upgrade head`).
 
 ## Démarrage initial
 
@@ -42,10 +66,21 @@ copy .env.example .env
 python -m venv .venv
 .venv\Scripts\pip.exe install -r requirements.txt
 
-# 3. Initialisation base auth (créée automatiquement au premier démarrage)
+# 3. Migrations PostgreSQL — OBLIGATOIRE avant tout usage
+#    Crée notamment la table quote_usage_counter (compteur de quota devis).
+#    ⚠️ SANS cette étape, toute création de devis est BLOQUÉE (la table manque).
+.venv\Scripts\python.exe -m alembic upgrade head
+
+# 4. Initialisation base auth (créée automatiquement au premier démarrage)
 .venv\Scripts\python.exe main.py
 # Ctrl+C après "DEMARRAGE NOMINAL NOVA" pour s'assurer que nova_auth.db est créée
 ```
+
+> **Migrations Alembic** : les fichiers `alembic/versions/*.py` sont gitignorés
+> (spécifiques à chaque environnement) et ne sont donc PAS dans le package de
+> déploiement. Ils doivent être présents/générés sur la machine cible avant de
+> lancer `alembic upgrade head`. La table `quote_usage_counter` n'est pas créée
+> automatiquement au démarrage — elle dépend de cette migration.
 
 ## Services Windows (NSSM)
 
@@ -119,6 +154,11 @@ git pull --ff-only
 # 3. Mettre à jour dépendances si requirements.txt a changé
 .venv\Scripts\pip.exe install -r requirements.txt
 
+# 3b. Appliquer les migrations de schéma — OBLIGATOIRE si de nouvelles migrations
+#     ont été ajoutées. Sans `alembic upgrade head`, une table manquante (ex:
+#     quote_usage_counter) bloque la création de devis.
+.venv\Scripts\python.exe -m alembic upgrade head
+
 # 4. Supprimer les .pyc périmés (cf. Leçon Critique 23/02/2026)
 Get-ChildItem -Path . -Filter "*.pyc" -Recurse | Remove-Item -Force
 Get-ChildItem -Path . -Filter "__pycache__" -Recurse -Directory | Remove-Item -Recurse -Force
@@ -160,7 +200,7 @@ Le rollback ne touche pas les données : les bases SQLite et PostgreSQL restent 
 
 | Action | Fréquence | Pourquoi |
 |---|---|---|
-| Rotation `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | 6 mois | bonne pratique |
+| Rotation `MISTRAL_API_KEY`, `ANTHROPIC_API_KEY` | 6 mois | bonne pratique |
 | Rotation `NOVA_JWT_SECRET` | 12 mois ou incident | invalide toutes les sessions actives |
 | Vérification `SAP_CA_BUNDLE_PATH` | à chaque renouvellement cert SAP | sinon WARNING au boot |
 | Vérification backups SQLite | 1 mois | tester un restore complet |

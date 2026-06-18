@@ -36,6 +36,7 @@ from auth.sap_session.sap_auth_service import (
 from auth.sap_session.store import (
     create_session,
     delete_session,
+    evict_user_sessions,
     get_session,
     slide_idle_expiry,
 )
@@ -125,6 +126,15 @@ async def login(body: LoginBody) -> JSONResponse:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="USER_NOT_PROVISIONED",
+        )
+
+    # Session unique par utilisateur : la nouvelle connexion évince l'ancienne.
+    evicted = evict_user_sessions(user["id"])
+    if evicted:
+        logger.info(
+            "sapauth login : %d session(s) antérieure(s) évincée(s) pour user_id=%s",
+            len(evicted),
+            user["id"],
         )
 
     idle_expires_at = _now_plus_minutes(IDLE_TIMEOUT_MINUTES)

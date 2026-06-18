@@ -11,6 +11,7 @@ Ce router est appelé depuis :
 """
 
 import logging
+import os
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -26,6 +27,11 @@ from services.sap_quotation_service import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Le payload SAP brut (structure interne) n'est exposé dans les réponses API
+# que si EXPOSE_SAP_PAYLOAD=true (mode debug). Désactivé par défaut en prod
+# pour ne pas divulguer la structure des documents SAP au client.
+_EXPOSE_SAP_PAYLOAD = os.getenv("EXPOSE_SAP_PAYLOAD", "false").lower() == "true"
 
 # ============================================================
 # LOGGING DEVIS — table quote_generation_log (email_analysis.db)
@@ -151,7 +157,7 @@ async def preview_sap_quotation(payload: QuotationPayload):
             "lines_count": len(payload.DocumentLines),
         },
         "currency": "EUR",
-        "sap_payload": sap_payload,
+        "sap_payload": sap_payload if _EXPOSE_SAP_PAYLOAD else None,
     }
 
 
@@ -271,7 +277,7 @@ async def create_sap_quotation(payload: QuotationPayload):
         message=result.message,
         retried=result.retried,
         retry_reason=result.retry_reason,
-        sap_payload=result.sap_payload,
+        sap_payload=result.sap_payload if _EXPOSE_SAP_PAYLOAD else None,
     )
 
 

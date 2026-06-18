@@ -38,6 +38,22 @@ from services.sap_quotation_service import (
 # ============================================================
 
 
+@pytest.fixture(autouse=True)
+def _neutralize_quota():
+    """Neutralise le service de quota pour ces tests.
+
+    create_sales_quotation appelle désormais get_quote_quota_service() (quota
+    mensuel de devis), qui accède à PostgreSQL. Ces tests ciblent la logique
+    SAP, pas le quota : on remplace le service par un mock qui autorise toujours
+    et n'incrémente rien, afin de rester hermétique (aucun accès DB).
+    Le quota lui-même est couvert par tests/test_quote_quota.py.
+    """
+    with patch("services.sap_quotation_service.get_quote_quota_service") as m:
+        m.return_value.check_quota.return_value = 50
+        m.return_value.increment.return_value = 1
+        yield
+
+
 @pytest.fixture
 def service():
     """Instance du service avec env SAP de test."""
@@ -209,9 +225,17 @@ class TestBuildSapPayload:
         assert "email_subject" not in sap
 
     def test_optional_fields_included_when_set(self, service, full_payload):
-        """Champs optionnels inclus si définis."""
+        """Champs optionnels inclus si définis.
+
+        Note : quand un email_id est présent, _build_sap_payload ajoute
+        volontairement un tag de traçabilité [NOVA-EMAIL-ID:...] à la fin
+        du champ Comments (cf. sap_quotation_service._build_sap_payload).
+        """
         sap = service._build_sap_payload(full_payload)
-        assert sap.get("Comments") == "Devis suite email du 20/02/2026 - Ref: PRJ-2026-001"
+        assert sap.get("Comments") == (
+            "Devis suite email du 20/02/2026 - Ref: PRJ-2026-001"
+            "\n[NOVA-EMAIL-ID:AAMkAGIxZmVkYWMz]"
+        )
         assert sap.get("NumAtCard") == "PRJ-2026-001"
         assert sap.get("SalesPersonCode") == 3
         assert sap.get("ValidUntil") == "2026-03-31"
@@ -315,8 +339,14 @@ class TestCreateSalesQuotation:
 
     @pytest.mark.asyncio
     async def test_login_failure_returns_failure(self, service, minimal_payload):
-        """Échec login SAP retourne success=False avec error_code SAP_LOGIN_FAILED."""
-        with patch.object(service, "login", new=AsyncMock(return_value=False)):
+        """Échec d'obtention de session SAP retourne SAP_LOGIN_FAILED.
+
+        create_sales_quotation passe par ensure_session() (qui tente d'emprunter
+        une session à SAPBusinessService avant de retomber sur login). On patche
+        donc ensure_session — le point d'entrée réel — pour simuler l'échec sans
+        déclencher d'I/O réseau.
+        """
+        with patch.object(service, "ensure_session", new=AsyncMock(return_value=False)):
             result = await service.create_sales_quotation(minimal_payload)
 
         assert result.success is False

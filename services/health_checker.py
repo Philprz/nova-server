@@ -12,7 +12,6 @@ from sqlalchemy import text
 from db.session import SessionLocal
 from services.mcp_connector import MCPConnector
 from services.llm_extractor import get_llm_extractor
-import openai
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +43,7 @@ class HealthChecker:
             ("sap_connection", self._test_sap_connection),
             ("salesforce_connection", self._test_salesforce_connection),
             ("claude_api", self._test_claude_api),
-            ("chatgpt_api", self._test_chatgpt_api),
+            ("mistral_api", self._test_mistral_api),
             ("sap_data_retrieval", self._test_sap_data_retrieval),
             ("salesforce_data_retrieval", self._test_salesforce_data_retrieval),
             ("routes_availability", self._test_routes_availability)
@@ -89,7 +88,7 @@ class HealthChecker:
         try:
             required_vars = [
                 "ANTHROPIC_API_KEY",
-                "OPENAI_API_KEY",
+                "MISTRAL_API_KEY",
                 "REDIS_URL"
             ]
             
@@ -276,32 +275,36 @@ class HealthChecker:
                 "duration_ms": round((time.time() - start_time) * 1000, 2)
             }
     
-    async def _test_chatgpt_api(self) -> Dict[str, Any]:
-        """Test de l'API ChatGPT OpenAI"""
+    async def _test_mistral_api(self) -> Dict[str, Any]:
+        """Test du routeur LLM (provider principal Mistral).
+
+        Remplace l'ancien test OpenAI/ChatGPT direct : OpenAI est retiré du
+        déploiement RONDOT. On valide ici le routeur LLM, dont le provider
+        principal est Mistral (avec fallback Anthropic).
+        """
         start_time = time.time()
 
         try:
-            client = openai.AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-            completion = await client.chat.completions.create(
-                model=os.getenv("OPENAI_MODEL"),
-                messages=[
-                    {"role": "system", "content": "You are a helpful assistant."},
-                    {"role": "user", "content": "Test"}
-                ],
-                max_tokens=5
+            from services.llm_router import get_llm_router
+
+            router = get_llm_router()
+            reply = await router.call(
+                system_prompt="You are a test bot. Reply with the single word OK.",
+                user_message="ping",
+                max_tokens=8,
             )
 
-            if completion and completion.choices:
+            if reply and reply.strip():
                 return {
                     "success": True,
-                    "message": "API ChatGPT OpenAI opérationnelle",
+                    "message": "Routeur LLM opérationnel (provider principal Mistral)",
                     "timestamp": datetime.now().isoformat(),
                     "duration_ms": round((time.time() - start_time) * 1000, 2)
                 }
             else:
                 return {
                     "success": False,
-                    "message": "Réponse ChatGPT invalide",
+                    "message": "Réponse routeur LLM vide",
                     "timestamp": datetime.now().isoformat(),
                     "duration_ms": round((time.time() - start_time) * 1000, 2)
                 }
@@ -309,7 +312,7 @@ class HealthChecker:
         except Exception as e:
             return {
                 "success": False,
-                "message": f"Échec API ChatGPT: {str(e)[:50]}...",
+                "message": f"Échec routeur LLM (Mistral): {str(e)[:50]}...",
                 "timestamp": datetime.now().isoformat(),
                 "duration_ms": round((time.time() - start_time) * 1000, 2)
             }
@@ -522,8 +525,8 @@ class HealthChecker:
                     recommendations.append("[FIX] Problème de connexion Salesforce - vérifier les MCP")
                 elif test_name == "claude_api":
                     recommendations.append("[FIX] Vérifier la clé API Anthropic dans .env")
-                elif test_name == "chatgpt_api":
-                    recommendations.append("[FIX] Vérifier la clé API OpenAI dans .env")
+                elif test_name == "mistral_api":
+                    recommendations.append("[FIX] Vérifier MISTRAL_API_KEY / config routeur LLM")
                 elif test_name == "sap_data_retrieval":
                     recommendations.append("[FIX] Problème de récupération de données SAP")
                 elif test_name == "salesforce_data_retrieval":

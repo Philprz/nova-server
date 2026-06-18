@@ -15,6 +15,18 @@ logger = logging.getLogger(__name__)
 DB_PATH = Path(__file__).parent.parent / "data" / "nova_auth.db"
 
 
+class CapacityExceededError(Exception):
+    """La société a atteint son nombre maximum d'utilisateurs actifs (max_users)."""
+
+    def __init__(self, society_id: int, max_users: int) -> None:
+        self.society_id = society_id
+        self.max_users = max_users
+        super().__init__(
+            f"Capacité atteinte : la société {society_id} est limitée à "
+            f"{max_users} utilisateur(s) actif(s)."
+        )
+
+
 def get_connection() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(DB_PATH))
@@ -34,6 +46,7 @@ def _init_db() -> None:
             name            TEXT    NOT NULL UNIQUE,
             sap_company_db  TEXT    NOT NULL UNIQUE,
             sap_base_url    TEXT    NOT NULL,
+            max_users       INTEGER NOT NULL DEFAULT 1,
             is_active       INTEGER NOT NULL DEFAULT 1,
             created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
             updated_at      TEXT    NOT NULL DEFAULT (datetime('now'))
@@ -92,6 +105,16 @@ def _init_db() -> None:
         CREATE INDEX IF NOT EXISTS idx_refresh_hash         ON refresh_tokens(token_hash);
     """)
 
+    # Migration idempotente des bases EXISTANTES créées avant l'ajout de max_users.
+    # CREATE TABLE IF NOT EXISTS n'altère pas une table déjà présente : on ajoute
+    # la colonne à la main si elle manque.
+    existing_cols = {row["name"] for row in cursor.execute("PRAGMA table_info(societies)")}
+    if "max_users" not in existing_cols:
+        cursor.execute(
+            "ALTER TABLE societies ADD COLUMN max_users INTEGER NOT NULL DEFAULT 1"
+        )
+        logger.info("Migration nova_auth.db : colonne societies.max_users ajoutée")
+
     conn.commit()
     conn.close()
     logger.info("nova_auth.db initialisée")
@@ -99,12 +122,17 @@ def _init_db() -> None:
 
 # ── Societies ──────────────────────────────────────────────────────────────────
 
-def create_society(name: str, sap_company_db: str, sap_base_url: str) -> int:
+def create_society(
+    name: str,
+    sap_company_db: str,
+    sap_base_url: str,
+    max_users: int = 1,
+) -> int:
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
-        "INSERT INTO societies (name, sap_company_db, sap_base_url) VALUES (?, ?, ?)",
-        (name, sap_company_db, sap_base_url),
+        "INSERT INTO societies (name, sap_company_db, sap_base_url, max_users) VALUES (?, ?, ?, ?)",
+        (name, sap_company_db, sap_base_url, max_users),
     )
     conn.commit()
     society_id = cursor.lastrowid
@@ -137,7 +165,7 @@ def list_societies() -> List[Dict]:
 
 
 def update_society(society_id: int, **kwargs) -> bool:
-    allowed = {"name", "sap_base_url", "is_active"}
+    allowed = {"name", "sap_base_url", "is_active", "max_users"}
     fields = {k: v for k, v in kwargs.items() if k in allowed}
     if not fields:
         return False
@@ -153,17 +181,58 @@ def update_society(society_id: int, **kwargs) -> bool:
 
 # ── Nova Users ─────────────────────────────────────────────────────────────────
 
+def count_active_users(society_id: int) -> int:
+    """Nombre d'utilisateurs actifs (is_active=1) rattachés à une société."""
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT COUNT(*) AS n FROM nova_users WHERE society_id = ? AND is_active = 1",
+        (society_id,),
+    ).fetchone()
+    conn.close()
+    return row["n"]
+
+
+def _assert_capacity(conn: sqlite3.Connection, society_id: int, *, exclude_user_id: Optional[int] = None) -> None:
+    """Lève CapacityExceededError si activer un utilisateur de plus dépasse max_users.
+
+    Opère sur une connexion existante pour rester dans la même transaction que
+    l'INSERT/UPDATE appelant. `exclude_user_id` permet d'ignorer l'utilisateur en
+    cours de réactivation (sinon il ne serait pas encore compté de toute façon).
+    """
+    society = conn.execute(
+        "SELECT max_users FROM societies WHERE id = ?", (society_id,)
+    ).fetchone()
+    # Société absente : on laisse la contrainte FK de l'INSERT trancher.
+    if society is None:
+        return
+    max_users = society["max_users"]
+    if exclude_user_id is None:
+        active = conn.execute(
+            "SELECT COUNT(*) AS n FROM nova_users WHERE society_id = ? AND is_active = 1",
+            (society_id,),
+        ).fetchone()["n"]
+    else:
+        active = conn.execute(
+            "SELECT COUNT(*) AS n FROM nova_users "
+            "WHERE society_id = ? AND is_active = 1 AND id != ?",
+            (society_id, exclude_user_id),
+        ).fetchone()["n"]
+    if active >= max_users:
+        raise CapacityExceededError(society_id, max_users)
+
+
 def create_user(society_id: int, sap_username: str, display_name: str, role: str) -> int:
     conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        "INSERT INTO nova_users (society_id, sap_username, display_name, role) VALUES (?, ?, ?, ?)",
-        (society_id, sap_username, display_name, role),
-    )
-    conn.commit()
-    user_id = cursor.lastrowid
-    conn.close()
-    return user_id
+    try:
+        _assert_capacity(conn, society_id)
+        cursor = conn.execute(
+            "INSERT INTO nova_users (society_id, sap_username, display_name, role) VALUES (?, ?, ?, ?)",
+            (society_id, sap_username, display_name, role),
+        )
+        conn.commit()
+        return cursor.lastrowid
+    finally:
+        conn.close()
 
 
 def get_user_by_id(user_id: int) -> Optional[Dict]:
@@ -205,10 +274,21 @@ def update_user(user_id: int, **kwargs) -> bool:
     set_clause = ", ".join(f"{k} = ?" for k in fields)
     values = list(fields.values()) + [user_id]
     conn = get_connection()
-    cursor = conn.execute(f"UPDATE nova_users SET {set_clause} WHERE id = ?", values)
-    conn.commit()
-    conn.close()
-    return cursor.rowcount > 0
+    try:
+        # Garde capacité lors d'une réactivation (is_active 0 -> 1) : on ne
+        # vérifie que si l'utilisateur est actuellement inactif et qu'on l'active.
+        if "is_active" in fields and int(fields["is_active"]) == 1:
+            current = conn.execute(
+                "SELECT society_id, is_active FROM nova_users WHERE id = ?",
+                (user_id,),
+            ).fetchone()
+            if current is not None and int(current["is_active"]) == 0:
+                _assert_capacity(conn, current["society_id"], exclude_user_id=user_id)
+        cursor = conn.execute(f"UPDATE nova_users SET {set_clause} WHERE id = ?", values)
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
 
 
 def deactivate_user(user_id: int) -> bool:
