@@ -1,5 +1,16 @@
 #main.py - CORRECTIONS CRITIQUES POUR NOVA
 
+# --- Shim de compat Cython <-> Pydantic v2 (Lot 5) ---------------------------
+# DOIT s'executer AVANT tout import de module contenant des modeles Pydantic
+# (routes.*, services.*...). Le shim reste en .py dans scripts/ (jamais
+# compile) ; on l'expose en module top-level quel que soit le cwd, puis on
+# applique la forme EXACTE validee en phase 2. Inerte hors-compilation.
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts"))
+import cython_pydantic_compat
+cython_pydantic_compat.apply()
+
 from dotenv import load_dotenv
 load_dotenv()
 

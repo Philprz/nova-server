@@ -25,8 +25,17 @@ NOTE : le bloc __main__ de main.py est CONSERVE en repli (compat dev :
 `python main.py` fonctionne toujours).
 """
 
+# --- Shim de compat Cython <-> Pydantic v2 (Lot 5) ---------------------------
+# DOIT s'executer AVANT tout import de module contenant des modeles Pydantic
+# (services.secure_config, main, routes...). Le shim reste en .py dans scripts/
+# (jamais compile) ; on l'expose en module top-level quel que soit le cwd, puis
+# on applique la forme EXACTE validee en phase 2. Inerte hors-compilation.
 import os
 import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts"))
+import cython_pydantic_compat
+cython_pydantic_compat.apply()
+
 import logging
 
 from services.secure_config import DEFAULT_VAULT_PATH

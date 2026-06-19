@@ -25,7 +25,7 @@ mail-to-biz/
 # ============================================================
 # ÉTAPE 1 — Livraison compilée RONDOT (Lot 6, SPEC_COMPILATION_RONDOT.md)
 # Exclusions appliquées AUSSI par scripts/package_compiled.ps1.
-# Ne PAS exclure : sync_clients.py (importé par routes_sync.py),
+# Ne PAS exclure :
 # register_webhook.py / renew_webhook.py (webhook Graph planifié),
 # main.py / sap_mcp.py / salesforce_mcp.py (compilés en .pyd).
 # ============================================================
