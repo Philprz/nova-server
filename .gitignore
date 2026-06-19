@@ -18,6 +18,12 @@ env/
 .env.production
 .env.*.local
 
+# Coffre chiffre et cle maitre (Lot 1 - ne JAMAIS committer)
+secrets.enc
+*.enc
+nova_vault.key
+*.master.key
+
 # Bases de données locales
 *.db
 *.sqlite
