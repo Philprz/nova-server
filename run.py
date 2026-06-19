@@ -13,12 +13,16 @@ Ordre EXACT respecte ci-dessous :
   1. Chargement OPTIONNEL du coffre chiffre (secrets.enc + NOVA_VAULT_KEY).
      Si absent -> on ne fait rien, le comportement .env actuel prend le relais.
      Aucune exception n'est levee si le coffre est absent.
-  2. SEULEMENT APRES : import de l'app (`from main import app`) + uvicorn.
-  3. Reprise a l'identique de la logique du bloc __main__ de main.py.
+  2. Migrations Alembic OPTIONNELLES (Lot 4) : seulement si NOVA_AUTO_MIGRATE
+     vaut "true"/"1". Par defaut : ne rien faire (comportement actuel preserve).
+     Si actif et que la migration echoue : c'est FATAL (arret du demarrage), PAS
+     de repli gracieux ici (contrairement au coffre) — on ne lance jamais uvicorn
+     sur une base potentiellement a moitie migree.
+  3. SEULEMENT APRES : import de l'app (`from main import app`) + uvicorn.
+  4. Reprise a l'identique de la logique du bloc __main__ de main.py.
 
 NOTE : le bloc __main__ de main.py est CONSERVE en repli (compat dev :
-`python main.py` fonctionne toujours). `alembic upgrade head` n'est PAS encore
-branche ici (ce sera le Lot 4).
+`python main.py` fonctionne toujours).
 """
 
 import os
@@ -94,10 +98,85 @@ def _load_vault_if_present() -> None:
         root.setLevel(_prev_level)
 
 
+_AUTO_MIGRATE_ENV_VAR = "NOVA_AUTO_MIGRATE"
+
+
+def _run_migrations_if_enabled() -> None:
+    """
+    Execute 'alembic upgrade head' par programme, UNIQUEMENT si NOVA_AUTO_MIGRATE
+    vaut "true" ou "1". Par defaut (variable absente/autre valeur) : ne fait
+    STRICTEMENT RIEN -> comportement actuel preserve a l'identique.
+
+    A executer APRES le chargement du coffre (DATABASE_URL doit etre dans
+    os.environ) et AVANT 'from main import app'. alembic/env.py refait son propre
+    load_dotenv() et lit DATABASE_URL via os.getenv -> les deux modes (coffre /
+    .env) fonctionnent.
+
+    Politique d'erreur : a l'inverse du coffre, l'echec ici est FATAL. On NE
+    lance PAS uvicorn sur une base potentiellement a moitie migree : on logue
+    l'erreur et on quitte avec un code non nul (SystemExit(1)).
+    """
+    flag = os.getenv(_AUTO_MIGRATE_ENV_VAR, "").strip().lower()
+    if flag not in ("true", "1"):
+        return  # defaut : aucune migration declenchee
+
+    # Handler console JETABLE pour la phase pre-import (meme raison que le coffre :
+    # ne pas court-circuiter le logging.basicConfig() de main.py). alembic/env.py
+    # appelle fileConfig() qui RECONFIGURE le root logger ; on restaure donc l'etat
+    # initial du root logger en sortie, quoi qu'il arrive.
+    root = logging.getLogger()
+    saved_handlers = root.handlers[:]
+    saved_level = root.level
+    _tmp_handler = logging.StreamHandler(sys.stdout)
+    _tmp_handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
+
+    def _ensure_visible() -> None:
+        # alembic/env.py (fileConfig) reconfigure le logging : il peut retirer
+        # notre handler, remonter le niveau a WARNING, et surtout DESACTIVER les
+        # loggers existants (disable_existing_loggers=True par defaut) -> notre
+        # logger "run" devient muet. On retablit tout pour garder nos messages.
+        if _tmp_handler not in root.handlers:
+            root.addHandler(_tmp_handler)
+        root.setLevel(logging.INFO)
+        logging.getLogger("run").disabled = False
+
+    _ensure_visible()
+    log = logging.getLogger("run")
+
+    try:
+        log.info("%s actif : execution de 'alembic upgrade head'...", _AUTO_MIGRATE_ENV_VAR)
+        from alembic.config import Config
+        from alembic import command
+
+        ini_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "alembic.ini")
+        cfg = Config(ini_path)
+        command.upgrade(cfg, "head")
+
+        _ensure_visible()
+        log.info("Migrations Alembic appliquees avec succes (base a jour : head).")
+    except Exception as exc:
+        _ensure_visible()
+        log.critical(
+            "ECHEC des migrations Alembic (%s) : %s. "
+            "Arret du demarrage : uvicorn NE sera PAS lance sur une base a moitie migree.",
+            type(exc).__name__, exc, exc_info=True,
+        )
+        # FATAL : pas de repli gracieux. finally restaure le logging, puis on quitte.
+        raise SystemExit(1)
+    finally:
+        # Restaurer l'etat initial du root logger pour que le basicConfig() de
+        # main.py s'applique (RotatingFileHandler -> nova.log).
+        root.handlers[:] = saved_handlers
+        root.setLevel(saved_level)
+
+
 # ── 1. Coffre AVANT tout import applicatif ────────────────────────────────────
 _load_vault_if_present()
 
-# ── 2. SEULEMENT APRES : import de l'app (main devient main.pyd au Lot 5) ─────
+# ── 2. Migrations Alembic optionnelles (Lot 4) — FATAL si actives et en echec ─
+_run_migrations_if_enabled()
+
+# ── 3. SEULEMENT APRES : import de l'app (main devient main.pyd au Lot 5) ─────
 import uvicorn
 from main import app, kill_process_on_port
 
@@ -120,6 +199,6 @@ def main() -> None:
     uvicorn.run(app, host="0.0.0.0", port=backend_port, log_config=None, loop="asyncio")
 
 
-# ── 3. Point d'entree ─────────────────────────────────────────────────────────
+# ── 4. Point d'entree ─────────────────────────────────────────────────────────
 if __name__ == "__main__":
     main()
