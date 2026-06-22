@@ -5,6 +5,7 @@ import sys
 import io
 import os
 import json
+import time
 import logging
 import asyncio
 from fastapi import APIRouter, HTTPException
@@ -22,10 +23,16 @@ from utils.client_lister import find_client_everywhere
 from services.product_search_engine import ProductSearchEngine
 from workflow.client_creation_workflow import client_creation_workflow
 from services.price_engine import PriceEngineService
-from services.cache_manager import referential_cache
+from services.cache_manager import referential_cache, RedisCacheManager
 from workflow.validation_workflow import SequentialValidator
 from services.local_product_search import LocalProductSearchService
 from services.security_helpers import escape_soql
+
+# Cache d'etat workflow partage (persistance des contextes entre les allers-retours
+# d'interaction utilisateur des routes /continue_quote). Singleton module : indispensable
+# pour que save_workflow_state d'une requete soit relu par get_workflow_state de la
+# suivante. Fallback memoire automatique si Redis est indisponible.
+cache_manager = RedisCacheManager()
 # Configuration sécurisée pour Windows
 if sys.platform == "win32":
     os.environ["PYTHONIOENCODING"] = "utf-8"
@@ -1310,6 +1317,7 @@ class DevisWorkflow:
             # Étape 2.1: Recherche client
             self._track_step_start("search_client", "Recherche du client...")
             
+            client_name = extracted_info.get("client", "")
             client_info = await self.client_validator.validate_client_complete(extracted_info.get("client"))
             # CORRECTION : Gérer les suggestions client MÊME si trouvé (choix multiple)
             if client_info.get("suggestions") and len(client_info["suggestions"]) > 1:
@@ -1969,6 +1977,7 @@ class DevisWorkflow:
             }
     async def _continue_workflow_after_client_selection(self, client_data, original_context):
         # CORRECTION: Utiliser _process_products_retrieval qui gère les sélections
+        products = (original_context or {}).get("extracted_info", {}).get("products", [])
         products_result = await self._process_products_retrieval(products)
         if products_result.get("status") == "product_selection_required":
              # Envoyer l'interaction WebSocket avant de s'arrêter
@@ -2001,6 +2010,10 @@ class DevisWorkflow:
         
         for i, product in enumerate(products):
             
+            product_code = (product.get("code") or
+                            product.get("item_code") or
+                            product.get("ItemCode", ""))
+            quantity = float(product.get("quantity", 1))
             logger.info(f"🔍 Validation produit {i+1}: {product_code}")
             
             try:
@@ -3751,6 +3764,7 @@ class DevisWorkflow:
         try:
             
             # Récupérer tous les brouillons
+            from sap_mcp import sap_list_draft_quotes
             draft_result = await sap_list_draft_quotes()
             
             if not draft_result.get("success"):
@@ -4854,42 +4868,8 @@ class DevisWorkflow:
             if not db_url:
                 logger.warning("DATABASE_URL manquant pour recherche locale par code")
                 return None
-            # Recherche simple et directe d'abord
-            simple_results = session.execute(
-                text("""
-                SELECT item_code, item_name, u_description, avg_price, on_hand,
-                    items_group_code, manufacturer, sales_unit
-                FROM produits_sap 
-                WHERE valid = true 
-                AND on_hand > 0
-                AND (
-                    LOWER(item_name) LIKE '%' || LOWER(:search_term) || '%' OR
-                    LOWER(u_description) LIKE '%' || LOWER(:search_term) || '%'
-                )
-                ORDER BY on_hand DESC
-                LIMIT 10
-                """),
-                {"search_term": product_name}
-            ).fetchall()
-
-            if simple_results:
-                logger.info(f"✅ Recherche simple trouvée: {len(simple_results)} résultats")
-                formatted_results: List[Dict[str, Any]] = []
-                for row in simple_results:
-                    formatted_results.append({
-                        "ItemCode": row.item_code,
-                        "ItemName": row.item_name,
-                        "U_Description": row.u_description or "",
-                        "AvgPrice": float(row.avg_price or 0),
-                        "OnHand": int(row.on_hand or 0),
-                        "QuantityOnStock": int(row.on_hand or 0),
-                        "ItemsGroupCode": row.items_group_code or "",
-                        "Manufacturer": row.manufacturer or "",
-                        "SalesUnit": row.sales_unit or "UN",
-                        "source": "local_db_simple",
-                        "relevance_score": 1.0
-                    })
-                return formatted_results
+            engine = create_engine(db_url, pool_pre_ping=True)
+            SessionLocal = sessionmaker(bind=engine)
             with SessionLocal() as session:
                 result = session.execute(
                     text("""
@@ -7082,7 +7062,6 @@ class DevisWorkflow:
                 
                 # Marquer la tâche en attente d'interaction
                 if self.current_task:
-                    from services.progress_tracker import TaskStatus
                     self.current_task.status = TaskStatus.PENDING
                     self.current_task.require_user_validation(
                         "duplicate_resolution",
@@ -7092,7 +7071,6 @@ class DevisWorkflow:
                 
                 # Envoyer via WebSocket
                 try:
-                    from services.websocket_manager import websocket_manager
                     await websocket_manager.send_user_interaction_required(
                         self.task_id,
                         duplicate_interaction_data
@@ -7166,7 +7144,7 @@ class DevisWorkflow:
                     "type": "quote_validation",
                     "interaction_type": "quote_validation",
                     "quote_preview": quote_preview,
-                    "client_info": client_info,
+                    "client_info": client_result,
                     "products": valid_products,  # ✅ uniquement valides
                     "message": "Veuillez valider le devis avant création",
                     "total_amount": quote_preview.get("total_amount", 0),
@@ -9389,14 +9367,14 @@ class EnhancedDevisWorkflow(DevisWorkflow):
             # Création dans SAP
             result = await self.mcp_connector.call_sap_mcp(
                 "sap_create_customer_complete",
-                {"customer_data": sap_data}
+                {"customer_data": sap_client_data}
             )
-            
-            if not sap_results.get("success", False):
-                logger.error(f"❌ Échec création SAP: {sap_results.get('error')}")
+
+            if not result.get("success", False):
+                logger.error(f"❌ Échec création SAP: {result.get('error')}")
                 return {
                     "created": False,
-                    "error": f"Erreur SAP: {sap_results.get('error', 'Erreur inconnue')}"
+                    "error": f"Erreur SAP: {result.get('error', 'Erreur inconnue')}"
                 }
             
             logger.info(f"✅ Client SAP créé: {card_code}")

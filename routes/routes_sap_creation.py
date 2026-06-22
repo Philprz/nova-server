@@ -182,7 +182,7 @@ async def check_product_exists(item_code: str):
         GET /api/sap/products/check-exists/2323060165
     """
     try:
-        from services.sap import get_sap_service
+        from services.sap import get_sap_service, call_sap
 
         sap = get_sap_service()
 

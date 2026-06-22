@@ -61,6 +61,7 @@ async def call_mcp_with_progress(server_name: str, action: str, params: Dict[str
             start_msg = message or f"Exécution {server_name}.{action}"
             current_task.update_step_progress(step_id, 10, start_msg)
 
+            mcp_connector = get_mcp_connector()
             result = await mcp_connector.call_mcp(server_name, action, params)
 
             # Terminer la progression

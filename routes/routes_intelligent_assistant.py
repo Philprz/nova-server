@@ -25,7 +25,7 @@ router = APIRouter(tags=["Assistant Intelligent"], dependencies=[Depends(get_cur
 # Import du système de progression
 from services.progress_tracker import progress_tracker, TaskStatus
 from workflow.devis_workflow import DevisWorkflow
-from workflow.client_creation_workflow import ClientCreationWorkflow
+from workflow.client_creation_workflow import ClientCreationWorkflow, client_creation_workflow
 logger = logging.getLogger(__name__)
 
 # Import des services NOVA existants
@@ -33,6 +33,7 @@ from services.suggestion_engine import SuggestionEngine, SuggestionResult
 from services.client_validator import ClientValidator
 from services.progress_tracker import ProgressTracker
 from services.mcp_connector import MCPConnector
+from services.llm_extractor import LLMExtractor, get_llm_extractor
 # Import des routes existantes pour réutiliser la logique
 import asyncio
 import httpx
@@ -595,10 +596,20 @@ async def get_unified_data(data_type: str, limit: int = 20):
                 }
                 
         return {'clients': [], 'products': [], 'total': 0}
-        
+
     except Exception as e:
         logger.error(f"Erreur get_unified_data: {e}")
         return {'clients': [], 'products': [], 'total': 0}
+
+
+async def get_workflow_context(task_id: str) -> Dict[str, Any]:
+    """Récupère le contexte de workflow persisté pour une tâche.
+
+    Le contexte est porté par la QuoteTask du progress_tracker (attribut .context).
+    Retourne un dict vide si la tâche n'existe pas / a expiré.
+    """
+    task = progress_tracker.get_task(task_id)
+    return getattr(task, "context", {}) or {}
 logger = logging.getLogger(__name__)
 
 # Modèles Pydantic
@@ -899,7 +910,7 @@ async def generate_intelligent_response(message: str, intent: Dict[str, Any]) ->
         return handle_quote_creation_intent(message, entities)
     
     elif primary_intent == 'find_client':
-        return handle_client_search_intent(message, entities)
+        return await handle_client_search_intent(message, entities)
     
     elif primary_intent == 'find_product':
         return await handle_product_search_intent(message, entities)
@@ -992,7 +1003,7 @@ def handle_quote_creation_intent(message: str, entities: Dict[str, Any]) -> Dict
             'suggestions': ["Réessayer", "Interface classique"]
         }
 
-def handle_client_search_intent(message: str, entities: Dict[str, Any]) -> Dict[str, Any]:
+async def handle_client_search_intent(message: str, entities: Dict[str, Any]) -> Dict[str, Any]:
     """Gère l'intention de recherche de client avec recherche google-like"""
     
     client_names = entities.get('client_names', [])
@@ -1018,7 +1029,23 @@ def handle_client_search_intent(message: str, entities: Dict[str, Any]) -> Dict[
             'message': f"🔍 **Résultats pour '{search_term}'**\n\n",
             'suggestions': []
         }
-        
+
+        # Recherche client unifiée (Salesforce via MCP), filtrée sur le terme et
+        # normalisée au format attendu par l'affichage ci-dessous.
+        raw_clients = await get_unified_data("clients")
+        matches = []
+        for rec in raw_clients.get('clients', []):
+            rec_name = (rec.get('Name') or rec.get('name') or '')
+            if search_term.lower() in rec_name.lower():
+                location = ', '.join(p for p in [rec.get('BillingCity', ''), rec.get('BillingCountry', '')] if p)
+                matches.append({
+                    'id': rec.get('Id', rec.get('id', '')),
+                    'name': rec_name,
+                    'industry': rec.get('Industry', rec.get('industry', '')),
+                    'location_display': location,
+                })
+        clients_data = {'success': bool(matches), 'clients': matches}
+
         if clients_data.get('success') and clients_data.get('clients'):
             # Clients trouvés - affichage google-like
             found_clients = clients_data['clients'][:5]  # Max 5 résultats
@@ -1181,14 +1208,14 @@ async def get_contextual_suggestions(suggestion_type: str):
     """Endpoint pour obtenir des suggestions contextuelles"""
     try:
         if suggestion_type == 'clients':
-            clients_data = get_clients_data()
+            clients_data = await get_unified_data("clients")
             return {
                 'success': True,
                 'suggestions': clients_data.get('clients', [])[:10]  # Top 10
             }
-        
+
         elif suggestion_type == 'products':
-            products_data = get_products_data()
+            products_data = await get_unified_data("products")
             return {
                 'success': True,
                 'suggestions': products_data.get('products', [])[:10]  # Top 10
@@ -1288,7 +1315,7 @@ async def get_products_list():
     """Récupère la liste complète des produits"""
     try:
         # Récupération des produits via MCP
-        products_data = await get_unified_data(products)
+        products_data = await get_unified_data("products")
         products = products_data.get('products', [])
         
         # Formater les produits pour l'affichage
@@ -1802,7 +1829,7 @@ async def continue_workflow_with_choice(request: Request):
     choice_type = data.get("choice_type")
 
     # Récupérer contexte workflow
-    context = get_workflow_context(task_id)
+    context = await get_workflow_context(task_id)
     workflow = DevisWorkflow(task_id=task_id, force_production=True)
 
     if choice_type == "client_selected":
