@@ -605,11 +605,26 @@ async def get_unified_data(data_type: str, limit: int = 20):
 async def get_workflow_context(task_id: str) -> Dict[str, Any]:
     """Récupère le contexte de workflow persisté pour une tâche.
 
-    Le contexte est porté par la QuoteTask du progress_tracker (attribut .context).
+    Mécanisme de persistance réel = la QuoteTask du progress_tracker :
+      - `task.context` (alimenté par DevisWorkflow._save_context_to_task) porte
+        `extracted_info` (et donc `products`) ;
+      - `task.task_id` et `task.user_prompt` portent l'identifiant et le prompt
+        d'origine.
+    Le consommateur produit `apply_product_suggestions` (devis_workflow:1604)
+    attend `extracted_info.products`, `extracted_info.original_prompt` et
+    `task_id` au niveau racine. On reconstitue donc un contexte complet à partir
+    de la tâche persistée (et non le seul `task.context` brut).
     Retourne un dict vide si la tâche n'existe pas / a expiré.
     """
     task = progress_tracker.get_task(task_id)
-    return getattr(task, "context", {}) or {}
+    if not task:
+        return {}
+    context = dict(getattr(task, "context", {}) or {})
+    context.setdefault("task_id", getattr(task, "task_id", task_id))
+    extracted_info = dict(context.get("extracted_info") or {})
+    extracted_info.setdefault("original_prompt", getattr(task, "user_prompt", "") or "")
+    context["extracted_info"] = extracted_info
+    return context
 logger = logging.getLogger(__name__)
 
 # Modèles Pydantic
@@ -1364,9 +1379,14 @@ async def handle_user_choice(choice_data: Dict[str, Any]):
         workflow_context = await get_workflow_context(task_id)
 
         if choice_type == "client_choice":
-            # Choix client depuis les suggestions
-            workflow = DevisWorkflow(task_id=task_id, force_production=True)
-            result = await workflow.handle_client_suggestions(choice_data, workflow_context)
+            # ⚠️ Branche CLIENT NON IMPLÉMENTÉE : workflow.handle_client_suggestions
+            # n'existe pas (chantier séparé à spécifier — voir aussi
+            # client_workflow_choice_endpoint et continue_workflow_with_choice).
+            raise HTTPException(
+                status_code=501,
+                detail="Sélection client via suggestions non implémentée "
+                       "(handle_client_suggestions absent — chantier séparé)"
+            )
 
         elif choice_type == "product_choice":
             # Choix produit depuis les alternatives
@@ -1386,6 +1406,9 @@ async def handle_user_choice(choice_data: Dict[str, Any]):
 
         return result
 
+    except HTTPException:
+        # Préserver les codes explicites (400/501) sans les convertir en 500.
+        raise
     except Exception as e:
         logger.error(f"Erreur gestion choix utilisateur: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1509,13 +1532,18 @@ async def client_workflow_choice_endpoint(choice_data: Dict[str, Any]):
         # Récupérer le contexte du workflow
         workflow_context = await get_workflow_context(task_id)
 
+        if choice_type == "client_choice":
+            # ⚠️ Branche CLIENT NON IMPLÉMENTÉE : workflow.handle_client_suggestions
+            # n'existe pas (chantier séparé à spécifier).
+            raise HTTPException(
+                status_code=501,
+                detail="Sélection client via suggestions non implémentée "
+                       "(handle_client_suggestions absent — chantier séparé)"
+            )
+
         workflow = DevisWorkflow(task_id=task_id, force_production=True)
 
-        if choice_type == "client_choice":
-            # Choix client depuis les suggestions
-            result = await workflow.handle_client_suggestions(choice_data, workflow_context)
-
-        elif choice_type == "product_choice":
+        if choice_type == "product_choice":
             # Choix produit depuis les alternatives
             result = await workflow.apply_product_suggestions(
                 choice_data.get("products", []),
@@ -1534,6 +1562,9 @@ async def client_workflow_choice_endpoint(choice_data: Dict[str, Any]):
 
         return result
 
+    except HTTPException:
+        # Préserver les codes explicites (400/501) sans les convertir en 500.
+        raise
     except Exception as e:
         logger.error(f"Erreur gestion choix utilisateur: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1833,8 +1864,13 @@ async def continue_workflow_with_choice(request: Request):
     workflow = DevisWorkflow(task_id=task_id, force_production=True)
 
     if choice_type == "client_selected":
-        client_data = data.get("client_data")
-        return await workflow.handle_client_selection_and_continue(client_data, context)
+        # ⚠️ Branche CLIENT NON IMPLÉMENTÉE : workflow.handle_client_selection_and_continue
+        # n'existe pas (chantier séparé à spécifier).
+        raise HTTPException(
+            status_code=501,
+            detail="Continuation après sélection client non implémentée "
+                   "(handle_client_selection_and_continue absent — chantier séparé)"
+        )
 
     elif choice_type == "product_selected":
         try:

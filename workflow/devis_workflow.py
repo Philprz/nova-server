@@ -6438,11 +6438,18 @@ class DevisWorkflow:
             
             # Demander validation utilisateur avant création
             if not quote_preview.get("error"):
+                # B6 : enveloppe conventionnelle {data, found, status} (cf. sites :961 / :5480)
+                # au lieu d'envoyer le brut client_result {status, data, message}.
+                client_info_payload = {
+                    "data": client_result.get("data"),
+                    "found": bool(client_result.get("data")),
+                    "status": client_result.get("status"),
+                }
                 validation_data = {
                     "type": "quote_validation",
                     "interaction_type": "quote_validation",
                     "quote_preview": quote_preview,
-                    "client_info": client_result,
+                    "client_info": client_info_payload,
                     "products": valid_products,  # ✅ uniquement valides
                     "message": "Veuillez valider le devis avant création",
                     "total_amount": quote_preview.get("total_amount", 0),
