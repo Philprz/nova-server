@@ -1873,17 +1873,16 @@ async def continue_workflow_with_choice(request: Request):
         )
 
     elif choice_type == "product_selected":
-        try:
-            product_choices = data.get("products", [])
-            if not product_choices:
-                # Fallback pour format alternatif
-                product_choices = [data.get("product_data")] if data.get("product_data") else []
-            
-            logger.info(f"🔧 Traitement sélection produit: {len(product_choices)} produit(s)")
-            return await workflow.apply_product_choices(product_choices, context)
-        except Exception as e:
-            logger.error(f"❌ Erreur traitement produit sélectionné: {e}")
-            raise HTTPException(status_code=500, detail=f"Erreur sélection produit: {str(e)}")
+        # ⚠️ Branche PRODUIT NON IMPLÉMENTÉE : workflow.apply_product_choices n'existe pas.
+        # Seule apply_product_suggestions est définie, avec un payload différent
+        # (choices typés {"type": "use_suggestion", "selected_product", "quantity"}).
+        # Même catégorie que handle_client_suggestions / handle_client_selection_and_continue :
+        # chantier séparé (ne pas inventer la méthode ni adapter le payload ici).
+        raise HTTPException(
+            status_code=501,
+            detail="Continuation après sélection produit non implémentée "
+                   "(apply_product_choices absent — chantier séparé)"
+        )
 @router.post("/assistant/workflow/select_client")
 async def select_client_and_continue(request: Request):
     """Sélection client et continuation workflow - SANS WebSocket"""
