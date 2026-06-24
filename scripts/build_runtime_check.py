@@ -119,6 +119,26 @@ def main() -> int:
         print(f"ERREUR : shim absent : {SHIM_REL}")
         return 2
 
+    # 3c. conftest.py racine — VALIDATION SEULEMENT (hors livraison).
+    #     pytest n'entre PAS par run.py : il faut donc appliquer le shim Cython
+    #     AVANT toute collection (sinon l'import d'un modele compile a methode-
+    #     cyfunction leve PydanticUserError). Ce conftest est l'equivalent pytest
+    #     de l'amorce shim de run.py ; il reste cantonne a la staging (tests/ est
+    #     exclu de la livraison par package_compiled.ps1, etape 3/3).
+    conftest_src = (
+        "# -*- coding: utf-8 -*-\n"
+        "# Genere par scripts/build_runtime_check.py — VALIDATION COMPILE SEULEMENT.\n"
+        "# Applique le shim Cython<->Pydantic avant toute collection pytest, comme\n"
+        "# run.py le fait avant 'from main import app' en production.\n"
+        "import os\n"
+        "import sys\n"
+        "sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), \"scripts\"))\n"
+        "import cython_pydantic_compat\n"
+        "cython_pydantic_compat.apply()\n"
+    )
+    (STAGE / "conftest.py").write_text(conftest_src, encoding="utf-8")
+    counts["other"] += 1
+
     # 4. Dossiers non-code (templates/static/frontend/alembic).
     for d in NONCODE_DIRS:
         src = ROOT / d

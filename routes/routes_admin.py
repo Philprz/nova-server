@@ -172,7 +172,7 @@ async def update_user(
 async def deactivate_user(
     user_id: int,
     _user: AuthenticatedUser = _admin,
-) -> None:
+):
     db.deactivate_user(user_id)
     db.revoke_all_user_tokens(user_id)
 
@@ -256,7 +256,7 @@ async def revoke_permission(
     user_id: int,
     mailbox_id: int,
     _user: AuthenticatedUser = _admin,
-) -> None:
+):
     db.revoke_mailbox_permission(user_id, mailbox_id)
 
 
@@ -576,7 +576,7 @@ async def update_provider(provider_id: int, body: ProviderUpdate) -> Dict[str, A
 
 @llm_admin_router.delete("/providers/{provider_id}", status_code=204,
                          dependencies=[Depends(require_llm_admin)])
-async def delete_provider(provider_id: int) -> None:
+async def delete_provider(provider_id: int):
     db_sess = _db()
     try:
         prov = db_sess.query(LLMProvider).filter(LLMProvider.id == provider_id).first()
@@ -982,7 +982,7 @@ async def create_benchmark_case(body: BenchmarkCaseCreate) -> dict:
 @llm_admin_router.delete("/benchmark/cases/{case_id}",
                           status_code=status.HTTP_204_NO_CONTENT,
                           dependencies=[Depends(require_llm_admin)])
-async def delete_benchmark_case(case_id: int) -> None:
+async def delete_benchmark_case(case_id: int):
     db: Session = SessionLocal()
     try:
         case = db.query(BenchmarkCase).filter(BenchmarkCase.id == case_id).first()
