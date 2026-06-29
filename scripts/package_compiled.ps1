@@ -57,6 +57,13 @@ if (-not (Test-Path $BuildDir)) {
     throw "BuildDir introuvable : $BuildDir. Lance d'abord le build Cython (Lot 5)."
 }
 
+# Normaliser BuildDir en chemin ABSOLU. Le calcul du chemin relatif (3a) fait
+# $_.FullName.Substring($BuildDir.Length), or FullName est TOUJOURS absolu. Si
+# -BuildDir est passe en relatif (ex. 'build/compiled', 14 car.), le Substring
+# tronque 14 car. du chemin absolu et niche tous les .pyd sous un faux dossier
+# (ex. 'OVA-SERVER/build/compiled/...'). On resout donc en absolu d'abord.
+$BuildDir = (Resolve-Path -LiteralPath $BuildDir).Path
+
 # ------------------------------------------------------------------
 # 1. Allowlist : ce qui PEUT entrer dans la livraison compilée
 # ------------------------------------------------------------------
@@ -82,15 +89,29 @@ if (Test-Path (Join-Path $RepoRoot 'run.py')) {
     Write-Warning "run.py absent (Lot 3 non implémenté) -> un .pyd ne se lance pas via 'python main.pyd'."
 }
 
+# Config Alembic (Lot 4). Requis par run.py (_run_migrations_if_enabled lit
+# <pkgroot>/alembic.ini). Le sqlalchemy.url qui y figure est un placeholder
+# localhost INERTE au runtime : alembic/env.py l'ecrase par DATABASE_URL (.env).
+$IncludeFiles += @('alembic.ini')
+
 # .bat d'exploitation runtime
 $IncludeFiles += @('start-nova.bat', 'restart_server.bat', 'nova-setup-tache.bat')
 
 # Scripts autonomes planifiés livrés en .py (exposition connue assumée, cf. .DESCRIPTION)
 $IncludeFiles += @('register_webhook.py', 'renew_webhook.py')
 
+# Shim de compat Cython<->Pydantic (Lot 5). OBLIGATOIRE en runtime compilé :
+# main.pyd exécute `sys.path.insert(0, <pkgroot>/scripts)` puis `import
+# cython_pydantic_compat` (cf. main.py / run.py, tête de module). Le shim reste
+# en .py PUR (jamais compilé) — aucun secret, aucune logique métier : seulement
+# le monkeypatch des ignored_types Pydantic. On le livre donc sous scripts/ pour
+# que le chemin matche exactement le sys.path.insert de main.pyd.
+$IncludeFiles += @('scripts/cython_pydantic_compat.py')
+
 # Sources .py TOLÉRÉES dans la sortie (le garde-fou les laisse passer) :
-#   - run.py (lanceur), register/renew_webhook (scheduler), alembic/** (migrations Lot 4)
-$AllowedSourcePy = @('run.py', 'register_webhook.py', 'renew_webhook.py')
+#   - run.py (lanceur), register/renew_webhook (scheduler), alembic/** (migrations Lot 4),
+#   - scripts/cython_pydantic_compat.py (shim de compat, requis par main.pyd).
+$AllowedSourcePy = @('run.py', 'register_webhook.py', 'renew_webhook.py', 'cython_pydantic_compat.py')
 
 # ------------------------------------------------------------------
 # 2. Motifs .deployignore (source de vérité des exclusions)
