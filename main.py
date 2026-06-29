@@ -599,6 +599,19 @@ else:
     logger.warning("NOVA_ADMIN_SECRET_PATH not set — admin LLM panel route disabled")
 
 
+# Page d'administration de la configuration (coffre chiffre). Le HTML n'est
+# qu'une coquille : toutes les donnees transitent par /api/admin/config, protege
+# par le role ADMIN (JWT). La page elle-meme ne contient aucun secret.
+@app.get("/admin/config", response_class=HTMLResponse, include_in_schema=False)
+async def admin_config_panel():
+    """Ecran d'administration de la configuration (auth ADMIN via l'API)."""
+    try:
+        with open("templates/admin_config.html", "r", encoding="utf-8") as f:
+            return HTMLResponse(content=f.read(), media_type="text/html; charset=utf-8")
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Not Found")
+
+
 def kill_process_on_port(port: int):
     """Tue le processus qui occupe le port spécifié (Windows uniquement)"""
     if sys.platform != "win32":

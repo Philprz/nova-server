@@ -129,6 +129,37 @@ def decrypt_vault(path: str = DEFAULT_VAULT_PATH) -> Dict[str, str]:
     return json.loads(raw.decode("utf-8"))
 
 
+def update_vault(
+    updates: Dict[str, str],
+    path: str = DEFAULT_VAULT_PATH,
+) -> int:
+    """
+    FUSIONNE une map PARTIELLE {cle: valeur} dans le coffre existant, puis
+    re-chiffre le coffre complet.
+
+    Garantie de NON-REGRESSION : c'est une FUSION, jamais un remplacement total.
+    Les cles deja presentes dans le coffre et ABSENTES de `updates` sont
+    preservees telles quelles (un secret masque non re-soumis n'est pas ecrase).
+    Seules les cles presentes dans `updates` sont creees ou ecrasees.
+
+    Le coffre doit deja exister (provisionne via scripts/provision_secrets.py).
+    Retourne le nombre total de paires dans le coffre apres fusion.
+    """
+    if not isinstance(updates, dict):
+        raise TypeError("update_vault attend un dictionnaire {cle: valeur}.")
+
+    current = decrypt_vault(path)
+    for key, value in updates.items():
+        current[str(key)] = str(value)
+
+    encrypt_env_to_vault(current, out_path=path)
+    logger.info(
+        "Coffre %s mis a jour par fusion : %d cle(s) modifiee(s), %d paire(s) au total.",
+        path, len(updates), len(current),
+    )
+    return len(current)
+
+
 def load_secrets_into_environ(path: str = DEFAULT_VAULT_PATH) -> int:
     """
     Dechiffre le coffre et injecte chaque paire dans os.environ via setdefault.
