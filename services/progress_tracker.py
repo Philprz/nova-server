@@ -473,6 +473,23 @@ class ProgressTracker:
             logger.error(f"Erreur notification WebSocket échec: {e}")
         return True
     
+    def cancel_task(self, task_id: str) -> bool:
+        """
+        Annule une tâche en cours.
+
+        Modelé sur l'endpoint sœur /progress/cancel_quote :
+        get_task -> vérifier le statut -> fail_task. Renvoie un booléen
+        (le consommateur DELETE /task/{task_id} le mappe en 404 si False).
+        """
+        task = self.get_task(task_id)
+        if not task:
+            return False
+        # Tâche déjà terminée : rien à annuler
+        if task.status in [TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED]:
+            return False
+        self.fail_task(task_id, "Annulé par l'utilisateur")
+        return True
+
     def get_all_active_tasks(self) -> List[Dict[str, Any]]:
         """Retourne toutes les tâches actives"""
         return [task.get_overall_progress() for task in self.active_tasks.values()]

@@ -86,16 +86,18 @@ async def check_client_exists(card_name: str):
     """
     try:
         from services.sap import call_sap
+        from urllib.parse import urlencode
 
+        # call_sap(endpoint, method, payload) n'accepte pas de `params` :
+        # on construit la query string OData directement dans l'endpoint
+        # (motif repo: sap_mcp.py / routes_sap_rondot.py).
+        query = urlencode({
+            "$filter": f"contains(CardName, '{card_name}')",
+            "$select": "CardCode,CardName,EmailAddress,Phone1",
+            "$top": 10,
+        })
         # Rechercher le client par nom
-        result = await call_sap(
-            endpoint="/BusinessPartners",
-            params={
-                "$filter": f"contains(CardName, '{card_name}')",
-                "$select": "CardCode,CardName,EmailAddress,Phone1",
-                "$top": 10
-            }
-        )
+        result = await call_sap(endpoint=f"/BusinessPartners?{query}")
 
         clients = result.get("value", [])
 
@@ -182,15 +184,14 @@ async def check_product_exists(item_code: str):
         GET /api/sap/products/check-exists/2323060165
     """
     try:
-        from services.sap import get_sap_service, call_sap
+        from services.sap import call_sap
+        from urllib.parse import urlencode
 
-        sap = get_sap_service()
-
-        # Rechercher le produit par code
-        result = await call_sap(
-            endpoint=f"/Items('{item_code}')",
-            params={"$select": "ItemCode,ItemName,SalesItem,PurchaseItem"}
-        )
+        # Rechercher le produit par code.
+        # call_sap(endpoint, method, payload) n'accepte pas de `params` :
+        # query string OData construite dans l'endpoint (motif repo).
+        query = urlencode({"$select": "ItemCode,ItemName,SalesItem,PurchaseItem"})
+        result = await call_sap(endpoint=f"/Items('{item_code}')?{query}")
 
         if result and result.get("ItemCode"):
             return {
