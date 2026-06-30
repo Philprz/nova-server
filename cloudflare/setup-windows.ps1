@@ -47,14 +47,15 @@ if (-not (Test-Path $pythonPath)) {
 
 Write-Success "Python trouvé : $pythonPath"
 
-# Vérifier que main.py existe
-$mainPath = Join-Path $NovaPath "main.py"
+# Vérifier que run.py existe (point d'entrée mince, Lot 3 SPEC_COMPILATION_RONDOT :
+# charge le coffre chiffré avant tout import applicatif, puis lance uvicorn).
+$mainPath = Join-Path $NovaPath "run.py"
 if (-not (Test-Path $mainPath)) {
-    Write-Error "main.py introuvable : $mainPath"
+    Write-Error "run.py introuvable : $mainPath"
     exit 1
 }
 
-Write-Success "main.py trouvé"
+Write-Success "run.py trouvé"
 
 # Vérifier si NSSM est installé
 $nssmPath = "C:\nssm\win64\nssm.exe"

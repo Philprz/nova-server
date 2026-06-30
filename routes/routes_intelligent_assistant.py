@@ -25,7 +25,7 @@ router = APIRouter(tags=["Assistant Intelligent"], dependencies=[Depends(get_cur
 # Import du système de progression
 from services.progress_tracker import progress_tracker, TaskStatus
 from workflow.devis_workflow import DevisWorkflow
-from workflow.client_creation_workflow import ClientCreationWorkflow
+from workflow.client_creation_workflow import ClientCreationWorkflow, client_creation_workflow
 logger = logging.getLogger(__name__)
 
 # Import des services NOVA existants
@@ -33,6 +33,7 @@ from services.suggestion_engine import SuggestionEngine, SuggestionResult
 from services.client_validator import ClientValidator
 from services.progress_tracker import ProgressTracker
 from services.mcp_connector import MCPConnector
+from services.llm_extractor import LLMExtractor, get_llm_extractor
 # Import des routes existantes pour réutiliser la logique
 import asyncio
 import httpx
@@ -595,10 +596,35 @@ async def get_unified_data(data_type: str, limit: int = 20):
                 }
                 
         return {'clients': [], 'products': [], 'total': 0}
-        
+
     except Exception as e:
         logger.error(f"Erreur get_unified_data: {e}")
         return {'clients': [], 'products': [], 'total': 0}
+
+
+async def get_workflow_context(task_id: str) -> Dict[str, Any]:
+    """Récupère le contexte de workflow persisté pour une tâche.
+
+    Mécanisme de persistance réel = la QuoteTask du progress_tracker :
+      - `task.context` (alimenté par DevisWorkflow._save_context_to_task) porte
+        `extracted_info` (et donc `products`) ;
+      - `task.task_id` et `task.user_prompt` portent l'identifiant et le prompt
+        d'origine.
+    Le consommateur produit `apply_product_suggestions` (devis_workflow:1604)
+    attend `extracted_info.products`, `extracted_info.original_prompt` et
+    `task_id` au niveau racine. On reconstitue donc un contexte complet à partir
+    de la tâche persistée (et non le seul `task.context` brut).
+    Retourne un dict vide si la tâche n'existe pas / a expiré.
+    """
+    task = progress_tracker.get_task(task_id)
+    if not task:
+        return {}
+    context = dict(getattr(task, "context", {}) or {})
+    context.setdefault("task_id", getattr(task, "task_id", task_id))
+    extracted_info = dict(context.get("extracted_info") or {})
+    extracted_info.setdefault("original_prompt", getattr(task, "user_prompt", "") or "")
+    context["extracted_info"] = extracted_info
+    return context
 logger = logging.getLogger(__name__)
 
 # Modèles Pydantic
@@ -899,7 +925,7 @@ async def generate_intelligent_response(message: str, intent: Dict[str, Any]) ->
         return handle_quote_creation_intent(message, entities)
     
     elif primary_intent == 'find_client':
-        return handle_client_search_intent(message, entities)
+        return await handle_client_search_intent(message, entities)
     
     elif primary_intent == 'find_product':
         return await handle_product_search_intent(message, entities)
@@ -992,7 +1018,7 @@ def handle_quote_creation_intent(message: str, entities: Dict[str, Any]) -> Dict
             'suggestions': ["Réessayer", "Interface classique"]
         }
 
-def handle_client_search_intent(message: str, entities: Dict[str, Any]) -> Dict[str, Any]:
+async def handle_client_search_intent(message: str, entities: Dict[str, Any]) -> Dict[str, Any]:
     """Gère l'intention de recherche de client avec recherche google-like"""
     
     client_names = entities.get('client_names', [])
@@ -1018,7 +1044,23 @@ def handle_client_search_intent(message: str, entities: Dict[str, Any]) -> Dict[
             'message': f"🔍 **Résultats pour '{search_term}'**\n\n",
             'suggestions': []
         }
-        
+
+        # Recherche client unifiée (Salesforce via MCP), filtrée sur le terme et
+        # normalisée au format attendu par l'affichage ci-dessous.
+        raw_clients = await get_unified_data("clients")
+        matches = []
+        for rec in raw_clients.get('clients', []):
+            rec_name = (rec.get('Name') or rec.get('name') or '')
+            if search_term.lower() in rec_name.lower():
+                location = ', '.join(p for p in [rec.get('BillingCity', ''), rec.get('BillingCountry', '')] if p)
+                matches.append({
+                    'id': rec.get('Id', rec.get('id', '')),
+                    'name': rec_name,
+                    'industry': rec.get('Industry', rec.get('industry', '')),
+                    'location_display': location,
+                })
+        clients_data = {'success': bool(matches), 'clients': matches}
+
         if clients_data.get('success') and clients_data.get('clients'):
             # Clients trouvés - affichage google-like
             found_clients = clients_data['clients'][:5]  # Max 5 résultats
@@ -1181,14 +1223,14 @@ async def get_contextual_suggestions(suggestion_type: str):
     """Endpoint pour obtenir des suggestions contextuelles"""
     try:
         if suggestion_type == 'clients':
-            clients_data = get_clients_data()
+            clients_data = await get_unified_data("clients")
             return {
                 'success': True,
                 'suggestions': clients_data.get('clients', [])[:10]  # Top 10
             }
-        
+
         elif suggestion_type == 'products':
-            products_data = get_products_data()
+            products_data = await get_unified_data("products")
             return {
                 'success': True,
                 'suggestions': products_data.get('products', [])[:10]  # Top 10
@@ -1288,7 +1330,7 @@ async def get_products_list():
     """Récupère la liste complète des produits"""
     try:
         # Récupération des produits via MCP
-        products_data = await get_unified_data(products)
+        products_data = await get_unified_data("products")
         products = products_data.get('products', [])
         
         # Formater les produits pour l'affichage
@@ -1337,9 +1379,14 @@ async def handle_user_choice(choice_data: Dict[str, Any]):
         workflow_context = await get_workflow_context(task_id)
 
         if choice_type == "client_choice":
-            # Choix client depuis les suggestions
-            workflow = DevisWorkflow(task_id=task_id, force_production=True)
-            result = await workflow.handle_client_suggestions(choice_data, workflow_context)
+            # ⚠️ Branche CLIENT NON IMPLÉMENTÉE : workflow.handle_client_suggestions
+            # n'existe pas (chantier séparé à spécifier — voir aussi
+            # client_workflow_choice_endpoint et continue_workflow_with_choice).
+            raise HTTPException(
+                status_code=501,
+                detail="Sélection client via suggestions non implémentée "
+                       "(handle_client_suggestions absent — chantier séparé)"
+            )
 
         elif choice_type == "product_choice":
             # Choix produit depuis les alternatives
@@ -1359,6 +1406,9 @@ async def handle_user_choice(choice_data: Dict[str, Any]):
 
         return result
 
+    except HTTPException:
+        # Préserver les codes explicites (400/501) sans les convertir en 500.
+        raise
     except Exception as e:
         logger.error(f"Erreur gestion choix utilisateur: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1482,13 +1532,18 @@ async def client_workflow_choice_endpoint(choice_data: Dict[str, Any]):
         # Récupérer le contexte du workflow
         workflow_context = await get_workflow_context(task_id)
 
+        if choice_type == "client_choice":
+            # ⚠️ Branche CLIENT NON IMPLÉMENTÉE : workflow.handle_client_suggestions
+            # n'existe pas (chantier séparé à spécifier).
+            raise HTTPException(
+                status_code=501,
+                detail="Sélection client via suggestions non implémentée "
+                       "(handle_client_suggestions absent — chantier séparé)"
+            )
+
         workflow = DevisWorkflow(task_id=task_id, force_production=True)
 
-        if choice_type == "client_choice":
-            # Choix client depuis les suggestions
-            result = await workflow.handle_client_suggestions(choice_data, workflow_context)
-
-        elif choice_type == "product_choice":
+        if choice_type == "product_choice":
             # Choix produit depuis les alternatives
             result = await workflow.apply_product_suggestions(
                 choice_data.get("products", []),
@@ -1507,6 +1562,9 @@ async def client_workflow_choice_endpoint(choice_data: Dict[str, Any]):
 
         return result
 
+    except HTTPException:
+        # Préserver les codes explicites (400/501) sans les convertir en 500.
+        raise
     except Exception as e:
         logger.error(f"Erreur gestion choix utilisateur: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1802,25 +1860,29 @@ async def continue_workflow_with_choice(request: Request):
     choice_type = data.get("choice_type")
 
     # Récupérer contexte workflow
-    context = get_workflow_context(task_id)
+    context = await get_workflow_context(task_id)
     workflow = DevisWorkflow(task_id=task_id, force_production=True)
 
     if choice_type == "client_selected":
-        client_data = data.get("client_data")
-        return await workflow.handle_client_selection_and_continue(client_data, context)
+        # ⚠️ Branche CLIENT NON IMPLÉMENTÉE : workflow.handle_client_selection_and_continue
+        # n'existe pas (chantier séparé à spécifier).
+        raise HTTPException(
+            status_code=501,
+            detail="Continuation après sélection client non implémentée "
+                   "(handle_client_selection_and_continue absent — chantier séparé)"
+        )
 
     elif choice_type == "product_selected":
-        try:
-            product_choices = data.get("products", [])
-            if not product_choices:
-                # Fallback pour format alternatif
-                product_choices = [data.get("product_data")] if data.get("product_data") else []
-            
-            logger.info(f"🔧 Traitement sélection produit: {len(product_choices)} produit(s)")
-            return await workflow.apply_product_choices(product_choices, context)
-        except Exception as e:
-            logger.error(f"❌ Erreur traitement produit sélectionné: {e}")
-            raise HTTPException(status_code=500, detail=f"Erreur sélection produit: {str(e)}")
+        # ⚠️ Branche PRODUIT NON IMPLÉMENTÉE : workflow.apply_product_choices n'existe pas.
+        # Seule apply_product_suggestions est définie, avec un payload différent
+        # (choices typés {"type": "use_suggestion", "selected_product", "quantity"}).
+        # Même catégorie que handle_client_suggestions / handle_client_selection_and_continue :
+        # chantier séparé (ne pas inventer la méthode ni adapter le payload ici).
+        raise HTTPException(
+            status_code=501,
+            detail="Continuation après sélection produit non implémentée "
+                   "(apply_product_choices absent — chantier séparé)"
+        )
 @router.post("/assistant/workflow/select_client")
 async def select_client_and_continue(request: Request):
     """Sélection client et continuation workflow - SANS WebSocket"""

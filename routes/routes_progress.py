@@ -9,7 +9,7 @@ from auth.dependencies import get_current_user
 from pydantic import BaseModel
 from services.websocket_manager import websocket_manager
 from services.progress_tracker import progress_tracker, TaskStatus
-from workflow.devis_workflow import DevisWorkflow
+from workflow.devis_workflow import DevisWorkflow, EnhancedDevisWorkflow
 from typing import Dict, Any, List, Optional
 import logging
 import asyncio

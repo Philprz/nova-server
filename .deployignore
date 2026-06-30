@@ -1,8 +1,9 @@
 # .deployignore — éléments EXCLUS du PACKAGE de déploiement.
 #
-# IMPORTANT : ce fichier n'affecte PAS git. Il est lu uniquement par
-# scripts/package_deploy.ps1, qui construit le package à partir des fichiers
-# SUIVIS par git (git ls-files) puis retire les chemins listés ici.
+# IMPORTANT : ce fichier n'affecte PAS git. Il est la source de vérité UNIQUE des
+# exclusions, lue par DEUX packagers :
+#   - scripts/package_deploy.ps1   : livraison SOURCE (à partir de git ls-files) ;
+#   - scripts/package_compiled.ps1 : livraison COMPILÉE Cython (.pyd + non-code).
 #
 # Comme le package part de `git ls-files`, tout ce qui est gitignoré est déjà
 # absent (.env, .venv/, *.db, *.pyc, node_modules/, logs/, alembic/versions/*).
@@ -20,3 +21,43 @@ mail-to-biz/
 # --- Métafichiers de packaging eux-mêmes ---
 .deployignore
 .env.example
+
+# ============================================================
+# ÉTAPE 1 — Livraison compilée RONDOT (Lot 6, SPEC_COMPILATION_RONDOT.md)
+# Exclusions appliquées AUSSI par scripts/package_compiled.ps1.
+# Ne PAS exclure :
+# register_webhook.py / renew_webhook.py (webhook Graph planifié),
+# main.py / sap_mcp.py / salesforce_mcp.py (compilés en .pyd).
+# ============================================================
+
+# --- Utilitaires one-shot (lancés à la main, non importés par l'app) ---
+install_pg_trgm.py
+list_sap_products.py
+get_user_id.py
+scripts/seed_rondot.py
+scripts/migrate_to_local_search.py
+scripts/sync_sap_products.py
+
+# --- Documentation (inutile au runtime) ---
+README.md
+LICENSE
+SAP_CACHE_SETUP.md
+WEBHOOK_AUTO_RENEWAL.md
+WEBHOOK_CONFIGURATION_GUIDE.md
+SPEC_COMPILATION_RONDOT.md
+PROMPTS_CLAUDE_CODE_NETTOYAGE.md
+docs/
+cloudflare/
+
+# --- Outils de build / dev frontend (pas de runtime prod) ---
+build-front.bat
+dev-front.bat
+
+# --- Artefacts de compilation Cython : NE JAMAIS LIVRER (Lot 6) ---
+*.c
+*.pyx
+build/
+
+# --- Packagers eux-mêmes ---
+scripts/package_deploy.ps1
+scripts/package_compiled.ps1

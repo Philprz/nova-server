@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NOVA — Configuration</title>
+<link rel="stylesheet" href="/static/it_spirit_styles.css">
+<style>
+  :root {
+    --primary-blue: #02B9FD;
+    --primary-purple: #832DFE;
+    --white: #FFFFFF;
+    --gray-50: #F8FAFC;
+    --gray-100: #F1F5F9;
+    --gray-200: #E2E8F0;
+    --gray-300: #CBD5E1;
+    --gray-400: #94A3B8;
+    --gray-500: #64748B;
+    --gray-700: #334155;
+    --gray-900: #0F172A;
+    --red: #DC2626;
+    --green: #16A34A;
+    --amber: #D97706;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: linear-gradient(135deg, var(--primary-blue) 0%, var(--primary-purple) 100%);
+    color: var(--gray-900);
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 24px; }
+  .card {
+    background: var(--white); border-radius: 16px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+    padding: 28px 32px;
+  }
+  h1 { margin: 0; font-size: 24px; color: var(--primary-purple); font-weight: 700; }
+  .subtitle { margin: 6px 0 0; color: var(--gray-400); font-size: 14px; }
+  .topbar {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid var(--gray-200);
+  }
+  button {
+    cursor: pointer; border: none; border-radius: 8px;
+    padding: 10px 18px; font-size: 14px; font-weight: 600;
+    transition: filter .15s, transform .05s;
+  }
+  button:active { transform: translateY(1px); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .btn-primary { background: var(--primary-purple); color: var(--white); }
+  .btn-primary:hover:not(:disabled) { filter: brightness(1.08); }
+  .btn-secondary { background: var(--gray-100); color: var(--gray-900); border: 1px solid var(--gray-300); }
+  .flash { padding: 12px 16px; border-radius: 8px; margin: 0 0 16px; font-size: 14px; }
+  .flash.error { background: #FEF2F2; color: var(--red); border: 1px solid #FCA5A5; }
+  .flash.success { background: #F0FDF4; color: var(--green); border: 1px solid #86EFAC; }
+  .flash.warn { background: #FFFBEB; color: var(--amber); border: 1px solid #FCD34D; }
+  .flash.info { background: #EFF6FF; color: #1E40AF; border: 1px solid #93C5FD; }
+  .hidden { display: none !important; }
+  .group { margin-bottom: 22px; }
+  .group h2 {
+    margin: 0 0 10px; font-size: 15px; color: var(--primary-purple);
+    text-transform: uppercase; letter-spacing: .04em;
+  }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--gray-100); font-size: 13px; vertical-align: middle; }
+  th { color: var(--gray-500); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+  td.keycell { font-family: ui-monospace, Menlo, Consolas, monospace; font-weight: 600; color: var(--gray-900); width: 32%; }
+  td.valcell { width: 52%; }
+  input[type=text], input[type=password] {
+    width: 100%; padding: 8px 10px; border: 1px solid var(--gray-300);
+    border-radius: 8px; font-size: 13px; background: var(--white); color: var(--gray-900);
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+  }
+  input:focus { outline: none; border-color: var(--primary-purple); box-shadow: 0 0 0 3px rgba(131,45,254,.15); }
+  input.dirty { border-color: var(--amber); background: #FFFBEB; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+  .badge.secret { background: #FEE2E2; color: var(--red); }
+  .badge.set { background: #DCFCE7; color: var(--green); }
+  .badge.unset { background: var(--gray-100); color: var(--gray-500); }
+  .reveal { font-size: 11px; color: var(--primary-purple); cursor: pointer; user-select: none; margin-left: 6px; }
+  .actions-bar { display: flex; gap: 12px; align-items: center; margin-top: 8px; }
+  .meta-line { color: var(--gray-500); font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <div class="topbar">
+      <div>
+        <h1>NOVA — Configuration</h1>
+        <p class="subtitle">Coffre chiffré — source unique de configuration. Réservé au rôle ADMIN.</p>
+      </div>
+      <div class="actions-bar">
+        <button class="btn-secondary" id="btn-reload" type="button">Recharger</button>
+        <button class="btn-primary" id="btn-save" type="button" disabled>Enregistrer</button>
+      </div>
+    </div>
+
+    <div id="banner-restart" class="flash warn hidden">
+      Modifications enregistrées dans le coffre. <b>Redémarrage requis</b> pour leur prise en compte
+      (les variables ne sont chargées qu'au démarrage).
+    </div>
+    <div id="flash" class="flash info hidden"></div>
+    <p class="meta-line" id="meta"></p>
+
+    <form id="config-form"></form>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const form = $("config-form");
+let ORIGINAL = {}; // key -> {is_secret, is_set, value?}
+
+function showFlash(kind, msg) {
+  const el = $("flash");
+  el.className = "flash " + kind;
+  el.textContent = msg;
+  el.classList.remove("hidden");
+}
+function hideFlash() { $("flash").classList.add("hidden"); }
+
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+async function loadConfig() {
+  hideFlash();
+  $("banner-restart").classList.add("hidden");
+  $("btn-save").disabled = true;
+  form.innerHTML = "";
+  ORIGINAL = {};
+  let resp;
+  try {
+    resp = await fetch("/api/admin/config", { credentials: "same-origin" });
+  } catch (e) {
+    showFlash("error", "Erreur réseau : " + e);
+    return;
+  }
+  if (resp.status === 401) { showFlash("error", "Non authentifié — connectez-vous en tant qu'ADMIN."); return; }
+  if (resp.status === 403) { showFlash("error", "Accès refusé : rôle ADMIN requis."); return; }
+  if (!resp.ok) {
+    let detail = resp.statusText;
+    try { detail = (await resp.json()).detail || detail; } catch (e) {}
+    showFlash("error", "Erreur " + resp.status + " : " + detail);
+    return;
+  }
+  const data = await resp.json();
+  if (!data.vault_present) {
+    showFlash("warn", data.message || "Coffre absent.");
+    $("meta").textContent = "";
+    return;
+  }
+  $("meta").textContent = data.total + " variable(s) dans le coffre, " +
+                          Object.keys(data.groups).length + " catégorie(s).";
+
+  const cats = Object.keys(data.groups).sort();
+  for (const cat of cats) {
+    const div = document.createElement("div");
+    div.className = "group";
+    let rows = "";
+    for (const item of data.groups[cat]) {
+      ORIGINAL[item.key] = item;
+      const badges =
+        (item.is_secret ? '<span class="badge secret">secret</span> ' : '') +
+        (item.is_set ? '<span class="badge set">défini</span>' : '<span class="badge unset">non défini</span>');
+      let field;
+      if (item.is_secret) {
+        const ph = item.is_set ? "•••••••• (laisser vide = inchangé)" : "(non défini)";
+        field = '<input type="password" data-key="' + esc(item.key) + '" data-secret="1" ' +
+                'placeholder="' + ph + '" autocomplete="new-password">' +
+                '<span class="reveal" data-target="' + esc(item.key) + '">afficher</span>';
+      } else {
+        field = '<input type="text" data-key="' + esc(item.key) + '" data-secret="0" ' +
+                'value="' + esc(item.value ?? "") + '">';
+      }
+      rows += '<tr><td class="keycell">' + esc(item.key) + '<div>' + badges + '</div></td>' +
+              '<td class="valcell">' + field + '</td></tr>';
+    }
+    div.innerHTML = '<h2>' + esc(cat) + '</h2><table><tbody>' + rows + '</tbody></table>';
+    form.appendChild(div);
+  }
+
+  form.querySelectorAll("input").forEach(inp => {
+    inp.addEventListener("input", () => { markDirty(inp); $("btn-save").disabled = collectUpdates().length === 0; });
+  });
+  form.querySelectorAll(".reveal").forEach(sp => {
+    sp.addEventListener("click", () => {
+      const inp = form.querySelector('input[data-key="' + CSS.escape(sp.dataset.target) + '"]');
+      if (!inp) return;
+      const showing = inp.type === "text";
+      inp.type = showing ? "password" : "text";
+      sp.textContent = showing ? "afficher" : "masquer";
+    });
+  });
+}
+
+function markDirty(inp) {
+  const key = inp.dataset.key;
+  const orig = ORIGINAL[key];
+  let dirty;
+  if (inp.dataset.secret === "1") {
+    dirty = inp.value.length > 0; // un secret n'est modifié que si on saisit une nouvelle valeur
+  } else {
+    dirty = inp.value !== (orig.value ?? "");
+  }
+  inp.classList.toggle("dirty", dirty);
+}
+
+function collectUpdates() {
+  const updates = [];
+  form.querySelectorAll("input").forEach(inp => {
+    const key = inp.dataset.key;
+    const orig = ORIGINAL[key];
+    if (inp.dataset.secret === "1") {
+      if (inp.value.length > 0) updates.push([key, inp.value]);
+    } else {
+      if (inp.value !== (orig.value ?? "")) updates.push([key, inp.value]);
+    }
+  });
+  return updates;
+}
+
+async function save() {
+  const pairs = collectUpdates();
+  if (pairs.length === 0) return;
+  const updates = {};
+  pairs.forEach(([k, v]) => { updates[k] = v; });
+  $("btn-save").disabled = true;
+  let resp;
+  try {
+    resp = await fetch("/api/admin/config", {
+      method: "PUT",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ updates }),
+    });
+  } catch (e) { showFlash("error", "Erreur réseau : " + e); return; }
+  if (!resp.ok) {
+    let detail = resp.statusText;
+    try { detail = (await resp.json()).detail || detail; } catch (e) {}
+    showFlash("error", "Échec (" + resp.status + ") : " + detail);
+    $("btn-save").disabled = false;
+    return;
+  }
+  const data = await resp.json();
+  showFlash("success", data.modified_keys.length + " clé(s) enregistrée(s) : " + data.modified_keys.join(", "));
+  $("banner-restart").classList.remove("hidden");
+  await loadConfig(); // recharge l'état masqué à jour
+}
+
+$("btn-reload").addEventListener("click", loadConfig);
+$("btn-save").addEventListener("click", save);
+loadConfig();
+</script>
+</body>
+</html>

@@ -11,4 +11,4 @@ timeout /t 2 /nobreak >nul
 
 echo Demarrage NOVA...
 cd /d C:\Users\PPZ\NOVA-SERVER
-.venv\Scripts\python.exe main.py
+.venv\Scripts\python.exe run.py

@@ -172,7 +172,7 @@ async def update_user(
 async def deactivate_user(
     user_id: int,
     _user: AuthenticatedUser = _admin,
-) -> None:
+):
     db.deactivate_user(user_id)
     db.revoke_all_user_tokens(user_id)
 
@@ -256,8 +256,184 @@ async def revoke_permission(
     user_id: int,
     mailbox_id: int,
     _user: AuthenticatedUser = _admin,
-) -> None:
+):
     db.revoke_mailbox_permission(user_id, mailbox_id)
+
+
+# ===========================================================================
+# Configuration applicative (coffre chiffre) — rôle ADMIN
+# Source UNIQUE : le coffre chiffre secrets.enc (cf. services/secure_config.py).
+# GET masque les secrets ; PUT fusionne une map partielle (jamais de
+# remplacement total) puis re-chiffre. Redémarrage requis pour prise en compte.
+# ===========================================================================
+
+from services import secure_config
+
+# Une clé est SENSIBLE si son nom contient l'un de ces fragments, OU si elle
+# figure dans la liste des clés sensibles exactes. La valeur d'une clé sensible
+# n'est JAMAIS renvoyée en clair par GET (ni journalisée par PUT).
+_SENSITIVE_FRAGMENTS = (
+    "PASSWORD", "SECRET", "KEY", "TOKEN",
+    "CONSUMER_SECRET", "CLIENT_SECRET", "API_KEY",
+)
+_SENSITIVE_EXACT = {"DATABASE_URL"}
+
+# Regroupement par CATÉGORIE selon le préfixe du nom (ordre = priorité de match).
+_CATEGORY_PREFIXES = (
+    ("SAP_", "SAP"),
+    ("SALESFORCE_", "Salesforce"),
+    ("MS_", "Microsoft 365"),
+    ("GRAPH_", "Microsoft 365"),
+    ("WEBHOOK_", "Microsoft 365"),
+    ("INSEE_", "INSEE"),
+    ("PAPPERS_", "Pappers"),
+    ("PA_", "Pappers"),
+    ("COMPANY_SEARCH_", "Recherche entreprise"),
+    ("CLIENT_ENRICHMENT", "Recherche entreprise"),
+    ("PRICING_", "Pricing"),
+    ("PRICE_", "Pricing"),
+    ("USE_SAP_PRICING", "Pricing"),
+    ("DHL_", "Transport DHL"),
+    ("ANTHROPIC_", "LLM"),
+    ("MISTRAL_", "LLM"),
+    ("QUOTA_", "Quota devis"),
+    ("NOVA_", "Application"),
+    ("APP_", "Application"),
+    ("LOG_", "Application"),
+    ("UVICORN_", "Application"),
+    ("SESSION_", "Application"),
+    ("COOKIE_", "Application"),
+    ("DATABASE_", "Application"),
+    ("REDIS_", "Application"),
+    ("CURRENCY_", "Application"),
+    ("DISABLE_", "Application"),
+    ("EXPOSE_", "Application"),
+    ("DISTUTILS", "Application"),
+)
+_DEFAULT_CATEGORY = "Divers"
+
+# Format de nom de variable d'environnement accepté en écriture.
+_ENV_KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
+
+
+def _is_sensitive_key(key: str) -> bool:
+    """True si la clé doit être masquée (jamais renvoyée/journalisée en clair)."""
+    name = (key or "").upper()
+    if name in _SENSITIVE_EXACT:
+        return True
+    return any(frag in name for frag in _SENSITIVE_FRAGMENTS)
+
+
+def _categorize_key(key: str) -> str:
+    """Catégorie d'affichage d'une clé, déduite de son préfixe."""
+    name = (key or "").upper()
+    for prefix, category in _CATEGORY_PREFIXES:
+        if name.startswith(prefix):
+            return category
+    return _DEFAULT_CATEGORY
+
+
+def _vault_path() -> str:
+    return os.getenv("NOVA_VAULT_PATH", secure_config.DEFAULT_VAULT_PATH)
+
+
+def _config_entry(key: str, value: str) -> Dict[str, Any]:
+    """Représentation d'une variable pour l'UI. Masque les secrets."""
+    sensitive = _is_sensitive_key(key)
+    is_set = value is not None and value != ""
+    entry: Dict[str, Any] = {
+        "key": key,
+        "category": _categorize_key(key),
+        "is_secret": sensitive,
+        "is_set": is_set,
+    }
+    if sensitive:
+        # JAMAIS la valeur en clair : preview masqué de longueur fixe.
+        entry["preview"] = "********" if is_set else ""
+    else:
+        entry["value"] = value
+    return entry
+
+
+@router.get("/config")
+async def get_config(_user: AuthenticatedUser = _admin) -> Dict[str, Any]:
+    """
+    Renvoie toutes les variables du coffre, groupées par catégorie.
+    Les clés SENSIBLES ne sont jamais renvoyées en clair (preview masqué).
+    """
+    path = _vault_path()
+    if not os.path.isfile(path):
+        return {
+            "vault_present": False,
+            "groups": {},
+            "total": 0,
+            "message": "Coffre absent : provisionner secrets.enc "
+                       "(scripts/provision_secrets.py) avant edition.",
+        }
+    try:
+        pairs = secure_config.decrypt_vault(path)
+    except Exception as exc:  # cle maitre absente/erronee, coffre corrompu
+        raise HTTPException(
+            status_code=503,
+            detail=f"Coffre present mais illisible (NOVA_VAULT_KEY ?) : {exc}",
+        )
+
+    groups: Dict[str, List[Dict[str, Any]]] = {}
+    for key in sorted(pairs.keys()):
+        entry = _config_entry(key, pairs[key])
+        groups.setdefault(entry["category"], []).append(entry)
+
+    return {"vault_present": True, "groups": groups, "total": len(pairs)}
+
+
+class ConfigPatch(BaseModel):
+    """Map PARTIELLE {clé: valeur} à fusionner dans le coffre."""
+    updates: Dict[str, str] = Field(min_length=1)
+
+    @field_validator("updates")
+    @classmethod
+    def _validate_keys(cls, v: Dict[str, str]) -> Dict[str, str]:
+        for key in v:
+            if not _ENV_KEY_RE.match(key):
+                raise ValueError(
+                    f"Nom de variable invalide : {key!r}. "
+                    f"Format attendu : MAJUSCULES, chiffres et underscores."
+                )
+        return v
+
+
+@router.put("/config")
+async def put_config(body: ConfigPatch, _user: AuthenticatedUser = _admin) -> Dict[str, Any]:
+    """
+    Fusionne une map PARTIELLE dans le coffre (préserve les clés non envoyées),
+    re-chiffre secrets.enc, journalise les CLÉS modifiées (jamais les valeurs).
+    """
+    path = _vault_path()
+    if not os.path.isfile(path):
+        raise HTTPException(
+            status_code=409,
+            detail="Coffre absent : provisionner secrets.enc avant toute edition.",
+        )
+    try:
+        total = secure_config.update_vault(body.updates, path=path)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Echec de mise a jour du coffre (NOVA_VAULT_KEY ?) : {exc}",
+        )
+
+    # Journalise UNIQUEMENT les noms de clés, jamais les valeurs.
+    modified = sorted(body.updates.keys())
+    logger.info("Admin config: %d cle(s) modifiee(s) par %s: %s",
+                len(modified), _user.sap_username, modified)
+
+    return {
+        "success": True,
+        "modified_keys": modified,
+        "total_keys": total,
+        "restart_required": True,
+        "message": "Redemarrage requis pour prise en compte des modifications.",
+    }
 
 
 # ===========================================================================
@@ -576,7 +752,7 @@ async def update_provider(provider_id: int, body: ProviderUpdate) -> Dict[str, A
 
 @llm_admin_router.delete("/providers/{provider_id}", status_code=204,
                          dependencies=[Depends(require_llm_admin)])
-async def delete_provider(provider_id: int) -> None:
+async def delete_provider(provider_id: int):
     db_sess = _db()
     try:
         prov = db_sess.query(LLMProvider).filter(LLMProvider.id == provider_id).first()
@@ -982,7 +1158,7 @@ async def create_benchmark_case(body: BenchmarkCaseCreate) -> dict:
 @llm_admin_router.delete("/benchmark/cases/{case_id}",
                           status_code=status.HTTP_204_NO_CONTENT,
                           dependencies=[Depends(require_llm_admin)])
-async def delete_benchmark_case(case_id: int) -> None:
+async def delete_benchmark_case(case_id: int):
     db: Session = SessionLocal()
     try:
         case = db.query(BenchmarkCase).filter(BenchmarkCase.id == case_id).first()

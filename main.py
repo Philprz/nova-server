@@ -1,5 +1,16 @@
 #main.py - CORRECTIONS CRITIQUES POUR NOVA
 
+# --- Shim de compat Cython <-> Pydantic v2 (Lot 5) ---------------------------
+# DOIT s'executer AVANT tout import de module contenant des modeles Pydantic
+# (routes.*, services.*...). Le shim reste en .py dans scripts/ (jamais
+# compile) ; on l'expose en module top-level quel que soit le cwd, puis on
+# applique la forme EXACTE validee en phase 2. Inerte hors-compilation.
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts"))
+import cython_pydantic_compat
+cython_pydantic_compat.apply()
+
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -586,6 +597,19 @@ if _admin_llm_secret:
     logger.info("Admin LLM panel route registered at /%s", _admin_llm_secret)
 else:
     logger.warning("NOVA_ADMIN_SECRET_PATH not set — admin LLM panel route disabled")
+
+
+# Page d'administration de la configuration (coffre chiffre). Le HTML n'est
+# qu'une coquille : toutes les donnees transitent par /api/admin/config, protege
+# par le role ADMIN (JWT). La page elle-meme ne contient aucun secret.
+@app.get("/admin/config", response_class=HTMLResponse, include_in_schema=False)
+async def admin_config_panel():
+    """Ecran d'administration de la configuration (auth ADMIN via l'API)."""
+    try:
+        with open("templates/admin_config.html", "r", encoding="utf-8") as f:
+            return HTMLResponse(content=f.read(), media_type="text/html; charset=utf-8")
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Not Found")
 
 
 def kill_process_on_port(port: int):

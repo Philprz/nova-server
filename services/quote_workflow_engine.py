@@ -595,6 +595,10 @@ class QuoteWorkflowEngine:
 
         draft.current_state = WorkflowState.TRANSPORT_OPTIMIZED
 
+        # Poids total = somme (poids unitaire x quantite) sur tous les produits.
+        # weight_kg est Optional -> 0.0 par defaut pour ne pas casser le calcul.
+        total_weight_kg = sum((p.weight_kg or 0.0) * p.quantity for p in draft.products)
+
         self._add_trace(draft, WorkflowState.TRANSPORT_OPTIMIZED,
                        f"Transport : {draft.selected_transport.carrier_name} - {draft.total_transport_eur:.2f} EUR",
                        f"Poids total : {total_weight_kg:.2f} kg",

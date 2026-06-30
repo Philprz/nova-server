@@ -4,6 +4,7 @@ Routes API pour le workflow de validation commerciale
 """
 
 import logging
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import List, Optional
 
@@ -329,7 +330,6 @@ async def get_validations_by_case_type(
         conn.close()
 
         import json
-        from datetime import datetime
 
         validations = []
         for row in rows:

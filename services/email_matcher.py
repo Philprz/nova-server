@@ -9,6 +9,7 @@ import re
 import json
 import logging
 import unicodedata
+from datetime import datetime
 from difflib import SequenceMatcher
 from typing import Optional, List, Dict, Any, Tuple
 from pydantic import BaseModel
@@ -44,6 +45,27 @@ def normalize_text(text: str) -> str:
     text = unicodedata.normalize('NFD', text)
     text = ''.join(c for c in text if unicodedata.category(c) != 'Mn')
     text = re.sub(r'[^\w\s]', ' ', text)
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
+
+
+@lru_cache(maxsize=2048)  # Cache 2048 chaînes normalisées
+def _normalize(text: str) -> str:
+    """Normalise un texte pour la comparaison fuzzy (avec cache LRU).
+
+    Fonction module-level (et non méthode @staticmethod) : la combinaison
+    @staticmethod + @lru_cache est cassée une fois compilée sous Cython.
+    """
+    if not text:
+        return ""
+    # Supprimer les accents
+    text = unicodedata.normalize('NFD', text)
+    text = ''.join(c for c in text if unicodedata.category(c) != 'Mn')
+    # Lowercase
+    text = text.lower()
+    # Supprimer la ponctuation sauf tirets
+    text = re.sub(r'[^\w\s-]', ' ', text)
+    # Espaces multiples
     text = re.sub(r'\s+', ' ', text).strip()
     return text
 
@@ -625,7 +647,7 @@ class EmailMatcher:
 
                 # Pré-normaliser le nom (cache)
                 if card_name:
-                    normalized = self._normalize(card_name)
+                    normalized = _normalize(card_name)
                     self._client_normalized[card_code] = normalized
 
                     # Index par première lettre (accélère fuzzy search)
@@ -653,7 +675,7 @@ class EmailMatcher:
                     # Pré-normaliser le nom du produit
                     item_name = item.get("ItemName", "")
                     if item_name:
-                        self._items_normalized[code] = self._normalize(item_name)
+                        self._items_normalized[code] = _normalize(item_name)
 
             # Pré-construire l'index des codes normalisés (refs fournisseurs)
             # Permet P-0301L-SLT == P/0301L-SLT via normalize_code()
@@ -1290,7 +1312,7 @@ class EmailMatcher:
     ) -> List[MatchedClient]:
         """Trouve les clients SAP qui matchent le texte de l'email (optimisé avec caches)."""
         matches: List[MatchedClient] = []
-        text_normalized = self._normalize(text)
+        text_normalized = _normalize(text)
 
         # Pré-extraire les mots du texte UNE SEULE FOIS (performance)
         text_words_6plus = WORD_PATTERN_6PLUS.findall(text_normalized)
@@ -1540,7 +1562,7 @@ class EmailMatcher:
                             break
                         # Fuzzy domaine vs nom
                         ratio = SequenceMatcher(None, domain_name,
-                                                self._normalize(card_name)).ratio()
+                                                _normalize(card_name)).ratio()
                         if ratio > 0.7:
                             score = int(65 + (ratio - 0.7) * 50)
                             if score > best_score:
@@ -2203,7 +2225,7 @@ class EmailMatcher:
         print(f"\n{'='*80}\n🔍 _MATCH_PRODUCTS APPELÉ - supplier_card_code: {supplier_card_code}\n{'='*80}\n", flush=True)
         matches: List[MatchedProduct] = []
         matched_codes = set()
-        text_normalized = self._normalize(text)
+        text_normalized = _normalize(text)
 
         # ===== PHASE 0 : EXTRACTION DESCRIPTIONS (pour apprentissage) =====
         product_descriptions = self._extract_product_descriptions(text)
@@ -2616,7 +2638,7 @@ class EmailMatcher:
             best_reason = ""
 
             # --- Stratégie 4 : ItemName exact dans le texte (score 90) ---
-            name_normalized = self._normalize(item_name)
+            name_normalized = _normalize(item_name)
             if len(name_normalized) >= 4 and name_normalized in text_normalized:
                 best_score = 90
                 best_reason = f"Nom exact: {item_name}"
@@ -3055,23 +3077,6 @@ class EmailMatcher:
         return 1  # Défaut
 
     # --- Utilitaires ---
-
-    @staticmethod
-    @lru_cache(maxsize=2048)  # Cache 2048 chaînes normalisées
-    def _normalize(text: str) -> str:
-        """Normalise un texte pour la comparaison fuzzy (avec cache LRU)."""
-        if not text:
-            return ""
-        # Supprimer les accents
-        text = unicodedata.normalize('NFD', text)
-        text = ''.join(c for c in text if unicodedata.category(c) != 'Mn')
-        # Lowercase
-        text = text.lower()
-        # Supprimer la ponctuation sauf tirets
-        text = re.sub(r'[^\w\s-]', ' ', text)
-        # Espaces multiples
-        text = re.sub(r'\s+', ' ', text).strip()
-        return text
 
     @staticmethod
     def _normalize_company_name(name: str) -> str:
