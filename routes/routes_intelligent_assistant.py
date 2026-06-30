@@ -1592,20 +1592,23 @@ async def search_company_for_creation(request: ClientCreationRequest):
         workflow = ClientCreationWorkflow()
 
         # Rechercher les informations de l'entreprise
-        search_results = await workflow.search_company_info(
+        search_results = await workflow.search_company_by_name(
             request.company_name,
             request.city
         )
+
+        # Remap vers le contrat de sortie déclaré {search_results, recommended, sources}
+        companies = search_results.get('companies', [])
 
         return {
             'success': True,
             'company_name': request.company_name,
             'city': request.city,
             'contact_name': request.contact_name,
-            'search_results': search_results['search_results'],
-            'recommended': search_results.get('recommended'),
-            'sources': search_results.get('sources', []),
-            'message': f"Trouvé {len(search_results['search_results'])} résultat(s) pour '{request.company_name}'"
+            'search_results': companies,
+            'recommended': None,
+            'sources': [],
+            'message': f"Trouvé {len(companies)} résultat(s) pour '{request.company_name}'"
         }
 
     except Exception as e:
@@ -1625,11 +1628,11 @@ async def create_client_from_company(request: ClientCreationFromCompanyRequest):
 
         workflow = ClientCreationWorkflow()
 
+        # Fusionner données entreprise + infos de contact (champs additifs compatibles)
+        client_data = {**request.company_data, **(request.contact_info or {})}
+
         # Créer le client
-        creation_result = await workflow.create_client_from_company_data(
-            request.company_data,
-            request.contact_info
-        )
+        creation_result = await workflow.create_client_in_salesforce(client_data)
 
         return creation_result
 
@@ -2025,8 +2028,9 @@ async def search_clients_direct(request: Dict[str, Any]):
         if not connection_status.get("results", {}).get("overall_status") == "OK":
             return {"success": False, "error": "Connexions système indisponibles"}
         
-        clients = await mcp.search_contacts(client_name)
-        
+        search_result = await mcp.search_salesforce_accounts(client_name)
+        clients = search_result.get("accounts", [])
+
         if clients:
             return {
                 "success": True,

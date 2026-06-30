@@ -5525,10 +5525,15 @@ class DevisWorkflow:
 
                 # CORRECTION: Vérifier doublons APRÈS sélection client mais AVANT produits
                 logger.info("🔍 === DÉBUT VÉRIFICATION DOUBLONS APRÈS SÉLECTION CLIENT ===")
-                duplicate_check = await self._check_duplicate_quotes(
-                    {"data": selected_client_data, "found": True, "name": client_display_name},
-                    original_products
-                )
+                # 🔧 Honorer skip_duplicate_check (forçage 'créer malgré les doublons')
+                if getattr(self, "skip_duplicate_check", False) or self.context.get("skip_duplicate_check"):
+                    logger.info("⏭️ Vérification doublons ignorée (skip_duplicate_check actif)")
+                    duplicate_check = {}
+                else:
+                    duplicate_check = await self._check_duplicate_quotes(
+                        {"data": selected_client_data, "found": True, "name": client_display_name},
+                        original_products
+                    )
                 self.context["duplicate_check"] = duplicate_check
 
                 # Si doublons trouvés ET nécessite une décision utilisateur
@@ -6323,11 +6328,16 @@ class DevisWorkflow:
                 logger.info("🔄 Utilisation du client du contexte (post-sélection)")
                 client_info_for_duplicates = self.context["client_info"]
             
-            duplicate_check = await self._check_duplicate_quotes(
-                client_info=client_info_for_duplicates,
-                products=products
-            )
-            
+            # 🔧 Honorer skip_duplicate_check (forçage 'créer malgré les doublons')
+            if getattr(self, "skip_duplicate_check", False) or self.context.get("skip_duplicate_check"):
+                logger.info("⏭️ Vérification doublons ignorée (skip_duplicate_check actif)")
+                duplicate_check = {}
+            else:
+                duplicate_check = await self._check_duplicate_quotes(
+                    client_info=client_info_for_duplicates,
+                    products=products
+                )
+
             self.context["duplicate_check"] = duplicate_check
             
             # Si doublons trouvés ET nécessite une décision utilisateur
