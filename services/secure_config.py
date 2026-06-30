@@ -32,21 +32,40 @@ def get_master_key() -> bytes:
     """
     Retourne la cle maitre Fernet servant a chiffrer/dechiffrer le coffre.
 
-    POUR L'INSTANT : la cle est lue depuis la variable d'environnement
-    NOVA_VAULT_KEY. Erreur explicite si elle est absente.
+    ORDRE DE RESOLUTION (Lot 2 / etape 2b) :
+      1. Cle EMBARQUEE en priorite : tentative d'import du module compile
+         `_vault_key` (livre uniquement sous forme de `_vault_key.pyd`) et appel
+         de `_vault_key.get_key()`, qui reconstruit la cle a l'execution depuis
+         des fragments obfusques (cf. scripts/generate_vault_key_module.py). La
+         cle n'apparait JAMAIS en clair dans la source ni dans le coffre.
+      2. Fallback DEV : si `_vault_key` est absent (module non genere/compile,
+         cas du poste de dev), repli sur la variable d'environnement
+         NOVA_VAULT_KEY (comportement historique du Lot 1).
 
-    TODO Lot 5 : cette cle deviendra une constante embarquee dans un module
-    compile en .pyd (jamais livree en clair dans un fichier .py ni dans le
-    coffre lui-meme). A ce moment, le corps de cette fonction sera remplace par
-    le retour direct de la constante compilee. La signature reste inchangee pour
-    ne rien casser en aval.
+    Erreur explicite si AUCUNE des deux sources n'est disponible.
+
+    LIMITE ASSUMEE : un .pyd reste reversible par desassemblage. L'embarquement
+    est une mesure de DISSUASION, pas un coffre inviolable (cf. doc coffre).
     """
+    # 1. Cle embarquee (module compile) — prioritaire.
+    try:
+        import _vault_key  # type: ignore
+    except ImportError:
+        pass  # module non genere/compile : on bascule sur le fallback DEV.
+    else:
+        key = _vault_key.get_key()
+        return key if isinstance(key, bytes) else key.encode("ascii")
+
+    # 2. Fallback DEV : variable d'environnement.
     key = os.getenv(_MASTER_KEY_ENV_VAR)
     if not key:
         raise RuntimeError(
-            f"{_MASTER_KEY_ENV_VAR} absente de l'environnement. "
-            f"Cle maitre requise pour acceder au coffre chiffre. "
-            f"Generer une cle avec 'python scripts/provision_secrets.py --genkey'."
+            f"Cle maitre introuvable : ni module embarque `_vault_key` (.pyd) "
+            f"ni variable {_MASTER_KEY_ENV_VAR} dans l'environnement. "
+            f"Cle requise pour acceder au coffre chiffre. En livraison, generer "
+            f"_vault_key.pyd via scripts/generate_vault_key_module.py + build "
+            f"Cython ; en dev, exposer {_MASTER_KEY_ENV_VAR} (voir "
+            f"'python scripts/provision_secrets.py --genkey')."
         )
     return key.encode("ascii") if isinstance(key, str) else key
 

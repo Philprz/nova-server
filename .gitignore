@@ -27,6 +27,11 @@ secrets.enc
 nova_vault.key
 *.master.key
 
+# Module de cle maitre embarquee (Lot 2/2b) : genere au build, JAMAIS commite ni
+# livre en source. Seul _vault_key.pyd (compile) est embarque. *.py[cod] ci-dessus
+# ne couvre PAS le .py, d'ou cette entree explicite.
+_vault_key.py
+
 # Bases de données locales
 *.db
 *.sqlite

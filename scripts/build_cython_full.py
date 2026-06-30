@@ -60,6 +60,13 @@ PKG_DIRS = [
 # Modules racine a compiler.
 ROOT_MODULES = ["main.py", "sap_mcp.py", "salesforce_mcp.py"]
 
+# Modules racine OPTIONNELS : compiles seulement s'ils existent, sans
+# avertissement bruyant en leur absence (cas legitime). _vault_key.py (Lot 2/2b)
+# porte la cle maitre embarquee ; il est genere AU BUILD de livraison par
+# scripts/generate_vault_key_module.py et gitignore. Present -> compile en
+# _vault_key.pyd et le total de modules passe a 112 ; absent (dev) -> ignore.
+OPTIONAL_ROOT_MODULES = ["_vault_key.py"]
+
 
 def module_name(rel_path: Path) -> str:
     """services/packing/box_catalog.py -> services.packing.box_catalog"""
@@ -84,6 +91,13 @@ def collect_sources() -> list[Path]:
             found.append(p.relative_to(ROOT))
         else:
             print(f"AVERTISSEMENT : module racine absent : {m}")
+    for m in OPTIONAL_ROOT_MODULES:
+        p = ROOT / m
+        if p.exists():
+            found.append(p.relative_to(ROOT))
+            print(f"INFO : module optionnel present, sera compile : {m}")
+        else:
+            print(f"INFO : module optionnel absent (ignore, normal en dev) : {m}")
     return found
 
 

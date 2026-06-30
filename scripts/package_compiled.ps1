@@ -111,6 +111,10 @@ $IncludeFiles += @('scripts/cython_pydantic_compat.py')
 # Sources .py TOLÉRÉES dans la sortie (le garde-fou les laisse passer) :
 #   - run.py (lanceur), register/renew_webhook (scheduler), alembic/** (migrations Lot 4),
 #   - scripts/cython_pydantic_compat.py (shim de compat, requis par main.pyd).
+# NOTE (Lot 2/2b) : _vault_key.py n'est VOLONTAIREMENT PAS dans cette allowlist.
+# La cle maitre embarquee ne doit ship QUE compilee (_vault_key.pyd, copié en 3a
+# depuis BuildDir). Si _vault_key.py fuitait dans le stage, le garde-fou (§4) le
+# détecterait comme source non autorisée et ferait échouer le packaging.
 $AllowedSourcePy = @('run.py', 'register_webhook.py', 'renew_webhook.py', 'cython_pydantic_compat.py')
 
 # ------------------------------------------------------------------
