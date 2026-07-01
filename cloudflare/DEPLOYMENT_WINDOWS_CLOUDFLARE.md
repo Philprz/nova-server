@@ -13,7 +13,7 @@ Internet → Cloudflare (CDN/Proxy) → Windows Server 2019 → NOVA Backend (lo
 - Compression
 
 **Windows Server gère :**
-- Backend NOVA (FastAPI sur port 8000)
+- Backend NOVA (FastAPI sur port 8001)
 
 ---
 
@@ -39,7 +39,7 @@ NOVA_MODE=production
 
 # Écoute sur toutes les interfaces (nécessaire pour Cloudflare)
 APP_HOST=0.0.0.0
-APP_PORT=8000
+APP_PORT=8001
 
 # Désactiver reload
 UVICORN_RELOAD=false
@@ -49,8 +49,8 @@ UVICORN_RELOAD=false
 
 **PowerShell (Administrateur) :**
 ```powershell
-# Autoriser le port 8000
-New-NetFirewallRule -DisplayName "NOVA Backend" -Direction Inbound -LocalPort 8000 -Protocol TCP -Action Allow
+# Autoriser le port 8001
+New-NetFirewallRule -DisplayName "NOVA Backend" -Direction Inbound -LocalPort 8001 -Protocol TCP -Action Allow
 
 # Vérifier la règle
 Get-NetFirewallRule -DisplayName "NOVA Backend"
@@ -229,7 +229,7 @@ Start-Service cloudflared
 
 ```env
 APP_HOST=127.0.0.1
-APP_PORT=8000
+APP_PORT=8001
 ```
 
 **Pas besoin d'ouvrir de port dans le pare-feu !**
@@ -408,7 +408,7 @@ $cloudflareIPs = @(
 )
 
 foreach ($ip in $cloudflareIPs) {
-    New-NetFirewallRule -DisplayName "NOVA Backend - Cloudflare $ip" -Direction Inbound -LocalPort 8000 -Protocol TCP -Action Allow -RemoteAddress $ip
+    New-NetFirewallRule -DisplayName "NOVA Backend - Cloudflare $ip" -Direction Inbound -LocalPort 8001 -Protocol TCP -Action Allow -RemoteAddress $ip
 }
 ```
 
@@ -446,13 +446,13 @@ Invoke-WebRequest -Uri https://nova-rondot.itspirit.ovh/ -MaximumRedirection 0
 ## 📋 Checklist Déploiement
 
 - [ ] Python 3.9+ installé sur Windows Server
-- [ ] NOVA Backend démarré localement (port 8000)
+- [ ] NOVA Backend démarré localement (port 8001)
 - [ ] Domaine `nova-rondot.itspirit.ovh` ajouté à Cloudflare
 - [ ] DNS configuré (A record → IP serveur)
 - [ ] SSL/TLS configuré sur Cloudflare (Mode: Full)
 - [ ] Page Rules créées (redirection root)
 - [ ] Service Windows configuré (NSSM ou Task Scheduler)
-- [ ] Pare-feu configuré (port 8000 ou Tunnel)
+- [ ] Pare-feu configuré (port 8001 ou Tunnel)
 - [ ] Tests réussis (local + Cloudflare)
 
 ---
@@ -515,14 +515,14 @@ Invoke-WebRequest -Uri https://nova-rondot.itspirit.ovh/ -MaximumRedirection 0
 │  - Page Rules (redirection root → /mail-to-biz)         │
 └────────────────────────┬────────────────────────────────┘
                          │
-                         │ HTTP (8000) ou Tunnel
+                         │ HTTP (8001) ou Tunnel
                          ▼
 ┌─────────────────────────────────────────────────────────┐
 │           Windows Server 2019                            │
 │                                                           │
 │  ┌──────────────────────────────────────────────────┐   │
 │  │  NOVA Backend (FastAPI)                          │   │
-│  │  - Port: 8000                                    │   │
+│  │  - Port: 8001                                    │   │
 │  │  - Service Windows (NSSM)                        │   │
 │  │  - /mail-to-biz (React SPA)                      │   │
 │  │  - /api (REST API)                               │   │
