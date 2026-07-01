@@ -1785,7 +1785,6 @@ GET  /api/admin/llm/benchmark/runs/{id}/export           # Export résultats
 - `services/pricing_engine.py` - Moteur de calcul CAS 1/2/3/4
 - `services/sap_history_service.py` - Accès historiques SAP (/Invoices, /PurchaseInvoices)
 - `services/pricing_audit_db.py` - Base audit SQLite avec statistiques
-- `services/transport_calculator.py` - Calculateur coût transport (Phase 1 basique)
 
 **Workflow Pricing :**
 
@@ -2040,12 +2039,10 @@ SUPPLIER_TARIFF_FOLDER=C:\Users\PPZ\RONDOT
 | **Price Engine**         | `services/price_engine.py`          | Calcul prix clients SAP                                       |
 | **Pricing Engine**       | `services/pricing_engine.py`        | Moteur pricing intelligent RONDOT-SAS (CAS 1/2/3/4)           |
 | **SAP History**          | `services/sap_history_service.py`   | Accès historiques SAP (factures ventes/achats)               |
-| **Transport Calculator** | `services/transport_calculator.py`  | Calcul coûts transport (Phase 1 basique)                     |
 | **Pricing Audit DB**     | `services/pricing_audit_db.py`      | Base audit décisions pricing SQLite                          |
 | **Quote Validator**      | `services/quote_validator.py`       | Validation commerciale workflow (CAS 2 & 4)                   |
 | **Dashboard Service**    | `services/dashboard_service.py`     | Métriques temps réel pricing & validation                   |
 | **Currency Service**     | `services/currency_service.py`      | Taux de change multi-devises (EUR, USD, GBP, CHF)             |
-| **Supplier Discounts**   | `services/supplier_discounts_db.py` | Remises fournisseurs (PERCENTAGE, FIXED_AMOUNT)               |
 | **File Parsers**         | `services/file_parsers.py`          | Parsers PDF/Excel (PyMuPDF, OpenPyXL)                         |
 
 ### Workflow Services
@@ -3243,7 +3240,6 @@ Implémentation complète de l'organigramme décisionnel RONDOT-SAS avec 4 CAS d
 - `services/pricing_engine.py` (300 lignes) - Moteur CAS 1/2/3/4
 - `services/sap_history_service.py` (250 lignes) - Accès historiques SAP
 - `services/pricing_audit_db.py` (280 lignes) - Base audit SQLite
-- `services/transport_calculator.py` (150 lignes) - Calculateur transport Phase 1
 
 ### Phase 4 : Enrichissement & Validation ⭐ NOUVEAU
 
@@ -3256,7 +3252,6 @@ Workflow de validation commerciale complet avec dashboard métriques temps réel
 - `routes/routes_pricing_validation.py` (180 lignes) - 12 endpoints API validation
 - `services/dashboard_service.py` (340 lignes) - Métriques temps réel
 - `services/currency_service.py` (200 lignes) - Taux de change (EUR, USD, GBP, CHF)
-- `services/supplier_discounts_db.py` (460 lignes) - Remises fournisseurs
 
 **Fichiers modifiés** :
 

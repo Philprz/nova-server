@@ -114,6 +114,9 @@ claude_diagnostic_results*.json
 # Claude Desktop config
 claude_desktop_config.json
 
+# Configuration locale Claude Code (spécifique à chaque poste)
+.claude/settings.local.json
+
 # Documentation générée
 docs/_build/
 docs/build/
