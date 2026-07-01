@@ -48,6 +48,19 @@ EXPECTED_PAIRS = {
 
 
 @pytest.fixture
+def no_embedded_key(monkeypatch):
+    """
+    Neutralise la cle EMBARQUEE (`_vault_key`) pour rendre les tests du chemin
+    fallback/erreur deterministes, qu'un `_vault_key.py`/`.pyd` traine ou non
+    dans l'arbre. En posant `sys.modules['_vault_key'] = None`, tout
+    `import _vault_key` leve ImportError -> get_master_key bascule sur le
+    fallback NOVA_VAULT_KEY (cf. services/secure_config.get_master_key, ordre 1->2).
+    monkeypatch restaure l'etat initial de sys.modules en fin de test.
+    """
+    monkeypatch.setitem(sys.modules, "_vault_key", None)
+
+
+@pytest.fixture
 def master_key(monkeypatch):
     """Pose une cle maitre Fernet valide dans l'environnement pour le test."""
     key = Fernet.generate_key().decode("ascii")
@@ -81,7 +94,7 @@ def test_roundtrip_from_dict(master_key, tmp_path):
     assert secure_config.decrypt_vault(vault) == source
 
 
-def test_wrong_master_key_fails_authentication(master_key, sample_env_file, tmp_path, monkeypatch):
+def test_wrong_master_key_fails_authentication(no_embedded_key, master_key, sample_env_file, tmp_path, monkeypatch):
     """Une cle maitre erronee doit faire echouer le dechiffrement (integrite)."""
     vault = str(tmp_path / "secrets.enc")
     secure_config.encrypt_env_to_vault(sample_env_file, out_path=vault)
@@ -94,8 +107,8 @@ def test_wrong_master_key_fails_authentication(master_key, sample_env_file, tmp_
         secure_config.decrypt_vault(vault)
 
 
-def test_missing_master_key_raises():
-    """Absence de NOVA_VAULT_KEY -> erreur explicite."""
+def test_missing_master_key_raises(no_embedded_key):
+    """Absence de NOVA_VAULT_KEY (et aucune cle embarquee) -> erreur explicite."""
     saved = os.environ.pop("NOVA_VAULT_KEY", None)
     try:
         with pytest.raises(RuntimeError):

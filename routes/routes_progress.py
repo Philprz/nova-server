@@ -128,10 +128,12 @@ async def get_active_tasks():
     Liste toutes les tâches actives
     """
     try:
-        active_tasks = progress_tracker.get_active_tasks()
+        active_tasks = progress_tracker.get_all_active_tasks()
+        # get_all_active_tasks() renvoie DÉJÀ une liste de dicts
+        # (un get_overall_progress() par tâche) -> pas de compréhension aval
         return {
             "count": len(active_tasks),
-            "tasks": [task.get_overall_progress() for task in active_tasks]
+            "tasks": active_tasks
         }
         
     except Exception as e:
@@ -147,9 +149,12 @@ async def cancel_task(task_id: str):
         success = progress_tracker.cancel_task(task_id)
         if not success:
             raise HTTPException(status_code=404, detail=f"Tâche {task_id} non trouvée")
-        
+
         return {"success": True, "message": f"Tâche {task_id} annulée"}
-        
+
+    except HTTPException:
+        # Laisser passer le 404 (sinon avalé et transformé en 500)
+        raise
     except Exception as e:
         logger.error(f"Erreur annulation tâche {task_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -652,14 +657,16 @@ async def get_progress_stats():
     Statistiques globales du système de progression
     """
     try:
-        stats = progress_tracker.get_global_stats()
+        stats = progress_tracker.get_task_statistics()
         return {
             "timestamp": datetime.now().isoformat(),
             "active_tasks": stats.get("active_tasks", 0),
             "completed_tasks": stats.get("completed_tasks", 0),
             "failed_tasks": stats.get("failed_tasks", 0),
-            "total_tasks": stats.get("total_tasks", 0),
-            "average_duration": stats.get("average_duration", 0),
+            # get_task_statistics() expose total_tasks_processed -> total_tasks
+            "total_tasks": stats.get("total_tasks_processed", 0),
+            # average_duration omis volontairement : get_task_statistics() ne calcule pas
+            # la durée moyenne et la donnée n'est pas disponible ici (ne pas l'inventer).
             "success_rate": stats.get("success_rate", 0)
         }
         

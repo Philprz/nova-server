@@ -146,8 +146,8 @@ async def resolve_duplicates(request: dict):
             workflow = DevisWorkflow()
             # Désactiver temporairement la vérification doublons
             workflow.skip_duplicate_check = True
-            
-            result = await workflow.generate_devis(original_prompt)
+
+            result = await workflow.process_prompt(original_prompt)
             return {"success": True, "action": "created", "result": result}
             
         elif action == "consolidate":
@@ -199,12 +199,12 @@ async def confirm_quote(request: QuoteConfirmationRequest):
         logger.info(f"Confirmation devis - Action: {request.action}, TaskID: {request.task_id}, Confirmé: {request.confirmed}")
         
         from workflow.devis_workflow import DevisWorkflow
-        from services.progress_tracker import get_task_result
-        
-        # Récupérer le résultat intermédiaire depuis le tracker de progression
-        task_result = await get_task_result(request.task_id)
-        
-        if not task_result:
+        from services.progress_tracker import progress_tracker
+
+        # Récupérer la tâche intermédiaire depuis le tracker de progression
+        task = progress_tracker.get_task(request.task_id)
+
+        if not task:
             return {
                 "status": "error",
                 "message": f"Impossible de trouver la tâche avec ID: {request.task_id}"
@@ -215,7 +215,7 @@ async def confirm_quote(request: QuoteConfirmationRequest):
             logger.info(f"Confirmation approuvée pour tâche {request.task_id}")
             
             workflow = DevisWorkflow()
-            workflow.context = task_result.get("context", {})
+            workflow.context = task.context
             workflow.task_id = request.task_id
             
             # Continuer le flux de travail depuis la dernière étape

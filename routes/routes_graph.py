@@ -2311,18 +2311,19 @@ async def set_manual_product_code(
                     break
 
         # 4. Enregistrer mapping pour apprentissage + persistance correction
-        try:
-            from services.product_mapping_db import get_product_mapping_db
-            mapping_db = get_product_mapping_db()
-            mapping_db.add_mapping(
-                external_code=item_code,
-                sap_code=sap_item.ItemCode,
-                source="manual_user_input",
-                confidence=1.0
-            )
-            logger.info(f"Mapping ajouté: {item_code} → {sap_item.ItemCode}")
-        except Exception as e:
-            logger.warning(f"Could not save mapping (non-critical): {e}")
+        # save_mapping (services/product_mapping_db.ProductMappingDB.save_mapping:144)
+        # exige external_description ET supplier_card_code (params requis, scale
+        # confidence_score = 0-100). Aucun des deux n'est sourçable proprement
+        # dans le contexte de cette route : correction manuelle rattachée à un
+        # email/message, sans fournisseur ni description externe disponibles ici.
+        # On NE fabrique PAS ces champs (réponse honnête) : pas d'enregistrement,
+        # et mapping_saved reflète la réalité (plus de "true" mensonger).
+        # TODO(mapping): câbler save_mapping(external_code=item_code,
+        #   external_description=<desc externe>, supplier_card_code=<fournisseur>,
+        #   matched_item_code=sap_item.ItemCode, match_method="MANUAL",
+        #   confidence_score=100, status="VALIDATED") dès que supplier_card_code et
+        #   external_description seront disponibles au site (req. ou product_match).
+        mapping_saved = False
 
         # Persistance correction en base
         try:
@@ -2401,7 +2402,7 @@ async def set_manual_product_code(
             "rondot_code": sap_item.ItemCode,
             "item_name": sap_item.ItemName,
             "unit_price": unit_price,
-            "mapping_saved": True,
+            "mapping_saved": mapping_saved,
             "product_updated": product_updated,
             "sap_validated": not sap_unavailable
         }

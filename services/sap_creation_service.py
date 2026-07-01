@@ -165,7 +165,7 @@ class SapCreationService:
             result = await call_sap(
                 endpoint="/BusinessPartners",
                 method="POST",
-                data=payload
+                payload=payload
             )
 
             # Récupérer le CardCode créé
@@ -276,7 +276,7 @@ class SapCreationService:
             result = await call_sap(
                 endpoint="/Items",
                 method="POST",
-                data=payload
+                payload=payload
             )
 
             # Récupérer l'ItemCode créé
