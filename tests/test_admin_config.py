@@ -70,7 +70,6 @@ SAMPLE_VAULT = {
     "SAP_CLIENT_PASSWORD": SECRET_SENTINEL,
     "NOVA_JWT_SECRET": "another-" + SECRET_SENTINEL,
     "PRICING_DEFAULT_MARGIN": "0.45",
-    "SALESFORCE_DOMAIN": "login.salesforce.com",
 }
 
 
@@ -100,14 +99,14 @@ class TestSensitiveMatcher:
     def test_sensitive_keys(self):
         from routes.routes_admin import _is_sensitive_key
         for k in ("SAP_CLIENT_PASSWORD", "NOVA_JWT_SECRET", "INSEE_API_KEY",
-                  "MS_CLIENT_SECRET", "SALESFORCE_SECURITY_TOKEN",
+                  "MS_CLIENT_SECRET",
                   "INSEE_CONSUMER_SECRET", "NOVA_VAULT_KEY", "DATABASE_URL"):
             assert _is_sensitive_key(k) is True, k
 
     def test_non_sensitive_keys(self):
         from routes.routes_admin import _is_sensitive_key
         for k in ("APP_PORT", "SAP_USER", "PRICING_DEFAULT_MARGIN",
-                  "SALESFORCE_DOMAIN", "MS_TENANT_ID", "PAPPERS_URL"):
+                  "MS_TENANT_ID", "PAPPERS_URL"):
             assert _is_sensitive_key(k) is False, k
 
 
@@ -116,7 +115,6 @@ class TestCategorize:
         from routes.routes_admin import _categorize_key
         cases = {
             "SAP_USER": "SAP",
-            "SALESFORCE_DOMAIN": "Salesforce",
             "MS_CLIENT_ID": "Microsoft 365",
             "INSEE_API_KEY": "INSEE",
             "PAPPERS_URL": "Pappers",

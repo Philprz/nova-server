@@ -281,7 +281,6 @@ _SENSITIVE_EXACT = {"DATABASE_URL"}
 # Regroupement par CATÉGORIE selon le préfixe du nom (ordre = priorité de match).
 _CATEGORY_PREFIXES = (
     ("SAP_", "SAP"),
-    ("SALESFORCE_", "Salesforce"),
     ("MS_", "Microsoft 365"),
     ("GRAPH_", "Microsoft 365"),
     ("WEBHOOK_", "Microsoft 365"),
