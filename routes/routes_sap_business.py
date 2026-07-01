@@ -182,7 +182,7 @@ async def export_items_excel(
 
     try:
         # ── Lecture depuis la base locale ──────────────────────────────────
-        db_path = FilePath(__file__).parent.parent / "supplier_tariffs.db"
+        db_path = FilePath(__file__).parent.parent / "data" / "supplier_tariffs.db"
         conn = sqlite3.connect(str(db_path))
         conn.row_factory = sqlite3.Row
 
@@ -858,7 +858,7 @@ async def debug_item_weight(item_code: str):
     # 2. Valeur en cache SQLite
     cache_data = {}
     try:
-        db_path = FilePath(__file__).parent.parent / "supplier_tariffs.db"
+        db_path = FilePath(__file__).parent.parent / "data" / "supplier_tariffs.db"
         conn = sqlite3.connect(str(db_path))
         conn.row_factory = sqlite3.Row
         row = conn.execute(

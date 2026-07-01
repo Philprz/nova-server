@@ -18,7 +18,7 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 # Chemin de la base de données (même répertoire que supplier_tariffs.db)
-DB_PATH = Path(__file__).parent.parent / "supplier_tariffs.db"
+DB_PATH = Path(__file__).parent.parent / "data" / "supplier_tariffs.db"
 
 
 class SAPCacheDB:

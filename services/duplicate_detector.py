@@ -60,7 +60,7 @@ class DuplicateDetector:
         """Initialise le détecteur de doublons."""
         if db_path is None:
             # Utiliser la même base que supplier_tariffs
-            db_path = str(Path(__file__).parent.parent / "supplier_tariffs.db")
+            db_path = str(Path(__file__).parent.parent / "data" / "supplier_tariffs.db")
 
         self.db_path = db_path
         self._init_database()

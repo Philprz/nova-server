@@ -20,7 +20,7 @@ class ProductMappingDB:
 
     def __init__(self, db_path: str = None):
         if db_path is None:
-            db_path = str(Path(__file__).parent.parent / "supplier_tariffs.db")
+            db_path = str(Path(__file__).parent.parent / "data" / "supplier_tariffs.db")
         self.db_path = db_path
         self._init_db()
 
