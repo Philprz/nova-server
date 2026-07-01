@@ -99,26 +99,6 @@ async def test_mcp_connections_with_progress() -> Dict[str, Any]:
         current_task = getattr(progress_tracker, '_current_task', None)
         mcp_connector = MCPConnector()
 
-        # Test Salesforce
-        if current_task:
-            current_task.update_step_progress("test_connections", 25, "🔍 Test Salesforce...")
-
-        try:
-            sf_result = await mcp_connector.call_mcp("salesforce_mcp", "salesforce_query", {
-                "query": "SELECT Id, Name FROM Account LIMIT 1"
-            })
-            results["connections"]["salesforce"] = {
-                "connected": "error" not in sf_result,
-                "details": sf_result,
-                "test_time": datetime.now().isoformat()
-            }
-        except Exception as e:
-            results["connections"]["salesforce"] = {
-                "connected": False,
-                "error": str(e),
-                "test_time": datetime.now().isoformat()
-            }
-
         # Test SAP
         if current_task:
             current_task.update_step_progress("test_connections", 75, "🔍 Test SAP...")
@@ -141,14 +121,11 @@ async def test_mcp_connections_with_progress() -> Dict[str, Any]:
                 "test_time": datetime.now().isoformat()
             }
 
-        # Déterminer le statut global
-        sf_ok = results["connections"].get("salesforce", {}).get("connected", False)
+        # Déterminer le statut global (SAP uniquement)
         sap_ok = results["connections"].get("sap", {}).get("connected", False)
 
-        if sf_ok and sap_ok:
+        if sap_ok:
             results["overall_status"] = "all_connected"
-        elif sf_ok or sap_ok:
-            results["overall_status"] = "partial_connection"
         else:
             results["overall_status"] = "no_connection"
 
@@ -172,12 +149,10 @@ async def test_mcp_connections_with_progress() -> Dict[str, Any]:
 def get_timeout_for_action(action: str) -> int:
     """Retourne le timeout approprié selon l'action"""
     timeouts = {
-        'salesforce_query': 60,
         'sap_read': 45,
         'sap_search': 60,
         'sap_create_customer_complete': 90,
         'sap_create_quotation_complete': 90,
-        'salesforce_create_opportunity_complete': 75,
         'ping': 10
     }
     return timeouts.get(action, 30)
@@ -235,7 +210,6 @@ class MCPConnector:
         
         # Statut des connexions
         self.connection_status = {
-            "salesforce": False,
             "sap": False
         }
         
@@ -1315,12 +1289,9 @@ class MCPConnector:
         try:
             available_routes = {
                 "sap_connection": True,
-                "salesforce_connection": True,
                 "claude_api": bool(get_llm_extractor and os.getenv("ANTHROPIC_API_KEY")),
                 "sap_data_retrieval": True,
-                "salesforce_data_retrieval": True,
                 "mcp_sap": True,
-                "mcp_salesforce": True,
                 "llm_extraction": bool(get_llm_extractor)
             }
             
