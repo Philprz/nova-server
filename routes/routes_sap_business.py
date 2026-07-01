@@ -574,7 +574,10 @@ async def create_quotation_from_email(
                     logger.info(f"Validation et enrichissement du client via SIRET: {client_siret}")
 
                     # Valider et enrichir via INSEE et Pappers
-                    validation_result = await validator.validate_and_enrich(client_data_for_validation)
+                    # validate_complete expose {valid, enriched_data{...}} (cf.
+                    # services/client_validator.ClientValidator.validate_complete:178) ;
+                    # la route lit validation_result["valid"] puis enriched_data.get(...).
+                    validation_result = await validator.validate_complete(client_data_for_validation)
 
                     if validation_result.get("valid"):
                         enriched_data = validation_result.get("enriched_data", {})
