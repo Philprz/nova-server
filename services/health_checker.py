@@ -41,11 +41,9 @@ class HealthChecker:
             ("environment_check", self._test_environment),
             ("database", self._test_database),
             ("sap_connection", self._test_sap_connection),
-            ("salesforce_connection", self._test_salesforce_connection),
             ("claude_api", self._test_claude_api),
             ("mistral_api", self._test_mistral_api),
             ("sap_data_retrieval", self._test_sap_data_retrieval),
-            ("salesforce_data_retrieval", self._test_salesforce_data_retrieval),
             ("routes_availability", self._test_routes_availability)
         ]
         
@@ -194,55 +192,6 @@ class HealthChecker:
                 "duration_ms": round((time.time() - start_time) * 1000, 2)
             }
     
-    async def _test_salesforce_connection(self) -> Dict[str, Any]:
-        """Test de connexion Salesforce via MCP"""
-        start_time = time.time()
-        
-        try:
-            connector = MCPConnector()
-            # VRAIE connexion Salesforce avec les actions disponibles
-            # Utiliser 'ping' au lieu de 'salesforce_login' inexistant
-            ping_result = await connector.call_salesforce_mcp("ping", {})
-            
-            if "error" in ping_result:
-                return {
-                    "success": False,
-                    "message": f"Échec ping Salesforce: {ping_result.get('error', 'Erreur inconnue')}",
-                    "timestamp": datetime.now().isoformat(),
-                    "duration_ms": round((time.time() - start_time) * 1000, 2)
-                }
-            
-            # Test requête simple pour valider la connexion
-            test_query = await connector.call_salesforce_mcp("salesforce_query", {
-                "query": "SELECT Id, Name FROM Account LIMIT 1"
-            })
-            
-            if "error" in test_query:
-                return {
-                    "success": False,
-                    "message": f"Échec test requête Salesforce: {test_query.get('error', 'Erreur inconnue')}",
-                    "timestamp": datetime.now().isoformat(),
-                    "duration_ms": round((time.time() - start_time) * 1000, 2)
-                }
-            
-            logger.info("Connexion Salesforce établie")
-            logger.info("Connexion Salesforce réussie via ping + salesforce_query")
-            logger.info("Connexion Salesforce réussie via salesforce_login")
-            return {
-                "success": True,
-                "message": "Connexion Salesforce établie avec succès",
-                "timestamp": datetime.now().isoformat(),
-                "duration_ms": round((time.time() - start_time) * 1000, 2)
-            }
-                
-        except Exception as e:
-            return {
-                "success": False,
-                "message": f"Échec connexion Salesforce: {str(e)[:50]}...",
-                "timestamp": datetime.now().isoformat(),
-                "duration_ms": round((time.time() - start_time) * 1000, 2)
-            }
-    
     async def _test_claude_api(self) -> Dict[str, Any]:
         """Test de l'API Claude Anthropic"""
         start_time = time.time()
@@ -364,52 +313,6 @@ class HealthChecker:
                 "duration_ms": round((time.time() - start_time) * 1000, 2)
             }
     
-    async def _test_salesforce_data_retrieval(self) -> Dict[str, Any]:
-        """Test de récupération de données Salesforce"""
-        start_time = time.time()
-        
-        try:
-            connector = MCPConnector()
-            logger.info("Appel MCP: salesforce_mcp.salesforce_query")
-            
-            # VRAIE récupération de données Salesforce
-            result = await connector.call_salesforce_mcp("salesforce_query", {
-                "query": "SELECT Id, Name FROM Account LIMIT 5"
-            })
-            
-            if "error" in result:
-                return {
-                    "success": False,
-                    "message": f"Échec récupération données Salesforce: {result.get('error', 'Erreur inconnue')}",
-                    "timestamp": datetime.now().isoformat(),
-                    "duration_ms": round((time.time() - start_time) * 1000, 2)
-                }
-            
-            # Vérifier que des données sont retournées
-            if not result.get("records") or len(result["records"]) == 0:
-                return {
-                    "success": False,
-                    "message": "Aucune donnée retournée par Salesforce",
-                    "timestamp": datetime.now().isoformat(),
-                    "duration_ms": round((time.time() - start_time) * 1000, 2)
-                }
-            
-            logger.info(f"Appel MCP réussi: salesforce_mcp.salesforce_query - {len(result['records'])} éléments récupérés")
-            return {
-                "success": True,
-                "message": "Récupération données Salesforce opérationnelle",
-                "timestamp": datetime.now().isoformat(),
-                "duration_ms": round((time.time() - start_time) * 1000, 2)
-            }
-            
-        except Exception as e:
-            return {
-                "success": False,
-                "message": f"Échec récupération données Salesforce: {str(e)[:50]}...",
-                "timestamp": datetime.now().isoformat(),
-                "duration_ms": round((time.time() - start_time) * 1000, 2)
-            }
-    
     async def _test_routes_availability(self) -> Dict[str, Any]:
         """Test des principales routes API - VERSION CORRIGÉE"""
         start_time = time.time()
@@ -521,16 +424,12 @@ class HealthChecker:
                     recommendations.append("[FIX] Vérifier la connexion PostgreSQL et les credentials")
                 elif test_name == "sap_connection":
                     recommendations.append("[FIX] Problème de connexion SAP - vérifier les MCP")
-                elif test_name == "salesforce_connection":
-                    recommendations.append("[FIX] Problème de connexion Salesforce - vérifier les MCP")
                 elif test_name == "claude_api":
                     recommendations.append("[FIX] Vérifier la clé API Anthropic dans .env")
                 elif test_name == "mistral_api":
                     recommendations.append("[FIX] Vérifier MISTRAL_API_KEY / config routeur LLM")
                 elif test_name == "sap_data_retrieval":
                     recommendations.append("[FIX] Problème de récupération de données SAP")
-                elif test_name == "salesforce_data_retrieval":
-                    recommendations.append("[FIX] Problème de récupération de données SALESFORCE")
                 elif test_name == "routes_availability":
                     recommendations.append("[FIX] Vérifier l'installation des modules de routes")
         
