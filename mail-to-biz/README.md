@@ -308,7 +308,7 @@ cd mail-to-biz
 npm run build
 ```
 
-Les fichiers buildés seront dans `mail-to-biz/dist/`
+Les fichiers buildés seront dans `frontend/` (cf. `build.outDir` dans `vite.config.ts`)
 
 ## Sécurité
 
