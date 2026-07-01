@@ -1,3 +1,5 @@
+> OBSOLÈTE — état pré-fix (30/06). Toutes les routes citées sont corrigées depuis. Ne plus utiliser comme référence. Voir docs/AUDIT_PREPROD_2026-07.md.
+
 # AUDIT — Routes montées cassées (symbole inexistant / crash garanti)
 
 **Branche** : `prod/fix-broken-routes` · **Date** : 2026-06-30 · **Mode** : LECTURE SEULE (aucune correction)
