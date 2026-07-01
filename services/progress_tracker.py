@@ -34,7 +34,6 @@ BUSINESS_STEPS_PARALLEL = {
     "quote_generation": [
         ("prepare_quote", "📋 Préparation du devis"),
         ("save_to_sap", "💾 Enregistrement SAP"),
-        ("sync_salesforce", "☁️ Synchronisation Salesforce"),
         ("quote_finalized", "✅ Devis finalisé")
     ]
 }
@@ -120,11 +119,9 @@ class QuoteTask:
         "create_quote": [
             ("prepare_quote", "📋 Préparation du devis"),
             ("create_quote", "🧾 Création du devis"),
-            ("sync_external_systems", "💾 Synchronisation SAP & Salesforce"),
+            ("sync_external_systems", "💾 Synchronisation SAP"),
             ("sync_to_sap", "💾 Enregistrement SAP"),
-            ("sync_to_salesforce", "☁️ Synchronisation Salesforce"),
             ("save_to_sap", "💾 Enregistrement SAP"),
-            ("sync_salesforce", "☁️ Synchronisation Salesforce"),
             ("quote_finalized", "✅ Devis finalisé")
         ]
     }
