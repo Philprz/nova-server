@@ -1,17 +1,23 @@
 {
   "permissions": {
     "allow": [
-      "Bash",
+      "Bash(*)",
       "Read",
       "Edit",
       "Write",
-      "Bash(npm install *)",
-      "Bash(psql --username=postgres --no-password -c \"SELECT version\\(\\);\")",
-      "Bash(net stop *)",
-      "Bash(net start *)",
-      "Bash(rm -f scripts/verify-corrective-invoice.ts scripts/_cleanup_verify.ts)",
-      "Bash(rm -f data/generated/GEN_A384-VERIFY* data/processed/GEN_A384-VERIFY* data/invoices/2026-06/*A384-VERIFY*)",
-      "Bash(find data *)"
+      "Bash(cd *)",
+      "Bash(ls *)",
+      "Bash(pwd *)",
+      "Bash(mkdir *)",
+      "Bash(rmdir *)",    
+      "Bash(git *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(head *)",
+      "Bash(echo *)",
+      "Bash(.venv/Scripts/python.exe *)",
+      "Bash(python *)"
     ],
     "deny": [
       "Bash(rm -rf:*)",
