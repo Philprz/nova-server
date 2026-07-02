@@ -1674,22 +1674,6 @@ class DevisWorkflow:
                 "validation_used": True
             }
         
-    async def _find_product_in_salesforce(self, product_code: str) -> Optional[str]:
-        """Trouve l'ID Salesforce correspondant au code produit SAP - RESTAURÉE"""
-        try:
-            query = f"SELECT Id, Name, ProductCode FROM Product2 WHERE ProductCode = '{escape_soql(product_code)}' LIMIT 1"
-            result = await MCPConnector.call_salesforce_mcp("salesforce_query", {"query": query})
-            
-            if "error" not in result and result.get("totalSize", 0) > 0:
-                return result["records"][0]["Id"]
-            
-            logger.info(f"Produit {product_code} non trouvé dans Salesforce")
-            return None
-            
-        except Exception as e:
-            logger.warning(f"Erreur recherche produit Salesforce {product_code}: {str(e)}")
-            return None
-        
     async def _prepare_quote_data(self) -> Dict[str, Any]:
         """Prépare les données du devis"""
         # Préparer les données pour la création du devis
@@ -3089,17 +3073,14 @@ class DevisWorkflow:
                 
                 # Calculer le stock total (logique conservée car technique)
                 total_stock = self._extract_stock_from_sap_data(product_details)
-                
-                # Récupérer l'ID Salesforce
-                salesforce_id = await self._find_product_in_salesforce(product_code)
-                
+
                 # ✅ NOUVEAU : Produit enrichi SANS calcul de prix
                 enriched_product = {
                 "code": product_code,
                 "quantity": product.get("quantity", 1),
                 "name": product_details.get("ItemName", "Unknown"),
                 "stock": total_stock,
-                "salesforce_id": salesforce_id,
+                "salesforce_id": None,
                 "sap_raw_data": product_details,
                 "unit_price": None,
                 "line_total": None,
