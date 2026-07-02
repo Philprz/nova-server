@@ -6419,10 +6419,10 @@ class DevisWorkflow:
             if not returned_products:
                 logger.warning("❌ Aucun produit valide pour le devis")
                 return {"success": False, "error": "Aucun produit valide trouvé"}
-            # Étape 4 : synchronisation dans les systèmes externes (SAP / Salesforce)
-            self._track_step_start("sync_external_systems", "💾 Synchronisation SAP & Salesforce")
+            # Étape 4 : synchronisation dans le système externe (SAP)
+            self._track_step_start("sync_external_systems", "💾 Synchronisation SAP")
             sync_results = {}
-            for system in ("sap", "salesforce"):
+            for system in ("sap",):
                 key = f"sync_to_{system}"
                 self._track_step_start(key, f"{'💾' if system=='sap' else '☁️'} Enregistrement dans {system.upper()}")
                 # Ajouter simulation temporelle même en mode draft
@@ -7920,12 +7920,12 @@ class DevisWorkflow:
     
     async def _sync_quote_to_systems(self, quote_result: Dict, target: str = None) -> Dict[str, Any]:
         """
-        Synchronisation vers SAP/Salesforce - VERSION PRODUCTION COMPLÈTE
-        
+        Synchronisation du devis vers SAP - VERSION PRODUCTION COMPLÈTE
+
         Args:
             quote_result: Résultat contenant les données de devis consolidées
-            target: Système cible spécifique ('sap', 'salesforce') ou None pour les deux
-            
+            target: Système cible ('sap') ou None
+
         Returns:
             Dict avec statut de synchronisation détaillé
         """
@@ -7934,11 +7934,11 @@ class DevisWorkflow:
             quote_data = quote_result.get("quote_data", {})
             
             # Validation du paramètre target
-            if target and target not in ("sap", "salesforce"):
+            if target and target not in ("sap",):
                 logger.error(f"❌ Target invalide: {target}")
                 return {
                     "status": "error",
-                    "message": f"Target '{target}' non supporté. Utilisez 'sap' ou 'salesforce'"
+                    "message": f"Target '{target}' non supporté. Utilisez 'sap'"
                 }
             
             # Validation des données de devis
@@ -8035,12 +8035,6 @@ class DevisWorkflow:
                     "message": "Non tenté",
                     "quote_sap_id": None,
                     "doc_entry": None
-                },
-                "salesforce_sync": {
-                    "attempted": False,
-                    "success": False,
-                    "message": "Non tenté", 
-                    "opportunity_id": None
                 }
             }
             
@@ -8107,116 +8101,24 @@ class DevisWorkflow:
                         sync_results["sap_sync"]["doc_entry"] = f"ENTRY_DRAFT_{quote_id}"
                         logger.info(f"🎯 Simulation SAP terminée pour {quote_id}")
             
-            # === SYNCHRONISATION SALESFORCE ===
-            if not target or target == "salesforce":
-                sync_results["salesforce_sync"]["attempted"] = True
-                logger.info(f"☁️ Début synchronisation Salesforce pour {quote_id}")
-                
-                # Validation des prérequis Salesforce
-                if not client_data.get("salesforce_id") and not client_data.get("AccountId"):
-                    sync_results["salesforce_sync"]["message"] = "AccountId Salesforce manquant"
-                    logger.error("❌ AccountId Salesforce manquant pour l'opportunité")
-                else:
-                    # Préparation données opportunité Salesforce
-                    sf_opportunity_data = {
-                        "Name": f"Devis {client_data.get('name', client_data.get('CardName', 'Client'))} - {doc_date_str}",
-                        "AccountId": client_data.get("salesforce_id") or client_data.get("AccountId"),
-                        "CloseDate": close_date_str,
-                        "StageName": "Quotation",
-                        "Amount": quote_data.get("total_amount", total_amount_validation),
-                        "Description": f"Devis NOVA automatique - {quote_id}",
-                        "Type": "New Customer",
-                        "LeadSource": "NOVA System"
-                    }
-                    
-                    # Construction des line items Salesforce
-                    sf_line_items = []
-                    for product in products_data:
-                        salesforce_id = product.get("salesforce_id") or product.get("Product2Id")
-                        if salesforce_id:  # Seulement les produits mappés Salesforce
-                            line_item = {
-                                "Product2Id": salesforce_id,
-                                "Quantity": _to_qty(product.get("Quantity", product.get("quantity", 1)), 1),
-                                "UnitPrice": _to_number(product.get("UnitPrice", product.get("price", 0)), 0.0),
-                                "Description": product.get("ItemName") or product.get("name", "")
-                            }
-                            sf_line_items.append(line_item)
-                    
-                    # === APPEL SALESFORCE RÉEL OU SIMULATION ===
-                    if is_production_mode:
-                        logger.info(f"📡 Appel Salesforce RÉEL salesforce_create_opportunity_complete")
-                        sf_result = await self.mcp_connector.salesforce_create_opportunity_complete(
-                            sf_opportunity_data, sf_line_items
-                        )
-                        
-                        if sf_result.get("success"):
-                            sync_results["salesforce_sync"]["success"] = True
-                            sync_results["salesforce_sync"]["message"] = "Opportunité Salesforce créée avec succès"
-                            sync_results["salesforce_sync"]["opportunity_id"] = sf_result.get("id") or sf_result.get("opportunity_id")
-                            logger.info(f"✅ Opportunité Salesforce créée: {sync_results['salesforce_sync']['opportunity_id']}")
-                        else:
-                            sync_results["salesforce_sync"]["message"] = sf_result.get("error", "Erreur Salesforce inconnue")
-                            logger.error(f"❌ Erreur création opportunité Salesforce: {sync_results['salesforce_sync']['message']}")
-                    else:
-                        # MODE DRAFT - Simulation réaliste
-                        await asyncio.sleep(0.6)  # Simulation latence Salesforce
-                        sync_results["salesforce_sync"]["success"] = True
-                        sync_results["salesforce_sync"]["message"] = "Simulation Salesforce réussie (mode draft)"
-                        sync_results["salesforce_sync"]["opportunity_id"] = f"DRAFT_SF_{quote_id}"
-                        logger.info(f"🎯 Simulation Salesforce terminée pour {quote_id}")
-            
-            # === DÉTERMINATION DU STATUT GLOBAL ===
+            # === DÉTERMINATION DU STATUT GLOBAL (SAP uniquement) ===
             sap_success = sync_results["sap_sync"]["success"]
-            sf_success = sync_results["salesforce_sync"]["success"]
             sap_attempted = sync_results["sap_sync"]["attempted"]
-            sf_attempted = sync_results["salesforce_sync"]["attempted"]
-            
-            # Logique de statut améliorée
-            if target == "sap":
-                if sap_success:
-                    status = "success"
-                    message = f"Synchronisation SAP réussie pour {quote_id}"
-                else:
-                    status = "error"
-                    message = f"Échec synchronisation SAP pour {quote_id}: {sync_results['sap_sync']['message']}"
-            elif target == "salesforce":
-                if sf_success:
-                    status = "success"
-                    message = f"Synchronisation Salesforce réussie pour {quote_id}"
-                else:
-                    status = "error"
-                    message = f"Échec synchronisation Salesforce pour {quote_id}: {sync_results['salesforce_sync']['message']}"
+
+            if sap_success:
+                status = "success"
+                message = f"Synchronisation SAP réussie pour {quote_id}"
             else:
-                if sap_success and sf_success:
-                    status = "success"
-                    message = f"Synchronisation complète réussie pour {quote_id}"
-                elif (sap_attempted and sap_success) or (sf_attempted and sf_success):
-                    status = "partial_success"
-                    failed_systems = []
-                    if sap_attempted and not sap_success:
-                        failed_systems.append(f"SAP ({sync_results['sap_sync']['message']})")
-                    if sf_attempted and not sf_success:
-                        failed_systems.append(f"Salesforce ({sync_results['salesforce_sync']['message']})")
-                    message = f"Synchronisation partielle pour {quote_id}. Échecs: {', '.join(failed_systems)}"
-                else:
-                    status = "error"
-                    error_messages = []
-                    if sap_attempted:
-                        error_messages.append(f"SAP: {sync_results['sap_sync']['message']}")
-                    if sf_attempted:
-                        error_messages.append(f"Salesforce: {sync_results['salesforce_sync']['message']}")
-                    message = f"Échec synchronisation complète pour {quote_id}. Erreurs: {'; '.join(error_messages)}"
-            
+                status = "error"
+                message = f"Échec synchronisation SAP pour {quote_id}: {sync_results['sap_sync']['message']}"
+
             # === LOG DE SYNTHÈSE ===
             mode_display = "PRODUCTION" if is_production_mode else "DRAFT"
             logger.info(f"✅ Synchronisation {mode_display} terminée - Statut: {status}")
-            
+
             if sap_attempted:
                 sap_status = "✅" if sap_success else "❌"
                 logger.info(f"{sap_status} SAP: {sync_results['sap_sync']['message']}")
-            if sf_attempted:
-                sf_status = "✅" if sf_success else "❌"
-                logger.info(f"{sf_status} Salesforce: {sync_results['salesforce_sync']['message']}")
             
             # === CONSTRUCTION DE LA RÉPONSE FINALE ===
             response = {
@@ -8233,10 +8135,7 @@ class DevisWorkflow:
             if sap_success:
                 response["sap_quote_number"] = sync_results["sap_sync"]["quote_sap_id"]
                 response["sap_doc_entry"] = sync_results["sap_sync"]["doc_entry"]
-            
-            if sf_success:
-                response["salesforce_opportunity_id"] = sync_results["salesforce_sync"]["opportunity_id"]
-            
+
             return response
             
         except Exception as e:
