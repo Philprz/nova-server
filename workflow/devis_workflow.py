@@ -2255,117 +2255,21 @@ class DevisWorkflow:
                     logger.exception(f"❌ EXCEPTION lors de l'appel SAP: {str(e)}")
                     sap_quote = {"success": False, "error": f"Exception lors de l'appel SAP: {str(e)}"}
                 
-                # ========== ÉTAPE 5: CRÉATION SALESFORCE ==========
-                
-                # Données minimales pour éviter erreurs de validation
-                opportunity_data = {
-                    'Name': f'NOVA-{today.strftime("%Y%m%d-%H%M%S")}',
-                    'StageName': 'Prospecting',  # Étape standard qui existe toujours
-                    'CloseDate': due_date,
-                    'Type': 'New Customer'
-                }
-                
-                # Ajouter AccountId seulement si client valide
-                if client_id and client_id != "":
-                    opportunity_data['AccountId'] = client_id
-                else:
-                    # Créer avec compte générique ou utiliser un compte par défaut
-                    logger.warning("⚠️ Pas de client Salesforce - création avec compte générique")
-                    # Utiliser un compte par défaut ou créer l'opportunité sans compte
-                    pass
-                
-                # Ajouter montant seulement si positif
-                if total_amount > 0:
-                    opportunity_data['Amount'] = total_amount
-                
-                # Ajouter description avec gestion d'erreurs
-                try:
-                    # CORRECTION: Définir sap_ref correctement
-                    sap_ref = ""
-                    if sap_quote and sap_quote.get('doc_num'):
-                        sap_ref = f" (SAP DocNum: {sap_quote.get('doc_num')})"
-                    
-                    opportunity_data['Description'] = f'Devis généré automatiquement via NOVA{sap_ref} - Mode: {"Brouillon" if self.draft_mode else "Définitif"}'
-                    opportunity_data['LeadSource'] = 'NOVA Middleware'
-                    opportunity_data['Probability'] = 50 if not self.draft_mode else 25
-                except Exception as e:
-                    logger.warning(f"⚠️ Erreur ajout métadonnées: {e}")
-                
-                logger.info("Création opportunité Salesforce...")
-                logger.info(f"Données: {json.dumps(opportunity_data, indent=2, ensure_ascii=False)}")
-                
-                salesforce_quote = None
-                
-                try:
-                    # Utiliser try/catch spécifique pour Salesforce
-                    opportunity_result = await MCPConnector.call_salesforce_mcp("salesforce_create_record", {
-                        "sobject": "Opportunity",
-                        "data": opportunity_data
-                    })
-                    
-                    logger.info(f"📊 Résultat brut Salesforce: {opportunity_result}")
-                    
-                    # Validation robuste du résultat
-                    if opportunity_result is None:
-                        raise Exception("Salesforce a retourné None")
-                    
-                    if not isinstance(opportunity_result, dict):
-                        raise Exception(f"Salesforce a retourné un type inattendu: {type(opportunity_result)}")
-                    
-                    # Vérifier succès avec plusieurs critères
-                    success_indicators = [
-                        opportunity_result.get("success") is True,
-                        "id" in opportunity_result and opportunity_result["id"],
-                        "error" not in opportunity_result
-                    ]
-                    
-                    if any(success_indicators) and opportunity_result.get("id"):
-                        opportunity_id = opportunity_result.get("id")
-                        logger.info(f"✅ Opportunité Salesforce créée: {opportunity_id}")
-                        
-                        salesforce_quote = {
-                            "success": True,
-                            "id": opportunity_id,
-                            "opportunity_id": opportunity_id,
-                            "lines_created": len(document_lines),
-                            "total_amount": total_amount,
-                            "message": f"Opportunité Salesforce créée avec succès: {opportunity_id}"
-                        }
-                    else:
-                        # Analyser l'erreur spécifique
-                        error_msg = opportunity_result.get("error", "Erreur Salesforce non spécifiée")
-                        logger.error(f"❌ Erreur création opportunité Salesforce: {error_msg}")
-                        
-                        salesforce_quote = {
-                            "success": False,
-                            "error": error_msg,
-                            "raw_response": opportunity_result,
-                            "attempted_data": opportunity_data
-                        }
-                            
-                except Exception as e:
-                    logger.exception(f"❌ EXCEPTION lors de la création Salesforce: {str(e)}")
-                    salesforce_quote = {
-                        "success": False,
-                        "error": f"Exception Salesforce: {str(e)}",
-                        "exception_type": type(e).__name__
-                    }
-                
                 # ========== ÉTAPE 6: CONSTRUCTION DE LA RÉPONSE ==========
                 
                 logger.info("=== CONSTRUCTION RÉPONSE FINALE ===")
                 
                 # Déterminer le succès global
                 sap_success = sap_quote and sap_quote.get("success", False)
-                sf_success = salesforce_quote and salesforce_quote.get("success", False)
-                
-                # Pour le POC, on considère que le succès = au moins SAP OU Salesforce
-                overall_success = sap_success or sf_success
-                
+                sf_success = False
+
+                # SAP est la source de vérité : le succès dépend uniquement de SAP
+                overall_success = sap_success
+
                 # Construire la réponse finale
                 result = {
                     "success": overall_success,
-                    "quote_id": f"SAP-{sap_quote.get('doc_num', 'FAILED')}" if sap_success else f"SF-{salesforce_quote.get('id', 'FAILED')}" if sf_success else f"FAILED-{today.strftime('%Y%m%d-%H%M%S')}",
+                    "quote_id": f"SAP-{sap_quote.get('doc_num', 'FAILED')}" if sap_success else f"FAILED-{today.strftime('%Y%m%d-%H%M%S')}",
                     "sap_doc_entry": sap_quote.get("doc_entry") if sap_success else None,
                     "sap_doc_num": sap_quote.get("doc_num") if sap_success else None,
                     "salesforce_quote_id": salesforce_quote.get("id") if sf_success else None,
