@@ -30,7 +30,7 @@ async def get_quote_details(
     Récupère les détails complets d'un devis pour édition
     
     Args:
-        quote_id: ID du devis (format: SAP-{DocEntry} ou SF-{OpportunityId})
+        quote_id: ID du devis (format: SAP-{DocEntry})
         include_lines: Inclure les lignes de produits
         include_customer: Inclure les informations client
     
@@ -45,17 +45,13 @@ async def get_quote_details(
         if quote_id.startswith("SAP-"):
             doc_entry = quote_id.replace("SAP-", "")
             return await get_sap_quote_details(doc_entry, include_lines, include_customer)
-        
-        elif quote_id.startswith("SF-"):
-            opportunity_id = quote_id.replace("SF-", "")
-            return await get_salesforce_quote_details(opportunity_id, include_lines, include_customer)
-        
+
         else:
             raise HTTPException(
-                status_code=400, 
-                detail=f"Format d'ID invalide: {quote_id}. Attendu: SAP-{{DocEntry}} ou SF-{{OpportunityId}}"
+                status_code=400,
+                detail=f"Format d'ID invalide: {quote_id}. Attendu: SAP-{{DocEntry}}"
             )
-    
+
     except Exception as e:
         logger.error(f"Erreur lors de la récupération du devis {quote_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Erreur interne: {str(e)}")
@@ -83,17 +79,13 @@ async def modify_quote(
         if quote_id.startswith("SAP-"):
             doc_entry = quote_id.replace("SAP-", "")
             return await modify_sap_quote(doc_entry, modifications)
-        
-        elif quote_id.startswith("SF-"):
-            opportunity_id = quote_id.replace("SF-", "")
-            return await modify_salesforce_quote(opportunity_id, modifications)
-        
+
         else:
             raise HTTPException(
-                status_code=400, 
-                detail=f"Format d'ID invalide: {quote_id}. Attendu: SAP-{{DocEntry}} ou SF-{{OpportunityId}}"
+                status_code=400,
+                detail=f"Format d'ID invalide: {quote_id}. Attendu: SAP-{{DocEntry}}"
             )
-    
+
     except Exception as e:
         logger.error(f"Erreur lors de la modification du devis {quote_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Erreur interne: {str(e)}")
@@ -150,59 +142,6 @@ async def modify_sap_quote(
         logger.error(f"Erreur modification devis SAP {doc_entry}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Erreur SAP: {str(e)}")
 
-async def modify_salesforce_quote(
-    opportunity_id: str,
-    modifications: Dict[str, Any]
-) -> Dict[str, Any]:
-    """
-    Modifie une opportunité Salesforce
-    """
-    
-    try:
-        from services.mcp_connector import get_mcp_connector
-
-        connector = get_mcp_connector()
-
-        # Préparer les données Salesforce
-        sf_update_data = {}
-
-        if "header" in modifications:
-            header_mods = modifications["header"]
-            if "comments" in header_mods:
-                sf_update_data["Description"] = header_mods["comments"]
-            if "doc_due_date" in header_mods:
-                sf_update_data["CloseDate"] = header_mods["doc_due_date"]
-            if "amount" in header_mods:
-                sf_update_data["Amount"] = float(header_mods["amount"])
-
-        # Mettre à jour l'opportunité - correction de la syntaxe
-        sf_response = await connector.call_salesforce_mcp("salesforce_update_record", {
-            "sobject_type": "Opportunity",
-            "record_id": opportunity_id,
-            "record_data": sf_update_data
-        })
-        
-        if not sf_response or not sf_response.get("success", False):
-            error_msg = sf_response.get('error', 'Erreur inconnue') if sf_response else 'Pas de réponse'
-            raise HTTPException(
-                status_code=400,
-                detail=f"Erreur Salesforce lors de la modification: {error_msg}"
-            )
-        
-        logger.info(f"Opportunité Salesforce {opportunity_id} modifiée avec succès")
-        
-        return {
-            "success": True,
-            "message": "Opportunité Salesforce modifiée avec succès",
-            "quote_id": f"SF-{opportunity_id}",
-            "updated_data": sf_response
-        }
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Erreur modification opportunité SF {opportunity_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Erreur Salesforce: {str(e)}")
 async def get_sap_quote_details(
     doc_entry: str,
     include_lines: bool = True,
@@ -388,136 +327,6 @@ async def get_sap_quote_details(
             detail=f"Erreur SAP: {str(e)}"
         )
 
-async def get_salesforce_quote_details(
-    opportunity_id: str,
-    include_lines: bool = True,
-    include_customer: bool = True
-) -> Dict[str, Any]:
-    """
-    Récupère les détails complets d'une opportunité Salesforce
-    """
-    
-    try:
-        from services.mcp_connector import get_mcp_connector
-
-        connector = get_mcp_connector()
-
-        # Récupération de l'opportunité Salesforce complète
-        logger.info(f"Appel Salesforce MCP pour opportunité {opportunity_id}")
-
-        # Correction de la syntaxe - call_salesforce_mcp prend 2 paramètres
-        sf_response = await connector.call_salesforce_mcp("get_opportunity_details", {
-            "opportunity_id": opportunity_id,
-            "include_products": include_lines,
-            "include_account": include_customer
-        })
-        
-        if not sf_response or not sf_response.get("success", False):
-            raise HTTPException(
-                status_code=404,
-                detail=f"Opportunité Salesforce {opportunity_id} non trouvée: {sf_response.get('error', 'Erreur inconnue') if sf_response else 'Pas de réponse'}"
-            )
-        
-        # Structure la réponse Salesforce pour l'édition
-        opportunity = sf_response.get("opportunity", {})
-        
-        editable_structure = {
-            "quote_id": f"SF-{opportunity_id}",
-            "source_system": "Salesforce",
-            "editable": True,
-            "last_updated": opportunity.get("LastModifiedDate"),
-            
-            # Informations header
-            "header": {
-                "opportunity_id": opportunity.get("Id"),
-                "name": opportunity.get("Name"),
-                "stage": opportunity.get("StageName"),
-                "close_date": opportunity.get("CloseDate"),
-                "probability": opportunity.get("Probability"),
-                "amount": opportunity.get("Amount"),
-                "description": opportunity.get("Description", ""),
-                "lead_source": opportunity.get("LeadSource"),
-                "owner": opportunity.get("Owner", {}).get("Name")
-            },
-            
-            # Informations client (Account)
-            "customer": {},
-            
-            # Produits/lignes
-            "lines": [],
-            
-            # Totaux
-            "totals": {
-                "total": opportunity.get("Amount", 0),
-                "currency": "EUR"
-            },
-            
-            # Métadonnées pour validation
-            "validation_rules": {
-                "can_modify_lines": True,
-                "can_modify_pricing": True,
-                "can_modify_customer": False,
-                "required_fields": ["Name", "CloseDate", "StageName"]
-            }
-        }
-        
-        # Informations client si demandées
-        if include_customer and "Account" in opportunity:
-            account = opportunity["Account"]
-            editable_structure["customer"] = {
-                "account_id": account.get("Id"),
-                "name": account.get("Name"),
-                "billing_address": {
-                    "street": account.get("BillingStreet"),
-                    "city": account.get("BillingCity"),
-                    "postal_code": account.get("BillingPostalCode"),
-                    "country": account.get("BillingCountry")
-                },
-                "phone": account.get("Phone"),
-                "website": account.get("Website")
-            }
-        
-        # Lignes de produits si demandées
-        if include_lines and "OpportunityLineItems" in sf_response:
-            for idx, line in enumerate(sf_response["OpportunityLineItems"]):
-                editable_line = {
-                    "line_id": line.get("Id"),
-                    "product_code": line.get("ProductCode"),
-                    "product_name": line.get("Product2", {}).get("Name"),
-                    "quantity": line.get("Quantity", 1),
-                    "unit_price": line.get("UnitPrice", 0),
-                    "total_price": line.get("TotalPrice", 0),
-                    "description": line.get("Description", ""),
-                    
-                    # Métadonnées d'édition
-                    "editable_fields": [
-                        "quantity", "unit_price", "description"
-                    ],
-                    "validation": {
-                        "min_quantity": 1,
-                        "min_price": 0.01
-                    }
-                }
-                
-                editable_structure["lines"].append(editable_line)
-        
-        logger.info(f"Opportunité SF {opportunity_id} récupérée avec succès - {len(editable_structure['lines'])} produits")
-        
-        return {
-            "success": True,
-            "quote": editable_structure,
-            "metadata": {
-                "source": "Salesforce",
-                "retrieved_at": datetime.now().isoformat(),
-                "total_lines": len(editable_structure["lines"]),
-                "editable_fields_count": count_editable_fields(editable_structure)
-            }
-        }
-    
-    except Exception as e:
-        logger.error(f"Erreur Salesforce pour opportunité {opportunity_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Erreur Salesforce: {str(e)}")
-
 def structure_quote_for_editing(quote_data: Dict[str, Any], doc_entry: int) -> Dict[str, Any]:
     """Structure les données SAP pour l'interface d'édition"""
     
@@ -677,11 +486,9 @@ async def get_quote_structure_for_editing(quote_id: str) -> Dict[str, Any]:
     """
     
     try:
-        # Structure adaptée selon le type de devis (SAP vs Salesforce)
+        # Structure adaptée selon le type de devis (SAP)
         if quote_id.startswith("SAP-"):
             return get_sap_structure()
-        elif quote_id.startswith("SF-"):
-            return get_salesforce_structure()
         else:
             return get_generic_structure()
             
@@ -759,28 +566,6 @@ def get_sap_structure() -> Dict[str, Any]:
                 "required_sections": ["header", "lines"],
                 "min_lines": 1
             }
-        }
-    }
-
-def get_salesforce_structure() -> Dict[str, Any]:
-    """Structure spécifique pour les opportunités Salesforce"""
-    return {
-        "success": True,
-        "structure": {
-            "sections": [
-                {
-                    "id": "header",
-                    "title": "Informations opportunité",
-                    "icon": "💼",
-                    "fields": [
-                        {"name": "name", "type": "text", "required": True, "label": "Nom de l'opportunité", "editable": True},
-                        {"name": "close_date", "type": "date", "required": True, "label": "Date de clôture", "editable": True},
-                        {"name": "stage", "type": "select", "required": True, "label": "Étape", "editable": True},
-                        {"name": "probability", "type": "number", "required": False, "min": 0, "max": 100, "label": "Probabilité %", "editable": True},
-                        {"name": "description", "type": "textarea", "required": False, "label": "Description", "editable": True}
-                    ]
-                }
-            ]
         }
     }
 
