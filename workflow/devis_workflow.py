@@ -1328,59 +1328,52 @@ class DevisWorkflow:
                         "enriched": True
                     })
                 
-                # CONSERVÉ: Création dans Salesforce d'abord
-                logger.info("💾 Création Salesforce...")
-                sf_client = await self._create_salesforce_client_from_validation(client_data, validation_result or {})
-                
-                if sf_client.get("success"):
-                    logger.info(f"✅ Client Salesforce créé: {sf_client.get('id')}")
-                    
-                    # CONSERVÉ: Création dans SAP ensuite
-                    logger.info("💾 Création SAP...")
-                    sap_client = await self._create_sap_client_from_validation(client_data, sf_client)
-                    
-                    if sap_client.get("success"):
-                        logger.info(f"✅ Client SAP créé: {sap_client.get('data', {}).get('CardCode')}")
-                    
-                    # === ÉTAPE 5: CONTINUATION WORKFLOW AUTOMATIQUE ===
-                    logger.info("🔄 Étape 5: Continuation automatique du workflow")
-                    
-                    # Mettre à jour le contexte avec le client créé
-                    client_final_data = sf_client.get("data", {})
-                    self.context.update({
-                        "client_info": {"data": client_final_data, "found": True, "created": True},
-                        "client_validation": validation_result,
-                        "sap_client": sap_client
-                    })
-                    
-                    # NOUVEAU: Continuation automatique avec les produits si disponibles
-                    if extracted_info and extracted_info.get("products"):
-                        logger.info("🔄 Continuation avec récupération produits...")
-                        try:
-                            products_result = await self._process_products_retrieval(extracted_info["products"])
-                            self.context["products_info"] = products_result.get("products", [])
-                            logger.info(f"✅ Workflow continué - {len(products_result.get('products', []))} produit(s) traités")
-                        except Exception as e:
-                            logger.warning(f"⚠️ Erreur continuation produits: {str(e)}")
-                    
-                    return {
-                        "client_created": True,
-                        "client_info": {"data": client_final_data, "found": True, "created": True},
-                        "validation_details": validation_result,
-                        "sap_client": sap_client,
-                        "enrichment_data": enrichment_data,
-                        "duplicate_check": duplicate_check,
-                        "workflow_continued": bool(extracted_info and extracted_info.get("products")),
-                        "message": f"Client '{client_name}' créé avec succès et workflow continué"
-                    }
-                else:
-                    logger.error(f"❌ Erreur création Salesforce: {sf_client.get('error')}")
+                # Création SAP (source de vérité, primaire et inconditionnelle)
+                logger.info("💾 Création SAP...")
+                sap_client = await self._create_sap_client_from_validation(client_data)
+
+                if not sap_client.get("success"):
+                    logger.error(f"❌ Erreur création SAP: {sap_client.get('error')}")
                     return {
                         "client_created": False,
-                        "error": f"Erreur création Salesforce: {sf_client.get('error')}",
+                        "error": f"Erreur création SAP: {sap_client.get('error')}",
                         "validation_details": validation_result,
                         "enrichment_data": enrichment_data
                     }
+
+                logger.info(f"✅ Client SAP créé: {sap_client.get('data', {}).get('CardCode')}")
+
+                # === ÉTAPE 5: CONTINUATION WORKFLOW AUTOMATIQUE ===
+                logger.info("🔄 Étape 5: Continuation automatique du workflow")
+
+                # Mettre à jour le contexte avec le client créé
+                client_final_data = sap_client.get("data", {})
+                self.context.update({
+                    "client_info": {"data": client_final_data, "found": True, "created": True},
+                    "client_validation": validation_result,
+                    "sap_client": sap_client
+                })
+
+                # NOUVEAU: Continuation automatique avec les produits si disponibles
+                if extracted_info and extracted_info.get("products"):
+                    logger.info("🔄 Continuation avec récupération produits...")
+                    try:
+                        products_result = await self._process_products_retrieval(extracted_info["products"])
+                        self.context["products_info"] = products_result.get("products", [])
+                        logger.info(f"✅ Workflow continué - {len(products_result.get('products', []))} produit(s) traités")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Erreur continuation produits: {str(e)}")
+
+                return {
+                    "client_created": True,
+                    "client_info": {"data": client_final_data, "found": True, "created": True},
+                    "validation_details": validation_result,
+                    "sap_client": sap_client,
+                    "enrichment_data": enrichment_data,
+                    "duplicate_check": duplicate_check,
+                    "workflow_continued": bool(extracted_info and extracted_info.get("products")),
+                    "message": f"Client '{client_name}' créé avec succès et workflow continué"
+                }
             else:
                 # === VALIDATION UTILISATEUR REQUISE ===
                 logger.info("⏸️ Validation utilisateur requise - Aucune auto-approbation")
@@ -1480,81 +1473,7 @@ class DevisWorkflow:
         # Par défaut, France (marché principal)
         return "FR"
     
-    async def _create_salesforce_client_from_validation(self, client_data: Dict[str, Any], validation_result: Dict[str, Any]) -> Dict[str, Any]:
-        """Crée un client dans Salesforce avec les données validées"""
-        try:
-            logger.info("Création client Salesforce avec données validées")
-            
-            # Préparer les données Salesforce
-            sf_data = {
-                "Name": validation_result.get("enriched_data", {}).get("normalized_company_name", client_data["company_name"]),
-                "Type": "Customer",
-                "Description": f"Client créé automatiquement via NOVA avec validation {validation_result['country']}",
-            }
-            
-            # Ajouter les données enrichies si disponibles
-            enriched = validation_result.get("enriched_data", {})
-            if enriched.get("normalized_email"):
-                # Note: Salesforce Account n'a pas de champ Email standard, on l'ajoute en description
-                sf_data["Description"] += f" - Email: {enriched['normalized_email']}"
-            
-            if enriched.get("normalized_website"):
-                sf_data["Website"] = enriched["normalized_website"]
-            
-            # Utiliser les données SIRET si disponibles (France)
-            siret_data = enriched.get("siret_data", {})
-            if siret_data:
-                sf_data["Description"] += f" - SIRET: {siret_data.get('siret', '')}"
-                if siret_data.get("activity_label"):
-                    sf_data["Industry"] = siret_data["activity_label"][:40]  # Limiter la taille
-            
-            # Créer dans Salesforce
-            result = await MCPConnector.call_salesforce_mcp("salesforce_create_record", {
-                "sobject": "Account",
-                "data": sf_data
-            })
-            
-            if result.get("success"):
-                # Récupérer les données complètes du client créé
-                client_id = result["id"]
-                detailed_query = f"""
-                SELECT Id, Name, AccountNumber,
-                    BillingStreet, BillingCity, BillingState, BillingPostalCode, BillingCountry,
-                    ShippingStreet, ShippingCity, ShippingState, ShippingPostalCode, ShippingCountry,
-                    Phone, Fax, Website, Industry, AnnualRevenue, NumberOfEmployees,
-                    Description, Type, OwnerId, CreatedDate, LastModifiedDate
-                FROM Account
-                WHERE Id = '{escape_soql(client_id)}'
-                """
-                
-                detailed_result = await MCPConnector.call_salesforce_mcp("salesforce_query", {"query": detailed_query})
-                
-                if "error" not in detailed_result and detailed_result.get("totalSize", 0) > 0:
-                    client_data_complete = detailed_result["records"][0]
-                    return {
-                        "success": True,
-                        "id": client_id,
-                        "data": client_data_complete
-                    }
-                else:
-                    return {
-                        "success": True,
-                        "id": client_id,
-                        "data": {"Id": client_id, "Name": sf_data["Name"]}
-                    }
-            else:
-                return {
-                    "success": False,
-                    "error": result.get("error", "Erreur création Salesforce")
-                }
-                
-        except Exception as e:
-            logger.exception(f"Erreur création client Salesforce validé: {str(e)}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
-    async def apply_client_suggestion(self, suggestion_choice: Dict[str, Any], 
+    async def apply_client_suggestion(self, suggestion_choice: Dict[str, Any],
                                     workflow_context: Dict[str, Any]) -> Dict[str, Any]:
         """
         Applique le choix de l'utilisateur pour une suggestion client
@@ -1610,7 +1529,7 @@ class DevisWorkflow:
             task_id=workflow_context["task_id"]
         )
  
-    async def _create_sap_client_from_validation(self, client_data: Dict[str, Any], salesforce_client: Dict[str, Any]) -> Dict[str, Any]:
+    async def _create_sap_client_from_validation(self, client_data: Dict[str, Any], salesforce_client: Dict = None) -> Dict[str, Any]:
         """Crée un client dans SAP avec les données validées"""
         try:
             logger.info("Création client SAP avec données validées")
@@ -1637,7 +1556,7 @@ class DevisWorkflow:
                 "Valid": "tYES",
                 "Frozen": "tNO",
                 "Notes": f"Client cree automatiquement par NOVA le {datetime.now().strftime('%d/%m/%Y')}",
-                "FederalTaxID": salesforce_client.get("id", "")[:32]  # Référence croisée
+                "FederalTaxID": (salesforce_client.get("id", "")[:32] if salesforce_client else "")
             }
             
             # Ajouter les données SIRET si disponibles
