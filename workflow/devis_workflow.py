@@ -898,10 +898,8 @@ class DevisWorkflow:
             # Génération SAP (passer quote_data si disponible)
             sap_quote = await self._create_sap_quote(client_data, products_data, quote_data)
 
-            # Génération Salesforce (si SAP réussi)
+            # Devis créé dans SAP (source de vérité) — plus de miroir Salesforce
             if sap_quote.get("success"):
-                sf_opportunity = await self._create_salesforce_opportunity(client_data, products_data, sap_quote)
-
                 self._track_step_complete("generate_quote", f"✅ Devis généré - Total: {total_amount:.2f}€")
                 # Normaliser les identifiants avant retour
                 sap_doc_num = (
@@ -911,8 +909,6 @@ class DevisWorkflow:
                     or "UNKNOWN"
                 )
                 sf_id = None
-                if isinstance(sf_opportunity, dict):
-                    sf_id = sf_opportunity.get("opportunity_id") or sf_opportunity.get("Id")
                 # Récupérer les résultats des systèmes
 
                 # Si pas de doc_num dans sap, essayer d'autres sources
@@ -1020,18 +1016,6 @@ class DevisWorkflow:
             }
 
         return {"status": "error", "message": "Action non reconnue"}
-
-    async def _create_salesforce_opportunity(self, client_data: Dict, products_data: List[Dict], sap_quote: Dict) -> Dict[str, Any]:
-        """Crée l'opportunité dans Salesforce"""
-        try:
-            # Cette méthode est déjà gérée dans _create_quote_in_salesforce
-            return {
-                "success": True,
-                "opportunity_id": sap_quote.get("salesforce_opportunity_id")
-            }
-        except Exception as e:
-            logger.exception(f"Erreur création opportunité Salesforce: {str(e)}")
-            return {"success": False, "error": str(e)}
 
     async def process_prompt(self, user_prompt: str, task_id: str = None) -> Dict[str, Any]:
         """IMPORTANT: Utiliser le task_id fourni, ne jamais le régénérer"""
