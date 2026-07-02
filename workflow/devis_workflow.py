@@ -2595,63 +2595,6 @@ class DevisWorkflow:
             return {"success": False, "error": str(e)}
 
     
-    async def _create_salesforce_quote(self, quote_data: Dict[str, Any], sap_quote: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-        """Crée RÉELLEMENT le devis dans Salesforce avec tous les détails"""
-        try:
-            logger.info("=== CRÉATION RÉELLE DU DEVIS DANS SALESFORCE ===")
-            
-            # Référence SAP si disponible
-            sap_ref = f" (SAP DocNum: {sap_quote.get('doc_num')})" if sap_quote and sap_quote.get('doc_num') else ""
-            
-            # 1. Préparer les données de l'opportunité (devis)
-            opportunity_data = {
-                'Name': f'NOVA-{datetime.now().strftime("%Y%m%d-%H%M%S")}',
-                'AccountId': quote_data.get("client", {}).get("id", ""),
-                'StageName': 'Proposal/Price Quote',
-                'CloseDate': (datetime.now() + timedelta(days=30)).strftime('%Y-%m-%d'),
-                'Amount': quote_data.get("total_amount", 0),
-                'Description': f'Devis généré automatiquement via NOVA Middleware{sap_ref}',
-                'LeadSource': 'NOVA Middleware',
-                'Type': 'New Customer',
-                'Probability': 50
-            }
-            
-            logger.info(f"Données opportunité préparées: {json.dumps(opportunity_data, indent=2)}")
-            
-            # 2. Créer l'opportunité
-            opportunity_result = await MCPConnector.call_salesforce_mcp("salesforce_create_record", {
-                "sobject": "Opportunity",
-                "data": opportunity_data
-            })
-            
-            if "error" in opportunity_result or not opportunity_result.get("success"):
-                logger.error(f"❌ Erreur création opportunité: {opportunity_result.get('error', 'Erreur inconnue')}")
-                return {"success": False, "error": opportunity_result.get("error", "Échec création opportunité")}
-            
-            opportunity_id = opportunity_result.get("id")
-            logger.info(f"✅ Opportunité créée dans Salesforce: {opportunity_id}")
-            
-            # Retourner un résultat simplifié pour le POC
-            result = {
-                "success": True,
-                "id": opportunity_id,
-                "opportunity_id": opportunity_id,
-                "lines_created": len(quote_data.get("quote_lines", [])),
-                "total_amount": quote_data.get("total_amount", 0),
-                "message": f"Opportunité Salesforce créée avec succès: {opportunity_id}"
-            }
-            
-            logger.info("=== DEVIS SALESFORCE CRÉÉ AVEC SUCCÈS ===")
-            return result
-            
-        except Exception as e:
-            logger.exception(f"❌ Erreur critique lors de la création du devis Salesforce: {str(e)}")
-            return {
-                "success": False, 
-                "error": str(e),
-                "message": "Erreur lors de la création du devis dans Salesforce"
-            }
-    
     def _get_stock_value(self, product: Dict[str, Any]) -> float:  # ← BON
         """Extrait la valeur du stock, qu'il soit un float ou un dict"""
         stock = product.get("stock", 0)
@@ -7991,69 +7934,6 @@ class DevisWorkflow:
             }
 
     
-    async def _create_salesforce_opportunity_safe(self, quote_data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        🔧 CRÉATION SÉCURISÉE d'opportunité Salesforce
-        """
-        try:
-            client_data = quote_data.get("client_data", {})
-            
-            # Validation préalable
-            if not client_data or not client_data.get("Id"):
-                logger.error("❌ Impossible de créer l'opportunité : client Salesforce requis")
-                return {
-                    "success": False,
-                    "error": "Client Salesforce requis pour créer l'opportunité",
-                    "skip_reason": "missing_client"
-                }
-
-            # Données minimales pour éviter les erreurs
-            opportunity_data = {
-                "Name": f"Devis {quote_data.get('quote_id', 'AUTO')} - {client_data.get('Name', 'Client')}",
-                "AccountId": client_data["Id"],
-                "StageName": "Prospecting",  # Étape existante dans Salesforce
-                "CloseDate": (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
-            }
-            
-            # Ajouter le montant seulement s'il est valide
-            total_amount = quote_data.get("total_amount", 0)
-            if total_amount and total_amount > 0:
-                opportunity_data["Amount"] = total_amount
-
-            logger.info(f"📋 Création opportunité: {opportunity_data['Name']}")
-
-            result = await self.mcp_connector.call_mcp(
-                "salesforce_mcp",
-                "salesforce_create_record",
-                {
-                    "sobject": "Opportunity",
-                    "data": opportunity_data
-                }
-            )
-
-            if result.get("success"):
-                logger.info(f"✅ Opportunité créée: {result.get('id')}")
-                return {
-                    "success": True,
-                    "opportunity_id": result.get("id"),
-                    "data": opportunity_data
-                }
-            else:
-                logger.error(f"❌ Erreur création opportunité: {result.get('error')}")
-                return {
-                    "success": False,
-                    "error": result.get("error", "Erreur inconnue"),
-                    "attempted_data": opportunity_data
-                }
-
-        except Exception as e:
-            logger.exception(f"❌ Exception création opportunité: {str(e)}")
-            return {
-                "success": False,
-                "error": f"Exception: {str(e)}"
-            }
-    
-
     async def _sync_quote_to_systems(self, quote_result: Dict, target: str = None) -> Dict[str, Any]:
         """
         Synchronisation vers SAP/Salesforce - VERSION PRODUCTION COMPLÈTE
