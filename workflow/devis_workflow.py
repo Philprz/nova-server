@@ -6824,63 +6824,21 @@ class DevisWorkflow:
 
                 logger.info(f"✅ Client SAP créé: {card_code}")
 
-                # 4. Création dans Salesforce ensuite
-                self._track_step_progress("search_client", 60, f"Création client Salesforce...")
-                
-                sf_client_data = {
+                # Construire les données client pour le workflow (SAP source de vérité)
+                client_data = {
+                    "Id": f"SAP_{card_code}",
                     "Name": client_name.title(),
                     "AccountNumber": card_code,
-                    "Type": "Customer",
-                    "Industry": "Technology",
-                    "BillingCountry": "France",
-                    "Description": f"Client cree automatiquement depuis SAP ({card_code})"
+                    "Type": "Customer"
                 }
 
-                sf_result = await self.mcp_connector.call_mcp(
-                    "salesforce_mcp",
-                    "salesforce_create_record",
-                    {
-                        "sobject": "Account",
-                        "data": sf_client_data
-                    }
-                )
-
-                if sf_result.get("success"):
-                    logger.info(f"✅ Client Salesforce créé: {sf_result.get('id')}")
-                    
-                    # Construire les données client pour le workflow
-                    client_data = {
-                        "Id": sf_result.get("id"),
-                        "Name": client_name.title(),
-                        "AccountNumber": card_code,
-                        "Type": "Customer"
-                    }
-
-                    return {
-                        "created": True,
-                        "client_data": client_data,
-                        "sap_card_code": card_code,
-                        "salesforce_id": sf_result.get("id"),
-                        "message": f"Client '{client_name}' créé avec succès (SAP: {card_code}, SF: {sf_result.get('id')[:8]}...)"
-                    }
-                else:
-                    logger.warning(f"⚠️ Client SAP créé mais échec Salesforce: {sf_result.get('error')}")
-                    
-                    # Retourner quand même le client SAP
-                    client_data = {
-                        "Id": f"SAP_{card_code}",  # ID temporaire
-                        "Name": client_name.title(),
-                        "AccountNumber": card_code,
-                        "Type": "Customer"
-                    }
-
-                    return {
-                        "created": True,
-                        "client_data": client_data,
-                        "sap_card_code": card_code,
-                        "salesforce_error": sf_result.get("error"),
-                        "message": f"Client '{client_name}' créé dans SAP uniquement (CardCode: {card_code})"
-                    }
+                return {
+                    "created": True,
+                    "client_data": client_data,
+                    "sap_card_code": card_code,
+                    "salesforce_id": None,
+                    "message": f"Client '{client_name}' créé avec succès (SAP: {card_code})"
+                }
             except Exception as e:
                 logger.exception(f"❌ Exception lors de la création automatique du client: {e}")
                 return {
@@ -7076,25 +7034,11 @@ class DevisWorkflow:
 
             if create_result.get("success", False):
                 logger.info(f"✅ Client SAP créé avec succès: {card_code}")
-                
-                # Création parallèle dans Salesforce
-                sf_data = {
-                    "Name": client_name,
-                    "AccountNumber": card_code,
-                    "Type": "Customer",
-                    "Industry": "Technology"
-                }
-
-                sf_result = await self.mcp_connector.call_mcp(
-                    "salesforce_mcp",
-                    "salesforce_create_record",
-                    {"sobject": "Account", "data": sf_data}
-                )
 
                 return {
                     "created": True,
                     "sap_client": create_result.get("data", {"CardCode": card_code, "CardName": client_name}),
-                    "salesforce_client": sf_result.get("data") if sf_result.get("success") else None,
+                    "salesforce_client": None,
                     "message": f"Client '{client_name}' créé avec succès"
                 }
             else:
@@ -8150,43 +8094,11 @@ class EnhancedDevisWorkflow(DevisWorkflow):
                 }
             
             logger.info(f"✅ Client SAP créé: {card_code}")
-            
-            # Préparer les données pour Salesforce
-            sf_client_data = {
-                "Name": enrichment_data.get("company_name", client_name.title()),
-                "AccountNumber": card_code,
-                "Type": "Customer",
-                "Industry": enrichment_data.get("activity", {}).get("label", ""),
-                "BillingStreet": address_data.get("street", ""),
-                "BillingPostalCode": address_data.get("postal_code", ""),
-                "BillingCity": address_data.get("city", ""),
-                "Description": f"Client créé avec validation - SIRET: {enrichment_data.get('siret', 'N/A')}"
-            }
-            
-            # Création dans Salesforce
-            sf_result = await self.mcp_connector.call_mcp(
-                "salesforce_mcp",
-                "salesforce_create_record",
-                {
-                    "sobject_type": "Account",
-                    "data": sf_client_data
-                }
-            )
-            
-            if not sf_result.get("success", False):
-                logger.error(f"❌ Échec création Salesforce: {sf_result.get('error')}")
-                return {
-                    "created": False,
-                    "error": f"Erreur Salesforce: {sf_result.get('error', 'Erreur inconnue')}"
-                }
-            
-            sf_client_id = sf_result.get("data", {}).get("Id")
-            logger.info(f"✅ Client Salesforce créé: {sf_client_id}")
-            
+
             return {
                 "created": True,
                 "client_data": {
-                    "Id": sf_client_id,
+                    "Id": f"SAP_{card_code}",
                     "Name": enrichment_data.get("company_name", client_name.title()),
                     "AccountNumber": card_code,
                     "SIRET": enrichment_data.get("siret", ""),
