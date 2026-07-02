@@ -7000,7 +7000,7 @@ class DevisWorkflow:
 
     async def _process_client_validation(self, client_name: str) -> Dict[str, Any]:
         """
-        Validation complète du client avec recherche Salesforce, fallback SAP et enrichissement.
+        Validation complète du client via recherche SAP (find_client_everywhere) et enrichissement.
         🔧 CORRIGÉ: Détection et arrêt pour interaction utilisateur
         """
         if not client_name or not client_name.strip():
@@ -7011,7 +7011,6 @@ class DevisWorkflow:
             }
 
         try:
-            safe_client_name = self._sanitize_soql_string(client_name)
             logger.info(f"🔍 Recherche approfondie du client: {client_name}")
             
             # Utiliser find_client_everywhere pour recherche exhaustive
@@ -7027,67 +7026,6 @@ class DevisWorkflow:
                 
                 # Si pas d'interaction requise, continuer normalement
                 return selection_result
-            # === ÉTAPE 1: RECHERCHE EXACTE ===
-            exact_query = f"""
-                SELECT Id, Name, AccountNumber, Phone, BillingCity, BillingCountry 
-                FROM Account 
-                WHERE Name = '{safe_client_name}' 
-                LIMIT 1
-            """
-            self._track_step_progress("search_client", 10, f"🔍 Recherche exacte de '{client_name}'")
-            exact_result = await self.mcp_connector.call_mcp("salesforce_mcp", "salesforce_query", {"query": exact_query})
-
-            if exact_result.get("totalSize", 0) > 0:
-                client_data = exact_result["records"][0]
-                logger.info(f"✅ Client trouvé (exact): {client_data['Name']}")
-                return {
-                    "status": "found",
-                    "data": client_data,
-                    "message": f"Client trouvé dans Salesforce (exact)",
-                    "source": "salesforce_exact"
-                }
-
-            # === ÉTAPE 2: INSENSIBLE À LA CASSE ===
-            ci_query = f"""
-                SELECT Id, Name, AccountNumber, Phone, BillingCity, BillingCountry 
-                FROM Account 
-                WHERE UPPER(Name) = UPPER('{safe_client_name}') 
-                LIMIT 5
-            """
-            self._track_step_progress("search_client", 20, "🔍 Recherche insensible à la casse")
-            ci_result = await self.mcp_connector.call_mcp("salesforce_mcp", "salesforce_query", {"query": ci_query})
-
-            if ci_result.get("totalSize", 0) > 0:
-                for record in ci_result["records"]:
-                    if record["Name"].upper() == client_name.upper():
-                        logger.info(f"✅ Client trouvé (insensible à la casse): {record['Name']}")
-                        return {
-                            "status": "found",
-                            "data": record,
-                            "message": f"Client trouvé (insensible à la casse)",
-                            "source": "salesforce_case_insensitive"
-                        }
-
-            # === ÉTAPE 3: RECHERCHE FLOUE ===
-            fuzzy_query = f"""
-                SELECT Id, Name, AccountNumber, Phone, BillingCity, BillingCountry 
-                FROM Account 
-                WHERE Name LIKE '%{safe_client_name}%' 
-                LIMIT 10
-            """
-            self._track_step_progress("search_client", 40, "🔍 Recherche floue dans Salesforce")
-            fuzzy_result = await self.mcp_connector.call_mcp("salesforce_mcp", "salesforce_query", {"query": fuzzy_query})
-
-            if fuzzy_result.get("totalSize", 0) > 0:
-                suggestions = fuzzy_result["records"]
-                logger.info(f"🔍 {len(suggestions)} suggestions trouvées pour '{client_name}'")
-                return {
-                    "status": "not_found",
-                    "suggestions_available": True,
-                    "suggestions": suggestions,
-                    "message": f"{len(suggestions)} clients similaires trouvés dans Salesforce"
-                }
-
             # === ÉTAPE 4: RECHERCHE DANS SAP ===
             self._track_step_progress("search_client", 60, "🔍 Recherche dans SAP")
             sap_results = await self.mcp_connector.call_mcp("sap_mcp", "sap_search", {
@@ -7100,14 +7038,12 @@ class DevisWorkflow:
                 for sap_client in sap_results.get("results", []):
                     if sap_client.get("CardName", "").upper() == client_name.upper():
                         logger.info(f"✅ Client trouvé dans SAP: {sap_client['CardName']}")
-                        sf_creation = await self._create_salesforce_from_sap(sap_client)
-                        if sf_creation.get("success"):
-                            return {
-                                "status": "found",
-                                "data": sf_creation["data"],
-                                "message": "Client synchronisé depuis SAP",
-                                "source": "sap_sync"
-                            }
+                        return {
+                            "status": "found",
+                            "data": sap_client,
+                            "message": "Client trouvé dans SAP",
+                            "source": "sap"
+                        }
 
             # === ÉTAPE 5: ENRICHISSEMENT et DÉDOUBLONNAGE ===
             self._track_step_progress("search_client", 80, "🔍 Enrichissement externe")
@@ -7157,54 +7093,6 @@ class DevisWorkflow:
                 "message": f"Erreur système: {str(e)}"
             }
 
-    async def _create_salesforce_from_sap(self, sap_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Crée un enregistrement Salesforce à partir des données SAP"""
-        try:
-            logger.info("🔄 Création Salesforce depuis données SAP")
-            
-            # Mapper les données SAP vers Salesforce
-            sf_data = {
-                "Name": sap_data.get("CardName", "Client SAP"),
-                "Type": "Customer",
-                "AccountNumber": sap_data.get("CardCode", ""),
-                "Description": f"Client synchronisé depuis SAP - CardCode: {sap_data.get('CardCode', '')}",
-                "BillingStreet": sap_data.get("BillToStreet", ""),
-                "BillingCity": sap_data.get("BillToCity", ""),
-                "BillingState": sap_data.get("BillToState", ""),
-                "BillingPostalCode": sap_data.get("BillToZipCode", ""),
-                "BillingCountry": sap_data.get("BillToCountry", ""),
-                "Phone": sap_data.get("Phone1", ""),
-                "Fax": sap_data.get("Fax", ""),
-                "Website": sap_data.get("Website", ""),
-                "Industry": sap_data.get("Industry", "")
-            }
-            
-            # Créer dans Salesforce
-            result = await self.mcp_connector.call_salesforce_mcp("salesforce_create_record", {
-                "sobject": "Account",
-                "data": sf_data
-            })
-            
-            if result.get("success"):
-                logger.info(f"✅ Client Salesforce créé depuis SAP: {result.get('id')}")
-                return {
-                    "success": True,
-                    "salesforce_id": result.get("id"),
-                    "data": sf_data
-                }
-            else:
-                logger.error(f"❌ Erreur création Salesforce: {result.get('error')}")
-                return {
-                    "success": False,
-                    "error": result.get("error", "Erreur création Salesforce")
-                }
-                
-        except Exception as e:
-            logger.exception(f"Erreur _create_salesforce_from_sap: {str(e)}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
     async def _handle_potential_duplicates(self, duplicate_check: Dict, client_name: str) -> Dict[str, Any]:
         """Gère les doublons potentiels détectés"""
         
