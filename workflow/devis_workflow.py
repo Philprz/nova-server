@@ -5376,22 +5376,24 @@ class DevisWorkflow:
             validation_result = await self.client_validator.validate_complete({"company_name": client_name}, "FR")
             
             if validation_result.get("can_create"):
-                # Créer dans Salesforce puis SAP
-                self._track_step_progress("client_creation", 30, "Création Salesforce...")
-                sf_client = await self._create_salesforce_client(validation_result)
-                
+                # Création SAP (source de vérité, primaire et inconditionnelle)
                 self._track_step_progress("client_creation", 60, "Création SAP...")
-                sap_client = await self._create_sap_client_from_validation(validation_result, sf_client)
-                
-                # Mettre à jour le contexte
+                sap_client = await self._create_sap_client_from_validation(validation_result)
+
+                if not sap_client.get("success"):
+                    self._track_step_fail("client_creation", "Erreur création client", sap_client.get("error", ""))
+                    return self._build_error_response("Impossible de créer le client", sap_client.get("error", ""))
+
+                # Mettre à jour le contexte avec les données SAP
+                sap_data = sap_client.get("data", {})
                 self.context.update({
-                    "client_info": {"data": sf_client, "found": True},
+                    "client_info": {"data": sap_data, "found": True},
                     "client_validated": True,
-                    "client_sap_code": sf_client.get("sap_code", "")
+                    "client_sap_code": sap_data.get("CardCode", "")
                 })
-                
-                self._track_step_complete("client_creation", f"Client créé: {sf_client.get('Name', client_name)}")
-                
+
+                self._track_step_complete("client_creation", f"Client créé: {sap_data.get('CardName', client_name)}")
+
                 # CORRECTION: Continuer le workflow avec les produits
                 original_products = workflow_context.get("extracted_info", {}).get("products", [])
                 if original_products:
@@ -5399,7 +5401,7 @@ class DevisWorkflow:
                     return await self._get_products_info(original_products)
                 else:
                     # Pas de produits dans le contexte - demander à l'utilisateur
-                    return self._build_product_request_response(sf_client.get("Name", client_name))
+                    return self._build_product_request_response(sap_data.get("CardName", client_name))
             
             else:
                 self._track_step_fail("client_creation", "Impossible de créer le client", validation_result.get("error", ""))
